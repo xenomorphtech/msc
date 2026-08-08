@@ -1,0 +1,29 @@
+# Local credentials and authenticated session state
+.env
+.env.*
+!.env.example
+
+# Codex scratch space, reverse-engineering worktrees, and downloaded tools
+.codex_tmp/
+
+# Captures, transcripts, logs, screenshots, client binaries, and generated
+# analysis are local-only; docs/SECURITY.md marks these artifacts sensitive.
+downloads/*
+!downloads/manual_ngm_extract.mjs
+
+# Python caches and test/tool output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Native build output
+*.o
+tools/maplestory_classic_server/tools/patch_wine_httpapi_cancel
+
+# Editor and OS noise
+.DS_Store
+*.swp
+*.swo
+*~
