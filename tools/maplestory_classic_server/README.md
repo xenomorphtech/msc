@@ -112,8 +112,9 @@ Account success, world records/sentinel, world/channel/character selections,
 the two-stage opcode-`402` transition, and handoff are fully validated. The
 character-list envelope is deliberately partial until its inner records are
 decoded. Opcode-`13` acknowledgments and client status messages are fully
-decoded; length-prefixed type-`6`/type-`7` security bodies are structurally
-bounded and intentionally reported as opaque.
+decoded; other length-prefixed type-`6`/type-`7` envelopes are structurally
+bounded and intentionally reported as opaque. They use neutral opcode-envelope
+names because adjacency in one capture does not establish security semantics.
 
 Inspect a transcript without dumping its entire payload:
 
@@ -157,9 +158,10 @@ without affecting other applications.
 4. Return server opcode `402` frames for client opcode `4` with delays
    `0,2.5`, and use `--rewrite-channel-transition-world`; the client otherwise
    stalls before emitting channel opcode `5` when the captured world differs.
-5. Return the partially decoded character list, server time, and type-`7`
-   security request for opcode `5`; the client must complete its type-`6`
-   response sequence and emit character opcode `7` before handoff.
+5. Return the partially decoded character list and server time for opcode `5`.
+   A live A/B replay reached the same connecting overlay with and without the
+   captured type-`7` envelope; sending it did not produce type-`6` or opcode
+   `7`, so it is not modeled as a security request.
 6. Rewrite the validated opcode-`5` handoff to the local stream-`92` replay
    listener only after opcode `7`. Sending it proactively blanks the scene but
    does not open a world connection.

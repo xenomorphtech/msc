@@ -87,7 +87,8 @@ For an official session:
 
 1. Run Chromium inside the same `mapleproxy` namespace and nested Sway desktop.
 2. Use the persistent profile `/tmp/maple-proxied-login` and remote debugging
-   port `9229`.
+   port `9229`, and pass `--disable-quic`. The transparent relay handles TCP;
+   QUIC otherwise bypasses it over UDP and can expose the host region.
 3. Log in manually and reach/click **Launch Software** on the MapleStory site.
 4. Run the helper below while the authenticated tab and CDP endpoint remain
    open:
@@ -111,9 +112,10 @@ It prints only `ticketReady` and whether the new argument differs from the
 previous one; it never prints the argument or credentials. The helper now uses
 a cache-busted, URL-encoded Galaxy login transaction, hard-reloads the
 authenticated main page, and waits before both authorization clicks so a fresh
-flow can establish its cookies. It reuses an already-authenticated main page
-without requiring account variables; credentials are required only if the ID
-and password form actually appears. Then launch with:
+flow can establish its cookies. It also handles the second Beanfun login iframe
+that may appear after the Game Start click. It reuses an already-authenticated
+main page without requiring account variables; credentials are required only
+if the ID and password form actually appears. Then launch with:
 
 ```sh
 MAPLE_NETWORK_NAMESPACE=mapleproxy \

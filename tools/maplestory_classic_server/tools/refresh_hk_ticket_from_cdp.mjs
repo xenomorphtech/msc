@@ -69,6 +69,42 @@ function flattenFrames(root) {
   return result;
 }
 
+async function currentLoginFrame() {
+  const frames = flattenFrames(await frameTree());
+  return frames.find((frame) =>
+    frame.url.includes("/login/id-pass_form_newBF.aspx")
+  ) || null;
+}
+
+async function submitLoginFrame(loginFrame) {
+  if (!account || !password) {
+    throw new Error(
+      "Maple account environment variables are required for a fresh login",
+    );
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  const {executionContextId} = await send("Page.createIsolatedWorld", {
+    frameId: loginFrame.id,
+    worldName: `hk-login-${loginFrame.id}`,
+  });
+  const submitted = await evaluate(`((account, password) => {
+    document.querySelector('#DivMsgBoxBtn')?.click();
+    const accountInput = document.querySelector('#t_AccountID');
+    const passwordInput = document.querySelector('#t_Password');
+    const submit = document.querySelector('#btn_login');
+    if (!accountInput || !passwordInput || !submit) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    for (const [input, value] of [[accountInput, account], [passwordInput, password]]) {
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+      input.dispatchEvent(new Event('change', {bubbles: true}));
+    }
+    submit.click();
+    return true;
+  })(${JSON.stringify(account)}, ${JSON.stringify(password)})`, executionContextId);
+  if (!submitted) throw new Error("The HK login form was incomplete");
+}
+
 await send("Page.enable");
 await send("Runtime.enable");
 if (process.env.MAPLE_FORCE_RELOGIN === "1") {
@@ -105,41 +141,13 @@ if (!authenticatedMain) {
 
   let loginFrame = null;
   await waitFor(async () => {
-    const frames = flattenFrames(await frameTree());
-    loginFrame = frames.find((frame) =>
-      frame.url.includes("/login/id-pass_form_newBF.aspx")
-    );
+    loginFrame = await currentLoginFrame();
     if (loginFrame) return true;
     return evaluate("Boolean(document.querySelector('#gamestart'))");
   }, "the HK login form or authenticated main page");
 
   if (loginFrame) {
-    if (!account || !password) {
-      throw new Error(
-        "Maple account environment variables are required for a fresh login",
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-    const {executionContextId} = await send("Page.createIsolatedWorld", {
-      frameId: loginFrame.id,
-      worldName: `hk-login-${loginFrame.id}`,
-    });
-    const submitted = await evaluate(`((account, password) => {
-      document.querySelector('#DivMsgBoxBtn')?.click();
-      const accountInput = document.querySelector('#t_AccountID');
-      const passwordInput = document.querySelector('#t_Password');
-      const submit = document.querySelector('#btn_login');
-      if (!accountInput || !passwordInput || !submit) return false;
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-      for (const [input, value] of [[accountInput, account], [passwordInput, password]]) {
-        setter.call(input, value);
-        input.dispatchEvent(new Event('input', {bubbles: true}));
-        input.dispatchEvent(new Event('change', {bubbles: true}));
-      }
-      submit.click();
-      return true;
-    })(${JSON.stringify(account)}, ${JSON.stringify(password)})`, executionContextId);
-    if (!submitted) throw new Error("The HK login form was incomplete");
+    await submitLoginFrame(loginFrame);
   }
 }
 
@@ -161,6 +169,16 @@ await waitFor(
 );
 await new Promise((resolve) => setTimeout(resolve, 1_500));
 await evaluate("document.querySelector('.btnLogin-beanfun').click(); true");
+
+let postAuthorizationLoginFrame = null;
+await waitFor(async () => {
+  postAuthorizationLoginFrame = await currentLoginFrame();
+  if (postAuthorizationLoginFrame) return true;
+  return evaluate("Boolean(document.querySelector('#gamestart'))");
+}, "the authenticated main page or repeated HK login form");
+if (postAuthorizationLoginFrame) {
+  await submitLoginFrame(postAuthorizationLoginFrame);
+}
 
 await waitFor(
   () => evaluate("Boolean(document.querySelector('#gamestart'))"),

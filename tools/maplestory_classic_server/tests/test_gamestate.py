@@ -24,8 +24,8 @@ from maple_server.packets import (  # noqa: E402
     CharacterSelection,
     ClientStatusMessage,
     PacketShapeError,
-    SecurityAck,
-    SecurityMessage,
+    Opcode13Ack,
+    Opcode13Envelope,
     ServerTime,
     WorldHandoff,
     WorldListEnd,
@@ -224,14 +224,14 @@ class PacketShapeTest(unittest.TestCase):
             ChannelTransitionResponse.parse(stage_one.to_bytes()), stage_one
         )
 
-    def test_security_envelopes_round_trip_and_validate_length(self) -> None:
-        acknowledgment = SecurityAck(result=0)
-        message = SecurityMessage(message_type=7, opaque_payload=b"challenge")
+    def test_opcode_13_envelopes_round_trip_and_validate_length(self) -> None:
+        acknowledgment = Opcode13Ack(result=0)
+        message = Opcode13Envelope(message_type=7, opaque_payload=b"message")
 
-        self.assertEqual(SecurityAck.parse(acknowledgment.to_bytes()), acknowledgment)
-        self.assertEqual(SecurityMessage.parse(message.to_bytes()), message)
-        with self.assertRaisesRegex(PacketShapeError, "needs 9 bytes"):
-            SecurityMessage.parse(message.to_bytes()[:-1])
+        self.assertEqual(Opcode13Ack.parse(acknowledgment.to_bytes()), acknowledgment)
+        self.assertEqual(Opcode13Envelope.parse(message.to_bytes()), message)
+        with self.assertRaisesRegex(PacketShapeError, "needs 7 bytes"):
+            Opcode13Envelope.parse(message.to_bytes()[:-1])
 
     def test_client_status_message_round_trip(self) -> None:
         status = ClientStatusMessage(

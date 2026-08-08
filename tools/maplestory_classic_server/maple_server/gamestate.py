@@ -12,8 +12,8 @@ from .packets import (
     CharacterSelection,
     ClientStatusMessage,
     PacketShapeError,
-    SecurityAck,
-    SecurityMessage,
+    Opcode13Ack,
+    Opcode13Envelope,
     ServerTime,
     WorldHandoff,
     WorldListEnd,
@@ -452,25 +452,25 @@ class LoginStateFold:
         payload = frame.plaintext
         if opcode == 13:
             if len(payload) == 3:
-                acknowledgment = SecurityAck.parse(payload)
+                acknowledgment = Opcode13Ack.parse(payload)
                 return self._observation(
                     frame,
-                    kind="security_ack",
+                    kind="opcode_13_ack",
                     coverage=ShapeCoverage.FULL,
                     parsed=acknowledgment,
                     details={"result": acknowledgment.result},
                 )
-            message = SecurityMessage.parse(payload)
+            message = Opcode13Envelope.parse(payload)
             return self._observation(
                 frame,
-                kind="security_message",
+                kind="opcode_13_envelope",
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=message,
                 details={
                     "message_type": message.message_type,
                     "opaque_bytes": len(message.opaque_payload),
                 },
-                issues=("security-message payload remains opaque",),
+                issues=("opcode-13 envelope payload remains opaque",),
             )
         if opcode == 134:
             server_time = ServerTime.parse(payload)
@@ -661,17 +661,17 @@ class LoginStateFold:
                         "message": status.message,
                     },
                 )
-            message = SecurityMessage.parse(payload)
+            message = Opcode13Envelope.parse(payload)
             return self._observation(
                 frame,
-                kind="security_message",
+                kind="opcode_13_envelope",
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=message,
                 details={
                     "message_type": message.message_type,
                     "opaque_bytes": len(message.opaque_payload),
                 },
-                issues=("security-message payload remains opaque",),
+                issues=("opcode-13 envelope payload remains opaque",),
             )
         if opcode == 4:
             selection = WorldSelection.parse(payload)

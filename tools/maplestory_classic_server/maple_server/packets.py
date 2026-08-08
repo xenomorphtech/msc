@@ -454,13 +454,13 @@ class ChannelTransitionResponse:
 
 
 @dataclass(frozen=True)
-class SecurityAck:
+class Opcode13Ack:
     result: int
     opcode: int = 13
 
     @classmethod
-    def parse(cls, payload: bytes) -> "SecurityAck":
-        reader = PacketReader(payload, packet_name="security_ack")
+    def parse(cls, payload: bytes) -> "Opcode13Ack":
+        reader = PacketReader(payload, packet_name="opcode_13_ack")
         _expect_opcode(reader, 13)
         result = reader.u8("result")
         reader.finish()
@@ -471,14 +471,14 @@ class SecurityAck:
 
 
 @dataclass(frozen=True)
-class SecurityMessage:
+class Opcode13Envelope:
     message_type: int
     opaque_payload: bytes
     opcode: int = 13
 
     @classmethod
-    def parse(cls, payload: bytes) -> "SecurityMessage":
-        reader = PacketReader(payload, packet_name="security_message")
+    def parse(cls, payload: bytes) -> "Opcode13Envelope":
+        reader = PacketReader(payload, packet_name="opcode_13_envelope")
         _expect_opcode(reader, 13)
         message_type = reader.u8("message_type")
         payload_length = reader.u32("payload_length")

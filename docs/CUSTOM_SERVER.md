@@ -120,13 +120,18 @@ stage-1 response to the triggering opcode-`4` world id.
 
 The corrected timing and live-world rewrite now produce client opcode `5`
 reliably and reach the character-selection controller. Frames `17` and `18`
-are accepted, while frame `19` is a type-`7` security request. The reference
-client answers it with three type-`6` messages before character opcode `7`.
-Sending the valid transformed handoff frame `20` proactively, while omitting
-that security exchange, only blanks the scene: no TCP connection reaches
-`12857`, and the client exits after the login connection closes. Security
-proof validation can remain a local policy decision, but the client-side
-completion transition cannot simply be omitted.
+are sufficient to reach that controller. A native authenticated A/B run then
+replayed the same sequence without frame `19`: it reached the identical
+“connecting to server” overlay, and character/start clicks still emitted no
+opcode `7`. The earlier run that did send frame `19` also emitted no later
+packet. Therefore type `7` is neither required to reach character selection nor
+sufficient to complete it; the capture's following type-`6` packets do not by
+themselves prove a request/response security relationship.
+
+Sending the valid transformed handoff frame `20` proactively still only blanks
+the scene: no TCP connection reaches `12857`, and the client exits after the
+login connection closes. The unresolved requirement is the client-side
+completion/selection transition, not server validation of frame `19`.
 
 Start the local target for the transformed handoff separately:
 

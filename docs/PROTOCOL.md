@@ -64,9 +64,9 @@ the main blocker is obsolete.
 ## Login opcodes recovered so far
 
 ```text
-server 0   bootstrap NGS challenge
-client 13  typed security/status message
-server 13  typed security message or three-byte acknowledgment
+server 0   bootstrap/login prelude
+client 13  typed opcode-13 envelope or status message
+server 13  typed opcode-13 envelope or three-byte acknowledgment
 server 1   account/login result
 server 2   one world record, or a signed world-id -1 sentinel
 client 4   select world (`uint32 world_id`)
@@ -77,10 +77,10 @@ client 7   select character (`uint32 character_id`)
 server 5   world-server handoff
 ```
 
-The custom replay currently ignores the opaque native proof and acknowledges
-opcode `13` with plaintext `0d0000`. That is enough for the client to continue
-into the login controller. It is a local-server behavior, not a claim that the
-official NGS proof has been reproduced.
+The custom replay acknowledges the client's type-`15` opcode-`13` status with
+plaintext `0d0000`. That is enough for the client to continue into the login
+controller. It is a local-server behavior, not a claim that the official NGS
+proof has been reproduced.
 
 Opcode `13` has three bounded envelopes in the observed sessions:
 
@@ -89,11 +89,11 @@ acknowledgment (3 bytes)
 uint16 opcode = 13
 uint8  result
 
-security message (7 + payload_length bytes)
+opaque envelope (7 + payload_length bytes)
 uint16 opcode = 13
 uint8  message_type
 uint32 payload_length
-byte[payload_length] opaque security body
+byte[payload_length] opaque body
 
 client status message
 uint16 opcode = 13
@@ -104,10 +104,15 @@ uint8  zero trailing byte
 ```
 
 The successful reference sends server message type `7` with 27 opaque bytes
-after the character list and time. The client answers with three type-`6`
-messages whose opaque bodies are 176, 184, and 137 bytes, then emits character
-selection opcode `7`. The bodies remain deliberately opaque; their length
-prefixes and exact packet boundaries are validated. Direct placeholder
+after the character list and time. It is followed by three client type-`6`
+messages whose opaque bodies are 176, 184, and 137 bytes, then character
+selection opcode `7`. A live official-ticket A/B replay reached the same
+character-controller loading overlay with or without type `7`; neither run
+emitted type `6` or opcode `7`. The temporal ordering therefore does not prove
+that type `7` is a security request or that type `6` is its response. The app
+handler path for type `7` also terminates in its UI-dialog utility, so the
+decoder deliberately uses the neutral `opcode_13_envelope` name. Length
+prefixes and exact packet boundaries remain validated. Direct placeholder
 launches also emit a fully decoded type-`15` status message containing “Please
 check the network connection status.”
 
@@ -153,7 +158,7 @@ frame 10     opcode 2, signed world-id -1 sentinel
 frames 15-16 opcode 402, 12-byte then 8-byte transition results
 frame 17     opcode 4, 170-byte character-list response
 frame 18     opcode 134, 10-byte server time
-frame 19     opcode 13, type-7 security request with 27 opaque bytes
+frame 19     opcode 13, type-7 envelope with 27 opaque bytes
 frame 20     opcode 5, 19-byte world handoff
 ```
 
@@ -198,10 +203,11 @@ The login state machine cannot skip directly from character-list/time to the
 handoff. A live bypass sent the valid endpoint-rewritten frame `20` without
 frame `19` or the client type-`6`/opcode-`7` sequence. The client accepted the
 handoff far enough to blank the scene, but never connected to the local world
-port and then exited after the login socket closed. Therefore a successful
-client-side security completion and character-selection transition are a real
-ordering gate, even if a custom server ultimately elects not to validate the
-opaque proof bodies.
+port and then exited after the login socket closed. The A/B replay above also
+shows that frame `19` alone does not unlock selection. Therefore the real
+ordering gate is a client-side completion and character-selection transition;
+the available evidence does not make it a server-side security-validation
+requirement.
 
 The successful 63-byte account packet is fully bounded as follows. Its three
 strings use a `uint16` UTF-16 code-unit count without the extra world-string

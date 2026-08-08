@@ -123,15 +123,14 @@ replayed reference world `4`; the fold now rejects that mismatch, and reactive
 replay can rewrite the field from the triggering client opcode `4`.
 
 The next gate is now bounded. After character list opcode `4` and server time
-opcode `134`, the reference sends opcode `13` message type `7` with a
-length-prefixed 27-byte opaque body. The official client answers with three
-type-`6` messages and then character-selection opcode `7`. A direct launch has
-not reproduced those type-`6` bodies yet. Skipping the exchange and sending a
-valid transformed handoff immediately is not sufficient: the scene goes
-black, no connection reaches local port `12857`, and the client exits after
-the login socket is closed. This proves the client-side completion/selection
-state is required, without implying that a custom server must validate the
-opaque proof contents.
+opcode `134`, an official-ticket A/B replay reached the same character scene
+and “connecting to server” overlay both with and without the captured opcode
+`13` type-`7` envelope. Neither run emitted a type-`6` envelope or character
+opcode `7`, even after direct character/start clicks. Type `7` is therefore not
+required to enter the character controller and is not sufficient to complete
+it. Skipping directly to a valid transformed handoff also remains
+insufficient: the scene goes black and no connection reaches local port
+`12857`. The unresolved gate is a client-side completion/selection state.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
@@ -139,8 +138,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Complete or safely bypass the type-`7`/type-`6` client security transition
-   and obtain live character opcode `7`.
+1. Identify the character-controller completion condition that removes the
+   loading overlay and obtain live character opcode `7`.
 2. Validate the captured opcode-`4` character-list envelope in the local
    controller and decode its 167-byte inner records.
 3. Select the character, verify opcode `7`, and follow the endpoint-rewritten
