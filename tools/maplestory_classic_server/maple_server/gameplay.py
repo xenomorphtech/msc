@@ -100,6 +100,7 @@ class GameplayGameState:
     entry_character_id: int | None = field(default=None, repr=False)
     npcs: dict[int, NpcEntity] = field(default_factory=dict, repr=False)
     mobs: dict[int, MobEntity] = field(default_factory=dict, repr=False)
+    mob_templates: dict[int, int] = field(default_factory=dict, repr=False)
     packets_by_direction: Counter[str] = field(default_factory=Counter)
     plaintext_bytes_by_direction: Counter[str] = field(default_factory=Counter)
     npc_spawns: int = 0
@@ -116,6 +117,7 @@ class GameplayGameState:
     )
     movement_submissions: int = 0
     movement_submissions_for_unknown_mobs: int = 0
+    movement_submissions_with_unknown_template: int = 0
     movement_commands: int = 0
     movement_commands_by_type: Counter[int] = field(default_factory=Counter)
     movement_acknowledgements: int = 0
@@ -176,9 +178,10 @@ class NpcStateReplayPlan:
 class MobMovementAcknowledgementPolicy:
     status_values_by_template: dict[int, int]
     observations_by_template: dict[int, int]
-    active_mob_templates: dict[int, int] = field(
+    known_mob_templates: dict[int, int] = field(
         repr=False, compare=False
     )
+    active_known_mob_count: int
     field_epoch: int
     matched_pairs: int
     known_template_pairs: int
@@ -190,10 +193,11 @@ class MobMovementAcknowledgementPolicy:
     def acknowledge(
         self, submission: MobMovementSubmission
     ) -> MobMovementAcknowledgement:
-        template_id = self.active_mob_templates.get(submission.object_id)
+        template_id = self.known_mob_templates.get(submission.object_id)
         if template_id is None:
             raise ValueError(
-                "movement submission has no explicit active mob-template state"
+                "movement submission has no explicit field-local "
+                "mob-template state"
             )
         status_value = self.status_values_by_template.get(template_id)
         if status_value is None:
@@ -214,7 +218,8 @@ class MobMovementAcknowledgementPolicy:
     def safe_dict(self) -> dict[str, object]:
         return {
             "field_epoch": self.field_epoch,
-            "active_known_mob_count": len(self.active_mob_templates),
+            "field_known_mob_count": len(self.known_mob_templates),
+            "active_known_mob_count": self.active_known_mob_count,
             "status_values_by_template": [
                 {
                     "template_id": template_id,
@@ -324,6 +329,9 @@ class GameplayAnalysis:
                 "active_npc_count": len(self.state.npcs),
                 "npcs": npcs,
                 "active_mob_count": len(self.state.mobs),
+                "field_known_mob_template_count": len(
+                    self.state.mob_templates
+                ),
                 "controlled_mob_count": sum(
                     entity.controller_level != 0
                     for entity in self.state.mobs.values()
@@ -350,6 +358,9 @@ class GameplayAnalysis:
                 "movement_submissions": self.state.movement_submissions,
                 "movement_submissions_for_unknown_mobs": (
                     self.state.movement_submissions_for_unknown_mobs
+                ),
+                "movement_submissions_with_unknown_template": (
+                    self.state.movement_submissions_with_unknown_template
                 ),
                 "movement_commands": self.state.movement_commands,
                 "movement_commands_by_type": dict(
@@ -673,15 +684,14 @@ class GameplayStateFold:
             )
             key = (movement.object_id, movement.sequence)
             entity = self.state.mobs.get(movement.object_id)
+            template_id = self.state.mob_templates.get(movement.object_id)
             expected_status_flag = int(
                 bool(movement_path.opaque_control[0])
             )
             self._pending_movements.setdefault(key, deque()).append(
                 PendingMobMovement(
                     expected_status_flag=expected_status_flag,
-                    template_id=(
-                        entity.spawn.template_id if entity is not None else None
-                    ),
+                    template_id=template_id,
                 )
             )
             self.state.pending_movements += 1
@@ -692,6 +702,8 @@ class GameplayStateFold:
             )
             if entity is None:
                 self.state.movement_submissions_for_unknown_mobs += 1
+            if template_id is None:
+                self.state.movement_submissions_with_unknown_template += 1
             if entity is not None:
                 entity.x = movement_path.path_end_x
                 entity.y = movement_path.path_end_y
@@ -702,9 +714,8 @@ class GameplayStateFold:
                 "controller_level": (
                     entity.controller_level if entity is not None else None
                 ),
-                "template_id": (
-                    entity.spawn.template_id if entity is not None else None
-                ),
+                "known_template": template_id is not None,
+                "template_id": template_id,
                 "sequence": movement.sequence,
                 "predicted_acknowledgement_flag": expected_status_flag,
                 "movement_body_bytes": len(movement.opaque_movement),
@@ -820,6 +831,7 @@ class GameplayStateFold:
             self.state.phase = GameplayPhase.FIELD_LOADING
             self.state.npcs.clear()
             self.state.mobs.clear()
+            self.state.mob_templates.clear()
             self._pending_movements.clear()
             self.state.pending_movements = 0
             details = {
@@ -925,6 +937,9 @@ class GameplayStateFold:
                 y=entered.spawn.y,
                 stance=entered.spawn.stance,
             )
+            self.state.mob_templates[entered.object_id] = (
+                entered.spawn.template_id
+            )
             self.state.mob_entries += 1
             details = {
                 "entity": alias,
@@ -979,6 +994,9 @@ class GameplayStateFold:
             entity = self.state.mobs.get(change.object_id)
             known_entity = entity is not None
             if change.spawn is not None:
+                self.state.mob_templates[change.object_id] = (
+                    change.spawn.template_id
+                )
                 if entity is None:
                     entity = MobEntity(alias=alias, spawn=change.spawn)
                     self.state.mobs[change.object_id] = entity
@@ -1342,10 +1360,10 @@ def derive_mob_movement_acknowledgement_policy(
         observations_by_template=dict(
             state.movement_acknowledgements_by_template
         ),
-        active_mob_templates={
-            object_id: entity.spawn.template_id
-            for object_id, entity in state.mobs.items()
-        },
+        known_mob_templates=dict(state.mob_templates),
+        active_known_mob_count=sum(
+            object_id in state.mob_templates for object_id in state.mobs
+        ),
         field_epoch=state.field_epoch,
         matched_pairs=state.matched_movement_acknowledgements,
         known_template_pairs=(
@@ -1448,10 +1466,15 @@ def render_gameplay_analysis(
             f"leaves:{state.mob_leaves} "
             f"controller_changes:{state.mob_controller_changes} "
             f"movement_broadcasts:{state.mob_movement_broadcasts} "
-            f"broadcast_commands:{state.mob_broadcast_commands}"
+            f"broadcast_commands:{state.mob_broadcast_commands} "
+            f"field_known_templates:{len(state.mob_templates)}"
         ),
         (
             f"movement=submitted:{state.movement_submissions} "
+            "unknown_active_mob:"
+            f"{state.movement_submissions_for_unknown_mobs} "
+            "unknown_template:"
+            f"{state.movement_submissions_with_unknown_template} "
             f"commands:{state.movement_commands} "
             f"command_types:{movement_command_types} "
             f"acknowledged:{state.movement_acknowledgements} "

@@ -480,6 +480,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.unknown_mob_leaves, 0)
         self.assertEqual(analysis.state.movement_submissions, 1)
         self.assertEqual(analysis.state.movement_submissions_for_unknown_mobs, 0)
+        self.assertEqual(
+            analysis.state.movement_submissions_with_unknown_template, 0
+        )
         self.assertEqual(analysis.state.movement_commands, 1)
         self.assertEqual(analysis.state.movement_commands_by_type, {0: 1})
         self.assertEqual(analysis.state.matched_movement_acknowledgements, 1)
@@ -594,6 +597,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             ],
         )
         self.assertEqual(safe["active_known_mob_count"], 1)
+        self.assertEqual(safe["field_known_mob_count"], 1)
         self.assertNotIn(str(MOB_OBJECT_ID), str(safe))
         nonzero_control_path = replace(
             fixture_movement_path(),
@@ -610,7 +614,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(flagged.status_flag, 1)
 
-    def test_movement_acknowledgement_policy_rejects_unknown_active_mob(
+    def test_movement_acknowledgement_policy_rejects_unknown_field_mob(
         self,
     ) -> None:
         policy = derive_mob_movement_acknowledgement_policy(
@@ -622,8 +626,24 @@ class GameplayStateFoldTest(unittest.TestCase):
             opaque_movement=fixture_movement_path().to_bytes(),
         )
 
-        with self.assertRaisesRegex(ValueError, "no explicit active"):
+        with self.assertRaisesRegex(ValueError, "no explicit field-local"):
             policy.acknowledge(unknown_submission)
+
+    def test_movement_acknowledgement_policy_retains_template_after_leave(
+        self,
+    ) -> None:
+        policy = derive_mob_movement_acknowledgement_policy(
+            fixture_gameplay_transcript(leave_mob=True)
+        )
+        submission = MobMovementSubmission(
+            object_id=MOB_OBJECT_ID,
+            sequence=10,
+            opaque_movement=fixture_movement_path().to_bytes(),
+        )
+
+        self.assertEqual(policy.safe_dict()["active_known_mob_count"], 0)
+        self.assertEqual(policy.safe_dict()["field_known_mob_count"], 1)
+        self.assertEqual(policy.acknowledge(submission).status_value, 35)
 
     def test_movement_acknowledgement_policy_rejects_capture_rule_mismatch(
         self,

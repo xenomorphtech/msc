@@ -20,7 +20,9 @@ from .gamestate import (
     render_login_analysis,
 )
 from .gameplay import (
+    MobMovementAcknowledgementPolicy,
     analyze_gameplay_transcript,
+    derive_mob_movement_acknowledgement_policy,
     plan_final_field_npc_state_replay,
     render_gameplay_analysis,
     world_session_termination_frame_index,
@@ -29,6 +31,7 @@ from .http_api import ServerRuntime, start_runtime_http_api
 from .packets import (
     ChannelTransitionResponse,
     HeartbeatProbe,
+    MobMovementSubmission,
     PacketShapeError,
     WorldHandoff,
     WorldSelection,
@@ -356,6 +359,9 @@ async def replay_connection(
     keep_world_open: bool = False,
     world_heartbeat_interval_seconds: float | None = None,
     npc_state_replay_plaintext: bytes | None = None,
+    mob_movement_acknowledgement_policy: (
+        MobMovementAcknowledgementPolicy | None
+    ) = None,
     runtime_protocol: dict[str, object] | None = None,
 ) -> None:
     if hold_open_seconds < 0:
@@ -368,6 +374,14 @@ async def replay_connection(
     if world_heartbeat_interval_seconds is not None and hold_open_seconds <= 0:
         raise ValueError(
             "world heartbeat probes require a positive hold_open_seconds"
+        )
+    if (
+        mob_movement_acknowledgement_policy is not None
+        and hold_open_seconds <= 0
+    ):
+        raise ValueError(
+            "reactive mob movement acknowledgements require a positive "
+            "hold_open_seconds"
         )
     if initial_delay_seconds < 0:
         raise ValueError("initial_delay_seconds cannot be negative")
@@ -387,6 +401,13 @@ async def replay_connection(
         raise ValueError("client_opcode_reply_delays cannot be negative")
     if strict and client_opcode_replies:
         raise ValueError("client opcode replies require non-strict replay")
+    if (
+        mob_movement_acknowledgement_policy is not None
+        and 207 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 207 cannot use both captured and modeled replies"
+        )
     if (
         npc_state_replay_plaintext is not None
         and npc_state_replay_plaintext not in post_transcript_server_frames
@@ -426,9 +447,24 @@ async def replay_connection(
         npc_state_replay_metrics, dict
     ):
         raise TypeError("runtime npc_state_replay telemetry must be a dictionary")
+    mob_acknowledgement_metrics = (
+        runtime_protocol.get("mob_movement_acknowledgements")
+        if runtime_protocol is not None
+        else None
+    )
+    if mob_acknowledgement_metrics is not None and not isinstance(
+        mob_acknowledgement_metrics, dict
+    ):
+        raise TypeError(
+            "runtime mob_movement_acknowledgements telemetry must be a dictionary"
+        )
     client_iv = (
         parse_handshake(transcript.server_bytes).first_iv
-        if client_opcode_replies or world_heartbeat_interval_seconds is not None
+        if (
+            client_opcode_replies
+            or world_heartbeat_interval_seconds is not None
+            or mob_movement_acknowledgement_policy is not None
+        )
         else None
     )
     observed = (
@@ -474,6 +510,9 @@ async def replay_connection(
                 ),
                 "repeat_final_field_npc_state_update": (
                     npc_state_replay_plaintext is not None
+                ),
+                "reactive_mob_movement_acknowledgements": (
+                    mob_movement_acknowledgement_policy is not None
                 ),
             },
         )
@@ -583,6 +622,7 @@ async def replay_connection(
             or pending_opcode_replies
             or remaining_opcode_replies
             or world_heartbeat_interval_seconds is not None
+            or mob_movement_acknowledgement_policy is not None
         )
         if needs_server_cipher:
             server_iv, server_version_mask = post_transcript_server_cipher_state(
@@ -722,6 +762,53 @@ async def replay_connection(
                         )
                         heartbeat_metrics["max_round_trip_ms"] = round(
                             max(float(prior_max or 0.0), round_trip_ms), 3
+                        )
+                if (
+                    opcode == 207
+                    and mob_movement_acknowledgement_policy is not None
+                ):
+                    movement = MobMovementSubmission.parse(client_plaintext)
+                    if mob_acknowledgement_metrics is not None:
+                        mob_acknowledgement_metrics["submissions_observed"] = (
+                            int(
+                                mob_acknowledgement_metrics.get(
+                                    "submissions_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    try:
+                        acknowledgement = (
+                            mob_movement_acknowledgement_policy.acknowledge(
+                                movement
+                            )
+                        )
+                    except ValueError:
+                        if mob_acknowledgement_metrics is not None:
+                            mob_acknowledgement_metrics[
+                                "submissions_rejected"
+                            ] = (
+                                int(
+                                    mob_acknowledgement_metrics.get(
+                                        "submissions_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                        raise
+                    await send_encrypted_frame(
+                        encrypt_next_server_frame(
+                            acknowledgement.to_bytes()
+                        )
+                    )
+                    if mob_acknowledgement_metrics is not None:
+                        mob_acknowledgement_metrics["responses_sent"] = (
+                            int(
+                                mob_acknowledgement_metrics.get(
+                                    "responses_sent", 0
+                                )
+                            )
+                            + 1
                         )
                 if opcode in remaining_opcode_replies:
                     await send_reactive_plaintexts(
@@ -1567,6 +1654,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reactive-mob-movement-acknowledgements",
+        action="store_true",
+        help=(
+            "during hold-open, derive the validated opcode-283 policy and "
+            "acknowledge opcode-207 submissions only for field-local mobs "
+            "with known templates; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--send-after-transcript",
         dest="post_transcript_server_frames",
         action="append",
@@ -2029,6 +2125,27 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "packets_planned": 1,
                 "packets_sent": 0,
             }
+        mob_movement_acknowledgement_policy = None
+        if arguments.reactive_mob_movement_acknowledgements:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-mob-movement-acknowledgements requires "
+                    "--keep-world-open"
+                )
+            mob_movement_acknowledgement_policy = (
+                derive_mob_movement_acknowledgement_policy(transcript)
+            )
+            if not mob_movement_acknowledgement_policy.known_mob_templates:
+                raise ValueError(
+                    "world transcript final field has no explicit "
+                    "mob-template state for reactive acknowledgements"
+                )
+            runtime_protocol["mob_movement_acknowledgements"] = {
+                **mob_movement_acknowledgement_policy.safe_dict(),
+                "submissions_observed": 0,
+                "responses_sent": 0,
+                "submissions_rejected": 0,
+            }
         if arguments.validate_login_state or arguments.rewrite_handoff:
             analysis = analyze_login_transcript(transcript)
             print(render_login_analysis(analysis))
@@ -2066,6 +2183,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
             opcode: tuple(payloads)
             for opcode, payloads in grouped_client_opcode_replies.items()
         }
+        if (
+            mob_movement_acknowledgement_policy is not None
+            and 207 in client_opcode_replies
+        ):
+            raise ValueError(
+                "--reactive-mob-movement-acknowledgements conflicts with "
+                "a captured client opcode 207 reply"
+            )
         client_opcode_reply_delays = dict(arguments.client_opcode_reply_delays)
         if len(client_opcode_reply_delays) != len(
             arguments.client_opcode_reply_delays
@@ -2132,6 +2257,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 arguments.world_heartbeat_interval_seconds
             ),
             npc_state_replay_plaintext=npc_state_replay_plaintext,
+            mob_movement_acknowledgement_policy=(
+                mob_movement_acknowledgement_policy
+            ),
             runtime_protocol=runtime_protocol,
         )
         runtime_config = {
@@ -2146,6 +2274,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "repeat_final_field_npc_state_update": (
                 arguments.repeat_final_field_npc_state_update
+            ),
+            "reactive_mob_movement_acknowledgements": (
+                arguments.reactive_mob_movement_acknowledgements
             ),
             "dropped_server_frame_indices": sorted(dropped_server_frames),
         }

@@ -35,7 +35,10 @@ from maple_server.server import (  # noqa: E402
     replay_connection,
     rewrite_channel_transition_world_from_selection,
 )
-from maple_server.gameplay import analyze_gameplay_transcript  # noqa: E402
+from maple_server.gameplay import (  # noqa: E402
+    MobMovementAcknowledgementPolicy,
+    analyze_gameplay_transcript,
+)
 from maple_server.protocol import (  # noqa: E402
     crypt_payload,
     encode_frame_header,
@@ -47,6 +50,10 @@ from maple_server.packets import (  # noqa: E402
     ChannelTransitionResponse,
     HeartbeatProbe,
     HeartbeatResponse,
+    MobMovementAcknowledgement,
+    MobMovementCommand,
+    MobMovementPath,
+    MobMovementSubmission,
     NpcStateUpdate,
     WorldHandoff,
     WorldSelection,
@@ -355,6 +362,23 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertEqual(arguments.world_heartbeat_interval_seconds, 10)
+
+    def test_replay_parser_accepts_reactive_mob_acknowledgements(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--hold-open-seconds",
+                "600",
+                "--keep-world-open",
+                "--reactive-mob-movement-acknowledgements",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_mob_movement_acknowledgements)
 
     def test_parse_server_frame_patch(self) -> None:
         self.assertEqual(parse_server_frame_patch("3=0000ff"), (3, b"\x00\x00\xff"))
@@ -1118,6 +1142,127 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks)
             server.close()
             await server.wait_closed()
+
+    async def test_replay_generates_typed_mob_acknowledgement_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-mob-ack", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            object_id = 20_001
+            policy = MobMovementAcknowledgementPolicy(
+                status_values_by_template={210_100: 35},
+                observations_by_template={210_100: 4_728},
+                known_mob_templates={object_id: 210_100},
+                active_known_mob_count=1,
+                field_epoch=1,
+                matched_pairs=11_949,
+                known_template_pairs=11_949,
+                unknown_template_pairs=0,
+                flag_rule_matches=11_949,
+                zero_auxiliary_pairs=11_949,
+                pending_submissions=0,
+            )
+            runtime_protocol = {
+                "mob_movement_acknowledgements": {
+                    "submissions_observed": 0,
+                    "responses_sent": 0,
+                    "submissions_rejected": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            hold_open_seconds=0.2,
+                            mob_movement_acknowledgement_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            movement_path = MobMovementPath(
+                opaque_control=b"\x01" + b"\x00" * 18,
+                reference_x=100,
+                reference_y=-200,
+                commands=(
+                    MobMovementCommand.absolute(
+                        position_x=110,
+                        position_y=-200,
+                        velocity_x=10,
+                        velocity_y=0,
+                        foothold_id=7,
+                        stance=2,
+                        duration_ms=90,
+                    ),
+                ),
+                trailer_marker=0,
+                path_start_x=90,
+                path_start_y=-200,
+                path_end_x=110,
+                path_end_y=-200,
+            )
+            submission = MobMovementSubmission(
+                object_id=object_id,
+                sequence=42,
+                opaque_movement=movement_path.to_bytes(),
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(submission), client_iv, 300)
+                + crypt_payload(submission, client_iv)
+            )
+            await writer.drain()
+            encrypted_acknowledgement = await reader.readexactly(17)
+            acknowledgement = MobMovementAcknowledgement.parse(
+                crypt_payload(
+                    encrypted_acknowledgement[4:], shuffle_iv(server_iv)
+                )
+            )
+            self.assertEqual(acknowledgement.object_id, object_id)
+            self.assertEqual(acknowledgement.sequence, 42)
+            self.assertEqual(acknowledgement.status_flag, 1)
+            self.assertEqual(acknowledgement.status_value, 35)
+            self.assertEqual(acknowledgement.status_auxiliary_1, 0)
+            self.assertEqual(acknowledgement.status_auxiliary_2, 0)
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            metrics = runtime_protocol["mob_movement_acknowledgements"]
+            self.assertEqual(metrics["submissions_observed"], 1)
+            self.assertEqual(metrics["responses_sent"], 1)
+            self.assertEqual(metrics["submissions_rejected"], 0)
 
     async def test_replay_preserves_delays_inside_reactive_reply_sequence(
         self,

@@ -221,26 +221,47 @@ leave and broadcast resolves to an active modeled mob.
 
 After respecting field-epoch resets, the acknowledgement flag matches whether
 submission control-prefix byte `0` is nonzero in all 11,949 correlated pairs.
-Both auxiliary fields are zero in all 11,949 pairs. For 10,570 pairs, the mob
-template was known when the submission arrived and the 16-bit value is
-deterministic by template: `100100 -> 0`, `130100 -> 30`, `210100 -> 35`,
-`1110100 -> 25`, `1130100 -> 30`, `2110200 -> 35`, `3210800 -> 100`, and
-`9999999 -> 0`. The other 1,379 correlated pairs lack a template at submission
-time because the mob exists only inside the still-opaque field snapshot. The
-separately reported acknowledgement-time unknown-entity count is 1,380 because
-one explicitly known mob leaves between submission and acknowledgement.
+Both auxiliary fields are zero in all 11,949 pairs. The 16-bit value is
+deterministic by the field-local mob template for every pair: `100100 -> 0`,
+`130100 -> 30`, `210100 -> 35`, `1110100 -> 25`, `1130100 -> 30`,
+`2110200 -> 35`, `3210800 -> 100`, and `9999999 -> 0`.
+
+Visible mob membership and protocol identity are intentionally separate in the
+fold. Opcode `280` removes a mob from the active visible set, but its template
+is retained until the next opcode-`157` field reset because the capture keeps
+submitting and acknowledging movement for that object afterward. This resolves
+all 11,949 acknowledgement values to templates. There are 1,502 submissions
+whose mob is no longer active, including 1,414 after a leave and one after a
+controller release. Only 87 submissions have no field-local template at all;
+none receives an acknowledgement before its field epoch resets or the capture
+ends. The acknowledgement-time unknown-active-entity count remains 1,380, a
+different and now explicitly named lifecycle metric.
 
 `derive_mob_movement_acknowledgement_policy()` turns that evidence into a
 conservative generator. It validates every correlated flag and auxiliary
-field, refuses any template with more than one observed value, retains only
-the final field's explicit object-to-template state, and emits opcode `283`
-with the submitted object id and sequence. Its safe report includes template
-ids, values, evidence counts, and the number of active known mobs but no runtime
-object ids. Calling it for a snapshot-only object, an object absent from the
-final field, or a template without deterministic evidence raises instead of
-guessing. Stream `92` ends with zero active explicit mobs, so the policy proves
-the mapping but deliberately cannot generate a post-capture live response from
-that final state.
+field, refuses any template with more than one observed value, retains the
+final field's explicit field-local object-to-template knowledge, and emits
+opcode `283` with the submitted object id and sequence. Its safe report includes
+template ids, values, evidence counts, and separate known/active mob counts but
+no runtime object ids. Calling it for an object without field-local template
+state or a template without deterministic evidence raises instead of guessing.
+Stream `92` ends after a new field reset with zero known or active explicit
+mobs, so the policy proves the mapping but deliberately cannot generate a
+post-capture live response from that final state.
+
+`--reactive-mob-movement-acknowledgements` wires the policy into hold-open
+replay. Each live opcode `207` is parsed, the submitted object and sequence are
+copied into a typed opcode `283`, the flag is derived from control byte zero,
+the deterministic template value is selected, and the two auxiliary fields are
+zeroed. The option requires `--keep-world-open`, refuses a simultaneous
+capture-sourced opcode-`207` rule, and rejects startup when the final field has
+no explicit field-local mob-template state. Runtime unit replay verifies the
+encrypted request/response path and telemetry. Neither reference stream is a
+valid live A/B target yet: short stream `114` contains no mob packets, while
+stream `92` resets all explicit mob-template state before its final hold-open
+point. A real-client effect test therefore remains gated on a short capture
+that ends with a known mob, or on generated field state after the field body is
+decoded.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
@@ -324,7 +345,11 @@ When periodic world heartbeats are enabled,
 observed, pending probes, and last/maximum round-trip milliseconds.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
-planned/sent packet counts, and the predicted fold delta. Other
+planned/sent packet counts, and the predicted fold delta. When reactive mob
+movement acknowledgements are enabled,
+`protocol.mob_movement_acknowledgements` reports the identifier-free derived
+policy, its full-capture evidence, observed submissions, sent responses, and
+rejections. Other
 methods are rejected with `405`; unknown paths return `404`. The API
 deliberately has no remote binding or mutating route: startup rejects
 non-loopback addresses, so the current local-only threat model relies on
@@ -417,10 +442,12 @@ It intentionally cannot launch an authenticated official session.
 14. Decode type-`0` absolute and type-`1`/`2` relative movement fields with
     exact command/path round trips, while retaining the 19-byte control prefix
     as opaque.
-15. Decode and fold mob entry/leave/controller/broadcast lifecycle and quantify
-    snapshot-only mobs.
+15. Decode and fold mob entry/leave/controller/broadcast lifecycle, separating
+    visible membership from field-local template knowledge retained after leave.
 16. Fully type opcode `283`, validate its flag/auxiliary rules across every
-    correlated pair, and derive a generator gated on explicit active template
-    state and deterministic capture evidence.
-17. Decode the inner character list, player records, and field snapshot body
+    correlated pair, derive a generator gated on explicit field-local template
+    state and deterministic capture evidence, and wire it into hold-open replay.
+17. Capture a short world session that ends with a known mob and run the typed
+    acknowledgement policy through a real-client prediction/effect A/B.
+18. Decode the inner character list, player records, and field snapshot body
     needed to replace finite replay content with generated world state.
