@@ -24,6 +24,7 @@ from .packets import (
     PacketShapeError,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
+    WorldSessionTermination,
 )
 from .transcript import Transcript
 
@@ -33,6 +34,7 @@ class GameplayPhase(str, Enum):
     ENTRY_REQUESTED = "entry_requested"
     FIELD_LOADING = "field_loading"
     ACTIVE = "active"
+    TERMINATED = "terminated"
 
 
 @dataclass
@@ -88,6 +90,7 @@ class GameplayGameState:
     heartbeat_acknowledgements: int = 0
     bootstrap_acknowledgements: int = 0
     pending_movements: int = 0
+    termination_received: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,7 @@ class GameplayAnalysis:
     state: GameplayGameState
     observations: tuple[PacketObservation, ...]
     events: tuple[GameplayEvent, ...]
+    transport_closed: bool
     issues: tuple[str, ...]
     warnings: tuple[str, ...]
 
@@ -176,6 +180,8 @@ class GameplayAnalysis:
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
                 ),
+                "termination_received": self.state.termination_received,
+                "transport_closed": self.transport_closed,
             },
             "events": [
                 event.safe_dict(show_identifiers=show_identifiers)
@@ -436,6 +442,23 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 9:
+            termination = WorldSessionTermination.parse(payload)
+            self.state.termination_received = True
+            self.state.phase = GameplayPhase.TERMINATED
+            self._event(
+                frame,
+                "world_session_termination_received",
+                details={"opaque_reason_bytes": 7},
+            )
+            return self._observation(
+                frame,
+                kind="world_session_termination",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=termination,
+                details={"opaque_reason_bytes": 7},
+                issues=("world-session termination reason remains opaque",),
+            )
         if opcode == 157:
             snapshot = FieldSnapshotEnvelope.parse(payload)
             cleared_npcs = len(self.state.npcs)
@@ -589,13 +612,15 @@ class GameplayStateFold:
             coverage=ShapeCoverage.UNKNOWN,
         )
 
-    def finish(self, last_frame: PlainFrame | None) -> None:
+    def finish(
+        self, last_frame: PlainFrame | None, *, transport_closed: bool
+    ) -> None:
         if self.state.unmatched_movement_acknowledgements:
             self.warnings.append(
                 f"{self.state.unmatched_movement_acknowledgements} movement "
                 "acknowledgements had no pending captured submission"
             )
-        if last_frame is not None:
+        if last_frame is not None and transport_closed:
             self._event(
                 last_frame,
                 "session_ended",
@@ -608,17 +633,51 @@ class GameplayStateFold:
             )
 
 
+def world_session_termination_frame_index(transcript: Transcript) -> int:
+    """Return the final server-frame index for one validated termination packet."""
+
+    decoded = decode_transcript(transcript)
+    server_frames = tuple(
+        frame
+        for frame in decoded.frames
+        if frame.direction == "server_to_client"
+    )
+    terminations = tuple(
+        frame for frame in server_frames if frame.opcode == 9
+    )
+    if not terminations:
+        raise PacketShapeError(
+            "world transcript has no server opcode-9 termination packet"
+        )
+    if len(terminations) != 1:
+        raise PacketShapeError(
+            "world transcript has multiple server opcode-9 termination packets"
+        )
+    termination = terminations[0]
+    WorldSessionTermination.parse(termination.plaintext)
+    if termination.direction_index != server_frames[-1].direction_index:
+        raise PacketShapeError(
+            "world-session termination is not the final captured server frame"
+        )
+    return termination.direction_index
+
+
 def analyze_gameplay_transcript(transcript: Transcript) -> GameplayAnalysis:
     decoded = decode_transcript(transcript)
     fold = GameplayStateFold()
     observations = tuple(fold.consume(frame) for frame in decoded.frames)
-    fold.finish(decoded.frames[-1] if decoded.frames else None)
+    transport_closed = any(event.event == "close" for event in transcript.events)
+    fold.finish(
+        decoded.frames[-1] if decoded.frames else None,
+        transport_closed=transport_closed,
+    )
     return GameplayAnalysis(
         source=str(transcript.path),
         decoded=decoded,
         state=fold.state,
         observations=observations,
         events=tuple(fold.events),
+        transport_closed=transport_closed,
         issues=tuple(fold.issues),
         warnings=tuple(fold.warnings),
     )
@@ -651,7 +710,8 @@ def render_gameplay_analysis(
         ),
         (
             f"phase={state.phase.value} field_epoch={state.field_epoch} "
-            f"field_load_stage={state.field_load_stage}"
+            f"field_load_stage={state.field_load_stage} "
+            f"transport_closed={analysis.transport_closed}"
         ),
         (
             f"frames=client:{state.packets_by_direction['client_to_server']} "

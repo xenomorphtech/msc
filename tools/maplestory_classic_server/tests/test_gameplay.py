@@ -11,6 +11,7 @@ from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     analyze_gameplay_transcript,
     render_gameplay_analysis,
+    world_session_termination_frame_index,
 )
 from maple_server.packets import (  # noqa: E402
     FieldLoadStage,
@@ -24,6 +25,7 @@ from maple_server.packets import (  # noqa: E402
     PacketShapeError,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
+    WorldSessionTermination,
 )
 from maple_server.protocol import (  # noqa: E402
     crypt_payload,
@@ -58,7 +60,12 @@ def fixture_npc() -> NpcSpawn:
     )
 
 
-def fixture_gameplay_transcript(*, repeat_npc_update: bool = False) -> Transcript:
+def fixture_gameplay_transcript(
+    *,
+    repeat_npc_update: bool = False,
+    terminate: bool = False,
+    close: bool = True,
+) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
         TranscriptEvent(
@@ -149,7 +156,13 @@ def fixture_gameplay_transcript(*, repeat_npc_update: bool = False) -> Transcrip
                 parameter=1,
             ).to_bytes(),
         )
-    events.append(TranscriptEvent(event="close", timestamp_ns=timestamp_ns))
+    if terminate:
+        append(
+            "server_to_client",
+            WorldSessionTermination(opaque_reason=b"ended!!").to_bytes(),
+        )
+    if close:
+        events.append(TranscriptEvent(event="close", timestamp_ns=timestamp_ns))
     return Transcript(path=Path("sanitized-gameplay.jsonl"), events=tuple(events))
 
 
@@ -197,6 +210,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             MobMovementAcknowledgement.parse(acknowledgement.to_bytes()),
             acknowledgement,
+        )
+
+    def test_world_session_termination_round_trip(self) -> None:
+        termination = WorldSessionTermination(opaque_reason=b"ended!!")
+
+        self.assertEqual(len(termination.to_bytes()), 9)
+        self.assertEqual(
+            WorldSessionTermination.parse(termination.to_bytes()), termination
         )
 
 
@@ -269,6 +290,42 @@ class GameplayStateFoldTest(unittest.TestCase):
             baseline.state.npc_state_updates + 1,
         )
         self.assertEqual(len(injected.events), len(baseline.events) + 1)
+
+    def test_terminal_packet_changes_phase_and_is_discoverable_for_omission(
+        self,
+    ) -> None:
+        transcript = fixture_gameplay_transcript(terminate=True)
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.state.phase, GameplayPhase.TERMINATED)
+        self.assertTrue(analysis.state.termination_received)
+        self.assertEqual(
+            world_session_termination_frame_index(transcript),
+            analysis.decoded.frames[-1].direction_index,
+        )
+        self.assertIn(
+            "world_session_termination_received",
+            [event.kind for event in analysis.events],
+        )
+
+    def test_live_partial_transcript_does_not_emit_session_ended(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(close=False)
+        )
+
+        self.assertFalse(analysis.transport_closed)
+        self.assertNotIn(
+            "session_ended", [event.kind for event in analysis.events]
+        )
+
+    def test_termination_discovery_rejects_capture_without_terminal_packet(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(PacketShapeError, "no server opcode-9"):
+            world_session_termination_frame_index(
+                fixture_gameplay_transcript(terminate=False)
+            )
 
 
 if __name__ == "__main__":

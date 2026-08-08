@@ -938,3 +938,26 @@ class HeartbeatAcknowledgement:
 
     def to_bytes(self) -> bytes:
         return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
+class WorldSessionTermination:
+    """Observed terminal world-session envelope; the reason body is opaque."""
+
+    opaque_reason: bytes
+    opcode: int = 9
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "WorldSessionTermination":
+        reader = PacketReader(payload, packet_name="world_session_termination")
+        _expect_opcode(reader, 9)
+        opaque_reason = reader.bytes(7, "opaque_reason")
+        reader.finish()
+        return cls(opaque_reason=opaque_reason)
+
+    def to_bytes(self) -> bytes:
+        if len(self.opaque_reason) != 7:
+            raise PacketShapeError(
+                "world session termination reason must contain exactly 7 bytes"
+            )
+        return struct.pack("<H", self.opcode) + self.opaque_reason

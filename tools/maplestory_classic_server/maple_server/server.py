@@ -18,7 +18,12 @@ from .gamestate import (
     normalize_maple_transcript,
     render_login_analysis,
 )
-from .gameplay import analyze_gameplay_transcript, render_gameplay_analysis
+from .gameplay import (
+    analyze_gameplay_transcript,
+    render_gameplay_analysis,
+    world_session_termination_frame_index,
+)
+from .http_api import ServerRuntime, start_runtime_http_api
 from .packets import (
     ChannelTransitionResponse,
     PacketShapeError,
@@ -345,6 +350,7 @@ async def replay_connection(
     client_opcode_replies: dict[int, bytes | tuple[bytes, ...]] | None = None,
     client_opcode_reply_delays: dict[int, tuple[float, ...]] | None = None,
     rewrite_channel_transition_world: bool = False,
+    keep_world_open: bool = False,
 ) -> None:
     if hold_open_seconds < 0:
         raise ValueError("hold_open_seconds cannot be negative")
@@ -421,6 +427,7 @@ async def replay_connection(
                 "rewrite_channel_transition_world": (
                     rewrite_channel_transition_world
                 ),
+                "keep_world_open": keep_world_open,
             },
         )
         if transcript_directory is not None
@@ -1230,22 +1237,58 @@ async def run_listener(
     host: str,
     port: int,
     handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]],
+    *,
+    runtime: ServerRuntime,
+    http_api_host: str,
+    http_api_port: int | None,
 ) -> None:
     tasks: set[asyncio.Task[None]] = set()
+
+    async def tracked_handler(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        runtime.connection_started()
+        error: Exception | None = None
+        try:
+            await handler(reader, writer)
+        except Exception as exception:
+            error = exception
+            raise
+        finally:
+            runtime.connection_finished(error)
 
     def start_handler(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        task = asyncio.create_task(handler(reader, writer))
+        task = asyncio.create_task(tracked_handler(reader, writer))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         task.add_done_callback(report_task_error)
 
     server = await asyncio.start_server(start_handler, host, port)
-    addresses = ", ".join(str(socket.getsockname()) for socket in server.sockets or [])
+    runtime.listener_addresses = tuple(
+        str(socket.getsockname()) for socket in server.sockets or []
+    )
+    addresses = ", ".join(runtime.listener_addresses)
     print(f"listening mode={handler_name(handler)} addresses={addresses}", flush=True)
-    async with server:
-        await server.serve_forever()
+    http_server = (
+        await start_runtime_http_api(runtime, http_api_host, http_api_port)
+        if http_api_port is not None
+        else None
+    )
+    if http_server is not None:
+        http_addresses = ", ".join(
+            str(socket.getsockname()) for socket in http_server.sockets or []
+        )
+        print(f"http_api addresses={http_addresses}", flush=True)
+    if http_server is None:
+        async with server:
+            await server.serve_forever()
+    else:
+        async with server, http_server:
+            await asyncio.gather(
+                server.serve_forever(), http_server.serve_forever()
+            )
 
 
 def handler_name(handler: object) -> str:
@@ -1378,6 +1421,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "omit one captured encrypted server frame and re-encrypt every later "
             "frame with corrected IV progression; may be repeated"
+        ),
+    )
+    replay.add_argument(
+        "--keep-world-open",
+        action="store_true",
+        help=(
+            "validate and omit the final server opcode-9 world-session "
+            "termination packet; requires --hold-open-seconds"
         ),
     )
     replay.add_argument(
@@ -1625,6 +1676,16 @@ def build_parser() -> argparse.ArgumentParser:
 def add_listener_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--listen-host", default="127.0.0.1")
     parser.add_argument("--listen-port", required=True, type=int)
+    parser.add_argument(
+        "--http-api-host",
+        default="127.0.0.1",
+        help="loopback address for the optional runtime HTTP API",
+    )
+    parser.add_argument(
+        "--http-api-port",
+        type=int,
+        help="enable the runtime HTTP API on this loopback port",
+    )
 
 
 def inspect_transcript(path: Path) -> None:
@@ -1723,6 +1784,7 @@ def common_suffix_length(first: bytes, second: bytes) -> int:
 
 
 async def async_main(arguments: argparse.Namespace) -> None:
+    runtime_config: dict[str, object]
     if arguments.command == "capture-proxy":
         client_result_rewrites = dict(arguments.rewrite_client_opcode_result)
         if len(client_result_rewrites) != len(
@@ -1757,6 +1819,11 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
         )
         handler = functools.partial(capture_proxy_connection, config=config)
+        runtime_config = {
+            "upstream_host": arguments.upstream_host,
+            "upstream_port": arguments.upstream_port,
+            "capture_enabled": True,
+        }
     elif arguments.command == "replay":
         if arguments.pcap is not None:
             if arguments.tcp_stream is None:
@@ -1776,6 +1843,17 @@ async def async_main(arguments: argparse.Namespace) -> None:
         dropped_server_frames = set(arguments.drop_server_frame)
         if len(dropped_server_frames) != len(arguments.drop_server_frame):
             raise ValueError("Each dropped server frame index may be specified once")
+        if arguments.keep_world_open:
+            if arguments.hold_open_seconds <= 0:
+                raise ValueError(
+                    "--keep-world-open requires a positive --hold-open-seconds"
+                )
+            termination_index = world_session_termination_frame_index(transcript)
+            if termination_index in server_frame_patches:
+                raise ValueError(
+                    f"terminal server frame {termination_index} is also patched"
+                )
+            dropped_server_frames.add(termination_index)
         if arguments.validate_login_state or arguments.rewrite_handoff:
             analysis = analyze_login_transcript(transcript)
             print(render_login_analysis(analysis))
@@ -1866,17 +1944,41 @@ async def async_main(arguments: argparse.Namespace) -> None:
             rewrite_channel_transition_world=(
                 arguments.rewrite_channel_transition_world
             ),
+            keep_world_open=arguments.keep_world_open,
         )
+        runtime_config = {
+            "source": "pcap" if arguments.pcap is not None else "transcript",
+            "tcp_stream": arguments.tcp_stream,
+            "strict": not arguments.no_strict,
+            "timing_scale": arguments.timing_scale,
+            "hold_open_seconds": arguments.hold_open_seconds,
+            "keep_world_open": arguments.keep_world_open,
+            "dropped_server_frame_indices": sorted(dropped_server_frames),
+        }
     elif arguments.command == "stub":
         handler = functools.partial(
             stub_connection,
             transcript_directory=arguments.transcript_dir,
             listen_port=arguments.listen_port,
         )
+        runtime_config = {"capture_enabled": True}
     else:
         raise ValueError(f"Unknown listener command: {arguments.command}")
 
-    await run_listener(arguments.listen_host, arguments.listen_port, handler)
+    runtime = ServerRuntime(
+        mode=handler_name(handler),
+        listen_host=arguments.listen_host,
+        listen_port=arguments.listen_port,
+        config=runtime_config,
+    )
+    await run_listener(
+        arguments.listen_host,
+        arguments.listen_port,
+        handler,
+        runtime=runtime,
+        http_api_host=arguments.http_api_host,
+        http_api_port=arguments.http_api_port,
+    )
 
 
 def main() -> None:

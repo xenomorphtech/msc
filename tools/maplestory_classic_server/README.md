@@ -89,6 +89,26 @@ decrypts the original sequence with the captured IVs, then re-encrypts every
 emitted frame with the shortened IV sequence. This makes it safe to withhold a
 captured response and send its plaintext later from a reactive opcode rule.
 
+The observed completed world captures end with a nine-byte server opcode-`9`
+termination envelope.
+`--hold-open-seconds` alone does not keep a replay in the field because the
+client acts on that packet before the hold begins. Use `--keep-world-open` to
+validate that the capture has exactly one terminal opcode-`9` server frame,
+require that it is the final server frame, and omit it with corrected IV
+progression:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --hold-open-seconds 600 \
+  --transcript-dir captures/replay-observed
+```
+
 Plaintext frames may also be sourced privately at runtime with
 `--send-after-transcript-from-pcap`,
 `--server-frame-patch-from-pcap`, or
@@ -143,14 +163,18 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `207` and server opcode `283`: correlated mob movement headers
   with opaque movement/status bodies,
 - client opcode `301`: the world-bootstrap acknowledgement envelope, and
-- client opcode `23` / server opcode `10`: heartbeat request/acknowledgement.
+- client opcode `23` / server opcode `10`: heartbeat
+  request/acknowledgement, and
+- server opcode `9`: the exact nine-byte world-session termination envelope;
+  its seven-byte reason body remains opaque.
 
 Unknown opcodes remain lossless frame observations and do not acquire semantic
 names from frequency or adjacency alone. Default reports replace character and
 runtime object ids with stable session-local aliases such as `npc:1`; use
 `--show-identifiers` only for private debugging.
 
-The full stream-`92` validation reaches `active` across 13 field epochs. All 26
+The full stream-`92` validation reaches `active` across 13 field epochs and
+then changes to `terminated` on its final server opcode-`9` packet. All 26
 field-load messages form 13 ordered stage pairs; all 53 NPC spawns and 77 NPC
 state updates validate; 11,949 movement acknowledgements match prior captured
 submissions; and all 75 heartbeats pair. Two movement submissions remain
@@ -161,8 +185,48 @@ frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
 injected sessions both reached `active` with nine NPCs. The injected fold had
 one additional server frame and one additional `npc_state_updated` event
 (`2 -> 3`) while entity count and session phase stayed unchanged, matching the
-prediction. Both sessions later returned to login, so that disconnect is a
-short-replay continuation gap rather than an effect of opcode `303`.
+prediction. Both sessions returned to login because the short capture's final
+opcode-`9` packet explicitly terminates the world session, not because of
+opcode `303`.
+
+Repeating the real-client stream-`114` replay with its validated terminal
+server frame omitted kept the character in the field for the complete
+configured 600-second hold. The observed connection lasted 605.85 seconds
+including replay/setup, remained `active` with nine NPCs, and closed only when
+the hold expired. This validates the predicted difference between replaying
+and omitting the modeled termination event; it does not yet establish an
+indefinitely self-sustaining world server.
+
+## Runtime HTTP API
+
+Listener commands can expose read-only, identifier-free runtime status on a
+loopback address:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 8799 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --hold-open-seconds 600
+
+curl http://127.0.0.1:8799/healthz
+curl http://127.0.0.1:8799/api/v1/status
+```
+
+`GET /healthz` returns `{"ok":true}`. `GET /api/v1/status` reports the
+listener mode/address, safe replay configuration, start time, and
+accepted/active/completed/failed connection counters. Other methods are
+rejected with `405`; unknown paths return `404`. The API deliberately has no
+remote binding or mutating route: startup rejects non-loopback addresses, so
+the current local-only threat model relies on OS/namespace access rather than
+application authentication. Add authentication before introducing any remote
+binding or mutating route. If the listener runs in `mapleproxy`, query the API
+from that namespace as well.
 
 Inspect a transcript without dumping its entire payload:
 
@@ -234,5 +298,9 @@ It intentionally cannot launch an authenticated official session.
 9. Repeat only a modeled, field-local packet in a baseline/injected A/B and
    compare the emitted state events rather than inferring effects from client
    liveness alone.
-10. Decode the inner character list, player records, field snapshot body, and
-    the world-session continuation packets needed to keep a replay live.
+10. Model the terminal server opcode-`9` envelope and omit it with
+    `--keep-world-open`; a real client remained in-field for the full
+    600-second hold and left only when the configured hold expired.
+11. Decode the inner character list, player records, field snapshot body, and
+    the reactive heartbeat/gameplay responses needed to make the world server
+    self-sustaining beyond a finite replay hold.

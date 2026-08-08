@@ -300,6 +300,23 @@ class TranscriptTest(unittest.TestCase):
         )
         self.assertEqual(arguments.drop_server_frame, [4, 7])
 
+    def test_replay_parser_accepts_keep_world_open(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--hold-open-seconds",
+                "600",
+                "--keep-world-open",
+            ]
+        )
+
+        self.assertTrue(arguments.keep_world_open)
+        self.assertEqual(arguments.hold_open_seconds, 600)
+
     def test_parse_server_frame_patch(self) -> None:
         self.assertEqual(parse_server_frame_patch("3=0000ff"), (3, b"\x00\x00\xff"))
 
