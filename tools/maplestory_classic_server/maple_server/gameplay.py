@@ -13,6 +13,7 @@ from .gamestate import (
     decode_transcript,
 )
 from .packets import (
+    CompactFieldTransition,
     FieldLoadStage,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
@@ -97,6 +98,12 @@ class GameplayGameState:
     phase: GameplayPhase = GameplayPhase.CONNECTED
     field_epoch: int = 0
     field_load_stage: int | None = None
+    compact_field_transitions: int = 0
+    transition_sequence: int | None = None
+    map_id: int | None = None
+    portal_index: int | None = None
+    current_hp: int | None = None
+    server_local_filetime_ticks: int | None = None
     entry_character_id: int | None = field(default=None, repr=False)
     npcs: dict[int, NpcEntity] = field(default_factory=dict, repr=False)
     mobs: dict[int, MobEntity] = field(default_factory=dict, repr=False)
@@ -325,6 +332,16 @@ class GameplayAnalysis:
                 "phase": self.state.phase.value,
                 "field_epoch": self.state.field_epoch,
                 "field_load_stage": self.state.field_load_stage,
+                "compact_field_transitions": (
+                    self.state.compact_field_transitions
+                ),
+                "transition_sequence": self.state.transition_sequence,
+                "map_id": self.state.map_id,
+                "portal_index": self.state.portal_index,
+                "current_hp": self.state.current_hp,
+                "server_local_filetime_ticks": (
+                    self.state.server_local_filetime_ticks
+                ),
                 "entry_character_id": entry_character_id,
                 "active_npc_count": len(self.state.npcs),
                 "npcs": npcs,
@@ -820,6 +837,11 @@ class GameplayStateFold:
             )
         if opcode == 157:
             snapshot = FieldSnapshotEnvelope.parse(payload)
+            transition = (
+                CompactFieldTransition.parse(payload)
+                if len(snapshot.opaque_snapshot) == 93
+                else None
+            )
             cleared_npcs = len(self.state.npcs)
             cleared_mobs = len(self.state.mobs)
             if self.state.entry_character_id is None:
@@ -839,15 +861,75 @@ class GameplayStateFold:
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
                 "cleared_npcs": cleared_npcs,
                 "cleared_mobs": cleared_mobs,
+                "variant": (
+                    "compact_transition"
+                    if transition is not None
+                    else "opaque_snapshot"
+                ),
             }
+            if transition is None:
+                self.state.transition_sequence = None
+                self.state.map_id = None
+                self.state.portal_index = None
+                self.state.current_hp = None
+                self.state.server_local_filetime_ticks = None
+            else:
+                self.state.compact_field_transitions += 1
+                self.state.transition_sequence = (
+                    transition.transition_sequence
+                )
+                self.state.map_id = transition.map_id
+                self.state.portal_index = transition.portal_index
+                self.state.current_hp = transition.current_hp
+                self.state.server_local_filetime_ticks = (
+                    transition.server_local_filetime_ticks
+                )
+                if transition.transition_sequence != self.state.field_epoch:
+                    self.issues.append(
+                        "compact field transition sequence does not match "
+                        "the folded field epoch"
+                    )
+                details.update(
+                    {
+                        "transition_sequence": transition.transition_sequence,
+                        "map_id": transition.map_id,
+                        "portal_index": transition.portal_index,
+                        "current_hp": transition.current_hp,
+                        "opaque_text_character_counts": [
+                            len(transition.opaque_text_1),
+                            len(transition.opaque_text_2),
+                            len(transition.opaque_text_3),
+                        ],
+                        "constant_u32": transition.constant_u32,
+                        "sentinel_filetime_ticks": (
+                            transition.sentinel_filetime_ticks
+                        ),
+                        "server_local_filetime_ticks": (
+                            transition.server_local_filetime_ticks
+                        ),
+                        "unknown_tail_u32": transition.unknown_tail_u32,
+                    }
+                )
             self._event(frame, "field_snapshot_received", details=details)
             return self._observation(
                 frame,
-                kind="field_snapshot",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=snapshot,
+                kind=(
+                    "compact_field_transition"
+                    if transition is not None
+                    else "field_snapshot"
+                ),
+                coverage=(
+                    ShapeCoverage.FULL
+                    if transition is not None
+                    else ShapeCoverage.PARTIAL
+                ),
+                parsed=transition if transition is not None else snapshot,
                 details=details,
-                issues=("field snapshot body remains opaque",),
+                issues=(
+                    ()
+                    if transition is not None
+                    else ("field snapshot body remains opaque",)
+                ),
             )
         if opcode == 300:
             spawn = NpcSpawn.parse(payload)
@@ -1452,6 +1534,12 @@ def render_gameplay_analysis(
             f"phase={state.phase.value} field_epoch={state.field_epoch} "
             f"field_load_stage={state.field_load_stage} "
             f"transport_closed={analysis.transport_closed}"
+        ),
+        (
+            f"field=map_id:{state.map_id} portal_index:{state.portal_index} "
+            f"current_hp:{state.current_hp} "
+            f"transition_sequence:{state.transition_sequence} "
+            f"compact_transitions:{state.compact_field_transitions}"
         ),
         (
             f"frames=client:{state.packets_by_direction['client_to_server']} "

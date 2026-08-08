@@ -701,6 +701,139 @@ class FieldSnapshotEnvelope:
 
 
 @dataclass(frozen=True)
+class CompactFieldTransition:
+    marker: int
+    reserved_flag: int
+    transition_sequence: int
+    map_id: int
+    portal_index: int
+    current_hp: int
+    reserved_u16: int
+    opaque_text_1: str
+    opaque_text_2: str
+    opaque_text_3: str
+    reserved_u32: int
+    constant_u32: int
+    reserved_flag_2: int
+    sentinel_filetime_ticks: int
+    server_local_filetime_ticks: int
+    unknown_tail_u32: int
+    opcode: int = 157
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "CompactFieldTransition":
+        if len(payload) != 95:
+            raise PacketShapeError(
+                f"compact field transition has {len(payload)} bytes, expected 95"
+            )
+        reader = PacketReader(payload, packet_name="compact_field_transition")
+        _expect_opcode(reader, 157)
+        transition = cls(
+            marker=reader.u32("marker"),
+            reserved_flag=reader.u8("reserved_flag"),
+            transition_sequence=reader.u32("transition_sequence"),
+            map_id=reader.u32("map_id"),
+            portal_index=reader.u8("portal_index"),
+            current_hp=reader.u32("current_hp"),
+            reserved_u16=reader.u16("reserved_u16"),
+            opaque_text_1=reader.utf16_string(
+                "opaque_text_1", trailing_byte=True
+            ),
+            opaque_text_2=reader.utf16_string(
+                "opaque_text_2", trailing_byte=True
+            ),
+            opaque_text_3=reader.utf16_string(
+                "opaque_text_3", trailing_byte=False
+            ),
+            reserved_u32=reader.u32("reserved_u32"),
+            constant_u32=reader.u32("constant_u32"),
+            reserved_flag_2=reader.u8("reserved_flag_2"),
+            sentinel_filetime_ticks=reader.i64("sentinel_filetime_ticks"),
+            server_local_filetime_ticks=reader.i64(
+                "server_local_filetime_ticks"
+            ),
+            unknown_tail_u32=reader.u32("unknown_tail_u32"),
+        )
+        reader.finish()
+        transition._validate()
+        return transition
+
+    def _validate(self) -> None:
+        if self.marker != 23:
+            raise PacketShapeError(
+                f"compact field transition marker is {self.marker}, expected 23"
+            )
+        if self.reserved_flag != 0 or self.reserved_flag_2 != 0:
+            raise PacketShapeError(
+                "compact field transition reserved flags must be zero"
+            )
+        if self.reserved_u16 != 0 or self.reserved_u32 != 0:
+            raise PacketShapeError(
+                "compact field transition reserved integers must be zero"
+            )
+        if self.constant_u32 != 2:
+            raise PacketShapeError(
+                "compact field transition constant integer must be two"
+            )
+        if self.sentinel_filetime_ticks != 94_354_848_000_000_000:
+            raise PacketShapeError(
+                "compact field transition sentinel must encode 1900-01-01"
+            )
+        if len(self.opaque_text_1) != 1 or len(self.opaque_text_2) != 1:
+            raise PacketShapeError(
+                "compact field transition short strings must contain one character"
+            )
+        if len(self.opaque_text_3) != 16:
+            raise PacketShapeError(
+                "compact field transition long string must contain 16 characters"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            encoded = (
+                struct.pack(
+                    "<HIBIIBIH",
+                    self.opcode,
+                    self.marker,
+                    self.reserved_flag,
+                    self.transition_sequence,
+                    self.map_id,
+                    self.portal_index,
+                    self.current_hp,
+                    self.reserved_u16,
+                )
+                + encode_utf16_string(
+                    self.opaque_text_1, trailing_byte=True
+                )
+                + encode_utf16_string(
+                    self.opaque_text_2, trailing_byte=True
+                )
+                + encode_utf16_string(
+                    self.opaque_text_3, trailing_byte=False
+                )
+                + struct.pack(
+                    "<IIBqqI",
+                    self.reserved_u32,
+                    self.constant_u32,
+                    self.reserved_flag_2,
+                    self.sentinel_filetime_ticks,
+                    self.server_local_filetime_ticks,
+                    self.unknown_tail_u32,
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"compact field transition field is out of range: {error}"
+            ) from error
+        if len(encoded) != 95:
+            raise PacketShapeError(
+                f"compact field transition encoded to {len(encoded)} bytes"
+            )
+        return encoded
+
+
+@dataclass(frozen=True)
 class NpcSpawn:
     object_id: int
     template_id: int

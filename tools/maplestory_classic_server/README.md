@@ -158,7 +158,9 @@ python -m maple_server analyze-gameplay \
 The gameplay fold currently models these capture-backed boundaries:
 
 - client opcode `8`: world-entry envelope (character id plus opaque ticket),
-- server opcode `157`: field snapshot/change envelope (opaque body),
+- server opcode `157`: field snapshot/change envelope; the initial 4.4 KB
+  character snapshot remains opaque, while the repeated 95-byte compact
+  transition variant is fully bounded,
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence,
 - server opcode `300`: complete 22-byte NPC spawn records,
 - server opcode `303`: complete 8-byte NPC state updates,
@@ -192,6 +194,21 @@ field-load messages form 13 ordered stage pairs; all 53 NPC spawns and 77 NPC
 state updates validate; 11,949 movement acknowledgements match prior captured
 submissions; and all 75 server heartbeat probes pair with the next 75 client
 responses. Two movement submissions remain pending at capture end.
+
+Twelve of the 13 opcode-`157` packets use an exact 95-byte compact transition
+shape (two-byte opcode plus 93-byte body). `CompactFieldTransition` decodes the
+marker/reserved fields, transition sequence, map id, portal index, current HP,
+two one-character UTF-16 strings with trailing zero bytes, one 16-character
+UTF-16 string, fixed integers, a `1900-01-01` FILETIME sentinel, a server-local
+FILETIME value, and a final unnamed `u32`. All 12 round-trip byte-for-byte and
+their sequences exactly match field epochs `2..13`. The map sequence is drawn
+from `100050000`, `100040100`, `100040000`, `100040110`, and `101000000`; the
+final folded state is map `101000000`, portal `6`, HP `50`. After accounting for
+UTC+8, each server-local clock value precedes packet capture by 1.097-1.183
+seconds. Reports expose string lengths, not their potentially identifying text,
+and retain neutral names for the three text roles and final integer. The first
+large opcode-`157` packet in each world connection remains the next snapshot
+decode boundary.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
@@ -449,5 +466,8 @@ It intentionally cannot launch an authenticated official session.
     state and deterministic capture evidence, and wire it into hold-open replay.
 17. Capture a short world session that ends with a known mob and run the typed
     acknowledgement policy through a real-client prediction/effect A/B.
-18. Decode the inner character list, player records, and field snapshot body
-    needed to replace finite replay content with generated world state.
+18. Decode and fold the repeated compact opcode-`157` transition into sequence,
+    map, portal, HP, bounded text/timestamps, and field reset state.
+19. Decode the inner character list, player records, and initial large field
+    snapshot body needed to replace finite replay content with generated world
+    state.

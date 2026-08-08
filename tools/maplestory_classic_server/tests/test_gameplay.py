@@ -17,6 +17,7 @@ from maple_server.gameplay import (  # noqa: E402
     world_session_termination_frame_index,
 )
 from maple_server.packets import (  # noqa: E402
+    CompactFieldTransition,
     FieldLoadStage,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
@@ -109,6 +110,27 @@ def fixture_mob_spawn(*, extended_status: bool = False) -> MobSpawnData:
     )
 
 
+def fixture_compact_field_transition() -> CompactFieldTransition:
+    return CompactFieldTransition(
+        marker=23,
+        reserved_flag=0,
+        transition_sequence=2,
+        map_id=100_050_000,
+        portal_index=15,
+        current_hp=70,
+        reserved_u16=0,
+        opaque_text_1="1",
+        opaque_text_2="1",
+        opaque_text_3="sanitized-field!",
+        reserved_u32=0,
+        constant_u32=2,
+        reserved_flag_2=0,
+        sentinel_filetime_ticks=94_354_848_000_000_000,
+        server_local_filetime_ticks=134_306_812_696_980_000,
+        unknown_tail_u32=2,
+    )
+
+
 def fixture_gameplay_transcript(
     *,
     repeat_npc_update: bool = False,
@@ -118,6 +140,7 @@ def fixture_gameplay_transcript(
     acknowledgement_flag: int = 0,
     acknowledgement_auxiliary_1: int = 0,
     acknowledgement_auxiliary_2: int = 0,
+    compact_transition: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -233,6 +256,11 @@ def fixture_gameplay_transcript(
         "client_to_server",
         HeartbeatResponse(opaque_token=b"\x00" * 8).to_bytes(),
     )
+    if compact_transition:
+        append(
+            "server_to_client",
+            fixture_compact_field_transition().to_bytes(),
+        )
     if repeat_npc_update:
         append(
             "server_to_client",
@@ -253,6 +281,18 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_compact_field_transition_round_trip(self) -> None:
+        transition = fixture_compact_field_transition()
+
+        self.assertEqual(len(transition.to_bytes()), 95)
+        self.assertEqual(
+            CompactFieldTransition.parse(transition.to_bytes()), transition
+        )
+        with self.assertRaisesRegex(PacketShapeError, "marker"):
+            replace(transition, marker=24).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "16 characters"):
+            replace(transition, opaque_text_3="short").to_bytes()
+
     def test_npc_spawn_round_trip(self) -> None:
         spawn = fixture_npc()
 
@@ -529,6 +569,33 @@ class GameplayStateFoldTest(unittest.TestCase):
             [event.index for event in analysis.events],
             list(range(len(analysis.events))),
         )
+
+    def test_folds_compact_transition_into_map_state(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(compact_transition=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.state.phase, GameplayPhase.FIELD_LOADING)
+        self.assertEqual(analysis.state.field_epoch, 2)
+        self.assertEqual(analysis.state.compact_field_transitions, 1)
+        self.assertEqual(analysis.state.transition_sequence, 2)
+        self.assertEqual(analysis.state.map_id, 100_050_000)
+        self.assertEqual(analysis.state.portal_index, 15)
+        self.assertEqual(analysis.state.current_hp, 70)
+        self.assertEqual(len(analysis.state.npcs), 0)
+        self.assertEqual(len(analysis.state.mobs), 0)
+        observation = next(
+            item
+            for item in analysis.observations
+            if item.kind == "compact_field_transition"
+        )
+        self.assertEqual(observation.coverage.value, "full")
+        self.assertEqual(observation.details["map_id"], 100_050_000)
+        self.assertEqual(
+            observation.details["opaque_text_character_counts"], [1, 1, 16]
+        )
+        self.assertNotIn("sanitized-field!", analysis.to_json())
 
     def test_safe_output_uses_correlatable_aliases_and_redacts_raw_ids(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
