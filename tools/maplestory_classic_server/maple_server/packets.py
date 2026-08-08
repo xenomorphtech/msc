@@ -795,6 +795,125 @@ class NpcStateUpdate:
 
 
 @dataclass(frozen=True)
+class MobSpawnData:
+    spawn_marker: int
+    template_id: int
+    opaque_status: bytes
+    x: int
+    y: int
+    stance: int
+    foothold_id: int
+    origin_foothold_id: int
+    spawn_effect: int
+    opaque_tail: bytes
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobSpawnData":
+        if len(payload) not in {42, 50}:
+            raise PacketShapeError(
+                f"mob spawn body has {len(payload)} bytes, expected 42 or 50"
+            )
+        reader = PacketReader(payload, packet_name="mob_spawn_data")
+        spawn_marker = reader.u8("spawn_marker")
+        if spawn_marker != 1:
+            raise PacketShapeError(
+                f"mob spawn marker is {spawn_marker}, expected one"
+            )
+        template_id = reader.u32("template_id")
+        opaque_status = reader.bytes(len(payload) - 20, "opaque_status")
+        x = reader.i16("x")
+        y = reader.i16("y")
+        stance = reader.u8("stance")
+        foothold_id = reader.u16("foothold_id")
+        origin_foothold_id = reader.u16("origin_foothold_id")
+        spawn_effect = reader.i16("spawn_effect")
+        opaque_tail = reader.bytes(4, "opaque_tail")
+        reader.finish()
+        return cls(
+            spawn_marker=spawn_marker,
+            template_id=template_id,
+            opaque_status=opaque_status,
+            x=x,
+            y=y,
+            stance=stance,
+            foothold_id=foothold_id,
+            origin_foothold_id=origin_foothold_id,
+            spawn_effect=spawn_effect,
+            opaque_tail=opaque_tail,
+        )
+
+    def to_bytes(self) -> bytes:
+        if self.spawn_marker != 1:
+            raise PacketShapeError("mob spawn marker must be one")
+        if len(self.opaque_status) not in {22, 30}:
+            raise PacketShapeError(
+                "mob spawn opaque status must contain 22 or 30 bytes"
+            )
+        if len(self.opaque_tail) != 4:
+            raise PacketShapeError("mob spawn opaque tail must contain four bytes")
+        return (
+            struct.pack("<BI", self.spawn_marker, self.template_id)
+            + self.opaque_status
+            + struct.pack(
+                "<hhBHHh",
+                self.x,
+                self.y,
+                self.stance,
+                self.foothold_id,
+                self.origin_foothold_id,
+                self.spawn_effect,
+            )
+            + self.opaque_tail
+        )
+
+
+@dataclass(frozen=True)
+class MobEnterField:
+    object_id: int
+    spawn: MobSpawnData
+    opcode: int = 279
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobEnterField":
+        reader = PacketReader(payload, packet_name="mob_enter_field")
+        _expect_opcode(reader, 279)
+        object_id = reader.u32("object_id")
+        spawn = MobSpawnData.parse(
+            reader.bytes(reader.remaining, "spawn")
+        )
+        reader.finish()
+        return cls(object_id=object_id, spawn=spawn)
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<HI", self.opcode, self.object_id) + self.spawn.to_bytes()
+
+
+@dataclass(frozen=True)
+class MobLeaveField:
+    object_id: int
+    reason: int
+    opcode: int = 280
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobLeaveField":
+        reader = PacketReader(payload, packet_name="mob_leave_field")
+        _expect_opcode(reader, 280)
+        object_id = reader.u32("object_id")
+        reason = reader.u8("reason")
+        reader.finish()
+        if reason not in {0, 1}:
+            raise PacketShapeError(
+                f"mob leave reason is {reason}, expected zero or one"
+            )
+        return cls(object_id=object_id, reason=reason)
+
+    def to_bytes(self) -> bytes:
+        if self.reason not in {0, 1}:
+            raise PacketShapeError("mob leave reason must be zero or one")
+        return struct.pack("<HIB", self.opcode, self.object_id, self.reason)
+
+
+@dataclass(frozen=True)
 class MobMovementCommand:
     command_type: int
     opaque_payload: bytes
@@ -1002,6 +1121,116 @@ class MobMovementPath:
                 self.path_end_x,
                 self.path_end_y,
             )
+        )
+
+
+@dataclass(frozen=True)
+class MobControllerChange:
+    control_level: int
+    object_id: int
+    spawn: MobSpawnData | None = None
+    opcode: int = 281
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobControllerChange":
+        reader = PacketReader(payload, packet_name="mob_controller_change")
+        _expect_opcode(reader, 281)
+        control_level = reader.u8("control_level")
+        if control_level not in {0, 1, 2}:
+            raise PacketShapeError(
+                f"mob control level is {control_level}, expected 0, 1, or 2"
+            )
+        object_id = reader.u32("object_id")
+        spawn = (
+            MobSpawnData.parse(reader.bytes(reader.remaining, "spawn"))
+            if reader.remaining
+            else None
+        )
+        reader.finish()
+        if control_level == 0 and spawn is not None:
+            raise PacketShapeError(
+                "mob control level zero must not include spawn data"
+            )
+        if control_level != 0 and spawn is None:
+            raise PacketShapeError(
+                "nonzero mob control level requires spawn data"
+            )
+        return cls(
+            control_level=control_level,
+            object_id=object_id,
+            spawn=spawn,
+        )
+
+    def to_bytes(self) -> bytes:
+        if self.control_level not in {0, 1, 2}:
+            raise PacketShapeError("mob control level must be zero, one, or two")
+        if self.control_level == 0 and self.spawn is not None:
+            raise PacketShapeError(
+                "mob control level zero cannot include spawn data"
+            )
+        if self.control_level != 0 and self.spawn is None:
+            raise PacketShapeError(
+                "nonzero mob control level requires spawn data"
+            )
+        return (
+            struct.pack("<HBI", self.opcode, self.control_level, self.object_id)
+            + (self.spawn.to_bytes() if self.spawn is not None else b"")
+        )
+
+
+@dataclass(frozen=True)
+class MobMovementBroadcast:
+    object_id: int
+    opaque_control: bytes
+    reference_x: int
+    reference_y: int
+    commands: tuple[MobMovementCommand, ...]
+    opcode: int = 282
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobMovementBroadcast":
+        reader = PacketReader(payload, packet_name="mob_movement_broadcast")
+        _expect_opcode(reader, 282)
+        object_id = reader.u32("object_id")
+        opaque_control = reader.bytes(7, "opaque_control")
+        reference_x = reader.i16("reference_x")
+        reference_y = reader.i16("reference_y")
+        command_count = reader.u8("command_count")
+        if command_count == 0:
+            raise PacketShapeError("mob movement broadcast has no commands")
+        commands = tuple(
+            MobMovementCommand.parse(reader, command_index=index)
+            for index in range(command_count)
+        )
+        reader.finish()
+        return cls(
+            object_id=object_id,
+            opaque_control=opaque_control,
+            reference_x=reference_x,
+            reference_y=reference_y,
+            commands=commands,
+        )
+
+    def to_bytes(self) -> bytes:
+        if len(self.opaque_control) != 7:
+            raise PacketShapeError(
+                "mob movement broadcast control prefix must contain seven bytes"
+            )
+        if not self.commands:
+            raise PacketShapeError(
+                "mob movement broadcast must contain a command"
+            )
+        if len(self.commands) > 255:
+            raise PacketShapeError(
+                "mob movement broadcast cannot contain more than 255 commands"
+            )
+        return (
+            struct.pack("<HI", self.opcode, self.object_id)
+            + self.opaque_control
+            + struct.pack(
+                "<hhB", self.reference_x, self.reference_y, len(self.commands)
+            )
+            + b"".join(command.to_bytes() for command in self.commands)
         )
 
 

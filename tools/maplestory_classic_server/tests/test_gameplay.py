@@ -20,10 +20,15 @@ from maple_server.packets import (  # noqa: E402
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
+    MobControllerChange,
+    MobEnterField,
+    MobLeaveField,
     MobMovementAcknowledgement,
+    MobMovementBroadcast,
     MobMovementCommand,
     MobMovementPath,
     MobMovementSubmission,
+    MobSpawnData,
     NpcSpawn,
     NpcStateUpdate,
     PacketShapeError,
@@ -88,9 +93,25 @@ def fixture_movement_path() -> MobMovementPath:
     )
 
 
+def fixture_mob_spawn(*, extended_status: bool = False) -> MobSpawnData:
+    return MobSpawnData(
+        spawn_marker=1,
+        template_id=210_100,
+        opaque_status=b"\x00" * (30 if extended_status else 22),
+        x=100,
+        y=-200,
+        stance=2,
+        foothold_id=7,
+        origin_foothold_id=8,
+        spawn_effect=-1,
+        opaque_tail=b"\x00" * 4,
+    )
+
+
 def fixture_gameplay_transcript(
     *,
     repeat_npc_update: bool = False,
+    leave_mob: bool = False,
     terminate: bool = False,
     close: bool = True,
 ) -> Transcript:
@@ -149,6 +170,31 @@ def fixture_gameplay_transcript(
         ).to_bytes(),
     )
     append(
+        "server_to_client",
+        MobEnterField(
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(),
+        ).to_bytes(),
+    )
+    append(
+        "server_to_client",
+        MobControllerChange(
+            control_level=1,
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(),
+        ).to_bytes(),
+    )
+    append(
+        "server_to_client",
+        MobMovementBroadcast(
+            object_id=MOB_OBJECT_ID,
+            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            reference_x=100,
+            reference_y=-200,
+            commands=fixture_movement_path().commands,
+        ).to_bytes(),
+    )
+    append(
         "client_to_server",
         WorldBootstrapAcknowledgement(opaque_value=0).to_bytes(),
     )
@@ -170,6 +216,11 @@ def fixture_gameplay_transcript(
             opaque_status=b"\x00" * 5,
         ).to_bytes(),
     )
+    if leave_mob:
+        append(
+            "server_to_client",
+            MobLeaveField(object_id=MOB_OBJECT_ID, reason=0).to_bytes(),
+        )
     append("server_to_client", HeartbeatProbe().to_bytes())
     append(
         "client_to_server",
@@ -330,6 +381,55 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaises(PacketShapeError):
             MobMovementPath.parse(bytes(encoded))
 
+    def test_mob_lifecycle_and_broadcast_round_trip(self) -> None:
+        entered = MobEnterField(
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(),
+        )
+        extended_enter = MobEnterField(
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(extended_status=True),
+        )
+        left = MobLeaveField(object_id=MOB_OBJECT_ID, reason=1)
+        released = MobControllerChange(
+            control_level=0,
+            object_id=MOB_OBJECT_ID,
+        )
+        controlled = MobControllerChange(
+            control_level=2,
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(),
+        )
+        broadcast = MobMovementBroadcast(
+            object_id=MOB_OBJECT_ID,
+            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            reference_x=100,
+            reference_y=-200,
+            commands=fixture_movement_path().commands,
+        )
+
+        for packet_type, packet in (
+            (MobEnterField, entered),
+            (MobEnterField, extended_enter),
+            (MobLeaveField, left),
+            (MobControllerChange, released),
+            (MobControllerChange, controlled),
+            (MobMovementBroadcast, broadcast),
+        ):
+            self.assertEqual(packet_type.parse(packet.to_bytes()), packet)
+        self.assertEqual(len(entered.to_bytes()), 48)
+        self.assertEqual(len(extended_enter.to_bytes()), 56)
+        self.assertEqual(len(left.to_bytes()), 7)
+        self.assertEqual(len(released.to_bytes()), 7)
+        self.assertEqual(len(controlled.to_bytes()), 49)
+        self.assertEqual(len(broadcast.to_bytes()), 32)
+        with self.assertRaises(PacketShapeError):
+            MobControllerChange(
+                control_level=0,
+                object_id=MOB_OBJECT_ID,
+                spawn=fixture_mob_spawn(),
+            ).to_bytes()
+
     def test_world_session_termination_round_trip(self) -> None:
         termination = WorldSessionTermination(opaque_reason=b"ended!!")
 
@@ -359,10 +459,23 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(analysis.state.npcs), 1)
         self.assertEqual(analysis.state.npc_spawns, 1)
         self.assertEqual(analysis.state.npc_state_updates, 1)
+        self.assertEqual(len(analysis.state.mobs), 1)
+        self.assertEqual(analysis.state.mobs[MOB_OBJECT_ID].controller_level, 1)
+        self.assertEqual(analysis.state.mob_entries, 1)
+        self.assertEqual(analysis.state.mob_controller_changes, 1)
+        self.assertEqual(analysis.state.mob_movement_broadcasts, 1)
+        self.assertEqual(analysis.state.mob_broadcast_commands, 1)
+        self.assertEqual(analysis.state.mob_broadcast_commands_by_type, {0: 1})
+        self.assertEqual(analysis.state.unknown_mob_broadcasts, 0)
+        self.assertEqual(analysis.state.unknown_mob_leaves, 0)
         self.assertEqual(analysis.state.movement_submissions, 1)
+        self.assertEqual(analysis.state.movement_submissions_for_unknown_mobs, 0)
         self.assertEqual(analysis.state.movement_commands, 1)
         self.assertEqual(analysis.state.movement_commands_by_type, {0: 1})
         self.assertEqual(analysis.state.matched_movement_acknowledgements, 1)
+        self.assertEqual(
+            analysis.state.movement_acknowledgements_for_unknown_mobs, 0
+        )
         self.assertEqual(
             analysis.state.movement_acknowledgement_statuses,
             {(0, 0, 0, 0): 1},
@@ -378,6 +491,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("field_snapshot_received", event_kinds)
         self.assertIn("npc_spawned", event_kinds)
         self.assertIn("npc_state_updated", event_kinds)
+        self.assertIn("mob_entered_field", event_kinds)
+        self.assertIn("mob_controller_changed", event_kinds)
+        self.assertIn("mob_movement_broadcast", event_kinds)
         self.assertIn("field_became_active", event_kinds)
         self.assertIn("mob_movement_submitted", event_kinds)
         self.assertIn("mob_movement_acknowledged", event_kinds)
@@ -398,6 +514,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn('"entity": "npc:1"', safe_json)
         self.assertEqual(identified["state"]["entry_character_id"], CHARACTER_ID)
         self.assertEqual(identified["state"]["npcs"][0]["object_id"], NPC_OBJECT_ID)
+        self.assertEqual(identified["state"]["mobs"][0]["object_id"], MOB_OBJECT_ID)
 
     def test_text_report_can_emit_events_and_packet_shapes(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
@@ -410,9 +527,24 @@ class GameplayStateFoldTest(unittest.TestCase):
 
         self.assertIn("kind=npc_spawned", report)
         self.assertIn("opcode=300 kind=npc_spawn coverage=full", report)
+        self.assertIn("opcode=279 kind=mob_enter_field coverage=partial", report)
+        self.assertIn("mobs=active:1 entries:1 leaves:0", report)
         self.assertIn("matched_submission\":true", report)
         self.assertIn("command_types\":[0]", report)
         self.assertIn('commands:1 command_types:{"0": 1}', report)
+
+    def test_mob_leave_removes_known_active_entity(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(leave_mob=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(len(analysis.state.mobs), 0)
+        self.assertEqual(analysis.state.mob_leaves, 1)
+        leave_event = next(
+            event for event in analysis.events if event.kind == "mob_left_field"
+        )
+        self.assertTrue(leave_event.details["known_entity"])
 
     def test_repeated_npc_update_has_the_predicted_field_local_delta(self) -> None:
         baseline = analyze_gameplay_transcript(fixture_gameplay_transcript())

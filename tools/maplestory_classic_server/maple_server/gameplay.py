@@ -17,8 +17,13 @@ from .packets import (
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
+    MobControllerChange,
+    MobEnterField,
+    MobLeaveField,
     MobMovementAcknowledgement,
+    MobMovementBroadcast,
     MobMovementSubmission,
+    MobSpawnData,
     NpcSpawn,
     NpcStateUpdate,
     PacketShapeError,
@@ -43,6 +48,16 @@ class NpcEntity:
     spawn: NpcSpawn = field(repr=False)
     action: int | None = None
     parameter: int | None = None
+
+
+@dataclass
+class MobEntity:
+    alias: str
+    spawn: MobSpawnData = field(repr=False)
+    controller_level: int = 0
+    x: int = 0
+    y: int = 0
+    stance: int = 0
 
 
 @dataclass(frozen=True)
@@ -78,14 +93,27 @@ class GameplayGameState:
     field_load_stage: int | None = None
     entry_character_id: int | None = field(default=None, repr=False)
     npcs: dict[int, NpcEntity] = field(default_factory=dict, repr=False)
+    mobs: dict[int, MobEntity] = field(default_factory=dict, repr=False)
     packets_by_direction: Counter[str] = field(default_factory=Counter)
     plaintext_bytes_by_direction: Counter[str] = field(default_factory=Counter)
     npc_spawns: int = 0
     npc_state_updates: int = 0
+    mob_entries: int = 0
+    mob_leaves: int = 0
+    mob_controller_changes: int = 0
+    mob_movement_broadcasts: int = 0
+    unknown_mob_leaves: int = 0
+    unknown_mob_broadcasts: int = 0
+    mob_broadcast_commands: int = 0
+    mob_broadcast_commands_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
     movement_submissions: int = 0
+    movement_submissions_for_unknown_mobs: int = 0
     movement_commands: int = 0
     movement_commands_by_type: Counter[int] = field(default_factory=Counter)
     movement_acknowledgements: int = 0
+    movement_acknowledgements_for_unknown_mobs: int = 0
     movement_acknowledgement_statuses: Counter[
         tuple[int, int, int, int]
     ] = field(
@@ -164,6 +192,24 @@ class GameplayAnalysis:
             if show_identifiers:
                 record["object_id"] = spawn.object_id
             npcs.append(record)
+        mobs: list[dict[str, object]] = []
+        for object_id, entity in sorted(
+            self.state.mobs.items(), key=lambda item: item[1].alias
+        ):
+            record = {
+                "entity": entity.alias,
+                "template_id": entity.spawn.template_id,
+                "controller_level": entity.controller_level,
+                "x": entity.x,
+                "y": entity.y,
+                "stance": entity.stance,
+                "foothold_id": entity.spawn.foothold_id,
+                "origin_foothold_id": entity.spawn.origin_foothold_id,
+                "spawn_effect": entity.spawn.spawn_effect,
+            }
+            if show_identifiers:
+                record["object_id"] = object_id
+            mobs.append(record)
         entry_character_id: int | str | None = None
         if self.state.entry_character_id is not None:
             entry_character_id = (
@@ -189,19 +235,43 @@ class GameplayAnalysis:
                 "entry_character_id": entry_character_id,
                 "active_npc_count": len(self.state.npcs),
                 "npcs": npcs,
+                "active_mob_count": len(self.state.mobs),
+                "controlled_mob_count": sum(
+                    entity.controller_level != 0
+                    for entity in self.state.mobs.values()
+                ),
+                "mobs": mobs,
                 "packets_by_direction": dict(self.state.packets_by_direction),
                 "plaintext_bytes_by_direction": dict(
                     self.state.plaintext_bytes_by_direction
                 ),
                 "npc_spawns": self.state.npc_spawns,
                 "npc_state_updates": self.state.npc_state_updates,
+                "mob_entries": self.state.mob_entries,
+                "mob_leaves": self.state.mob_leaves,
+                "mob_controller_changes": self.state.mob_controller_changes,
+                "mob_movement_broadcasts": (
+                    self.state.mob_movement_broadcasts
+                ),
+                "unknown_mob_leaves": self.state.unknown_mob_leaves,
+                "unknown_mob_broadcasts": self.state.unknown_mob_broadcasts,
+                "mob_broadcast_commands": self.state.mob_broadcast_commands,
+                "mob_broadcast_commands_by_type": dict(
+                    self.state.mob_broadcast_commands_by_type
+                ),
                 "movement_submissions": self.state.movement_submissions,
+                "movement_submissions_for_unknown_mobs": (
+                    self.state.movement_submissions_for_unknown_mobs
+                ),
                 "movement_commands": self.state.movement_commands,
                 "movement_commands_by_type": dict(
                     self.state.movement_commands_by_type
                 ),
                 "movement_acknowledgements": (
                     self.state.movement_acknowledgements
+                ),
+                "movement_acknowledgements_for_unknown_mobs": (
+                    self.state.movement_acknowledgements_for_unknown_mobs
                 ),
                 "movement_acknowledgement_statuses": [
                     {
@@ -290,7 +360,7 @@ class GameplayStateFold:
         self.warnings: list[str] = []
         self.events: list[GameplayEvent] = []
         self._npc_aliases: dict[int, str] = {}
-        self._movement_aliases: dict[int, str] = {}
+        self._mob_aliases: dict[int, str] = {}
         self._pending_movements: Counter[tuple[int, int]] = Counter()
         self._pending_heartbeat_probes: deque[int] = deque()
         self._unknown_npc_updates: set[tuple[int, int]] = set()
@@ -302,6 +372,20 @@ class GameplayStateFold:
             alias = f"{prefix}:{len(aliases) + 1}"
             aliases[object_id] = alias
         return alias
+
+    @staticmethod
+    def _mob_spawn_details(spawn: MobSpawnData) -> dict[str, object]:
+        return {
+            "template_id": spawn.template_id,
+            "opaque_status_bytes": len(spawn.opaque_status),
+            "x": spawn.x,
+            "y": spawn.y,
+            "stance": spawn.stance,
+            "foothold_id": spawn.foothold_id,
+            "origin_foothold_id": spawn.origin_foothold_id,
+            "spawn_effect": spawn.spawn_effect,
+            "opaque_tail_bytes": len(spawn.opaque_tail),
+        }
 
     def _event(
         self,
@@ -463,7 +547,7 @@ class GameplayStateFold:
             movement = MobMovementSubmission.parse(payload)
             movement_path = movement.movement_path
             alias = self._alias(
-                self._movement_aliases, movement.object_id, "mob"
+                self._mob_aliases, movement.object_id, "mob"
             )
             key = (movement.object_id, movement.sequence)
             self._pending_movements[key] += 1
@@ -473,8 +557,19 @@ class GameplayStateFold:
             self.state.movement_commands_by_type.update(
                 command.command_type for command in movement_path.commands
             )
+            entity = self.state.mobs.get(movement.object_id)
+            if entity is None:
+                self.state.movement_submissions_for_unknown_mobs += 1
+            if entity is not None:
+                entity.x = movement_path.path_end_x
+                entity.y = movement_path.path_end_y
+                entity.stance = movement_path.commands[-1].stance
             details = {
                 "entity": alias,
+                "known_entity": entity is not None,
+                "controller_level": (
+                    entity.controller_level if entity is not None else None
+                ),
                 "sequence": movement.sequence,
                 "movement_body_bytes": len(movement.opaque_movement),
                 "opaque_control_bytes": len(movement_path.opaque_control),
@@ -579,6 +674,7 @@ class GameplayStateFold:
         if opcode == 157:
             snapshot = FieldSnapshotEnvelope.parse(payload)
             cleared_npcs = len(self.state.npcs)
+            cleared_mobs = len(self.state.mobs)
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -587,12 +683,14 @@ class GameplayStateFold:
             self.state.field_load_stage = None
             self.state.phase = GameplayPhase.FIELD_LOADING
             self.state.npcs.clear()
+            self.state.mobs.clear()
             self._pending_movements.clear()
             self.state.pending_movements = 0
             details = {
                 "field_epoch": self.state.field_epoch,
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
                 "cleared_npcs": cleared_npcs,
+                "cleared_mobs": cleared_mobs,
             }
             self._event(frame, "field_snapshot_received", details=details)
             return self._observation(
@@ -676,10 +774,175 @@ class GameplayStateFold:
                 parsed=update,
                 details=details,
             )
+        if opcode == 279:
+            entered = MobEnterField.parse(payload)
+            alias = self._alias(self._mob_aliases, entered.object_id, "mob")
+            existing = self.state.mobs.get(entered.object_id)
+            controller_level = (
+                existing.controller_level if existing is not None else 0
+            )
+            self.state.mobs[entered.object_id] = MobEntity(
+                alias=alias,
+                spawn=entered.spawn,
+                controller_level=controller_level,
+                x=entered.spawn.x,
+                y=entered.spawn.y,
+                stance=entered.spawn.stance,
+            )
+            self.state.mob_entries += 1
+            details = {
+                "entity": alias,
+                "replaced_existing": existing is not None,
+                "controller_level": controller_level,
+                "field_epoch": self.state.field_epoch,
+                **self._mob_spawn_details(entered.spawn),
+            }
+            self._event(
+                frame,
+                "mob_entered_field",
+                details=details,
+                identifiers={"object_id": entered.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="mob_enter_field",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=entered,
+                details=details,
+                issues=("mob temporary status and spawn tail remain opaque",),
+            )
+        if opcode == 280:
+            left = MobLeaveField.parse(payload)
+            alias = self._alias(self._mob_aliases, left.object_id, "mob")
+            known_entity = self.state.mobs.pop(left.object_id, None) is not None
+            if not known_entity:
+                self.state.unknown_mob_leaves += 1
+            self.state.mob_leaves += 1
+            details = {
+                "entity": alias,
+                "known_entity": known_entity,
+                "reason": left.reason,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "mob_left_field",
+                details=details,
+                identifiers={"object_id": left.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="mob_leave_field",
+                coverage=ShapeCoverage.FULL,
+                parsed=left,
+                details=details,
+            )
+        if opcode == 281:
+            change = MobControllerChange.parse(payload)
+            alias = self._alias(self._mob_aliases, change.object_id, "mob")
+            entity = self.state.mobs.get(change.object_id)
+            known_entity = entity is not None
+            if change.spawn is not None:
+                if entity is None:
+                    entity = MobEntity(alias=alias, spawn=change.spawn)
+                    self.state.mobs[change.object_id] = entity
+                else:
+                    entity.spawn = change.spawn
+                entity.x = change.spawn.x
+                entity.y = change.spawn.y
+                entity.stance = change.spawn.stance
+                entity.controller_level = change.control_level
+            elif entity is not None:
+                entity.controller_level = 0
+            self.state.mob_controller_changes += 1
+            details = {
+                "entity": alias,
+                "known_entity": known_entity,
+                "control_level": change.control_level,
+                "has_spawn": change.spawn is not None,
+                "field_epoch": self.state.field_epoch,
+            }
+            if change.spawn is not None:
+                details.update(self._mob_spawn_details(change.spawn))
+            self._event(
+                frame,
+                "mob_controller_changed",
+                details=details,
+                identifiers={"object_id": change.object_id},
+            )
+            issues = (
+                ("mob temporary status and spawn tail remain opaque",)
+                if change.spawn is not None
+                else ()
+            )
+            return self._observation(
+                frame,
+                kind="mob_controller_change",
+                coverage=(
+                    ShapeCoverage.PARTIAL
+                    if change.spawn is not None
+                    else ShapeCoverage.FULL
+                ),
+                parsed=change,
+                details=details,
+                issues=issues,
+            )
+        if opcode == 282:
+            broadcast = MobMovementBroadcast.parse(payload)
+            alias = self._alias(self._mob_aliases, broadcast.object_id, "mob")
+            entity = self.state.mobs.get(broadcast.object_id)
+            if entity is None:
+                self.state.unknown_mob_broadcasts += 1
+            absolute_positions = [
+                command.position
+                for command in broadcast.commands
+                if command.position is not None
+            ]
+            if entity is not None:
+                if absolute_positions:
+                    entity.x, entity.y = absolute_positions[-1]
+                else:
+                    entity.x = broadcast.reference_x
+                    entity.y = broadcast.reference_y
+                entity.stance = broadcast.commands[-1].stance
+            self.state.mob_movement_broadcasts += 1
+            self.state.mob_broadcast_commands += len(broadcast.commands)
+            self.state.mob_broadcast_commands_by_type.update(
+                command.command_type for command in broadcast.commands
+            )
+            details = {
+                "entity": alias,
+                "known_entity": entity is not None,
+                "opaque_control_bytes": len(broadcast.opaque_control),
+                "reference_x": broadcast.reference_x,
+                "reference_y": broadcast.reference_y,
+                "command_count": len(broadcast.commands),
+                "command_types": [
+                    command.command_type for command in broadcast.commands
+                ],
+                "commands": [
+                    command.safe_dict() for command in broadcast.commands
+                ],
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "mob_movement_broadcast",
+                details=details,
+                identifiers={"object_id": broadcast.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="mob_movement_broadcast",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=broadcast,
+                details=details,
+                issues=("server mob-movement control metadata remains opaque",),
+            )
         if opcode == 283:
             acknowledgement = MobMovementAcknowledgement.parse(payload)
             alias = self._alias(
-                self._movement_aliases, acknowledgement.object_id, "mob"
+                self._mob_aliases, acknowledgement.object_id, "mob"
             )
             key = (acknowledgement.object_id, acknowledgement.sequence)
             matched = self._pending_movements[key] > 0
@@ -692,6 +955,9 @@ class GameplayStateFold:
             else:
                 self.state.unmatched_movement_acknowledgements += 1
             self.state.movement_acknowledgements += 1
+            known_entity = acknowledgement.object_id in self.state.mobs
+            if not known_entity:
+                self.state.movement_acknowledgements_for_unknown_mobs += 1
             self.state.movement_acknowledgement_statuses[
                 (
                     acknowledgement.status_flag,
@@ -702,6 +968,7 @@ class GameplayStateFold:
             ] += 1
             details = {
                 "entity": alias,
+                "known_entity": known_entity,
                 "sequence": acknowledgement.sequence,
                 "matched_submission": matched,
                 "status_flag": acknowledgement.status_flag,
@@ -776,6 +1043,7 @@ class GameplayStateFold:
                     "field_epoch": self.state.field_epoch,
                     "phase": self.state.phase.value,
                     "active_npcs": len(self.state.npcs),
+                    "active_mobs": len(self.state.mobs),
                     "pending_movements": self.state.pending_movements,
                     "pending_heartbeat_probes": (
                         self.state.pending_heartbeat_probes
@@ -906,6 +1174,13 @@ def render_gameplay_analysis(
         (
             f"npcs=active:{len(state.npcs)} spawned:{state.npc_spawns} "
             f"state_updates:{state.npc_state_updates}"
+        ),
+        (
+            f"mobs=active:{len(state.mobs)} entries:{state.mob_entries} "
+            f"leaves:{state.mob_leaves} "
+            f"controller_changes:{state.mob_controller_changes} "
+            f"movement_broadcasts:{state.mob_movement_broadcasts} "
+            f"broadcast_commands:{state.mob_broadcast_commands}"
         ),
         (
             f"movement=submitted:{state.movement_submissions} "
