@@ -204,18 +204,31 @@ handoff. A live bypass sent the valid endpoint-rewritten frame `20` without
 frame `19` or the client type-`6`/opcode-`7` sequence. The client accepted the
 handoff far enough to blank the scene, but never connected to the local world
 port and then exited after the login socket closed. The A/B replay above also
-shows that frame `19` alone does not unlock selection. Therefore the real
-ordering gate is a client-side completion and character-selection transition;
-the available evidence does not make it a server-side security-validation
-requirement.
+shows that frame `19` alone does not unlock selection.
 
-Replaying the successful stream's six-byte server opcode `23` at this point is
-also insufficient. In the live synthetic-callback probe it produced only a
-fully decoded client opcode-`13` type-`15` status with an empty message. The
-client stayed in `character_selection` and sent no opcode `7`. Because that
-session had already produced a native opcode-`6` packet during startup, opcode
-`23` is best classified as an NGSX initialization/status trigger, not the
-missing post-selection security completion packet.
+Replaying the successful stream's six-byte server opcode `23` late is also
+insufficient. In the live synthetic-callback probe it produced only a fully
+decoded client opcode-`13` type-`15` status with an empty message; the client
+stayed in `character_selection` and sent no opcode `7`. The missing variable
+was ordering: non-strict replay consumed fresh-client extra frames as captured
+events and emitted captured server frame `4` before the actual opcode `6`.
+
+With frame `4` omitted and its plaintext sent reactively after the observed
+client opcode `6`, a clean unpatched client returned a non-empty type-`15`
+status, completed world/channel/character selection, emitted opcode `7`,
+accepted the transformed handoff, and opened the local world connection. Thus
+the bounded rule is:
+
+```text
+client opcode 6 (variable opaque security payload)
+server opcode 23 (six-byte captured response)
+client opcode 13, type 15 (non-empty completion/status message)
+```
+
+The server response is necessary in this position, while a late duplicate is
+not a substitute. The type-`7` envelope still is not independently sufficient;
+it participates after the ordered NGSX completion rather than causing that
+completion itself.
 
 The successful 63-byte account packet is fully bounded as follows. Its three
 strings use a `uint16` UTF-16 code-unit count without the extra world-string

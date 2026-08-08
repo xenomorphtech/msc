@@ -45,8 +45,24 @@ the game on workspace 1.
 
 ## Direct client launch for local-server testing
 
-This was the shortest reliable iteration path and does not require NGM or a
-fresh website ticket:
+Use the repository launcher for custom-server work. It does not contact the
+browser, CDP, NGM, or the Beanfun website:
+
+```sh
+cd /home/sdancer/ms
+python tools/maplestory_classic_server/tools/launch_local_game.py --restart
+```
+
+The launcher discovers the active nested Sway socket and its wlroots Xwayland
+display, verifies that login port `12082` and world port `12857` are listening
+inside `mapleproxy`, starts/verifies `maplestory-audio-mute.service`,
+cold-restarts only this Wine prefix when `--restart` is requested, and focuses
+the new window through Sway.
+It uses the four local placeholder arguments and never reads or prints an
+authenticated launch ticket. Run without `--restart` to make an existing game
+process a hard error instead of stopping it.
+
+The equivalent manual command is:
 
 ```sh
 sudo ip netns exec mapleproxy sudo -u sdancer env \
@@ -61,7 +77,8 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
 ```
 
 This uses X11 through the nested Sway instance's Xwayland server. Change
-`DISPLAY=:1` if the new Xwayland display differs.
+`DISPLAY=:1` if the new Xwayland display differs. Prefer the launcher so these
+runtime endpoints and the audio invariant are checked automatically.
 
 The client also rendered through Wine's native Wayland driver inside Sway:
 
@@ -79,7 +96,8 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
 
 Use Xwayland by default because that was the selected setup. The placeholder
 arguments are sufficient for local custom-server iterations, but they are not
-a substitute for an official authenticated launch ticket.
+a substitute for an official authenticated launch ticket. The browser/CDP
+procedure below is retained only for official-server capture work.
 
 ## Official authenticated NGM launch
 

@@ -1,14 +1,16 @@
-"""Synthesize successful NGSX Run callbacks for custom-server testing.
+"""Synthesize successful NGSX Run callbacks for diagnostic A/B testing.
 
-The current Wine client can initialize the native plugin but does not complete
-its asynchronous Run requests.  This build-specific, process-local patch keeps
-the normal managed NGSX event path while redirecting ``NgsxWindows.Run`` to its
-existing callback and constructing a successful result with an empty managed
-message.  No executable or native proof data is modified on disk.
+This build-specific, process-local patch keeps the normal managed NGSX event
+path while redirecting ``NgsxWindows.Run`` to its existing callback and
+constructing a successful result. The managed message defaults to empty and
+can be set with ``MAPLE_NGSX_RESULT_MESSAGE``. No executable or native proof
+data is modified on disk. The validated custom-server flow no longer requires
+this patch because it completes the native opcode-6/opcode-23 exchange.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import struct
 
@@ -26,6 +28,18 @@ NGSX_RESULT_TYPE_SLOT_RVA = 0x6961AF0
 
 EXPECTED_RUN_PREFIX = bytes.fromhex("41 56 56 57 53 48 83 ec 58")
 EXPECTED_READ_PREFIX = bytes.fromhex("41 56 56 57 55 53 48 83 ec 20")
+PATCHED_RUN_PREFIX = bytes.fromhex("48 83 ec 28 31 c9 31 d2 45")
+PATCHED_READ_PREFIX = bytes.fromhex("56 48 83 ec 20 48 8d 0d")
+
+message_text = os.environ.get("MAPLE_NGSX_RESULT_MESSAGE", "")
+try:
+    message_bytes = message_text.encode("utf-8")
+except UnicodeEncodeError as error:
+    raise gdb.GdbError("MAPLE_NGSX_RESULT_MESSAGE must be UTF-8 encodable") from error
+if b"\x00" in message_bytes:
+    raise gdb.GdbError("MAPLE_NGSX_RESULT_MESSAGE cannot contain NUL bytes")
+if len(message_bytes) > 1024:
+    raise gdb.GdbError("MAPLE_NGSX_RESULT_MESSAGE must be at most 1024 bytes")
 
 
 inferior = gdb.selected_inferior()
@@ -76,13 +90,13 @@ string_new = base + IL2CPP_STRING_NEW_RVA
 result_type_slot = base + NGSX_RESULT_TYPE_SLOT_RVA
 
 actual_run = bytes(inferior.read_memory(windows_run, len(EXPECTED_RUN_PREFIX)))
-if actual_run != EXPECTED_RUN_PREFIX:
+if actual_run not in (EXPECTED_RUN_PREFIX, PATCHED_RUN_PREFIX):
     raise gdb.GdbError(
         "NgsxWindows.Run prefix mismatch: "
         f"expected={EXPECTED_RUN_PREFIX.hex()} actual={actual_run.hex()}"
     )
 actual_read = bytes(inferior.read_memory(read_result, len(EXPECTED_READ_PREFIX)))
-if actual_read != EXPECTED_READ_PREFIX:
+if actual_read != EXPECTED_READ_PREFIX and not actual_read.startswith(PATCHED_READ_PREFIX):
     raise gdb.GdbError(
         "NgsxWindows.ReadResult prefix mismatch: "
         f"expected={EXPECTED_READ_PREFIX.hex()} actual={actual_read.hex()}"
@@ -106,19 +120,21 @@ result_code.extend(
         "c7 46 14 00 00 00 00"
     )
 )
-empty_string_lea = len(result_code)
+message_lea = len(result_code)
 result_code.extend(b"\x48\x8d\x0d\x00\x00\x00\x00")
 emit_call(result_code, read_result, string_new)
-result_code.extend(bytes.fromhex("48 89 46 18 48 89 f0 48 83 c4 20 5e c3 00"))
-empty_string = read_result + len(result_code) - 1
-lea_next = read_result + empty_string_lea + 7
-result_code[empty_string_lea + 3 : empty_string_lea + 7] = relative32(
-    lea_next, empty_string
+result_code.extend(bytes.fromhex("48 89 46 18 48 89 f0 48 83 c4 20 5e c3"))
+message_address = read_result + len(result_code)
+result_code.extend(message_bytes + b"\x00")
+lea_next = read_result + message_lea + 7
+result_code[message_lea + 3 : message_lea + 7] = relative32(
+    lea_next, message_address
 )
 
 inferior.write_memory(read_result, result_code)
 inferior.write_memory(windows_run, run_code)
 gdb.write(
     "ngsx_run_success patched=true "
-    f"run={windows_run:#x} read_result={read_result:#x}\n"
+    f"run={windows_run:#x} read_result={read_result:#x} "
+    f"message_bytes={len(message_bytes)}\n"
 )

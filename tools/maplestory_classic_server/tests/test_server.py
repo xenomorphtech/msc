@@ -31,6 +31,7 @@ from maple_server.server import (  # noqa: E402
     parse_zero_filled_frame,
     patch_server_event_data,
     patch_server_frames,
+    post_transcript_server_cipher_state,
     replay_connection,
     rewrite_channel_transition_world_from_selection,
 )
@@ -233,6 +234,71 @@ class TranscriptTest(unittest.TestCase):
             event_payloads = patch_server_event_data(transcript, {0: b"longer"})
             self.assertEqual(len(event_payloads), 2)
             self.assertEqual(b"".join(event_payloads), patched)
+
+    def test_server_frame_drop_reencrypts_later_frames_and_remaps_events(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first_iv = bytes.fromhex("6e3c795a")
+            second_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + first_iv
+                + second_iv
+                + b"\x08"
+            )
+            plaintexts = (b"first", b"drop-me", b"third")
+            frames = []
+            iv = second_iv
+            for plaintext in plaintexts:
+                frames.append(
+                    encode_frame_header(len(plaintext), iv, ~300)
+                    + crypt_payload(plaintext, iv)
+                )
+                iv = shuffle_iv(iv)
+
+            writer = TranscriptWriter(directory, label="drop-server", metadata={})
+            writer.data("server_to_client", greeting + frames[0] + frames[1][:2])
+            writer.data("server_to_client", frames[1][2:] + frames[2][:3])
+            writer.data("server_to_client", frames[2][3:])
+            writer.close()
+            transcript = Transcript.load(writer.path)
+
+            edited = patch_server_frames(transcript, {}, {1})
+            parsed_handshake = parse_handshake(edited)
+            parsed_frames = parse_encrypted_frames(
+                edited, offset=parsed_handshake.wire_length
+            )
+            self.assertEqual(len(parsed_frames), 2)
+            self.assertEqual(
+                crypt_payload(parsed_frames[0].payload, second_iv), b"first"
+            )
+            next_iv = shuffle_iv(second_iv)
+            self.assertEqual(
+                crypt_payload(parsed_frames[1].payload, next_iv), b"third"
+            )
+            self.assertEqual(
+                post_transcript_server_cipher_state(transcript, {1})[0],
+                shuffle_iv(next_iv),
+            )
+
+            event_payloads = patch_server_event_data(transcript, {}, {1})
+            self.assertEqual(len(event_payloads), 3)
+            self.assertEqual(b"".join(event_payloads), edited)
+
+    def test_replay_parser_accepts_server_frame_omissions(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12082",
+                "--transcript",
+                "capture.jsonl",
+                "--drop-server-frame",
+                "4",
+                "--drop-server-frame",
+                "7",
+            ]
+        )
+        self.assertEqual(arguments.drop_server_frame, [4, 7])
 
     def test_parse_server_frame_patch(self) -> None:
         self.assertEqual(parse_server_frame_patch("3=0000ff"), (3, b"\x00\x00\xff"))

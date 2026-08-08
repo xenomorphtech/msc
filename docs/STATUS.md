@@ -11,9 +11,9 @@
   clicks; repeated fresh tickets now succeed.
 - The `mapleproxy` namespace transparently relays ordinary TCP and redirects
   login port `10282` to local port `12082` and handoff port `58880` to `12080`.
-- Lossless JSONL capture, strict/non-strict replay, frame patching, reactive
-  opcode replies, hold-open, and independently timed post-transcript frames
-  are implemented.
+- Lossless JSONL capture, strict/non-strict replay, frame patching, IV-correct
+  server-frame omission, reactive opcode replies, hold-open, and independently
+  timed post-transcript frames are implemented.
 - PCAP TCP reassembly, Maple endpoint identification, frame normalization,
   private PCAP-frame sourcing/transforms, and per-opcode reactive response
   timing are implemented.
@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 56 tests.
+- The custom-server suite currently passes all 61 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -53,6 +53,10 @@
   controller.
 - The enabled user service `maplestory-audio-mute.service` continuously mutes
   only PipeWire nodes named `Maplestory_Classic.exe` across relaunches.
+- `tools/maplestory_classic_server/tools/launch_local_game.py` now provides the
+  repeatable browser/CDP/NGM-free local launch. It discovers nested
+  Sway/Xwayland, verifies both namespace listeners and the audio service, optionally
+  cold-restarts the Wine prefix, and focuses the new window through Sway.
 
 ## Proxy result
 
@@ -130,14 +134,23 @@ opcode `7`, even after direct character/start clicks. Type `7` is therefore not
 required to enter the character controller and is not sufficient to complete
 it. Skipping directly to a valid transformed handoff also remains
 insufficient: the scene goes black and no connection reaches local port
-`12857`. The unresolved gate is a client-side completion/selection state.
+`12857`. At that stage, the bounded gate was a client-side
+completion/selection state.
 
 A subsequent patched live run sent the successful capture's server opcode `23`
 after character-list/time/type-`7`. The client replied only with a decoded
 opcode-`13` type-`15` empty status and stayed in `character_selection`; it sent
-no opcode `7` or additional type-`6` packet. The run had already emitted one
-native startup opcode-`6`, so opcode `23` is an initialization/status exchange,
-not the missing completion exchange.
+no opcode `7`. This established only that a late duplicate was insufficient.
+
+The clean ordering experiment then omitted captured bootstrap server frame `4`
+and sent the successful six-byte opcode `23` only after observing the live
+client opcode `6`. Without any synthetic NGSX patch, the client returned a
+non-empty type-`15` status, reached world/channel/character selection, emitted
+opcode `7`, received the transformed handoff, and connected to the local
+stream-`92` world replay on port `12857`. The login transcript folds validly to
+`handoff_ready`; the resulting world transcript contains 1,589 client bytes
+and 19,753 server bytes. The security exchange is required and its ordering,
+not the mere presence of opcode `23`, was the missing completion condition.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
@@ -145,13 +158,11 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Identify the character-controller completion condition that removes the
-   loading overlay and obtain live character opcode `7`.
-2. Validate the captured opcode-`4` character-list envelope in the local
+1. Validate the captured opcode-`4` character-list envelope in the local
    controller and decode its 167-byte inner records.
-3. Select the character, verify opcode `7`, and follow the endpoint-rewritten
-   handoff into the local stream-`92` listener.
-4. Replace initial world/map replay with typed stateful packets.
+2. Decode/fold the initial world/map transcript now reached after the validated
+   local handoff.
+3. Replace initial world/map replay with typed stateful packets.
 
 ## Useful proof artifacts
 

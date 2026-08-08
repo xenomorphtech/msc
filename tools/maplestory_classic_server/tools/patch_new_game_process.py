@@ -17,6 +17,19 @@ import subprocess
 import time
 
 
+DEBUGGER_ENVIRONMENT_PREFIXES = (
+    "MAPLE_AES_",
+    "MAPLE_CIPHER_",
+    "MAPLE_ENUMERATE_",
+    "MAPLE_INNO_",
+    "MAPLE_LOGIN_",
+    "MAPLE_METHOD_",
+    "MAPLE_NGSX_",
+    "MAPLE_OPCODE2_",
+    "MAPLE_TRACE_",
+)
+
+
 PROCESS_NAME_PREFIX = "maplestory_clas"
 DEFAULT_PATCH = Path(__file__).with_name("gdb_patch_ngsx_success.py")
 
@@ -98,7 +111,15 @@ def main() -> int:
         print(f"patch_watcher patched=false reason=stop_failed error={error}", flush=True)
         return 5
 
-    debugger = ["gdb"] if os.geteuid() == 0 else ["sudo", "-n", "gdb"]
+    if os.geteuid() == 0:
+        debugger = ["gdb"]
+    else:
+        maple_environment = [
+            f"{key}={value}"
+            for key, value in sorted(os.environ.items())
+            if key.startswith(DEBUGGER_ENVIRONMENT_PREFIXES)
+        ]
+        debugger = ["sudo", "-n", "env", *maple_environment, "gdb"]
     debugger_commands = [
         "-ex",
         "set pagination off",

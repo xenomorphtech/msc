@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 56 tests.
+The last run passed all 61 tests.
 
 ## Inspect and compare captures
 
@@ -88,25 +88,35 @@ its successful world connection. PCAP plaintext is resolved inside the server
 process, so private account/character records never appear as command-line hex
 or committed fixtures. The working login composition is:
 
-1. replay the proven local HK bootstrap/NGS transcript;
-2. on native client opcode `13`, send the local acknowledgment followed by
+1. replay the proven local HK bootstrap/NGS transcript, but omit captured
+   server frame `4` (opcode `23`);
+2. on native client opcode `6`, send successful stream `83` server frame `13`
+   (the six-byte opcode-`23` response);
+3. on native client opcode `13`, send the local acknowledgment followed by
    successful account frame `3` (opcode rewritten `0` to local handler `1`),
    world frames `5` through `9`, and sentinel frame `10`;
-3. on client opcode `4`, send frames `15` and `16` with delays `0,2.5`, and
+4. on client opcode `4`, send frames `15` and `16` with delays `0,2.5`, and
    rewrite frame `16`'s stage-1 world id from the live selection;
-4. on client opcode `5`, send character frames `17`, `18`, and `19` with
+5. on client opcode `5`, send character frames `17`, `18`, and `19` with
    delays `0,0,1.0`;
-5. on client opcode `7`, send handoff frame `20` after transforming only its
+6. on client opcode `7`, send handoff frame `20` after transforming only its
    endpoint to `127.0.0.1:12857`.
 
 Repeated `--reply-on-client-opcode-from-pcap` options for one opcode form the
 ordered response sequence. Configure the capture-faithful waits with:
 
 ```text
+--drop-server-frame 4
+--reply-on-client-opcode-from-pcap 6=/home/sdancer/Downloads/111.pcapng@83:13
 --client-opcode-reply-delays 4=0,2.5
 --client-opcode-reply-delays 5=0,0,1.0
 --rewrite-channel-transition-world
 ```
+
+Dropping an encrypted server frame is not a ciphertext splice. The replay
+decrypts the original stream with its captured IV progression and re-encrypts
+all emitted later frames after removing one IV step. Reactive frames then use
+the resulting post-transcript IV, so the client remains synchronized.
 
 The live client now renders all five world tabs and their online channels.
 The first untimed run sent both opcode-`402` frames back-to-back: selecting
@@ -130,17 +140,38 @@ themselves prove a request/response security relationship.
 
 Sending the valid transformed handoff frame `20` proactively still only blanks
 the scene: no TCP connection reaches `12857`, and the client exits after the
-login connection closes. The unresolved requirement is the client-side
-completion/selection transition, not server validation of frame `19`.
+login connection closes. This bounded the then-missing requirement to a
+client-side completion/selection transition rather than server validation of
+frame `19`; the ordered opcode-`6` experiment below resolves that transition.
 
 A follow-up live probe sent the successful capture's server opcode `23` again
 after the character list, time, and type-`7` envelope. The client answered with
 an opcode-`13` type-`15` status carrying an empty message, remained at character
-selection, and emitted neither opcode `7` nor another type-`6` packet. The same
-session had already emitted one native opcode-`6` packet during startup. This
-separates the two exchanges: opcode `23` retriggers NGSX initialization/status,
-but it is not the missing completion packet and cannot substitute for the
-client-side security completion state.
+selection, and emitted neither opcode `7` nor another type-`6` packet. That
+proved a late duplicate is insufficient, but it did not test the capture's
+request/response ordering.
+
+The decisive clean run withheld bootstrap server frame `4` until the real
+client opcode `6` appeared. The client then received the same six-byte opcode
+`23`, returned a non-empty type-`15` status, entered world/channel/character
+selection without any synthetic NGSX-success patch, and emitted character
+opcode `7` after the Start click. The typed fold reached valid `handoff_ready`,
+the transformed frame `20` was returned, and the client opened the local world
+replay on port `12857`. Security completion is therefore required, and opcode
+`23` must follow the actual opcode `6`; replaying it by captured event count can
+send it too early when a fresh client emits extra frames.
+
+For subsequent runs, start the listener composition, then launch the client
+without the browser:
+
+```sh
+cd /home/sdancer/ms
+python tools/maplestory_classic_server/tools/launch_local_game.py --restart
+```
+
+The launcher checks both namespace listeners, nested Sway/Xwayland, and the
+persistent Maple-only audio mute service before using the local placeholder
+arguments.
 
 Start the local target for the transformed handoff separately:
 

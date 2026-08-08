@@ -83,6 +83,11 @@ Exploratory login work also supports `--server-frame-patch`, reactive
 combined queued-reactive-reply and appended-frame sequence; missing values
 fall back to the uniform delay.
 
+`--drop-server-frame INDEX` omits an encrypted captured frame. The replay first
+decrypts the original sequence with the captured IVs, then re-encrypts every
+emitted frame with the shortened IV sequence. This makes it safe to withhold a
+captured response and send its plaintext later from a reactive opcode rule.
+
 Plaintext frames may also be sourced privately at runtime with
 `--send-after-transcript-from-pcap`,
 `--server-frame-patch-from-pcap`, or
@@ -148,21 +153,37 @@ systemctl --user status maplestory-audio-mute.service
 It checks every 250 ms and mutes newly created/recreated MapleStory streams
 without affecting other applications.
 
+## Browser-free local launch
+
+Once the login listener is active inside `mapleproxy`, launch the local client
+without Chromium, CDP, NGM, or a website ticket:
+
+```sh
+cd /home/sdancer/ms
+python tools/maplestory_classic_server/tools/launch_local_game.py --restart
+```
+
+The script discovers nested Sway/Xwayland, checks both namespace listeners,
+requires the Maple-only audio mute service to be active, launches the local
+placeholder argument tuple, waits for the window, and focuses it through Sway.
+It intentionally cannot launch an authenticated official session.
+
 ## Current implementation steps
 
 1. Run the replay listener inside the client's network namespace; host-only
    listeners do not receive namespace-local port redirects.
 2. Validate the successful login reference before sourcing any replay frames.
-3. Acknowledge native client opcode `13`, then return the validated account,
+3. Withhold captured server frame `4` and return the successful stream's server
+   frame `13` only after native client opcode `6`. This preserves the proven
+   NGSX request/response ordering even when a fresh client emits extra frames.
+4. Acknowledge native client opcode `13`, then return the validated account,
    world records, and world-list sentinel as one reactive sequence.
-4. Return server opcode `402` frames for client opcode `4` with delays
+5. Return server opcode `402` frames for client opcode `4` with delays
    `0,2.5`, and use `--rewrite-channel-transition-world`; the client otherwise
    stalls before emitting channel opcode `5` when the captured world differs.
-5. Return the partially decoded character list and server time for opcode `5`.
-   A live A/B replay reached the same connecting overlay with and without the
-   captured type-`7` envelope; sending it did not produce type-`6` or opcode
-   `7`, so it is not modeled as a security request.
-6. Rewrite the validated opcode-`5` handoff to the local stream-`92` replay
-   listener only after opcode `7`. Sending it proactively blanks the scene but
-   does not open a world connection.
-7. Finish the inner character-list and initial world/map packet models.
+6. Return the partially decoded character list, server time, and captured
+   type-`7` envelope for opcode `5`.
+7. Rewrite the validated opcode-`5` handoff to the local stream-`92` replay
+   listener only after opcode `7`. The ordered NGSX run produced opcode `7`, a
+   valid `handoff_ready` fold, and a real connection to the local world replay.
+8. Finish the inner character-list and initial world/map packet models.

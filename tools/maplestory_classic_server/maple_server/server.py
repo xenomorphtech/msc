@@ -335,6 +335,7 @@ async def replay_connection(
     hold_open_seconds: float = 0.0,
     initial_delay_seconds: float = 0.0,
     server_frame_patches: dict[int, bytes] | None = None,
+    dropped_server_frames: set[int] | None = None,
     post_transcript_server_frames: tuple[bytes, ...] = (),
     post_transcript_start_delay_seconds: float = 0.0,
     post_transcript_frame_delay_seconds: float = 0.0,
@@ -366,7 +367,11 @@ async def replay_connection(
         raise ValueError("client opcode replies require non-strict replay")
     previous_timestamp_ns: int | None = None
     patched_server_events = iter(
-        patch_server_event_data(transcript, server_frame_patches or {})
+        patch_server_event_data(
+            transcript,
+            server_frame_patches or {},
+            dropped_server_frames,
+        )
     )
     remaining_opcode_replies = {
         opcode: (payloads if isinstance(payloads, tuple) else (payloads,))
@@ -389,6 +394,9 @@ async def replay_connection(
                 "hold_open_seconds": hold_open_seconds,
                 "initial_delay_seconds": initial_delay_seconds,
                 "server_frame_patch_indices": sorted(server_frame_patches or {}),
+                "dropped_server_frame_indices": sorted(
+                    dropped_server_frames or set()
+                ),
                 "post_transcript_reply_lengths": [
                     len(payload) for payload in post_transcript_replies
                 ],
@@ -520,7 +528,7 @@ async def replay_connection(
         )
         if needs_server_cipher:
             server_iv, server_version_mask = post_transcript_server_cipher_state(
-                transcript
+                transcript, dropped_server_frames
             )
         else:
             server_iv, server_version_mask = b"", 0
@@ -606,83 +614,104 @@ async def replay_connection(
 
 
 def patch_server_frames(
-    transcript: Transcript, frame_patches: dict[int, bytes]
+    transcript: Transcript,
+    frame_patches: dict[int, bytes],
+    dropped_frame_indices: set[int] | None = None,
 ) -> bytes:
-    """Return the server stream with selected encrypted payloads replaced.
+    """Return the server stream with selected frames replaced or omitted.
 
-    Replacements are plaintext and may change the encrypted frame length.  Later
-    frames retain their captured ciphertext because IV progression depends on the
-    frame count, not the preceding payload lengths.
+    Replacements are plaintext and may change the encrypted frame length.  When a
+    frame is omitted, all later frames are decrypted with the captured IV stream
+    and re-encrypted with the emitted IV stream so the client remains synchronized.
     """
+    dropped_frame_indices = dropped_frame_indices or set()
     server_bytes = transcript.server_bytes
-    if not frame_patches:
+    if not frame_patches and not dropped_frame_indices:
         return server_bytes
-    if any(index < 0 for index in frame_patches):
-        raise ValueError("Server frame patch indices cannot be negative")
+    edited_indices = set(frame_patches) | dropped_frame_indices
+    if any(index < 0 for index in edited_indices):
+        raise ValueError("Server frame edit indices cannot be negative")
+    overlap = sorted(set(frame_patches) & dropped_frame_indices)
+    if overlap:
+        raise ValueError(
+            f"Server frames cannot be both patched and dropped: {overlap}"
+        )
 
     handshake = parse_handshake(server_bytes)
     frames = parse_encrypted_frames(server_bytes, offset=handshake.wire_length)
-    missing = sorted(set(frame_patches) - set(range(len(frames))))
+    missing = sorted(edited_indices - set(range(len(frames))))
     if missing:
         raise ValueError(
-            f"Server frame patch indices are out of range: {missing}; "
+            f"Server frame edit indices are out of range: {missing}; "
             f"capture has {len(frames)} frames"
         )
 
     patched = bytearray(server_bytes[: handshake.wire_length])
     source_offset = handshake.wire_length
-    iv = handshake.second_iv
+    captured_iv = handshake.second_iv
+    emitted_iv = handshake.second_iv
     for index, frame in enumerate(frames):
         patched.extend(server_bytes[source_offset : frame.offset])
-        replacement = frame_patches.get(index)
-        if replacement is not None:
-            original_first_word = int.from_bytes(frame.header[:2], "little")
-            version_mask = original_first_word ^ int.from_bytes(iv[2:4], "little")
+        original_plaintext = crypt_payload(frame.payload, captured_iv)
+        version_mask = int.from_bytes(
+            frame.header[:2], "little"
+        ) ^ int.from_bytes(captured_iv[2:4], "little")
+        captured_iv = shuffle_iv(captured_iv)
+
+        if index not in dropped_frame_indices:
+            plaintext = frame_patches.get(index, original_plaintext)
             patched.extend(
-                encode_frame_header(len(replacement), iv, version_mask)
-                + crypt_payload(replacement, iv)
+                encode_frame_header(len(plaintext), emitted_iv, version_mask)
+                + crypt_payload(plaintext, emitted_iv)
             )
-        else:
-            patched.extend(
-                server_bytes[frame.offset : frame.offset + frame.wire_length]
-            )
+            emitted_iv = shuffle_iv(emitted_iv)
         source_offset = frame.offset + frame.wire_length
-        iv = shuffle_iv(iv)
     patched.extend(server_bytes[source_offset:])
     return bytes(patched)
 
 
 def patch_server_event_data(
-    transcript: Transcript, frame_patches: dict[int, bytes]
+    transcript: Transcript,
+    frame_patches: dict[int, bytes],
+    dropped_frame_indices: set[int] | None = None,
 ) -> tuple[bytes, ...]:
-    """Map a resized patched stream back onto captured server event timing.
+    """Map an edited server stream back onto captured server event timing.
 
     Event boundaries inside a resized frame are moved proportionally through its
-    payload.  This preserves every client/server ordering point while allowing a
-    replacement frame to grow or shrink.
+    payload; boundaries inside an omitted frame collapse to its former start.
+    This preserves every client/server ordering point while allowing a frame to
+    grow, shrink, or disappear.
     """
+    dropped_frame_indices = dropped_frame_indices or set()
     server_events = tuple(
         event
         for event in data_events(transcript.events)
         if event.direction == "server_to_client"
     )
-    if not frame_patches:
+    if not frame_patches and not dropped_frame_indices:
         return tuple(event.data for event in server_events)
 
     original = transcript.server_bytes
-    patched = patch_server_frames(transcript, frame_patches)
+    patched = patch_server_frames(
+        transcript, frame_patches, dropped_frame_indices
+    )
     handshake = parse_handshake(original)
     frames = parse_encrypted_frames(original, offset=handshake.wire_length)
     edits: list[tuple[int, int, int, int]] = []
     cumulative_delta = 0
     for index, frame in enumerate(frames):
         replacement = frame_patches.get(index)
-        if replacement is None:
+        dropped = index in dropped_frame_indices
+        if replacement is None and not dropped:
             continue
         old_start = frame.offset
         old_end = frame.offset + frame.wire_length
         new_start = old_start + cumulative_delta
-        new_end = new_start + len(frame.header) + len(replacement)
+        new_end = (
+            new_start
+            if dropped
+            else new_start + len(frame.header) + len(replacement)
+        )
         edits.append((old_start, old_end, new_start, new_end))
         cumulative_delta += (new_end - new_start) - (old_end - old_start)
 
@@ -694,6 +723,8 @@ def patch_server_event_data(
             if boundary >= old_end:
                 delta += (new_end - new_start) - (old_end - old_start)
                 continue
+            if new_start == new_end:
+                return new_start
 
             relative = boundary - old_start
             header_length = 4
@@ -725,8 +756,10 @@ def patch_server_event_data(
 
 def post_transcript_server_cipher_state(
     transcript: Transcript,
+    dropped_frame_indices: set[int] | None = None,
 ) -> tuple[bytes, int]:
-    """Return the server IV and version mask after all captured frames."""
+    """Return server cipher state after all emitted captured frames."""
+    dropped_frame_indices = dropped_frame_indices or set()
     handshake = parse_handshake(transcript.server_bytes)
     captured_frames = parse_encrypted_frames(
         transcript.server_bytes, offset=handshake.wire_length
@@ -742,7 +775,15 @@ def post_transcript_server_cipher_state(
     ) ^ int.from_bytes(
         iv[2:4], "little"
     )
-    for _ in captured_frames:
+    missing = sorted(dropped_frame_indices - set(range(len(captured_frames))))
+    if missing:
+        raise ValueError(
+            f"Dropped server frame indices are out of range: {missing}; "
+            f"capture has {len(captured_frames)} frames"
+        )
+    for index, _ in enumerate(captured_frames):
+        if index in dropped_frame_indices:
+            continue
         iv = shuffle_iv(iv)
     return iv, version_mask
 
@@ -1328,6 +1369,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="replace a captured replay frame with plaintext sourced from pcap",
     )
     replay.add_argument(
+        "--drop-server-frame",
+        action="append",
+        default=[],
+        type=parse_non_negative_int,
+        metavar="INDEX",
+        help=(
+            "omit one captured encrypted server frame and re-encrypt every later "
+            "frame with corrected IV progression; may be repeated"
+        ),
+    )
+    replay.add_argument(
         "--send-after-transcript",
         dest="post_transcript_server_frames",
         action="append",
@@ -1680,6 +1732,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         server_frame_patches = dict(arguments.server_frame_patch)
         if len(server_frame_patches) != len(arguments.server_frame_patch):
             raise ValueError("Each server frame patch index may be specified only once")
+        dropped_server_frames = set(arguments.drop_server_frame)
+        if len(dropped_server_frames) != len(arguments.drop_server_frame):
+            raise ValueError("Each dropped server frame index may be specified once")
         if arguments.validate_login_state or arguments.rewrite_handoff:
             analysis = analyze_login_transcript(transcript)
             print(render_login_analysis(analysis))
@@ -1738,7 +1793,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "--rewrite-channel-transition-world requires reactive "
                 "client opcode 4 replies"
             )
-        patch_server_frames(transcript, server_frame_patches)
+        patch_server_frames(
+            transcript, server_frame_patches, dropped_server_frames
+        )
         handler = functools.partial(
             replay_connection,
             transcript=transcript,
@@ -1749,6 +1806,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             hold_open_seconds=arguments.hold_open_seconds,
             initial_delay_seconds=arguments.initial_delay_seconds,
             server_frame_patches=server_frame_patches,
+            dropped_server_frames=dropped_server_frames,
             post_transcript_server_frames=tuple(
                 arguments.post_transcript_server_frames
             ),
