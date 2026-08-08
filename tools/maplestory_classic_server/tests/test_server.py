@@ -35,6 +35,7 @@ from maple_server.server import (  # noqa: E402
     replay_connection,
     rewrite_channel_transition_world_from_selection,
 )
+from maple_server.gameplay import analyze_gameplay_transcript  # noqa: E402
 from maple_server.protocol import (  # noqa: E402
     crypt_payload,
     encode_frame_header,
@@ -44,6 +45,8 @@ from maple_server.protocol import (  # noqa: E402
 )
 from maple_server.packets import (  # noqa: E402
     ChannelTransitionResponse,
+    HeartbeatProbe,
+    HeartbeatResponse,
     WorldHandoff,
     WorldSelection,
 )
@@ -316,6 +319,24 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertTrue(arguments.keep_world_open)
         self.assertEqual(arguments.hold_open_seconds, 600)
+
+    def test_replay_parser_accepts_world_heartbeat_interval(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--hold-open-seconds",
+                "600",
+                "--keep-world-open",
+                "--world-heartbeat-interval-seconds",
+                "10",
+            ]
+        )
+
+        self.assertEqual(arguments.world_heartbeat_interval_seconds, 10)
 
     def test_parse_server_frame_patch(self) -> None:
         self.assertEqual(parse_server_frame_patch("3=0000ff"), (3, b"\x00\x00\xff"))
@@ -595,6 +616,106 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks)
             server.close()
             await server.wait_closed()
+
+    async def test_replay_periodically_probes_and_folds_heartbeat_responses(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"\x34\x12captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="heartbeat-source", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            runtime_protocol = {
+                "world_heartbeat": {
+                    "probes_sent": 0,
+                    "responses_observed": 0,
+                    "pending": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.13,
+                            world_heartbeat_interval_seconds=0.05,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+
+            next_server_iv = shuffle_iv(server_iv)
+            next_client_iv = client_iv
+            for token in (b"first!!!", b"second!!"):
+                encrypted_probe = await reader.readexactly(6)
+                probe_plaintext = crypt_payload(
+                    encrypted_probe[4:], next_server_iv
+                )
+                self.assertEqual(
+                    HeartbeatProbe.parse(probe_plaintext), HeartbeatProbe()
+                )
+                next_server_iv = shuffle_iv(next_server_iv)
+
+                response = HeartbeatResponse(opaque_token=token).to_bytes()
+                writer.write(
+                    encode_frame_header(len(response), next_client_iv, 300)
+                    + crypt_payload(response, next_client_iv)
+                )
+                await writer.drain()
+                next_client_iv = shuffle_iv(next_client_iv)
+
+            self.assertEqual(await reader.read(), b"")
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            observed_paths = tuple(observed_directory.glob("*.jsonl"))
+            self.assertEqual(len(observed_paths), 1)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(observed_paths[0])
+            )
+            self.assertTrue(analysis.valid)
+            self.assertEqual(analysis.state.heartbeat_probes, 2)
+            self.assertEqual(analysis.state.heartbeat_responses, 2)
+            self.assertEqual(analysis.state.matched_heartbeat_responses, 2)
+            self.assertEqual(analysis.state.pending_heartbeat_probes, 0)
+            heartbeat_metrics = runtime_protocol["world_heartbeat"]
+            self.assertEqual(heartbeat_metrics["probes_sent"], 2)
+            self.assertEqual(heartbeat_metrics["responses_observed"], 2)
+            self.assertEqual(heartbeat_metrics["pending"], 0)
+            self.assertGreater(heartbeat_metrics["last_round_trip_ms"], 0)
 
     async def test_replay_replies_after_one_new_client_frame(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -16,6 +16,7 @@ class ServerRuntime:
     listen_host: str
     listen_port: int
     config: dict[str, object] = field(default_factory=dict)
+    protocol: dict[str, object] = field(default_factory=dict)
     started_at_ns: int = field(default_factory=time.time_ns)
     listener_addresses: tuple[str, ...] = ()
     accepted_connections: int = 0
@@ -46,6 +47,7 @@ class ServerRuntime:
                 "addresses": list(self.listener_addresses),
             },
             "config": self.config,
+            "protocol": self.protocol,
             "connections": {
                 "accepted": self.accepted_connections,
                 "active": self.active_connections,

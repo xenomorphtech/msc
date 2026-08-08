@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from enum import Enum
 import json
@@ -15,8 +15,8 @@ from .gamestate import (
 from .packets import (
     FieldLoadStage,
     FieldSnapshotEnvelope,
-    HeartbeatAcknowledgement,
-    HeartbeatRequest,
+    HeartbeatProbe,
+    HeartbeatResponse,
     MobMovementAcknowledgement,
     MobMovementSubmission,
     NpcSpawn,
@@ -86,8 +86,13 @@ class GameplayGameState:
     movement_acknowledgements: int = 0
     matched_movement_acknowledgements: int = 0
     unmatched_movement_acknowledgements: int = 0
-    heartbeat_requests: int = 0
-    heartbeat_acknowledgements: int = 0
+    heartbeat_probes: int = 0
+    heartbeat_responses: int = 0
+    matched_heartbeat_responses: int = 0
+    unmatched_heartbeat_responses: int = 0
+    pending_heartbeat_probes: int = 0
+    last_heartbeat_round_trip_ms: float | None = None
+    max_heartbeat_round_trip_ms: float | None = None
     bootstrap_acknowledgements: int = 0
     pending_movements: int = 0
     termination_received: bool = False
@@ -173,9 +178,22 @@ class GameplayAnalysis:
                     self.state.unmatched_movement_acknowledgements
                 ),
                 "pending_movements": self.state.pending_movements,
-                "heartbeat_requests": self.state.heartbeat_requests,
-                "heartbeat_acknowledgements": (
-                    self.state.heartbeat_acknowledgements
+                "heartbeat_probes": self.state.heartbeat_probes,
+                "heartbeat_responses": self.state.heartbeat_responses,
+                "matched_heartbeat_responses": (
+                    self.state.matched_heartbeat_responses
+                ),
+                "unmatched_heartbeat_responses": (
+                    self.state.unmatched_heartbeat_responses
+                ),
+                "pending_heartbeat_probes": (
+                    self.state.pending_heartbeat_probes
+                ),
+                "last_heartbeat_round_trip_ms": (
+                    self.state.last_heartbeat_round_trip_ms
+                ),
+                "max_heartbeat_round_trip_ms": (
+                    self.state.max_heartbeat_round_trip_ms
                 ),
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
@@ -225,6 +243,7 @@ class GameplayStateFold:
         self._npc_aliases: dict[int, str] = {}
         self._movement_aliases: dict[int, str] = {}
         self._pending_movements: Counter[tuple[int, int]] = Counter()
+        self._pending_heartbeat_probes: deque[int] = deque()
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
 
@@ -421,16 +440,40 @@ class GameplayStateFold:
                 issues=("movement command stream remains opaque",),
             )
         if opcode == 23:
-            heartbeat = HeartbeatRequest.parse(payload)
-            self.state.heartbeat_requests += 1
-            self._event(frame, "heartbeat_requested")
+            response = HeartbeatResponse.parse(payload)
+            matched_probe = bool(self._pending_heartbeat_probes)
+            round_trip_ms: float | None = None
+            if matched_probe:
+                probe_timestamp_ns = self._pending_heartbeat_probes.popleft()
+                round_trip_ms = (
+                    frame.timestamp_ns - probe_timestamp_ns
+                ) / 1e6
+                self.state.pending_heartbeat_probes -= 1
+                self.state.matched_heartbeat_responses += 1
+                self.state.last_heartbeat_round_trip_ms = round_trip_ms
+                self.state.max_heartbeat_round_trip_ms = max(
+                    self.state.max_heartbeat_round_trip_ms or 0.0,
+                    round_trip_ms,
+                )
+            else:
+                self.state.unmatched_heartbeat_responses += 1
+            self.state.heartbeat_responses += 1
+            details = {
+                "matched_probe": matched_probe,
+                "opaque_token_bytes": 8,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
+            self._event(
+                frame, "heartbeat_response_submitted", details=details
+            )
             return self._observation(
                 frame,
-                kind="heartbeat_request",
+                kind="heartbeat_response",
                 coverage=ShapeCoverage.PARTIAL,
-                parsed=heartbeat,
-                details={"opaque_token_bytes": 8},
-                issues=("heartbeat token remains opaque",),
+                parsed=response,
+                details=details,
+                issues=("heartbeat response token remains opaque",),
             )
         return self._observation(
             frame,
@@ -597,14 +640,22 @@ class GameplayStateFold:
                 issues=("movement acknowledgement status remains opaque",),
             )
         if opcode == 10:
-            heartbeat = HeartbeatAcknowledgement.parse(payload)
-            self.state.heartbeat_acknowledgements += 1
-            self._event(frame, "heartbeat_acknowledged")
+            probe = HeartbeatProbe.parse(payload)
+            self._pending_heartbeat_probes.append(frame.timestamp_ns)
+            self.state.heartbeat_probes += 1
+            self.state.pending_heartbeat_probes += 1
+            self._event(
+                frame,
+                "heartbeat_probe_received",
+                details={
+                    "pending_probes": self.state.pending_heartbeat_probes,
+                },
+            )
             return self._observation(
                 frame,
-                kind="heartbeat_acknowledgement",
+                kind="heartbeat_probe",
                 coverage=ShapeCoverage.FULL,
-                parsed=heartbeat,
+                parsed=probe,
             )
         return self._observation(
             frame,
@@ -620,6 +671,16 @@ class GameplayStateFold:
                 f"{self.state.unmatched_movement_acknowledgements} movement "
                 "acknowledgements had no pending captured submission"
             )
+        if self.state.unmatched_heartbeat_responses:
+            self.warnings.append(
+                f"{self.state.unmatched_heartbeat_responses} heartbeat "
+                "responses had no pending captured server probe"
+            )
+        if self.state.pending_heartbeat_probes:
+            self.warnings.append(
+                f"{self.state.pending_heartbeat_probes} server heartbeat "
+                "probes had no captured client response"
+            )
         if last_frame is not None and transport_closed:
             self._event(
                 last_frame,
@@ -629,6 +690,9 @@ class GameplayStateFold:
                     "phase": self.state.phase.value,
                     "active_npcs": len(self.state.npcs),
                     "pending_movements": self.state.pending_movements,
+                    "pending_heartbeat_probes": (
+                        self.state.pending_heartbeat_probes
+                    ),
                 },
             )
 
@@ -729,8 +793,13 @@ def render_gameplay_analysis(
             f"pending:{state.pending_movements}"
         ),
         (
-            f"heartbeats=requested:{state.heartbeat_requests} "
-            f"acknowledged:{state.heartbeat_acknowledgements}"
+            f"heartbeats=probed:{state.heartbeat_probes} "
+            f"responded:{state.heartbeat_responses} "
+            f"matched:{state.matched_heartbeat_responses} "
+            f"unmatched:{state.unmatched_heartbeat_responses} "
+            f"pending:{state.pending_heartbeat_probes} "
+            f"last_rtt_ms:{state.last_heartbeat_round_trip_ms} "
+            f"max_rtt_ms:{state.max_heartbeat_round_trip_ms}"
         ),
         f"packet_shapes={json.dumps(dict(sorted(packet_counts.items())))}",
         f"events={json.dumps(dict(sorted(event_counts.items())))}",

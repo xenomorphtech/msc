@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import sys
 import unittest
@@ -16,8 +17,8 @@ from maple_server.gameplay import (  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     FieldLoadStage,
     FieldSnapshotEnvelope,
-    HeartbeatAcknowledgement,
-    HeartbeatRequest,
+    HeartbeatProbe,
+    HeartbeatResponse,
     MobMovementAcknowledgement,
     MobMovementSubmission,
     NpcSpawn,
@@ -142,11 +143,11 @@ def fixture_gameplay_transcript(
             opaque_status=b"\x00" * 5,
         ).to_bytes(),
     )
+    append("server_to_client", HeartbeatProbe().to_bytes())
     append(
         "client_to_server",
-        HeartbeatRequest(opaque_token=b"\x00" * 8).to_bytes(),
+        HeartbeatResponse(opaque_token=b"\x00" * 8).to_bytes(),
     )
-    append("server_to_client", HeartbeatAcknowledgement().to_bytes())
     if repeat_npc_update:
         append(
             "server_to_client",
@@ -220,6 +221,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
             WorldSessionTermination.parse(termination.to_bytes()), termination
         )
 
+    def test_heartbeat_probe_and_response_round_trip(self) -> None:
+        probe = HeartbeatProbe()
+        response = HeartbeatResponse(opaque_token=b"response")
+
+        self.assertEqual(HeartbeatProbe.parse(probe.to_bytes()), probe)
+        self.assertEqual(
+            HeartbeatResponse.parse(response.to_bytes()), response
+        )
+
 
 class GameplayStateFoldTest(unittest.TestCase):
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
@@ -235,8 +245,12 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.movement_submissions, 1)
         self.assertEqual(analysis.state.matched_movement_acknowledgements, 1)
         self.assertEqual(analysis.state.pending_movements, 0)
-        self.assertEqual(analysis.state.heartbeat_requests, 1)
-        self.assertEqual(analysis.state.heartbeat_acknowledgements, 1)
+        self.assertEqual(analysis.state.heartbeat_probes, 1)
+        self.assertEqual(analysis.state.heartbeat_responses, 1)
+        self.assertEqual(analysis.state.matched_heartbeat_responses, 1)
+        self.assertEqual(analysis.state.unmatched_heartbeat_responses, 0)
+        self.assertEqual(analysis.state.pending_heartbeat_probes, 0)
+        self.assertEqual(analysis.state.last_heartbeat_round_trip_ms, 1e-6)
         event_kinds = [event.kind for event in analysis.events]
         self.assertIn("field_snapshot_received", event_kinds)
         self.assertIn("npc_spawned", event_kinds)
@@ -326,6 +340,29 @@ class GameplayStateFoldTest(unittest.TestCase):
             world_session_termination_frame_index(
                 fixture_gameplay_transcript(terminate=False)
             )
+
+    def test_heartbeat_correlation_rejects_reversed_temporal_interpretation(
+        self,
+    ) -> None:
+        transcript = fixture_gameplay_transcript()
+        events = list(transcript.events)
+        probe_event = events[-3]
+        response_event = events[-2]
+        events[-3] = replace(
+            response_event, timestamp_ns=probe_event.timestamp_ns
+        )
+        events[-2] = replace(
+            probe_event, timestamp_ns=response_event.timestamp_ns
+        )
+
+        analysis = analyze_gameplay_transcript(
+            Transcript(path=transcript.path, events=tuple(events))
+        )
+
+        self.assertEqual(analysis.state.matched_heartbeat_responses, 0)
+        self.assertEqual(analysis.state.unmatched_heartbeat_responses, 1)
+        self.assertEqual(analysis.state.pending_heartbeat_probes, 1)
+        self.assertEqual(len(analysis.warnings), 2)
 
 
 if __name__ == "__main__":

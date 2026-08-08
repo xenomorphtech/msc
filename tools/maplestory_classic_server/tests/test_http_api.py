@@ -22,6 +22,13 @@ class RuntimeHttpApiTest(unittest.IsolatedAsyncioTestCase):
             listen_host="127.0.0.1",
             listen_port=12857,
             config={"keep_world_open": True},
+            protocol={
+                "world_heartbeat": {
+                    "probes_sent": 2,
+                    "responses_observed": 2,
+                    "pending": 0,
+                }
+            },
         )
         self.server = await start_runtime_http_api(
             self.runtime, "127.0.0.1", 0
@@ -60,6 +67,9 @@ class RuntimeHttpApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["mode"], "replay_connection")
         self.assertEqual(status["config"]["keep_world_open"], True)
         self.assertEqual(status["connections"]["active"], 1)
+        self.assertEqual(
+            status["protocol"]["world_heartbeat"]["responses_observed"], 2
+        )
 
     async def test_rejects_mutating_methods_and_unknown_routes(self) -> None:
         method_status, method = await self.request(

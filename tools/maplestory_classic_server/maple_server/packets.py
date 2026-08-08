@@ -907,13 +907,15 @@ class FieldLoadStage:
 
 
 @dataclass(frozen=True)
-class HeartbeatRequest:
+class HeartbeatResponse:
+    """Client response to an opcode-10 server heartbeat probe."""
+
     opaque_token: bytes
     opcode: int = 23
 
     @classmethod
-    def parse(cls, payload: bytes) -> "HeartbeatRequest":
-        reader = PacketReader(payload, packet_name="heartbeat_request")
+    def parse(cls, payload: bytes) -> "HeartbeatResponse":
+        reader = PacketReader(payload, packet_name="heartbeat_response")
         _expect_opcode(reader, 23)
         opaque_token = reader.bytes(8, "opaque_token")
         reader.finish()
@@ -926,12 +928,14 @@ class HeartbeatRequest:
 
 
 @dataclass(frozen=True)
-class HeartbeatAcknowledgement:
+class HeartbeatProbe:
+    """Exact empty-body server heartbeat probe observed before opcode 23."""
+
     opcode: int = 10
 
     @classmethod
-    def parse(cls, payload: bytes) -> "HeartbeatAcknowledgement":
-        reader = PacketReader(payload, packet_name="heartbeat_acknowledgement")
+    def parse(cls, payload: bytes) -> "HeartbeatProbe":
+        reader = PacketReader(payload, packet_name="heartbeat_probe")
         _expect_opcode(reader, 10)
         reader.finish()
         return cls()

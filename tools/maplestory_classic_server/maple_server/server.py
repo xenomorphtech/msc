@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from collections import deque
 from dataclasses import dataclass
 import functools
 from ipaddress import IPv4Address
@@ -26,6 +27,7 @@ from .gameplay import (
 from .http_api import ServerRuntime, start_runtime_http_api
 from .packets import (
     ChannelTransitionResponse,
+    HeartbeatProbe,
     PacketShapeError,
     WorldHandoff,
     WorldSelection,
@@ -351,9 +353,20 @@ async def replay_connection(
     client_opcode_reply_delays: dict[int, tuple[float, ...]] | None = None,
     rewrite_channel_transition_world: bool = False,
     keep_world_open: bool = False,
+    world_heartbeat_interval_seconds: float | None = None,
+    runtime_protocol: dict[str, object] | None = None,
 ) -> None:
     if hold_open_seconds < 0:
         raise ValueError("hold_open_seconds cannot be negative")
+    if (
+        world_heartbeat_interval_seconds is not None
+        and world_heartbeat_interval_seconds <= 0
+    ):
+        raise ValueError("world_heartbeat_interval_seconds must be positive")
+    if world_heartbeat_interval_seconds is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "world heartbeat probes require a positive hold_open_seconds"
+        )
     if initial_delay_seconds < 0:
         raise ValueError("initial_delay_seconds cannot be negative")
     if post_transcript_start_delay_seconds < 0:
@@ -385,9 +398,19 @@ async def replay_connection(
         for opcode, payloads in (client_opcode_replies or {}).items()
     }
     pending_opcode_replies: list[bytes] = []
+    pending_periodic_heartbeats: deque[float] = deque()
+    heartbeat_metrics = (
+        runtime_protocol.get("world_heartbeat")
+        if runtime_protocol is not None
+        else None
+    )
+    if heartbeat_metrics is not None and not isinstance(
+        heartbeat_metrics, dict
+    ):
+        raise TypeError("runtime world_heartbeat telemetry must be a dictionary")
     client_iv = (
         parse_handshake(transcript.server_bytes).first_iv
-        if client_opcode_replies
+        if client_opcode_replies or world_heartbeat_interval_seconds is not None
         else None
     )
     observed = (
@@ -428,6 +451,9 @@ async def replay_connection(
                     rewrite_channel_transition_world
                 ),
                 "keep_world_open": keep_world_open,
+                "world_heartbeat_interval_seconds": (
+                    world_heartbeat_interval_seconds
+                ),
             },
         )
         if transcript_directory is not None
@@ -502,6 +528,8 @@ async def replay_connection(
                                 )
                             )
                         pending_opcode_replies.extend(plaintexts)
+                elif client_iv is not None:
+                    received, _, _ = await read_live_frame()
                 elif strict:
                     received = await read_and_record_exactly(
                         client_reader, len(event.data), observed
@@ -533,6 +561,7 @@ async def replay_connection(
             or post_transcript_replies
             or pending_opcode_replies
             or remaining_opcode_replies
+            or world_heartbeat_interval_seconds is not None
         )
         if needs_server_cipher:
             server_iv, server_version_mask = post_transcript_server_cipher_state(
@@ -583,28 +612,88 @@ async def replay_connection(
                         client_plaintext,
                     )
             else:
-                await read_and_record_encrypted_frame(client_reader, observed)
+                if client_iv is not None:
+                    await read_live_frame()
+                else:
+                    await read_and_record_encrypted_frame(client_reader, observed)
             await send_encrypted_frame(encrypt_next_server_frame(plaintext))
 
         if hold_open_seconds > 0:
-            deadline = asyncio.get_running_loop().time() + hold_open_seconds
-            while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + hold_open_seconds
+            next_heartbeat_at = (
+                loop.time() + world_heartbeat_interval_seconds
+                if world_heartbeat_interval_seconds is not None
+                else None
+            )
+            while (remaining := deadline - loop.time()) > 0:
+                now = loop.time()
+                if next_heartbeat_at is not None and now >= next_heartbeat_at:
+                    await send_encrypted_frame(
+                        encrypt_next_server_frame(HeartbeatProbe().to_bytes())
+                    )
+                    pending_periodic_heartbeats.append(loop.time())
+                    if heartbeat_metrics is not None:
+                        heartbeat_metrics["probes_sent"] = (
+                            int(heartbeat_metrics.get("probes_sent", 0)) + 1
+                        )
+                        heartbeat_metrics["pending"] = (
+                            int(heartbeat_metrics.get("pending", 0)) + 1
+                        )
+                    next_heartbeat_at += world_heartbeat_interval_seconds
+                    if next_heartbeat_at <= now:
+                        next_heartbeat_at = (
+                            now + world_heartbeat_interval_seconds
+                        )
+                    continue
+                timeout = remaining
+                if next_heartbeat_at is not None:
+                    timeout = min(timeout, next_heartbeat_at - now)
                 try:
-                    if remaining_opcode_replies:
+                    if client_iv is not None:
                         received, opcode, client_plaintext = await asyncio.wait_for(
-                            read_live_frame(), timeout=remaining
+                            read_live_frame(), timeout=timeout
                         )
                     else:
                         received = await asyncio.wait_for(
-                            client_reader.read(65536), timeout=remaining
+                            client_reader.read(65536), timeout=timeout
                         )
                         opcode = None
                         if received and observed is not None:
                             observed.data("client_to_server", received)
                 except TimeoutError:
+                    if next_heartbeat_at is not None:
+                        continue
+                    break
+                except asyncio.IncompleteReadError:
                     break
                 if not received:
                     break
+                if opcode == 23 and pending_periodic_heartbeats:
+                    sent_at = pending_periodic_heartbeats.popleft()
+                    round_trip_ms = (loop.time() - sent_at) * 1000
+                    if heartbeat_metrics is not None:
+                        heartbeat_metrics["responses_observed"] = (
+                            int(
+                                heartbeat_metrics.get(
+                                    "responses_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                        heartbeat_metrics["pending"] = max(
+                            0,
+                            int(heartbeat_metrics.get("pending", 0)) - 1,
+                        )
+                        heartbeat_metrics["last_round_trip_ms"] = round(
+                            round_trip_ms, 3
+                        )
+                        prior_max = heartbeat_metrics.get(
+                            "max_round_trip_ms"
+                        )
+                        heartbeat_metrics["max_round_trip_ms"] = round(
+                            max(float(prior_max or 0.0), round_trip_ms), 3
+                        )
                 if opcode in remaining_opcode_replies:
                     await send_reactive_plaintexts(
                         opcode,
@@ -1432,6 +1521,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--world-heartbeat-interval-seconds",
+        type=float,
+        help=(
+            "after replay, periodically send the modeled server opcode-10 "
+            "heartbeat probe while holding the world open"
+        ),
+    )
+    replay.add_argument(
         "--send-after-transcript",
         dest="post_transcript_server_frames",
         action="append",
@@ -1785,6 +1882,7 @@ def common_suffix_length(first: bytes, second: bytes) -> int:
 
 async def async_main(arguments: argparse.Namespace) -> None:
     runtime_config: dict[str, object]
+    runtime_protocol: dict[str, object] = {}
     if arguments.command == "capture-proxy":
         client_result_rewrites = dict(arguments.rewrite_client_opcode_result)
         if len(client_result_rewrites) != len(
@@ -1854,6 +1952,32 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     f"terminal server frame {termination_index} is also patched"
                 )
             dropped_server_frames.add(termination_index)
+        if arguments.world_heartbeat_interval_seconds is not None:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--world-heartbeat-interval-seconds requires "
+                    "--keep-world-open"
+                )
+            if arguments.world_heartbeat_interval_seconds <= 0:
+                raise ValueError(
+                    "--world-heartbeat-interval-seconds must be positive"
+                )
+            heartbeat_analysis = analyze_gameplay_transcript(transcript)
+            if not heartbeat_analysis.valid:
+                raise ValueError(
+                    "world transcript failed packet/state validation"
+                )
+            if heartbeat_analysis.state.heartbeat_probes == 0:
+                raise ValueError(
+                    "world transcript has no modeled server heartbeat probe"
+                )
+            if (
+                heartbeat_analysis.state.unmatched_heartbeat_responses
+                or heartbeat_analysis.state.pending_heartbeat_probes
+            ):
+                raise ValueError(
+                    "world transcript heartbeat probes/responses do not pair"
+                )
         if arguments.validate_login_state or arguments.rewrite_handoff:
             analysis = analyze_login_transcript(transcript)
             print(render_login_analysis(analysis))
@@ -1869,7 +1993,10 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     "--server-frame-patch and --rewrite-handoff"
                 )
             server_frame_patches[handoff_index] = handoff_payload
-        if arguments.pcap is not None:
+        if (
+            arguments.pcap is not None
+            or arguments.world_heartbeat_interval_seconds is not None
+        ):
             transcript = normalize_maple_transcript(transcript)
         elif arguments.drop_client_frame:
             raise ValueError("--drop-client-frame currently requires --pcap")
@@ -1945,6 +2072,10 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 arguments.rewrite_channel_transition_world
             ),
             keep_world_open=arguments.keep_world_open,
+            world_heartbeat_interval_seconds=(
+                arguments.world_heartbeat_interval_seconds
+            ),
+            runtime_protocol=runtime_protocol,
         )
         runtime_config = {
             "source": "pcap" if arguments.pcap is not None else "transcript",
@@ -1953,8 +2084,20 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "timing_scale": arguments.timing_scale,
             "hold_open_seconds": arguments.hold_open_seconds,
             "keep_world_open": arguments.keep_world_open,
+            "world_heartbeat_interval_seconds": (
+                arguments.world_heartbeat_interval_seconds
+            ),
             "dropped_server_frame_indices": sorted(dropped_server_frames),
         }
+        if arguments.world_heartbeat_interval_seconds is not None:
+            runtime_protocol["world_heartbeat"] = {
+                "interval_seconds": arguments.world_heartbeat_interval_seconds,
+                "probes_sent": 0,
+                "responses_observed": 0,
+                "pending": 0,
+                "last_round_trip_ms": None,
+                "max_round_trip_ms": None,
+            }
     elif arguments.command == "stub":
         handler = functools.partial(
             stub_connection,
@@ -1970,6 +2113,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
         listen_host=arguments.listen_host,
         listen_port=arguments.listen_port,
         config=runtime_config,
+        protocol=runtime_protocol,
     )
     await run_listener(
         arguments.listen_host,
