@@ -19,6 +19,7 @@ from .packets import (
     HeartbeatProbe,
     HeartbeatResponse,
     InitialFieldSnapshot,
+    InitialInventoryItem,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -118,6 +119,21 @@ class GameplayGameState:
     skill_points: int | None = None
     experience: int | None = None
     fame: int | None = None
+    inventory_region_bytes: int | None = None
+    progression_region_bytes: int | None = None
+    inventory_items: dict[str, tuple[InitialInventoryItem, ...]] = field(
+        default_factory=dict, repr=False
+    )
+    skill_levels: dict[int, int] = field(default_factory=dict, repr=False)
+    string_property_code_units: dict[int, int] = field(
+        default_factory=dict, repr=False
+    )
+    timestamp_property_keys: tuple[int, ...] = field(default=(), repr=False)
+    saved_map_ids: tuple[int, ...] = field(default=(), repr=False)
+    extended_property_code_units: dict[int, int] = field(
+        default_factory=dict, repr=False
+    )
+    progression_variant: int | None = None
     server_local_filetime_ticks: int | None = None
     entry_character_id: int | None = field(default=None, repr=False)
     npcs: dict[int, NpcEntity] = field(default_factory=dict, repr=False)
@@ -332,6 +348,19 @@ class GameplayAnalysis:
                 if show_identifiers
                 else "present"
             )
+        inventory = {
+            name: [
+                {
+                    "slot": item.slot,
+                    "item_id": item.item_id,
+                    "record_type": item.record_type,
+                    "cash_item": item.cash_item,
+                    "quantity": item.quantity,
+                }
+                for item in items
+            ]
+            for name, items in self.state.inventory_items.items()
+        }
         return {
             "source": self.source,
             "valid": self.valid,
@@ -370,6 +399,29 @@ class GameplayAnalysis:
                     "skill_points": self.state.skill_points,
                     "experience": self.state.experience,
                     "fame": self.state.fame,
+                },
+                "inventory": {
+                    "region_bytes": self.state.inventory_region_bytes,
+                    "item_counts": {
+                        name: len(items)
+                        for name, items in self.state.inventory_items.items()
+                    },
+                    "items": inventory,
+                },
+                "progression": {
+                    "region_bytes": self.state.progression_region_bytes,
+                    "skill_levels": self.state.skill_levels,
+                    "string_property_code_units": (
+                        self.state.string_property_code_units
+                    ),
+                    "timestamp_property_keys": (
+                        self.state.timestamp_property_keys
+                    ),
+                    "saved_map_ids": self.state.saved_map_ids,
+                    "extended_property_code_units": (
+                        self.state.extended_property_code_units
+                    ),
+                    "variant": self.state.progression_variant,
                 },
                 "server_local_filetime_ticks": (
                     self.state.server_local_filetime_ticks
@@ -911,6 +963,8 @@ class GameplayStateFold:
             event_identifiers: dict[str, object] = {}
             if initial_snapshot is not None:
                 character = initial_snapshot.character
+                inventory = initial_snapshot.parse_inventory()
+                progression = initial_snapshot.parse_progression()
                 self.state.initial_field_snapshots += 1
                 self.state.transition_sequence = None
                 self.state.map_id = character.map_id
@@ -929,7 +983,33 @@ class GameplayStateFold:
                 self.state.skill_points = character.skill_points
                 self.state.experience = character.experience
                 self.state.fame = character.fame
-                self.state.server_local_filetime_ticks = None
+                self.state.inventory_region_bytes = (
+                    len(initial_snapshot.opaque_tail)
+                    - len(inventory.opaque_remainder)
+                )
+                self.state.progression_region_bytes = len(
+                    inventory.opaque_remainder
+                )
+                self.state.inventory_items = {
+                    group.name: group.items for group in inventory.groups
+                }
+                self.state.skill_levels = dict(progression.skill_levels)
+                self.state.string_property_code_units = {
+                    key: len(value.encode("utf-16-le")) // 2
+                    for key, value in progression.string_properties
+                }
+                self.state.timestamp_property_keys = tuple(
+                    key for key, _ in progression.timestamp_properties
+                )
+                self.state.saved_map_ids = progression.saved_map_ids
+                self.state.extended_property_code_units = {
+                    key: len(value.encode("utf-16-le")) // 2
+                    for key, value in progression.extended_properties
+                }
+                self.state.progression_variant = progression.variant
+                self.state.server_local_filetime_ticks = (
+                    progression.trailer.server_local_filetime_ticks
+                )
                 if (
                     self.state.entry_character_id is not None
                     and character.character_id != self.state.entry_character_id
@@ -941,7 +1021,7 @@ class GameplayStateFold:
                 details.update(
                     {
                         "typed_prefix_bytes": initial_snapshot.typed_prefix_bytes,
-                        "opaque_tail_bytes": len(initial_snapshot.opaque_tail),
+                        "snapshot_tail_bytes": len(initial_snapshot.opaque_tail),
                         "character_data_flags": character.data_flags,
                         "character_name_code_units": (
                             len(character.name.encode("utf-16-le")) // 2
@@ -962,6 +1042,62 @@ class GameplayStateFold:
                         "fame": character.fame,
                         "map_id": character.map_id,
                         "portal_index": character.portal_index,
+                        "inventory_region_bytes": (
+                            self.state.inventory_region_bytes
+                        ),
+                        "progression_region_bytes": (
+                            self.state.progression_region_bytes
+                        ),
+                        "inventory_item_counts": {
+                            group.name: len(group.items)
+                            for group in inventory.groups
+                        },
+                        "skill_levels": dict(progression.skill_levels),
+                        "string_properties": [
+                            {
+                                "key": key,
+                                "value_code_units": (
+                                    len(value.encode("utf-16-le")) // 2
+                                ),
+                            }
+                            for key, value in progression.string_properties
+                        ],
+                        "timestamp_property_keys": [
+                            key for key, _ in progression.timestamp_properties
+                        ],
+                        "saved_map_ids": list(progression.saved_map_ids),
+                        "progression_variant": progression.variant,
+                        "extended_properties": [
+                            {
+                                "key": key,
+                                "value_code_units": (
+                                    len(value.encode("utf-16-le")) // 2
+                                ),
+                            }
+                            for key, value in progression.extended_properties
+                        ],
+                        "trailer_text_code_units": [
+                            len(value.encode("utf-16-le")) // 2
+                            for value in progression.trailer.opaque_texts
+                        ],
+                        "server_local_filetime_ticks": (
+                            progression.trailer.server_local_filetime_ticks
+                        ),
+                        "unknown_tail_u32": (
+                            progression.trailer.unknown_tail_u32
+                        ),
+                        "inventory_items": {
+                            group.name: [
+                                {
+                                    "slot": item.slot,
+                                    "item_id": item.item_id,
+                                    "cash_item": item.cash_item,
+                                    "quantity": item.quantity,
+                                }
+                                for item in group.items
+                            ]
+                            for group in inventory.groups
+                        },
                     }
                 )
                 event_identifiers["character_id"] = character.character_id
@@ -1044,7 +1180,10 @@ class GameplayStateFold:
                     ()
                     if transition is not None
                     else (
-                        ("initial field snapshot tail remains opaque",)
+                        (
+                            "initial field snapshot equipment metadata and "
+                            "progression/trailer meanings remain partially opaque",
+                        )
                         if initial_snapshot is not None
                         else ("field snapshot body remains opaque",)
                     )
@@ -1637,6 +1776,13 @@ def render_gameplay_analysis(
             )
         }
     )
+    inventory_item_counts = json.dumps(
+        {
+            name: len(items)
+            for name, items in state.inventory_items.items()
+        },
+        sort_keys=True,
+    )
     lines = [
         f"source={analysis.source}",
         f"valid={analysis.valid}",
@@ -1668,6 +1814,19 @@ def render_gameplay_analysis(
             f"str:{state.strength} dex:{state.dexterity} "
             f"int:{state.intelligence} luk:{state.luck} "
             f"exp:{state.experience} fame:{state.fame}"
+        ),
+        (
+            "inventory="
+            f"counts:{inventory_item_counts} "
+            f"region_bytes:{state.inventory_region_bytes} "
+            f"progression_region_bytes:{state.progression_region_bytes}"
+        ),
+        (
+            f"progression=skills:{len(state.skill_levels)} "
+            f"string_properties:{len(state.string_property_code_units)} "
+            f"timestamp_properties:{len(state.timestamp_property_keys)} "
+            f"extended_properties:{len(state.extended_property_code_units)} "
+            f"variant:{state.progression_variant}"
         ),
         (
             f"frames=client:{state.packets_by_direction['client_to_server']} "

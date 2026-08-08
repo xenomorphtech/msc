@@ -206,8 +206,13 @@ read ledger rather than a truncated console dump. Use GDB non-stop mode and
 non-stop trace can destabilize the instrumented client after hundreds of
 breakpoints, so treat that client process as sacrificial and validate the
 recovered layout offline against the PCAP. The decoded 112-byte prefix now
-round-trips both stream `92` and stream `114`; the untyped remainder stays a
-single lossless tail.
+round-trips both stream `92` and stream `114`. The trace's repeated item-reader
+callers also bound five equipment groups and the use/setup/etc/cash lists; the
+two extracted inventory regions round-trip independently. The remaining
+1,422 bytes decode into counted skill, string-property, timestamp, saved-map,
+and extended-property collections plus a fixed trailer. The complete initial
+packet is now structurally bounded; semantic identification of neutral fields
+is the next boundary.
 
 ## Next debugger work
 

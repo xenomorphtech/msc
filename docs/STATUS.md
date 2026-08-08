@@ -46,10 +46,16 @@
   protocol-compatible reference: login stream `83` and world stream `92`.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
-  byte-for-byte; their remaining 4,352-byte and 4,394-byte nested tails stay
-  explicitly opaque. The gameplay fold seeds level/job/base stats, HP/MP,
-  AP/SP, EXP/fame, map, and portal, emits them on the field event, and validates
-  the embedded character id against the world-entry request.
+  byte-for-byte. Their inventory tails now decode into five equipment groups
+  and use/setup/etc/cash records, including slot, template id, cash flag,
+  expiration, and stack quantity. The two inventory regions also round-trip;
+  the common 1,422-byte continuation now decodes skill levels, keyed strings,
+  keyed timestamps, saved-map slots, extended properties, and the fixed
+  trailer. String contents remain redacted, and neutral roles/equipment
+  metadata keep the observation at partial semantic coverage. The gameplay
+  fold seeds player, field, inventory, progression, and server-clock state,
+  emits it on the field event, and validates the embedded character id against
+  the world-entry request.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.

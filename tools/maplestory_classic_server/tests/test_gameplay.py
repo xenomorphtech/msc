@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import struct
 import sys
 import unittest
 
@@ -23,7 +24,10 @@ from maple_server.packets import (  # noqa: E402
     HeartbeatProbe,
     HeartbeatResponse,
     InitialCharacterSnapshot,
+    InitialFieldTrailer,
     InitialFieldSnapshot,
+    InitialInventorySnapshot,
+    InitialProgressionSnapshot,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -133,7 +137,54 @@ def fixture_compact_field_transition() -> CompactFieldTransition:
     )
 
 
+def fixture_initial_progression_snapshot() -> InitialProgressionSnapshot:
+    expected_block = b"\x01\x01\x01\x00" + b"\xff" * 4 + b"\x00" * 9
+    return InitialProgressionSnapshot(
+        reserved_flag=0,
+        skill_levels=((2_001_002, 1), (2_001_005, 6)),
+        reserved_u16_1=0,
+        string_properties=((2_089, ""),),
+        timestamp_properties=((1_015, 134_305_973_644_300_000),),
+        reserved_i64=0,
+        saved_map_ids=(999_999_999,) * 15 + (0,),
+        reserved_flag_2=0,
+        constant_u32=1,
+        variant=1,
+        extended_properties=((7_995, "N=0"),),
+        reserved_u16_2=0,
+        trailer=InitialFieldTrailer(
+            opaque_blocks=(expected_block, expected_block),
+            reserved_u16=0,
+            opaque_texts=("", "1", "1", "sanitized-field!", ""),
+            constant_u8=2,
+            reserved_u32=0,
+            sentinel_filetime_ticks=94_354_848_000_000_000,
+            server_local_filetime_ticks=134_306_812_493_680_000,
+            unknown_tail_u32=7,
+        ),
+    )
+
+
 def fixture_initial_field_snapshot() -> InitialFieldSnapshot:
+    item_sentinel_ticks = 94_354_848_000_000_000
+    use_item_record = b"".join(
+        (
+            struct.pack("<BIBqH", 2, 2_000_000, 0, 150_842_304_000_000_000, 3),
+            b"\x00\x00\x00",
+            b"\x00" * 10,
+            struct.pack("<qI", item_sentinel_ticks, 0),
+        )
+    )
+    inventory_tail = b"".join(
+        (
+            b"\x00" * 22,
+            struct.pack("<q", item_sentinel_ticks),
+            b"\x00" * 5,
+            b"\x01" + use_item_record + b"\x00",
+            b"\x00" * 3,
+            fixture_initial_progression_snapshot().to_bytes(),
+        )
+    )
     return InitialFieldSnapshot(
         marker=23,
         reserved_flag=0,
@@ -171,7 +222,7 @@ def fixture_initial_field_snapshot() -> InitialFieldSnapshot:
             opaque_state_flag=1,
             opaque_state_u64=0,
         ),
-        opaque_tail=b"sanitized-initial-tail".ljust(32, b"\x00"),
+        opaque_tail=inventory_tail,
     )
 
 
@@ -341,6 +392,31 @@ class GameplayPacketShapeTest(unittest.TestCase):
             snapshot.typed_prefix_bytes,
             len(encoded) - len(snapshot.opaque_tail),
         )
+        inventory = snapshot.parse_inventory()
+        self.assertIsInstance(inventory, InitialInventorySnapshot)
+        self.assertEqual(inventory.to_bytes(), snapshot.opaque_tail)
+        self.assertEqual(
+            [
+                (item.slot, item.item_id, item.quantity)
+                for item in inventory.groups[5].items
+            ],
+            [(1, 2_000_000, 3)],
+        )
+        progression = snapshot.parse_progression()
+        self.assertEqual(
+            InitialProgressionSnapshot.parse(progression.to_bytes()),
+            progression,
+        )
+        self.assertEqual(
+            progression.to_bytes(), inventory.opaque_remainder
+        )
+        with self.assertRaisesRegex(PacketShapeError, "variant"):
+            replace(progression, variant=3).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "text lengths"):
+            replace(
+                progression.trailer,
+                opaque_texts=("", "1", "1", "short", ""),
+            ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "marker"):
             replace(snapshot, marker=24).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "tail"):
@@ -590,7 +666,15 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(observation.details["character_name_code_units"], 6)
         self.assertEqual(observation.details["map_id"], 101_000_000)
-        self.assertIn("tail remains opaque", observation.issues[0])
+        self.assertEqual(observation.details["inventory_item_counts"]["use"], 1)
+        self.assertEqual(analysis.state.inventory_items["use"][0].quantity, 3)
+        self.assertEqual(analysis.state.skill_levels, {2_001_002: 1, 2_001_005: 6})
+        self.assertEqual(analysis.state.progression_variant, 1)
+        self.assertEqual(
+            analysis.state.server_local_filetime_ticks,
+            134_306_812_493_680_000,
+        )
+        self.assertIn("partially opaque", observation.issues[0])
         self.assertNotIn('"name": "player"', analysis.to_json())
 
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:

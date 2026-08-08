@@ -357,23 +357,63 @@ uint32 map_id
 uint8  portal_index
 uint8  opaque_state_flag
 uint64 opaque_state_value
-byte[] opaque_inventory_skill_tail
+byte[] inventory_and_post_inventory_tail
 ```
 
-The final tail is bounded and preserved rather than guessed: 4,352 bytes in
-stream `92`, and 4,394 bytes in stream `114`. Reports expose the character-name
-code-unit count but not the text or raw character id. The gameplay fold checks
-the embedded character id against client opcode `8`, then seeds the player
-level/job/stats, HP/MP, progression values, map, and portal in game state and
-emits a `field_snapshot_received` event with variant
-`initial_character_snapshot`.
+The tail begins with a 30-byte preamble ending in the `1900-01-01` FILETIME
+sentinel. It then contains five zero-terminated equipment groups followed by
+zero-terminated use, setup, etc, and cash groups. Each item begins with a slot,
+record type, template id, cash flag, optional cash id, and expiration. Stack
+records additionally expose a `uint16` quantity. Equipment-specific metadata
+is retained as bounded raw record bytes until its conditional fields are named.
+
+Stream `92` contains group counts `4/1/4/0/0/24/2/17/1`; stream `114`
+contains `4/1/4/0/0/24/2/18/1`. The inventory regions are 2,930 and 2,972
+bytes respectively, and both are followed by the same 1,422-byte progression
+region. Each inventory region and complete initial packet round-trips
+byte-for-byte. Reports expose item slot/template/quantity data and the
+character-name code-unit count, but not the name text or raw character id. The
+gameplay fold checks the embedded character id against client opcode `8`, then
+seeds player, field, and inventory state and emits a `field_snapshot_received`
+event with variant `initial_character_snapshot`.
+
+The 1,422-byte continuation is also structurally complete:
+
+```text
+uint8  reserved_flag = 0
+uint16 skill_count
+repeat skill_count: uint32 skill_id, uint32 level
+uint16 reserved = 0
+uint16 string_property_count
+repeat string_property_count: uint32 key, string value
+uint16 timestamp_property_count
+repeat timestamp_property_count: uint32 key, int64 ticks
+int64  reserved = 0
+uint32 saved_map_id[16]
+uint8  reserved_flag = 0
+uint32 constant = 1
+uint8  variant                         # 1 in stream 92; 2 in stream 114
+uint16 extended_property_count
+repeat extended_property_count: uint32 key, string value
+uint16 reserved = 0
+byte[112] fixed_trailer
+```
+
+Both captures contain six skill entries, seven string properties, 35 timestamp
+properties, and 12 extended properties. The fixed trailer contains two
+validated 17-byte blocks, five UTF-16 strings with code-unit counts
+`0/1/1/16/0`, constant/reserved fields, the `1900-01-01` sentinel, a
+server-local FILETIME, and one final `uint32`. Values of keyed strings and
+trailer strings are retained for exact re-encoding but omitted from normal
+reports.
 
 The layout is supported by a complete live primitive-reader trace of the
 stream-`114` packet: 734 observed calls consumed the body through the final
 field. The trace also showed that RVA `0x1cd0560` is a direct one-byte reader,
 while RVAs `0x1cd0730` and `0x1cd0790` account for the two- and eight-byte gaps
-in the typed prefix. Semantic names stop at the 112-byte boundary until the
-nested tail structures receive the same capture-backed treatment.
+in the typed prefix. The entire packet is now structurally bounded. Semantic
+names remain neutral for the five equipment groups, keyed property roles, and
+parts of the fixed trailer until independent effects identify them.
 
 The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server

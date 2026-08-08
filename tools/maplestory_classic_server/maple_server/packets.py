@@ -831,6 +831,543 @@ class InitialCharacterSnapshot:
             ) from error
 
 
+INITIAL_ITEM_SENTINEL_TICKS = 94_354_848_000_000_000
+
+
+@dataclass(frozen=True)
+class InitialInventoryItem:
+    """Inventory item boundary with common fields and lossless record bytes."""
+
+    slot: int
+    record_type: int
+    item_id: int
+    cash_item: bool
+    expires_at_ticks: int
+    quantity: int | None
+    raw_record: bytes
+
+    def to_bytes(self) -> bytes:
+        if not 1 <= self.slot <= 0xFF:
+            raise PacketShapeError(
+                f"initial inventory item slot is out of range: {self.slot}"
+            )
+        if len(self.raw_record) < 6:
+            raise PacketShapeError("initial inventory item record is truncated")
+        if self.raw_record[0] != self.record_type:
+            raise PacketShapeError(
+                "initial inventory item record-type byte does not match"
+            )
+        if int.from_bytes(self.raw_record[1:5], "little") != self.item_id:
+            raise PacketShapeError(
+                "initial inventory item template id does not match record bytes"
+            )
+        return bytes((self.slot,)) + self.raw_record
+
+
+@dataclass(frozen=True)
+class InitialInventoryGroup:
+    name: str
+    items: tuple[InitialInventoryItem, ...]
+
+    def to_bytes(self) -> bytes:
+        return b"".join(item.to_bytes() for item in self.items) + b"\x00"
+
+
+@dataclass(frozen=True)
+class InitialInventorySnapshot:
+    """Capture-backed inventory lists at the start of the large opaque tail."""
+
+    opaque_prefix: bytes
+    groups: tuple[InitialInventoryGroup, ...]
+    opaque_remainder: bytes
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "InitialInventorySnapshot":
+        reader = PacketReader(payload, packet_name="initial_inventory_snapshot")
+        opaque_prefix = reader.bytes(30, "opaque_prefix")
+        sentinel = int.from_bytes(opaque_prefix[-8:], "little", signed=True)
+        if sentinel != INITIAL_ITEM_SENTINEL_TICKS:
+            raise PacketShapeError(
+                "initial inventory prefix does not end in the 1900-01-01 sentinel"
+            )
+
+        groups: list[InitialInventoryGroup] = []
+        for index in range(5):
+            groups.append(
+                cls._parse_equipment_group(
+                    reader, name=f"equipment_group_{index + 1}"
+                )
+            )
+        for name in ("use", "setup", "etc"):
+            groups.append(cls._parse_stack_group(reader, name=name))
+        groups.append(cls._parse_cash_group(reader))
+        opaque_remainder = reader.bytes(reader.remaining, "opaque_remainder")
+        reader.finish()
+        if not opaque_remainder:
+            raise PacketShapeError(
+                "initial inventory snapshot has no post-inventory remainder"
+            )
+        return cls(
+            opaque_prefix=opaque_prefix,
+            groups=tuple(groups),
+            opaque_remainder=opaque_remainder,
+        )
+
+    @staticmethod
+    def _read_common_item_prefix(
+        reader: PacketReader, *, expected_type: int
+    ) -> tuple[int, bool, int, int]:
+        record_start = reader.offset
+        record_type = reader.u8("item.record_type")
+        if record_type != expected_type:
+            raise PacketShapeError(
+                f"initial inventory item type is {record_type}, "
+                f"expected {expected_type}"
+            )
+        item_id = reader.u32("item.item_id")
+        cash_flag = reader.u8("item.cash_flag")
+        if cash_flag not in (0, 1):
+            raise PacketShapeError(
+                f"initial inventory cash flag is {cash_flag}, expected 0 or 1"
+            )
+        if cash_flag:
+            reader.u64("item.cash_id")
+        expires_at_ticks = reader.i64("item.expires_at_ticks")
+        return record_start, bool(cash_flag), item_id, expires_at_ticks
+
+    @classmethod
+    def _parse_equipment_group(
+        cls, reader: PacketReader, *, name: str
+    ) -> InitialInventoryGroup:
+        items: list[InitialInventoryItem] = []
+        sentinel_bytes = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
+            8, "little", signed=True
+        )
+        while True:
+            slot = reader.u8(f"{name}.slot")
+            if slot == 0:
+                break
+            record_start, cash_item, item_id, expires_at_ticks = (
+                cls._read_common_item_prefix(reader, expected_type=1)
+            )
+            first_sentinel = reader.payload.find(sentinel_bytes, reader.offset)
+            if first_sentinel < 0:
+                raise PacketShapeError(
+                    f"initial inventory {name} item lacks its first sentinel"
+                )
+            second_sentinel = reader.payload.find(
+                sentinel_bytes, first_sentinel + len(sentinel_bytes)
+            )
+            if second_sentinel < 0:
+                raise PacketShapeError(
+                    f"initial inventory {name} item lacks its second sentinel"
+                )
+            record_end = second_sentinel + len(sentinel_bytes) + 4
+            if record_end > len(reader.payload):
+                raise PacketShapeError(
+                    f"initial inventory {name} item tail is truncated"
+                )
+            if (
+                reader.payload[first_sentinel + 8 : first_sentinel + 12]
+                != b"\xff" * 4
+            ):
+                raise PacketShapeError(
+                    f"initial inventory {name} first sentinel tail is not -1"
+                )
+            if (
+                reader.payload[second_sentinel + 8 : record_end]
+                != b"\x00" * 4
+            ):
+                raise PacketShapeError(
+                    f"initial inventory {name} second sentinel tail is not zero"
+                )
+            reader.bytes(
+                record_end - reader.offset,
+                f"{name}.item_record_tail",
+            )
+            raw_record = reader.payload[record_start:record_end]
+            items.append(
+                InitialInventoryItem(
+                    slot=slot,
+                    record_type=1,
+                    item_id=item_id,
+                    cash_item=cash_item,
+                    expires_at_ticks=expires_at_ticks,
+                    quantity=None,
+                    raw_record=raw_record,
+                )
+            )
+        return InitialInventoryGroup(name=name, items=tuple(items))
+
+    @classmethod
+    def _parse_stack_group(
+        cls, reader: PacketReader, *, name: str
+    ) -> InitialInventoryGroup:
+        items: list[InitialInventoryItem] = []
+        while True:
+            slot = reader.u8(f"{name}.slot")
+            if slot == 0:
+                break
+            record_start, cash_item, item_id, expires_at_ticks = (
+                cls._read_common_item_prefix(reader, expected_type=2)
+            )
+            quantity = reader.u16(f"{name}.quantity")
+            reader.utf16_string(f"{name}.owner", trailing_byte=True)
+            reader.bytes(10, f"{name}.opaque_item_metadata")
+            sentinel = reader.i64(f"{name}.sentinel_filetime_ticks")
+            if sentinel != INITIAL_ITEM_SENTINEL_TICKS:
+                raise PacketShapeError(
+                    f"initial inventory {name} item sentinel is {sentinel}"
+                )
+            reader.u32(f"{name}.opaque_tail_u32")
+            raw_record = reader.payload[record_start : reader.offset]
+            items.append(
+                InitialInventoryItem(
+                    slot=slot,
+                    record_type=2,
+                    item_id=item_id,
+                    cash_item=cash_item,
+                    expires_at_ticks=expires_at_ticks,
+                    quantity=quantity,
+                    raw_record=raw_record,
+                )
+            )
+        return InitialInventoryGroup(name=name, items=tuple(items))
+
+    @classmethod
+    def _parse_cash_group(cls, reader: PacketReader) -> InitialInventoryGroup:
+        items: list[InitialInventoryItem] = []
+        while True:
+            slot = reader.u8("cash.slot")
+            if slot == 0:
+                break
+            record_start, cash_item, item_id, expires_at_ticks = (
+                cls._read_common_item_prefix(reader, expected_type=3)
+            )
+            reader.utf16_string("cash.owner", trailing_byte=True)
+            reader.u8("cash.opaque_flag_1")
+            reader.u16("cash.opaque_u16_1")
+            reader.u8("cash.opaque_flag_2")
+            reader.i64("cash.opaque_timestamp")
+            reader.bytes(4, "cash.opaque_metadata")
+            reader.u32("cash.opaque_u32_1")
+            reader.u16("cash.opaque_u16_2")
+            reader.u8("cash.opaque_flag_3")
+            reader.u32("cash.opaque_u32_2")
+            reader.u16("cash.opaque_u16_3")
+            reader.u32("cash.opaque_u32_3")
+            raw_record = reader.payload[record_start : reader.offset]
+            items.append(
+                InitialInventoryItem(
+                    slot=slot,
+                    record_type=3,
+                    item_id=item_id,
+                    cash_item=cash_item,
+                    expires_at_ticks=expires_at_ticks,
+                    quantity=None,
+                    raw_record=raw_record,
+                )
+            )
+        return InitialInventoryGroup(name="cash", items=tuple(items))
+
+    def to_bytes(self) -> bytes:
+        expected_names = (
+            "equipment_group_1",
+            "equipment_group_2",
+            "equipment_group_3",
+            "equipment_group_4",
+            "equipment_group_5",
+            "use",
+            "setup",
+            "etc",
+            "cash",
+        )
+        if tuple(group.name for group in self.groups) != expected_names:
+            raise PacketShapeError(
+                "initial inventory snapshot groups are missing or out of order"
+            )
+        if not self.opaque_remainder:
+            raise PacketShapeError(
+                "initial inventory snapshot remainder cannot be empty"
+            )
+        return (
+            self.opaque_prefix
+            + b"".join(group.to_bytes() for group in self.groups)
+            + self.opaque_remainder
+        )
+
+
+@dataclass(frozen=True)
+class InitialFieldTrailer:
+    """Fixed final 112 bytes of the initial field packet."""
+
+    opaque_blocks: tuple[bytes, bytes]
+    reserved_u16: int
+    opaque_texts: tuple[str, str, str, str, str]
+    constant_u8: int
+    reserved_u32: int
+    sentinel_filetime_ticks: int
+    server_local_filetime_ticks: int
+    unknown_tail_u32: int
+
+    @classmethod
+    def parse_from(cls, reader: PacketReader) -> "InitialFieldTrailer":
+        trailer = cls(
+            opaque_blocks=(
+                reader.bytes(17, "trailer.opaque_block_1"),
+                reader.bytes(17, "trailer.opaque_block_2"),
+            ),
+            reserved_u16=reader.u16("trailer.reserved_u16"),
+            opaque_texts=(
+                reader.utf16_string("trailer.opaque_text_1", trailing_byte=True),
+                reader.utf16_string("trailer.opaque_text_2", trailing_byte=True),
+                reader.utf16_string("trailer.opaque_text_3", trailing_byte=True),
+                reader.utf16_string("trailer.opaque_text_4", trailing_byte=True),
+                reader.utf16_string("trailer.opaque_text_5", trailing_byte=True),
+            ),
+            constant_u8=reader.u8("trailer.constant_u8"),
+            reserved_u32=reader.u32("trailer.reserved_u32"),
+            sentinel_filetime_ticks=reader.i64(
+                "trailer.sentinel_filetime_ticks"
+            ),
+            server_local_filetime_ticks=reader.i64(
+                "trailer.server_local_filetime_ticks"
+            ),
+            unknown_tail_u32=reader.u32("trailer.unknown_tail_u32"),
+        )
+        trailer._validate()
+        return trailer
+
+    def _validate(self) -> None:
+        expected_block = b"\x01\x01\x01\x00" + b"\xff" * 4 + b"\x00" * 9
+        if self.opaque_blocks != (expected_block, expected_block):
+            raise PacketShapeError(
+                "initial field trailer opaque blocks do not match the captured shape"
+            )
+        if self.reserved_u16 != 0 or self.reserved_u32 != 0:
+            raise PacketShapeError(
+                "initial field trailer reserved integers must be zero"
+            )
+        text_lengths = tuple(
+            len(value.encode("utf-16-le")) // 2 for value in self.opaque_texts
+        )
+        if text_lengths != (
+            0,
+            1,
+            1,
+            16,
+            0,
+        ):
+            raise PacketShapeError(
+                "initial field trailer text lengths must be 0/1/1/16/0"
+            )
+        if self.constant_u8 != 2:
+            raise PacketShapeError(
+                "initial field trailer constant byte must be two"
+            )
+        if self.sentinel_filetime_ticks != INITIAL_ITEM_SENTINEL_TICKS:
+            raise PacketShapeError(
+                "initial field trailer sentinel must encode 1900-01-01"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return b"".join(
+                (
+                    *self.opaque_blocks,
+                    struct.pack("<H", self.reserved_u16),
+                    *(
+                        encode_utf16_string(value, trailing_byte=True)
+                        for value in self.opaque_texts
+                    ),
+                    struct.pack(
+                        "<BIqqI",
+                        self.constant_u8,
+                        self.reserved_u32,
+                        self.sentinel_filetime_ticks,
+                        self.server_local_filetime_ticks,
+                        self.unknown_tail_u32,
+                    ),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"initial field trailer field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class InitialProgressionSnapshot:
+    """Skill, property, timestamp, saved-map, and trailer collections."""
+
+    reserved_flag: int
+    skill_levels: tuple[tuple[int, int], ...]
+    reserved_u16_1: int
+    string_properties: tuple[tuple[int, str], ...]
+    timestamp_properties: tuple[tuple[int, int], ...]
+    reserved_i64: int
+    saved_map_ids: tuple[int, ...]
+    reserved_flag_2: int
+    constant_u32: int
+    variant: int
+    extended_properties: tuple[tuple[int, str], ...]
+    reserved_u16_2: int
+    trailer: InitialFieldTrailer
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "InitialProgressionSnapshot":
+        reader = PacketReader(payload, packet_name="initial_progression_snapshot")
+        reserved_flag = reader.u8("reserved_flag")
+        skill_levels = tuple(
+            (
+                reader.u32(f"skill_levels[{index}].skill_id"),
+                reader.u32(f"skill_levels[{index}].level"),
+            )
+            for index in range(reader.u16("skill_level_count"))
+        )
+        reserved_u16_1 = reader.u16("reserved_u16_1")
+        string_properties = tuple(
+            (
+                reader.u32(f"string_properties[{index}].key"),
+                reader.utf16_string(
+                    f"string_properties[{index}].value", trailing_byte=True
+                ),
+            )
+            for index in range(reader.u16("string_property_count"))
+        )
+        timestamp_properties = tuple(
+            (
+                reader.u32(f"timestamp_properties[{index}].key"),
+                reader.i64(f"timestamp_properties[{index}].ticks"),
+            )
+            for index in range(reader.u16("timestamp_property_count"))
+        )
+        reserved_i64 = reader.i64("reserved_i64")
+        saved_map_ids = tuple(
+            reader.u32(f"saved_map_ids[{index}]") for index in range(16)
+        )
+        reserved_flag_2 = reader.u8("reserved_flag_2")
+        constant_u32 = reader.u32("constant_u32")
+        variant = reader.u8("variant")
+        extended_properties = tuple(
+            (
+                reader.u32(f"extended_properties[{index}].key"),
+                reader.utf16_string(
+                    f"extended_properties[{index}].value", trailing_byte=True
+                ),
+            )
+            for index in range(reader.u16("extended_property_count"))
+        )
+        reserved_u16_2 = reader.u16("reserved_u16_2")
+        snapshot = cls(
+            reserved_flag=reserved_flag,
+            skill_levels=skill_levels,
+            reserved_u16_1=reserved_u16_1,
+            string_properties=string_properties,
+            timestamp_properties=timestamp_properties,
+            reserved_i64=reserved_i64,
+            saved_map_ids=saved_map_ids,
+            reserved_flag_2=reserved_flag_2,
+            constant_u32=constant_u32,
+            variant=variant,
+            extended_properties=extended_properties,
+            reserved_u16_2=reserved_u16_2,
+            trailer=InitialFieldTrailer.parse_from(reader),
+        )
+        reader.finish()
+        snapshot._validate()
+        return snapshot
+
+    def _validate(self) -> None:
+        if self.reserved_flag != 0 or self.reserved_flag_2 != 0:
+            raise PacketShapeError(
+                "initial progression snapshot reserved flags must be zero"
+            )
+        if self.reserved_u16_1 != 0 or self.reserved_u16_2 != 0:
+            raise PacketShapeError(
+                "initial progression snapshot reserved integers must be zero"
+            )
+        if self.reserved_i64 != 0:
+            raise PacketShapeError(
+                "initial progression snapshot reserved int64 must be zero"
+            )
+        if len(self.saved_map_ids) != 16:
+            raise PacketShapeError(
+                "initial progression snapshot must contain 16 saved map ids"
+            )
+        if self.constant_u32 != 1:
+            raise PacketShapeError(
+                "initial progression snapshot constant integer must be one"
+            )
+        if self.variant not in (1, 2):
+            raise PacketShapeError(
+                f"initial progression snapshot variant is {self.variant}"
+            )
+
+    @staticmethod
+    def _encode_keyed_strings(values: tuple[tuple[int, str], ...]) -> bytes:
+        return b"".join(
+            struct.pack("<I", key)
+            + encode_utf16_string(value, trailing_byte=True)
+            for key, value in values
+        )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        if len(self.skill_levels) > 0xFFFF:
+            raise PacketShapeError("initial progression has too many skill levels")
+        if len(self.string_properties) > 0xFFFF:
+            raise PacketShapeError(
+                "initial progression has too many string properties"
+            )
+        if len(self.timestamp_properties) > 0xFFFF:
+            raise PacketShapeError(
+                "initial progression has too many timestamp properties"
+            )
+        if len(self.extended_properties) > 0xFFFF:
+            raise PacketShapeError(
+                "initial progression has too many extended properties"
+            )
+        try:
+            return b"".join(
+                (
+                    struct.pack("<BH", self.reserved_flag, len(self.skill_levels)),
+                    b"".join(
+                        struct.pack("<II", skill_id, level)
+                        for skill_id, level in self.skill_levels
+                    ),
+                    struct.pack(
+                        "<HH",
+                        self.reserved_u16_1,
+                        len(self.string_properties),
+                    ),
+                    self._encode_keyed_strings(self.string_properties),
+                    struct.pack("<H", len(self.timestamp_properties)),
+                    b"".join(
+                        struct.pack("<Iq", key, ticks)
+                        for key, ticks in self.timestamp_properties
+                    ),
+                    struct.pack("<q", self.reserved_i64),
+                    struct.pack("<16I", *self.saved_map_ids),
+                    struct.pack(
+                        "<BIBH",
+                        self.reserved_flag_2,
+                        self.constant_u32,
+                        self.variant,
+                        len(self.extended_properties),
+                    ),
+                    self._encode_keyed_strings(self.extended_properties),
+                    struct.pack("<H", self.reserved_u16_2),
+                    self.trailer.to_bytes(),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"initial progression field is out of range: {error}"
+            ) from error
+
+
 @dataclass(frozen=True)
 class InitialFieldSnapshot:
     """Initial opcode-157 field packet with a typed character-stat prefix."""
@@ -874,6 +1411,14 @@ class InitialFieldSnapshot:
     @property
     def typed_prefix_bytes(self) -> int:
         return len(self.to_bytes()) - len(self.opaque_tail)
+
+    def parse_inventory(self) -> InitialInventorySnapshot:
+        return InitialInventorySnapshot.parse(self.opaque_tail)
+
+    def parse_progression(self) -> InitialProgressionSnapshot:
+        return InitialProgressionSnapshot.parse(
+            self.parse_inventory().opaque_remainder
+        )
 
     def _validate(self) -> None:
         if self.marker != 23:
