@@ -1276,7 +1276,10 @@ class MobMovementSubmission:
 class MobMovementAcknowledgement:
     object_id: int
     sequence: int
-    opaque_status: bytes
+    status_flag: int
+    status_value: int
+    status_auxiliary_1: int
+    status_auxiliary_2: int
     opcode: int = 283
 
     @classmethod
@@ -1285,47 +1288,44 @@ class MobMovementAcknowledgement:
         _expect_opcode(reader, 283)
         object_id = reader.u32("object_id")
         sequence = reader.u16("sequence")
-        opaque_status = reader.bytes(5, "opaque_status")
+        status_flag = reader.u8("status_flag")
+        status_value = reader.u16("status_value")
+        status_auxiliary_1 = reader.u8("status_auxiliary_1")
+        status_auxiliary_2 = reader.u8("status_auxiliary_2")
         reader.finish()
-        if opaque_status[0] not in {0, 1}:
+        if status_flag not in {0, 1}:
             raise PacketShapeError(
                 "mob movement acknowledgement status flag must be zero or one"
             )
         return cls(
             object_id=object_id,
             sequence=sequence,
-            opaque_status=opaque_status,
+            status_flag=status_flag,
+            status_value=status_value,
+            status_auxiliary_1=status_auxiliary_1,
+            status_auxiliary_2=status_auxiliary_2,
         )
 
     def to_bytes(self) -> bytes:
-        if len(self.opaque_status) != 5:
-            raise PacketShapeError(
-                "mob movement acknowledgement status must contain exactly 5 bytes"
-            )
-        if self.opaque_status[0] not in {0, 1}:
+        if self.status_flag not in {0, 1}:
             raise PacketShapeError(
                 "mob movement acknowledgement status flag must be zero or one"
             )
-        return (
-            struct.pack("<HIH", self.opcode, self.object_id, self.sequence)
-            + self.opaque_status
-        )
-
-    @property
-    def status_flag(self) -> int:
-        return self.opaque_status[0]
-
-    @property
-    def status_value(self) -> int:
-        return int.from_bytes(self.opaque_status[1:3], "little")
-
-    @property
-    def status_auxiliary_1(self) -> int:
-        return self.opaque_status[3]
-
-    @property
-    def status_auxiliary_2(self) -> int:
-        return self.opaque_status[4]
+        try:
+            return struct.pack(
+                "<HIHBHBB",
+                self.opcode,
+                self.object_id,
+                self.sequence,
+                self.status_flag,
+                self.status_value,
+                self.status_auxiliary_1,
+                self.status_auxiliary_2,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"mob movement acknowledgement field is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)

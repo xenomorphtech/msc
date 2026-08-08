@@ -172,9 +172,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `207`: correlated mob movement submissions with a bounded
   19-byte control prefix, signed reference position, command count, typed
   commands, and zero-marked start/end-position trailer,
-- server opcode `283`: correlated mob movement acknowledgements with a one-byte
-  boolean-like flag, 16-bit little-endian status/resource value, and two
-  auxiliary bytes,
+- server opcode `283`: complete correlated mob movement acknowledgements with
+  a one-byte boolean flag, 16-bit little-endian status/resource value, and two
+  one-byte auxiliary fields,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
@@ -208,10 +208,10 @@ records instead of one undifferentiated movement blob.
 
 All 11,949 acknowledgement bodies also fit one exact primitive boundary: flag
 `0` or `1`, a 16-bit little-endian value in `{0,25,30,35,100}`, and two zero
-auxiliary bytes. The fold reports all nine observed combinations and their
-counts while leaving their behavioral meanings unnamed. This validates the
-body shape without promoting numeric adjacency or frequency into unsupported
-semantics.
+auxiliary bytes. `MobMovementAcknowledgement` parses and writes those four
+fields directly; no acknowledgement bytes remain bundled as an opaque status
+blob. The fold reports all nine observed combinations and their counts while
+leaving the behavioral meaning of the 16-bit value unnamed.
 
 The fold now tracks the mob lifecycle needed by a future reactive opcode-`283`
 generator. All 337 entry records, 175 leaves, 589 controller changes, and 5,284
@@ -221,12 +221,26 @@ leave and broadcast resolves to an active modeled mob.
 
 After respecting field-epoch resets, the acknowledgement flag matches whether
 submission control-prefix byte `0` is nonzero in all 11,949 correlated pairs.
-For the 10,570 pairs whose mob is introduced by an explicit entry/controller
-record, the 16-bit acknowledgement value is deterministic by mob template and
-both auxiliary bytes are zero. The remaining 1,502 submissions and 1,380
-acknowledgements refer to mobs introduced only inside the still-opaque field
-snapshot. The fold reports those counts explicitly; a generator must not guess
-their template-dependent status value.
+Both auxiliary fields are zero in all 11,949 pairs. For 10,570 pairs, the mob
+template was known when the submission arrived and the 16-bit value is
+deterministic by template: `100100 -> 0`, `130100 -> 30`, `210100 -> 35`,
+`1110100 -> 25`, `1130100 -> 30`, `2110200 -> 35`, `3210800 -> 100`, and
+`9999999 -> 0`. The other 1,379 correlated pairs lack a template at submission
+time because the mob exists only inside the still-opaque field snapshot. The
+separately reported acknowledgement-time unknown-entity count is 1,380 because
+one explicitly known mob leaves between submission and acknowledgement.
+
+`derive_mob_movement_acknowledgement_policy()` turns that evidence into a
+conservative generator. It validates every correlated flag and auxiliary
+field, refuses any template with more than one observed value, retains only
+the final field's explicit object-to-template state, and emits opcode `283`
+with the submitted object id and sequence. Its safe report includes template
+ids, values, evidence counts, and the number of active known mobs but no runtime
+object ids. Calling it for a snapshot-only object, an object absent from the
+final field, or a template without deterministic evidence raises instead of
+guessing. Stream `92` ends with zero active explicit mobs, so the policy proves
+the mapping but deliberately cannot generate a post-capture live response from
+that final state.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
@@ -403,8 +417,10 @@ It intentionally cannot launch an authenticated official session.
 14. Decode type-`0` absolute and type-`1`/`2` relative movement fields with
     exact command/path round trips, while retaining the 19-byte control prefix
     as opaque.
-15. Decode and fold mob entry/leave/controller/broadcast lifecycle, quantify
-    snapshot-only mobs, and use the exact capture correlation to gate reactive
-    movement acknowledgements on known template state.
-16. Decode the inner character list, player records, and field snapshot body
+15. Decode and fold mob entry/leave/controller/broadcast lifecycle and quantify
+    snapshot-only mobs.
+16. Fully type opcode `283`, validate its flag/auxiliary rules across every
+    correlated pair, and derive a generator gated on explicit active template
+    state and deterministic capture evidence.
+17. Decode the inner character list, player records, and field snapshot body
     needed to replace finite replay content with generated world state.

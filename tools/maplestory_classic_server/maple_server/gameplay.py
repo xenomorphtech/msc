@@ -61,6 +61,12 @@ class MobEntity:
 
 
 @dataclass(frozen=True)
+class PendingMobMovement:
+    expected_status_flag: int
+    template_id: int | None
+
+
+@dataclass(frozen=True)
 class GameplayEvent:
     index: int
     timestamp_ns: int
@@ -119,6 +125,18 @@ class GameplayGameState:
     ] = field(
         default_factory=Counter
     )
+    movement_acknowledgement_flag_matches: int = 0
+    movement_acknowledgement_flag_mismatches: int = 0
+    movement_acknowledgement_zero_auxiliary_pairs: int = 0
+    movement_acknowledgement_nonzero_auxiliary_pairs: int = 0
+    movement_acknowledgements_with_known_template: int = 0
+    movement_acknowledgements_with_unknown_template: int = 0
+    movement_acknowledgement_values_by_template: dict[int, set[int]] = field(
+        default_factory=dict
+    )
+    movement_acknowledgements_by_template: Counter[int] = field(
+        default_factory=Counter
+    )
     matched_movement_acknowledgements: int = 0
     unmatched_movement_acknowledgements: int = 0
     heartbeat_probes: int = 0
@@ -150,6 +168,76 @@ class NpcStateReplayPlan:
                 "events_delta": 1,
                 "active_npc_count_delta": 0,
                 "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class MobMovementAcknowledgementPolicy:
+    status_values_by_template: dict[int, int]
+    observations_by_template: dict[int, int]
+    active_mob_templates: dict[int, int] = field(
+        repr=False, compare=False
+    )
+    field_epoch: int
+    matched_pairs: int
+    known_template_pairs: int
+    unknown_template_pairs: int
+    flag_rule_matches: int
+    zero_auxiliary_pairs: int
+    pending_submissions: int
+
+    def acknowledge(
+        self, submission: MobMovementSubmission
+    ) -> MobMovementAcknowledgement:
+        template_id = self.active_mob_templates.get(submission.object_id)
+        if template_id is None:
+            raise ValueError(
+                "movement submission has no explicit active mob-template state"
+            )
+        status_value = self.status_values_by_template.get(template_id)
+        if status_value is None:
+            raise ValueError(
+                f"mob template {template_id} has no deterministic captured "
+                "acknowledgement value"
+            )
+        status_flag = int(bool(submission.movement_path.opaque_control[0]))
+        return MobMovementAcknowledgement(
+            object_id=submission.object_id,
+            sequence=submission.sequence,
+            status_flag=status_flag,
+            status_value=status_value,
+            status_auxiliary_1=0,
+            status_auxiliary_2=0,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "active_known_mob_count": len(self.active_mob_templates),
+            "status_values_by_template": [
+                {
+                    "template_id": template_id,
+                    "status_value": status_value,
+                    "observations": self.observations_by_template[template_id],
+                }
+                for template_id, status_value in sorted(
+                    self.status_values_by_template.items()
+                )
+            ],
+            "evidence": {
+                "matched_pairs": self.matched_pairs,
+                "known_template_pairs": self.known_template_pairs,
+                "unknown_template_pairs": self.unknown_template_pairs,
+                "flag_rule_matches": self.flag_rule_matches,
+                "zero_auxiliary_pairs": self.zero_auxiliary_pairs,
+                "pending_submissions": self.pending_submissions,
+            },
+            "prediction": {
+                "status_flag": "submission_control_byte_0_nonzero",
+                "status_value": "captured_template_value",
+                "status_auxiliary_1": 0,
+                "status_auxiliary_2": 0,
             },
         }
 
@@ -290,6 +378,38 @@ class GameplayAnalysis:
                         self.state.movement_acknowledgement_statuses.items()
                     )
                 ],
+                "movement_acknowledgement_flag_matches": (
+                    self.state.movement_acknowledgement_flag_matches
+                ),
+                "movement_acknowledgement_flag_mismatches": (
+                    self.state.movement_acknowledgement_flag_mismatches
+                ),
+                "movement_acknowledgement_zero_auxiliary_pairs": (
+                    self.state.movement_acknowledgement_zero_auxiliary_pairs
+                ),
+                "movement_acknowledgement_nonzero_auxiliary_pairs": (
+                    self.state.movement_acknowledgement_nonzero_auxiliary_pairs
+                ),
+                "movement_acknowledgements_with_known_template": (
+                    self.state.movement_acknowledgements_with_known_template
+                ),
+                "movement_acknowledgements_with_unknown_template": (
+                    self.state.movement_acknowledgements_with_unknown_template
+                ),
+                "movement_acknowledgement_values_by_template": [
+                    {
+                        "template_id": template_id,
+                        "status_values": sorted(status_values),
+                        "count": (
+                            self.state.movement_acknowledgements_by_template[
+                                template_id
+                            ]
+                        ),
+                    }
+                    for template_id, status_values in sorted(
+                        self.state.movement_acknowledgement_values_by_template.items()
+                    )
+                ],
                 "matched_movement_acknowledgements": (
                     self.state.matched_movement_acknowledgements
                 ),
@@ -361,7 +481,9 @@ class GameplayStateFold:
         self.events: list[GameplayEvent] = []
         self._npc_aliases: dict[int, str] = {}
         self._mob_aliases: dict[int, str] = {}
-        self._pending_movements: Counter[tuple[int, int]] = Counter()
+        self._pending_movements: dict[
+            tuple[int, int], deque[PendingMobMovement]
+        ] = {}
         self._pending_heartbeat_probes: deque[int] = deque()
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
@@ -550,14 +672,24 @@ class GameplayStateFold:
                 self._mob_aliases, movement.object_id, "mob"
             )
             key = (movement.object_id, movement.sequence)
-            self._pending_movements[key] += 1
+            entity = self.state.mobs.get(movement.object_id)
+            expected_status_flag = int(
+                bool(movement_path.opaque_control[0])
+            )
+            self._pending_movements.setdefault(key, deque()).append(
+                PendingMobMovement(
+                    expected_status_flag=expected_status_flag,
+                    template_id=(
+                        entity.spawn.template_id if entity is not None else None
+                    ),
+                )
+            )
             self.state.pending_movements += 1
             self.state.movement_submissions += 1
             self.state.movement_commands += len(movement_path.commands)
             self.state.movement_commands_by_type.update(
                 command.command_type for command in movement_path.commands
             )
-            entity = self.state.mobs.get(movement.object_id)
             if entity is None:
                 self.state.movement_submissions_for_unknown_mobs += 1
             if entity is not None:
@@ -570,7 +702,11 @@ class GameplayStateFold:
                 "controller_level": (
                     entity.controller_level if entity is not None else None
                 ),
+                "template_id": (
+                    entity.spawn.template_id if entity is not None else None
+                ),
                 "sequence": movement.sequence,
+                "predicted_acknowledgement_flag": expected_status_flag,
                 "movement_body_bytes": len(movement.opaque_movement),
                 "opaque_control_bytes": len(movement_path.opaque_control),
                 "reference_x": movement_path.reference_x,
@@ -605,7 +741,7 @@ class GameplayStateFold:
                 parsed=movement,
                 details=details,
                 issues=(
-                    "movement control metadata remains opaque",
+                    "movement control metadata after byte zero remains opaque",
                 ),
             )
         if opcode == 23:
@@ -945,10 +1081,13 @@ class GameplayStateFold:
                 self._mob_aliases, acknowledgement.object_id, "mob"
             )
             key = (acknowledgement.object_id, acknowledgement.sequence)
-            matched = self._pending_movements[key] > 0
+            pending_queue = self._pending_movements.get(key)
+            matched = bool(pending_queue)
+            pending: PendingMobMovement | None = None
             if matched:
-                self._pending_movements[key] -= 1
-                if self._pending_movements[key] == 0:
+                assert pending_queue is not None
+                pending = pending_queue.popleft()
+                if not pending_queue:
                     del self._pending_movements[key]
                 self.state.pending_movements -= 1
                 self.state.matched_movement_acknowledgements += 1
@@ -966,11 +1105,60 @@ class GameplayStateFold:
                     acknowledgement.status_auxiliary_2,
                 )
             ] += 1
+            flag_matches_submission: bool | None = None
+            if pending is not None:
+                flag_matches_submission = (
+                    acknowledgement.status_flag
+                    == pending.expected_status_flag
+                )
+                if flag_matches_submission:
+                    self.state.movement_acknowledgement_flag_matches += 1
+                else:
+                    self.state.movement_acknowledgement_flag_mismatches += 1
+                    self.issues.append(
+                        f"{alias} movement acknowledgement flag did not match "
+                        "submission control byte zero"
+                    )
+                auxiliary_is_zero = (
+                    acknowledgement.status_auxiliary_1 == 0
+                    and acknowledgement.status_auxiliary_2 == 0
+                )
+                if auxiliary_is_zero:
+                    self.state.movement_acknowledgement_zero_auxiliary_pairs += 1
+                else:
+                    self.state.movement_acknowledgement_nonzero_auxiliary_pairs += 1
+                    self.issues.append(
+                        f"{alias} movement acknowledgement auxiliary bytes "
+                        "were nonzero"
+                    )
+                if pending.template_id is None:
+                    self.state.movement_acknowledgements_with_unknown_template += 1
+                else:
+                    self.state.movement_acknowledgements_with_known_template += 1
+                    status_values = (
+                        self.state.movement_acknowledgement_values_by_template
+                        .setdefault(pending.template_id, set())
+                    )
+                    status_values.add(acknowledgement.status_value)
+                    self.state.movement_acknowledgements_by_template[
+                        pending.template_id
+                    ] += 1
+                    if len(status_values) > 1:
+                        self.issues.append(
+                            f"mob template {pending.template_id} has multiple "
+                            "movement acknowledgement values"
+                        )
             details = {
                 "entity": alias,
                 "known_entity": known_entity,
                 "sequence": acknowledgement.sequence,
                 "matched_submission": matched,
+                "submission_template_id": (
+                    pending.template_id if pending is not None else None
+                ),
+                "status_flag_matches_submission_control": (
+                    flag_matches_submission
+                ),
                 "status_flag": acknowledgement.status_flag,
                 "status_value": acknowledgement.status_value,
                 "status_auxiliary_1": acknowledgement.status_auxiliary_1,
@@ -986,12 +1174,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="mob_movement_acknowledgement",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=acknowledgement,
                 details=details,
-                issues=(
-                    "movement acknowledgement status meanings remain opaque",
-                ),
             )
         if opcode == 10:
             probe = HeartbeatProbe.parse(payload)
@@ -1102,6 +1287,81 @@ def analyze_gameplay_transcript(transcript: Transcript) -> GameplayAnalysis:
     )
 
 
+def derive_mob_movement_acknowledgement_policy(
+    transcript: Transcript,
+) -> MobMovementAcknowledgementPolicy:
+    """Derive only acknowledgement behavior proven by a validated capture."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.matched_movement_acknowledgements == 0:
+        raise ValueError(
+            "world transcript has no correlated mob movement acknowledgements"
+        )
+    if (
+        state.movement_acknowledgement_flag_matches
+        != state.matched_movement_acknowledgements
+    ):
+        raise ValueError(
+            "movement acknowledgement flag rule is not exact in this capture"
+        )
+    if (
+        state.movement_acknowledgement_zero_auxiliary_pairs
+        != state.matched_movement_acknowledgements
+    ):
+        raise ValueError(
+            "movement acknowledgement auxiliary bytes are not uniformly zero"
+        )
+    ambiguous_templates = {
+        template_id: sorted(status_values)
+        for template_id, status_values in (
+            state.movement_acknowledgement_values_by_template.items()
+        )
+        if len(status_values) != 1
+    }
+    if ambiguous_templates:
+        raise ValueError(
+            "movement acknowledgement values are not deterministic for "
+            f"templates {ambiguous_templates}"
+        )
+    status_values_by_template = {
+        template_id: next(iter(status_values))
+        for template_id, status_values in (
+            state.movement_acknowledgement_values_by_template.items()
+        )
+    }
+    if not status_values_by_template:
+        raise ValueError(
+            "world transcript has no acknowledgements for explicitly known "
+            "mob templates"
+        )
+    return MobMovementAcknowledgementPolicy(
+        status_values_by_template=status_values_by_template,
+        observations_by_template=dict(
+            state.movement_acknowledgements_by_template
+        ),
+        active_mob_templates={
+            object_id: entity.spawn.template_id
+            for object_id, entity in state.mobs.items()
+        },
+        field_epoch=state.field_epoch,
+        matched_pairs=state.matched_movement_acknowledgements,
+        known_template_pairs=(
+            state.movement_acknowledgements_with_known_template
+        ),
+        unknown_template_pairs=(
+            state.movement_acknowledgements_with_unknown_template
+        ),
+        flag_rule_matches=state.movement_acknowledgement_flag_matches,
+        zero_auxiliary_pairs=(
+            state.movement_acknowledgement_zero_auxiliary_pairs
+        ),
+        pending_submissions=state.pending_movements,
+    )
+
+
 def plan_final_field_npc_state_replay(
     transcript: Transcript,
 ) -> NpcStateReplayPlan:
@@ -1150,6 +1410,14 @@ def render_gameplay_analysis(
     movement_command_types = json.dumps(
         dict(sorted(state.movement_commands_by_type.items()))
     )
+    acknowledgement_template_values = json.dumps(
+        {
+            template_id: sorted(status_values)
+            for template_id, status_values in sorted(
+                state.movement_acknowledgement_values_by_template.items()
+            )
+        }
+    )
     lines = [
         f"source={analysis.source}",
         f"valid={analysis.valid}",
@@ -1190,6 +1458,20 @@ def render_gameplay_analysis(
             f"matched:{state.matched_movement_acknowledgements} "
             f"unmatched:{state.unmatched_movement_acknowledgements} "
             f"pending:{state.pending_movements}"
+        ),
+        (
+            "movement_ack_policy="
+            f"flag_matches:{state.movement_acknowledgement_flag_matches} "
+            f"flag_mismatches:{state.movement_acknowledgement_flag_mismatches} "
+            "zero_auxiliary:"
+            f"{state.movement_acknowledgement_zero_auxiliary_pairs} "
+            "nonzero_auxiliary:"
+            f"{state.movement_acknowledgement_nonzero_auxiliary_pairs} "
+            "known_template_pairs:"
+            f"{state.movement_acknowledgements_with_known_template} "
+            "unknown_template_pairs:"
+            f"{state.movement_acknowledgements_with_unknown_template} "
+            f"template_values:{acknowledgement_template_values}"
         ),
         (
             f"heartbeats=probed:{state.heartbeat_probes} "

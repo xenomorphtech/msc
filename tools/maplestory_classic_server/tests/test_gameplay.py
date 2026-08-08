@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     analyze_gameplay_transcript,
+    derive_mob_movement_acknowledgement_policy,
     plan_final_field_npc_state_replay,
     render_gameplay_analysis,
     world_session_termination_frame_index,
@@ -71,7 +72,7 @@ def fixture_npc() -> NpcSpawn:
 
 def fixture_movement_path() -> MobMovementPath:
     return MobMovementPath(
-        opaque_control=b"sanitized-control".ljust(19, b"\x00"),
+        opaque_control=b"\x00anitized-control".ljust(19, b"\x00"),
         reference_x=100,
         reference_y=-200,
         commands=(
@@ -114,6 +115,9 @@ def fixture_gameplay_transcript(
     leave_mob: bool = False,
     terminate: bool = False,
     close: bool = True,
+    acknowledgement_flag: int = 0,
+    acknowledgement_auxiliary_1: int = 0,
+    acknowledgement_auxiliary_2: int = 0,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -213,7 +217,10 @@ def fixture_gameplay_transcript(
         MobMovementAcknowledgement(
             object_id=MOB_OBJECT_ID,
             sequence=9,
-            opaque_status=b"\x00" * 5,
+            status_flag=acknowledgement_flag,
+            status_value=35,
+            status_auxiliary_1=acknowledgement_auxiliary_1,
+            status_auxiliary_2=acknowledgement_auxiliary_2,
         ).to_bytes(),
     )
     if leave_mob:
@@ -315,7 +322,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
         acknowledgement = MobMovementAcknowledgement(
             object_id=MOB_OBJECT_ID,
             sequence=42,
-            opaque_status=b"\x01\x23\x00\x00\x00",
+            status_flag=1,
+            status_value=35,
+            status_auxiliary_1=0,
+            status_auxiliary_2=0,
         )
 
         self.assertEqual(
@@ -364,7 +374,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(acknowledgement.status_auxiliary_2, 0)
         with self.assertRaises(PacketShapeError):
             replace(
-                acknowledgement, opaque_status=b"\x02\x23\x00\x00\x00"
+                acknowledgement, status_flag=2
             ).to_bytes()
 
     def test_movement_path_rejects_unmodeled_or_truncated_commands(self) -> None:
@@ -478,7 +488,21 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(
             analysis.state.movement_acknowledgement_statuses,
-            {(0, 0, 0, 0): 1},
+            {(0, 35, 0, 0): 1},
+        )
+        self.assertEqual(analysis.state.movement_acknowledgement_flag_matches, 1)
+        self.assertEqual(
+            analysis.state.movement_acknowledgement_flag_mismatches, 0
+        )
+        self.assertEqual(
+            analysis.state.movement_acknowledgement_zero_auxiliary_pairs, 1
+        )
+        self.assertEqual(
+            analysis.state.movement_acknowledgements_with_known_template, 1
+        )
+        self.assertEqual(
+            analysis.state.movement_acknowledgement_values_by_template,
+            {210_100: {35}},
         )
         self.assertEqual(analysis.state.pending_movements, 0)
         self.assertEqual(analysis.state.heartbeat_probes, 1)
@@ -532,6 +556,86 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("matched_submission\":true", report)
         self.assertIn("command_types\":[0]", report)
         self.assertIn('commands:1 command_types:{"0": 1}', report)
+        self.assertIn(
+            "movement_ack_policy=flag_matches:1 flag_mismatches:0",
+            report,
+        )
+
+    def test_derives_identifier_free_movement_acknowledgement_policy(self) -> None:
+        policy = derive_mob_movement_acknowledgement_policy(
+            fixture_gameplay_transcript()
+        )
+        submission = MobMovementSubmission(
+            object_id=MOB_OBJECT_ID,
+            sequence=10,
+            opaque_movement=fixture_movement_path().to_bytes(),
+        )
+
+        self.assertEqual(
+            policy.acknowledge(submission),
+            MobMovementAcknowledgement(
+                object_id=MOB_OBJECT_ID,
+                sequence=10,
+                status_flag=0,
+                status_value=35,
+                status_auxiliary_1=0,
+                status_auxiliary_2=0,
+            ),
+        )
+        safe = policy.safe_dict()
+        self.assertEqual(
+            safe["status_values_by_template"],
+            [
+                {
+                    "template_id": 210_100,
+                    "status_value": 35,
+                    "observations": 1,
+                }
+            ],
+        )
+        self.assertEqual(safe["active_known_mob_count"], 1)
+        self.assertNotIn(str(MOB_OBJECT_ID), str(safe))
+        nonzero_control_path = replace(
+            fixture_movement_path(),
+            opaque_control=(
+                b"\x01" + fixture_movement_path().opaque_control[1:]
+            ),
+        )
+        flagged = policy.acknowledge(
+            MobMovementSubmission(
+                object_id=MOB_OBJECT_ID,
+                sequence=11,
+                opaque_movement=nonzero_control_path.to_bytes(),
+            )
+        )
+        self.assertEqual(flagged.status_flag, 1)
+
+    def test_movement_acknowledgement_policy_rejects_unknown_active_mob(
+        self,
+    ) -> None:
+        policy = derive_mob_movement_acknowledgement_policy(
+            fixture_gameplay_transcript()
+        )
+        unknown_submission = MobMovementSubmission(
+            object_id=MOB_OBJECT_ID + 1,
+            sequence=10,
+            opaque_movement=fixture_movement_path().to_bytes(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "no explicit active"):
+            policy.acknowledge(unknown_submission)
+
+    def test_movement_acknowledgement_policy_rejects_capture_rule_mismatch(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(ValueError, "packet/state validation"):
+            derive_mob_movement_acknowledgement_policy(
+                fixture_gameplay_transcript(acknowledgement_flag=1)
+            )
+        with self.assertRaisesRegex(ValueError, "packet/state validation"):
+            derive_mob_movement_acknowledgement_policy(
+                fixture_gameplay_transcript(acknowledgement_auxiliary_1=1)
+            )
 
     def test_mob_leave_removes_known_active_entity(self) -> None:
         analysis = analyze_gameplay_transcript(
