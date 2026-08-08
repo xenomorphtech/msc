@@ -313,6 +313,72 @@ The selected character ID must equal the handoff character ID. The replay's
 `?handoff=127.0.0.1:PORT` PCAP-frame transform changes only address and port
 after validating this shape.
 
+## Initial field snapshot (`server opcode 157`, large variant)
+
+The first opcode-`157` packet on each validated world connection contains a
+typed character/stat prefix followed by a much larger nested state tail. The
+stream-`92` plaintext is 4,464 bytes and the independent stream-`114`
+plaintext is 4,506 bytes. Both consume the same 112-byte prefix exactly and
+round-trip byte-for-byte through `InitialFieldSnapshot`:
+
+```text
+uint16 opcode = 157
+uint32 marker = 23
+uint8  reserved_flag = 0
+uint8  contains_character_data = 1
+uint8  character_data_mode = 1
+uint16 reserved = 0
+uint32 opaque_session_value[3]
+int64  sentinel = -1
+uint8  character_record_prefix = 0
+uint32 character_data_flags
+uint32 character_id
+string character_name                 # uint16 count + UTF-16LE + zero byte
+uint8  gender
+uint8  skin
+uint32 face_id
+uint32 hair_id
+uint64 companion_id
+uint8  level
+uint16 job_id
+uint16 strength
+uint16 dexterity
+uint16 intelligence
+uint16 luck
+uint16 current_hp
+uint16 max_hp
+uint16 current_mp
+uint16 max_mp
+uint16 ability_points
+uint16 skill_points
+uint32 experience
+int16  fame
+uint32 map_id
+uint8  portal_index
+uint8  opaque_state_flag
+uint64 opaque_state_value
+byte[] opaque_inventory_skill_tail
+```
+
+The final tail is bounded and preserved rather than guessed: 4,352 bytes in
+stream `92`, and 4,394 bytes in stream `114`. Reports expose the character-name
+code-unit count but not the text or raw character id. The gameplay fold checks
+the embedded character id against client opcode `8`, then seeds the player
+level/job/stats, HP/MP, progression values, map, and portal in game state and
+emits a `field_snapshot_received` event with variant
+`initial_character_snapshot`.
+
+The layout is supported by a complete live primitive-reader trace of the
+stream-`114` packet: 734 observed calls consumed the body through the final
+field. The trace also showed that RVA `0x1cd0560` is a direct one-byte reader,
+while RVAs `0x1cd0730` and `0x1cd0790` account for the two- and eight-byte gaps
+in the typed prefix. Semantic names stop at the 112-byte boundary until the
+nested tail structures receive the same capture-backed treatment.
+
+The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
+fully decoded and updates transition sequence, map, portal, HP, and server
+clock without replacing the initial player-stat model.
+
 ## `58880` exchange
 
 The client sent a stable HTTP/1.1 request:

@@ -4,8 +4,11 @@ Source this script after attaching GDB to Maplestory_Classic.exe, then continue.
 The breakpoints auto-continue and only log readers whose packet opcode matches
 ``MAPLE_TRACE_OPCODE`` (default 0).  Set it to ``any`` when a narrow caller-RVA
 range already identifies the handler and the packet object's opcode field is
-not yet known.  Stop GDB with Ctrl-C after the packet has been dispatched, then
-detach.
+not yet known.  ``MAPLE_TRACE_DUMP_BYTES`` controls the repeated buffer preview
+(default 512; set it to 0 for compact traces), while
+``MAPLE_TRACE_STOP_CURSOR`` disables all reader breakpoints after logging a
+matching cursor.  Stop GDB with Ctrl-C after the packet has been dispatched,
+then detach.
 """
 
 from __future__ import annotations
@@ -21,7 +24,9 @@ READER_RVAS = {
     0x1CD0530: "read_byte",
     0x1CD0560: "reader_1cd0560",
     0x1CD0700: "read_signed_byte",
+    0x1CD0730: "read_u16",
     0x1CD0760: "reader_1cd0760",
+    0x1CD0790: "read_u64",
     0x1CD09D0: "reader_1cd09d0",
     0x1CD0B00: "reader_1cd0b00",
     0x1CD0CA0: "reader_1cd0ca0",
@@ -31,7 +36,7 @@ PACKET_CURSOR_OFFSET = 0x18
 PACKET_OPCODE_OFFSET = 0x1C
 MANAGED_ARRAY_LENGTH_OFFSET = 0x18
 MANAGED_ARRAY_DATA_OFFSET = 0x20
-MAX_DUMP_BYTES = 512
+DEFAULT_DUMP_BYTES = 512
 LOGIN_OPCODE4_RESULT_XOR_RVA = 0x6840484
 LOGIN_OPCODE4_STATE_ADD_RVA = 0x6840488
 LOGIN_OPCODE4_DECISION_RVA = 0xC13108
@@ -75,6 +80,13 @@ caller_rva_end = int(
 )
 if caller_rva_start < 0 or caller_rva_end <= caller_rva_start:
     raise gdb.GdbError("MAPLE_TRACE_CALLER_RVA_START/END define an invalid range")
+dump_bytes = int(os.environ.get("MAPLE_TRACE_DUMP_BYTES", str(DEFAULT_DUMP_BYTES)), 0)
+stop_cursor = int(os.environ.get("MAPLE_TRACE_STOP_CURSOR", "0"), 0)
+if not 0 <= dump_bytes <= 1_000_000:
+    raise gdb.GdbError("MAPLE_TRACE_DUMP_BYTES must be between 0 and 1000000")
+if not 0 <= stop_cursor <= 0xFFFFFFFF:
+    raise gdb.GdbError("MAPLE_TRACE_STOP_CURSOR must be a uint")
+packet_read_breakpoints: list[PacketReadBreakpoint] = []
 
 
 class PacketReadBreakpoint(gdb.Breakpoint):
@@ -95,7 +107,7 @@ class PacketReadBreakpoint(gdb.Breakpoint):
             length = read_u64(buffer_pointer + MANAGED_ARRAY_LENGTH_OFFSET)
             if length > 1_000_000:
                 raise ValueError(f"implausible buffer length {length}")
-            dumped_length = min(length, MAX_DUMP_BYTES)
+            dumped_length = min(length, dump_bytes)
             # The login packet object keeps zero in its cached opcode field.
             # The first decrypted frame still has its four-byte encrypted-frame
             # header at the start of the managed buffer, followed by the opcode.
@@ -107,21 +119,35 @@ class PacketReadBreakpoint(gdb.Breakpoint):
             )
             if target_opcode is not None and frame_opcode != target_opcode:
                 return False
-            payload = bytes(
-                inferior.read_memory(
-                    buffer_pointer + MANAGED_ARRAY_DATA_OFFSET, dumped_length
+            payload = (
+                bytes(
+                    inferior.read_memory(
+                        buffer_pointer + MANAGED_ARRAY_DATA_OFFSET, dumped_length
+                    )
                 )
+                if dumped_length
+                else b""
             )
             suffix = "..." if dumped_length < length else ""
+            buffer_field = (
+                f" buffer={payload.hex()}{suffix}" if dumped_length else ""
+            )
             gdb.write(
                 f"packet_read label={self.label} rva={self.rva:#x} "
                 f"caller_rva={caller_rva:#x} packet={packet:#x} "
                 f"cached_opcode={cached_opcode:#x} "
                 f"frame_opcode="
                 f"{'none' if frame_opcode is None else hex(frame_opcode)} "
-                f"cursor={cursor} length={length} "
-                f"buffer={payload.hex()}{suffix}\n"
+                f"cursor={cursor} length={length}"
+                f"{buffer_field}\n"
             )
+            if stop_cursor and cursor >= stop_cursor:
+                for breakpoint in packet_read_breakpoints:
+                    breakpoint.enabled = False
+                gdb.write(
+                    f"packet_read_trace_complete cursor={cursor} "
+                    f"breakpoints_disabled={len(packet_read_breakpoints)}\n"
+                )
         except Exception as error:  # Keep tracing unrelated/malformed hits.
             gdb.write(
                 f"packet_read_error label={self.label} rva={self.rva:#x} "
@@ -160,7 +186,7 @@ class Opcode4DecisionBreakpoint(gdb.Breakpoint):
 
 
 for reader_rva, reader_label in READER_RVAS.items():
-    PacketReadBreakpoint(reader_rva, reader_label)
+    packet_read_breakpoints.append(PacketReadBreakpoint(reader_rva, reader_label))
 if os.environ.get("MAPLE_TRACE_OPCODE4_DECISIONS", "0") == "1":
     Opcode4DecisionBreakpoint(LOGIN_OPCODE4_DECISION_RVA, "result_check")
     Opcode4DecisionBreakpoint(LOGIN_OPCODE4_SUCCESS_RVA, "success_path")
@@ -169,6 +195,7 @@ gdb.write(
     f"opcode={'any' if target_opcode is None else hex(target_opcode)} "
     f"caller_range={caller_rva_start:#x}:{caller_rva_end:#x} "
     f"readers={len(READER_RVAS)} "
+    f"dump_bytes={dump_bytes} stop_cursor={stop_cursor} "
     f"opcode4_result_xor={read_u32(base + LOGIN_OPCODE4_RESULT_XOR_RVA):#x} "
     f"opcode4_success_result="
     f"{read_u32(base + LOGIN_OPCODE4_RESULT_XOR_RVA) ^ 0x7DFCBC3C:#x}\n"

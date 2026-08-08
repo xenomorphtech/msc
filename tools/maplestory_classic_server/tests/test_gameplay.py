@@ -22,6 +22,8 @@ from maple_server.packets import (  # noqa: E402
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
+    InitialCharacterSnapshot,
+    InitialFieldSnapshot,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -131,6 +133,48 @@ def fixture_compact_field_transition() -> CompactFieldTransition:
     )
 
 
+def fixture_initial_field_snapshot() -> InitialFieldSnapshot:
+    return InitialFieldSnapshot(
+        marker=23,
+        reserved_flag=0,
+        contains_character_data=1,
+        character_data_mode=1,
+        reserved_u16=0,
+        opaque_session_u32s=(101, 202, 303),
+        sentinel_i64=-1,
+        character_record_prefix=0,
+        character=InitialCharacterSnapshot(
+            data_flags=302_104,
+            character_id=CHARACTER_ID,
+            name="player",
+            gender=1,
+            skin=0,
+            face_id=21_201,
+            hair_id=31_047,
+            companion_id=0,
+            level=12,
+            job_id=200,
+            strength=4,
+            dexterity=4,
+            intelligence=57,
+            luck=15,
+            current_hp=70,
+            max_hp=222,
+            current_mp=136,
+            max_mp=342,
+            ability_points=0,
+            skill_points=5,
+            experience=1_567,
+            fame=0,
+            map_id=101_000_000,
+            portal_index=1,
+            opaque_state_flag=1,
+            opaque_state_u64=0,
+        ),
+        opaque_tail=b"sanitized-initial-tail".ljust(32, b"\x00"),
+    )
+
+
 def fixture_gameplay_transcript(
     *,
     repeat_npc_update: bool = False,
@@ -141,6 +185,7 @@ def fixture_gameplay_transcript(
     acknowledgement_auxiliary_1: int = 0,
     acknowledgement_auxiliary_2: int = 0,
     compact_transition: bool = False,
+    initial_snapshot: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -185,7 +230,13 @@ def fixture_gameplay_transcript(
     )
     append(
         "server_to_client",
-        FieldSnapshotEnvelope(opaque_snapshot=b"sanitized-field").to_bytes(),
+        (
+            fixture_initial_field_snapshot().to_bytes()
+            if initial_snapshot
+            else FieldSnapshotEnvelope(
+                opaque_snapshot=b"sanitized-field"
+            ).to_bytes()
+        ),
     )
     append("server_to_client", fixture_npc().to_bytes())
     append(
@@ -281,6 +332,20 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_initial_field_snapshot_typed_prefix_round_trip(self) -> None:
+        snapshot = fixture_initial_field_snapshot()
+        encoded = snapshot.to_bytes()
+
+        self.assertEqual(InitialFieldSnapshot.parse(encoded), snapshot)
+        self.assertEqual(
+            snapshot.typed_prefix_bytes,
+            len(encoded) - len(snapshot.opaque_tail),
+        )
+        with self.assertRaisesRegex(PacketShapeError, "marker"):
+            replace(snapshot, marker=24).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "tail"):
+            replace(snapshot, opaque_tail=b"").to_bytes()
+
     def test_compact_field_transition_round_trip(self) -> None:
         transition = fixture_compact_field_transition()
 
@@ -499,6 +564,35 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
 
 class GameplayStateFoldTest(unittest.TestCase):
+    def test_folds_initial_snapshot_character_prefix_into_player_state(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(initial_snapshot=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.state.initial_field_snapshots, 1)
+        self.assertEqual(analysis.state.character_level, 12)
+        self.assertEqual(analysis.state.job_id, 200)
+        self.assertEqual(analysis.state.map_id, 101_000_000)
+        self.assertEqual(analysis.state.portal_index, 1)
+        self.assertEqual(analysis.state.current_hp, 70)
+        self.assertEqual(analysis.state.max_hp, 222)
+        self.assertEqual(analysis.state.current_mp, 136)
+        self.assertEqual(analysis.state.max_mp, 342)
+        observation = next(
+            item
+            for item in analysis.observations
+            if item.kind == "initial_field_snapshot"
+        )
+        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(
+            observation.details["variant"], "initial_character_snapshot"
+        )
+        self.assertEqual(observation.details["character_name_code_units"], 6)
+        self.assertEqual(observation.details["map_id"], 101_000_000)
+        self.assertIn("tail remains opaque", observation.issues[0])
+        self.assertNotIn('"name": "player"', analysis.to_json())
+
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
 

@@ -159,8 +159,9 @@ The gameplay fold currently models these capture-backed boundaries:
 
 - client opcode `8`: world-entry envelope (character id plus opaque ticket),
 - server opcode `157`: field snapshot/change envelope; the initial 4.4 KB
-  character snapshot remains opaque, while the repeated 95-byte compact
-  transition variant is fully bounded,
+  variant has a typed 112-byte character/stat prefix and a bounded opaque
+  inventory/skill tail, while the repeated 95-byte compact transition variant
+  is fully bounded,
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence,
 - server opcode `300`: complete 22-byte NPC spawn records,
 - server opcode `303`: complete 8-byte NPC state updates,
@@ -207,8 +208,22 @@ final folded state is map `101000000`, portal `6`, HP `50`. After accounting for
 UTC+8, each server-local clock value precedes packet capture by 1.097-1.183
 seconds. Reports expose string lengths, not their potentially identifying text,
 and retain neutral names for the three text roles and final integer. The first
-large opcode-`157` packet in each world connection remains the next snapshot
-decode boundary.
+large opcode-`157` packet now decodes through its 112-byte plaintext prefix:
+marker/branch flags, three connection-local integers, signed `-1` sentinel,
+character-data flags, character id, UTF-16 name, appearance, level/job, four
+base stats, HP/MP pairs, AP/SP, EXP, fame, map id, portal, and two still-neutral
+state fields. The character name is omitted from reports; only its UTF-16 code
+unit count is exposed. The remaining 4,352 bytes in stream `92` are preserved
+as one opaque tail. The same parser round-trips the independent stream-`114`
+initial packet byte-for-byte, with a 4,394-byte opaque tail, and its embedded
+character id matches the preceding world-entry request in both streams.
+
+The initial snapshot now seeds player and field game state immediately. For
+stream `114`, the emitted `field_snapshot_received` event reports level `12`,
+job `200`, map `101000000`, portal `6`, HP `50/222`, MP `97/342`, and the
+remaining base/progression values without exposing the character name or raw
+identifier. Its packet observation is deliberately `partial`, because the
+inventory/skill tail is lossless but not yet interpreted.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with

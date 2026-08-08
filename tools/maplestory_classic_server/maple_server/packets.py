@@ -51,6 +51,9 @@ class PacketReader:
     def i64(self, field: str) -> int:
         return int.from_bytes(self._read(8, field), "little", signed=True)
 
+    def u64(self, field: str) -> int:
+        return int.from_bytes(self._read(8, field), "little")
+
     def bytes(self, size: int, field: str) -> bytes:
         return self._read(size, field)
 
@@ -698,6 +701,228 @@ class FieldSnapshotEnvelope:
         if not self.opaque_snapshot:
             raise PacketShapeError("field snapshot body cannot be empty")
         return struct.pack("<H", self.opcode) + self.opaque_snapshot
+
+
+@dataclass(frozen=True)
+class InitialCharacterSnapshot:
+    """Typed character-stat prefix embedded in the initial field snapshot."""
+
+    data_flags: int
+    character_id: int
+    name: str
+    gender: int
+    skin: int
+    face_id: int
+    hair_id: int
+    companion_id: int
+    level: int
+    job_id: int
+    strength: int
+    dexterity: int
+    intelligence: int
+    luck: int
+    current_hp: int
+    max_hp: int
+    current_mp: int
+    max_mp: int
+    ability_points: int
+    skill_points: int
+    experience: int
+    fame: int
+    map_id: int
+    portal_index: int
+    opaque_state_flag: int
+    opaque_state_u64: int
+
+    @classmethod
+    def parse_from(cls, reader: PacketReader) -> "InitialCharacterSnapshot":
+        snapshot = cls(
+            data_flags=reader.u32("character.data_flags"),
+            character_id=reader.u32("character.character_id"),
+            name=reader.utf16_string("character.name", trailing_byte=True),
+            gender=reader.u8("character.gender"),
+            skin=reader.u8("character.skin"),
+            face_id=reader.u32("character.face_id"),
+            hair_id=reader.u32("character.hair_id"),
+            companion_id=reader.u64("character.companion_id"),
+            level=reader.u8("character.level"),
+            job_id=reader.u16("character.job_id"),
+            strength=reader.u16("character.strength"),
+            dexterity=reader.u16("character.dexterity"),
+            intelligence=reader.u16("character.intelligence"),
+            luck=reader.u16("character.luck"),
+            current_hp=reader.u16("character.current_hp"),
+            max_hp=reader.u16("character.max_hp"),
+            current_mp=reader.u16("character.current_mp"),
+            max_mp=reader.u16("character.max_mp"),
+            ability_points=reader.u16("character.ability_points"),
+            skill_points=reader.u16("character.skill_points"),
+            experience=reader.u32("character.experience"),
+            fame=reader.i16("character.fame"),
+            map_id=reader.u32("character.map_id"),
+            portal_index=reader.u8("character.portal_index"),
+            opaque_state_flag=reader.u8("character.opaque_state_flag"),
+            opaque_state_u64=reader.u64("character.opaque_state_u64"),
+        )
+        snapshot._validate()
+        return snapshot
+
+    def _validate(self) -> None:
+        if not self.name:
+            raise PacketShapeError("initial character snapshot name cannot be empty")
+        if self.gender not in (0, 1):
+            raise PacketShapeError(
+                f"initial character snapshot gender is {self.gender}, expected 0 or 1"
+            )
+        if self.level == 0:
+            raise PacketShapeError("initial character snapshot level cannot be zero")
+        if self.character_id == 0:
+            raise PacketShapeError(
+                "initial character snapshot character id cannot be zero"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return b"".join(
+                (
+                    struct.pack("<II", self.data_flags, self.character_id),
+                    encode_utf16_string(self.name, trailing_byte=True),
+                    struct.pack(
+                        "<BBIIQBH",
+                        self.gender,
+                        self.skin,
+                        self.face_id,
+                        self.hair_id,
+                        self.companion_id,
+                        self.level,
+                        self.job_id,
+                    ),
+                    struct.pack(
+                        "<HHHH",
+                        self.strength,
+                        self.dexterity,
+                        self.intelligence,
+                        self.luck,
+                    ),
+                    struct.pack(
+                        "<HHHHHH",
+                        self.current_hp,
+                        self.max_hp,
+                        self.current_mp,
+                        self.max_mp,
+                        self.ability_points,
+                        self.skill_points,
+                    ),
+                    struct.pack(
+                        "<IhIBBQ",
+                        self.experience,
+                        self.fame,
+                        self.map_id,
+                        self.portal_index,
+                        self.opaque_state_flag,
+                        self.opaque_state_u64,
+                    ),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"initial character snapshot field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class InitialFieldSnapshot:
+    """Initial opcode-157 field packet with a typed character-stat prefix."""
+
+    marker: int
+    reserved_flag: int
+    contains_character_data: int
+    character_data_mode: int
+    reserved_u16: int
+    opaque_session_u32s: tuple[int, int, int]
+    sentinel_i64: int
+    character_record_prefix: int
+    character: InitialCharacterSnapshot
+    opaque_tail: bytes
+    opcode: int = 157
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "InitialFieldSnapshot":
+        reader = PacketReader(payload, packet_name="initial_field_snapshot")
+        _expect_opcode(reader, 157)
+        snapshot = cls(
+            marker=reader.u32("marker"),
+            reserved_flag=reader.u8("reserved_flag"),
+            contains_character_data=reader.u8("contains_character_data"),
+            character_data_mode=reader.u8("character_data_mode"),
+            reserved_u16=reader.u16("reserved_u16"),
+            opaque_session_u32s=(
+                reader.u32("opaque_session_u32_1"),
+                reader.u32("opaque_session_u32_2"),
+                reader.u32("opaque_session_u32_3"),
+            ),
+            sentinel_i64=reader.i64("sentinel_i64"),
+            character_record_prefix=reader.u8("character_record_prefix"),
+            character=InitialCharacterSnapshot.parse_from(reader),
+            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+        )
+        reader.finish()
+        snapshot._validate()
+        return snapshot
+
+    @property
+    def typed_prefix_bytes(self) -> int:
+        return len(self.to_bytes()) - len(self.opaque_tail)
+
+    def _validate(self) -> None:
+        if self.marker != 23:
+            raise PacketShapeError(
+                f"initial field snapshot marker is {self.marker}, expected 23"
+            )
+        if self.reserved_flag != 0 or self.reserved_u16 != 0:
+            raise PacketShapeError(
+                "initial field snapshot reserved fields must be zero"
+            )
+        if self.contains_character_data != 1 or self.character_data_mode != 1:
+            raise PacketShapeError(
+                "initial field snapshot character-data flags must both be one"
+            )
+        if self.sentinel_i64 != -1:
+            raise PacketShapeError(
+                "initial field snapshot signed sentinel must be minus one"
+            )
+        if self.character_record_prefix != 0:
+            raise PacketShapeError(
+                "initial field snapshot character-record prefix must be zero"
+            )
+        if len(self.opaque_session_u32s) != 3:
+            raise PacketShapeError(
+                "initial field snapshot must contain three opaque session integers"
+            )
+        if not self.opaque_tail:
+            raise PacketShapeError("initial field snapshot tail cannot be empty")
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            prefix = struct.pack(
+                "<HIBBBHIIIqB",
+                self.opcode,
+                self.marker,
+                self.reserved_flag,
+                self.contains_character_data,
+                self.character_data_mode,
+                self.reserved_u16,
+                *self.opaque_session_u32s,
+                self.sentinel_i64,
+                self.character_record_prefix,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"initial field snapshot field is out of range: {error}"
+            ) from error
+        return prefix + self.character.to_bytes() + self.opaque_tail
 
 
 @dataclass(frozen=True)

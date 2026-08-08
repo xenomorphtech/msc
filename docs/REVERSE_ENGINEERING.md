@@ -154,6 +154,7 @@ gdb_patch_login_opcode1_transition.py
 gdb_patch_login_opcode2_transition.py
 gdb_dump_world_parser.py
 gdb_stage_opcode2_controller_capture.py
+gdb_trace_packet_reads.py
 ```
 
 `gdb_dump_world_parser.py` reports only structural fields and handler branches;
@@ -185,6 +186,28 @@ the earlier false zero-world result. The corrected dump reports `worlds=1`.
 
 Attaching before NGS finishes startup can still invalidate the run. Do not
 leave a breakpoint probe attached, and always restore process-local patches.
+
+`gdb_trace_packet_reads.py` traces the build's packet primitive readers by RVA.
+Set `MAPLE_TRACE_OPCODE` to restrict output to one plaintext opcode,
+`MAPLE_TRACE_DUMP_BYTES=0` to omit repeated packet-buffer hex, and
+`MAPLE_TRACE_STOP_CURSOR` to disable all reader breakpoints at a known final
+cursor. The compact opcode-`157` run used:
+
+```sh
+MAPLE_TRACE_OPCODE=157 \
+MAPLE_TRACE_DUMP_BYTES=0 \
+MAPLE_TRACE_STOP_CURSOR=4506
+```
+
+The stream-`114` initial field packet produced 734 reader calls and reached the
+configured final cursor, which made the trace useful as a complete structural
+read ledger rather than a truncated console dump. Use GDB non-stop mode and
+`continue -a`; an all-stop attach stalls Wine's worker/GC threads. Even the
+non-stop trace can destabilize the instrumented client after hundreds of
+breakpoints, so treat that client process as sacrificial and validate the
+recovered layout offline against the PCAP. The decoded 112-byte prefix now
+round-trips both stream `92` and stream `114`; the untyped remainder stays a
+single lossless tail.
 
 ## Next debugger work
 

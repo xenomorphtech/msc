@@ -18,6 +18,7 @@ from .packets import (
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
+    InitialFieldSnapshot,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -98,11 +99,25 @@ class GameplayGameState:
     phase: GameplayPhase = GameplayPhase.CONNECTED
     field_epoch: int = 0
     field_load_stage: int | None = None
+    initial_field_snapshots: int = 0
     compact_field_transitions: int = 0
     transition_sequence: int | None = None
     map_id: int | None = None
     portal_index: int | None = None
     current_hp: int | None = None
+    max_hp: int | None = None
+    current_mp: int | None = None
+    max_mp: int | None = None
+    character_level: int | None = None
+    job_id: int | None = None
+    strength: int | None = None
+    dexterity: int | None = None
+    intelligence: int | None = None
+    luck: int | None = None
+    ability_points: int | None = None
+    skill_points: int | None = None
+    experience: int | None = None
+    fame: int | None = None
     server_local_filetime_ticks: int | None = None
     entry_character_id: int | None = field(default=None, repr=False)
     npcs: dict[int, NpcEntity] = field(default_factory=dict, repr=False)
@@ -332,6 +347,7 @@ class GameplayAnalysis:
                 "phase": self.state.phase.value,
                 "field_epoch": self.state.field_epoch,
                 "field_load_stage": self.state.field_load_stage,
+                "initial_field_snapshots": self.state.initial_field_snapshots,
                 "compact_field_transitions": (
                     self.state.compact_field_transitions
                 ),
@@ -339,6 +355,22 @@ class GameplayAnalysis:
                 "map_id": self.state.map_id,
                 "portal_index": self.state.portal_index,
                 "current_hp": self.state.current_hp,
+                "player": {
+                    "level": self.state.character_level,
+                    "job_id": self.state.job_id,
+                    "strength": self.state.strength,
+                    "dexterity": self.state.dexterity,
+                    "intelligence": self.state.intelligence,
+                    "luck": self.state.luck,
+                    "current_hp": self.state.current_hp,
+                    "max_hp": self.state.max_hp,
+                    "current_mp": self.state.current_mp,
+                    "max_mp": self.state.max_mp,
+                    "ability_points": self.state.ability_points,
+                    "skill_points": self.state.skill_points,
+                    "experience": self.state.experience,
+                    "fame": self.state.fame,
+                },
                 "server_local_filetime_ticks": (
                     self.state.server_local_filetime_ticks
                 ),
@@ -842,6 +874,11 @@ class GameplayStateFold:
                 if len(snapshot.opaque_snapshot) == 93
                 else None
             )
+            initial_snapshot = (
+                InitialFieldSnapshot.parse(payload)
+                if transition is None and len(payload) >= 112
+                else None
+            )
             cleared_npcs = len(self.state.npcs)
             cleared_mobs = len(self.state.mobs)
             if self.state.entry_character_id is None:
@@ -864,10 +901,71 @@ class GameplayStateFold:
                 "variant": (
                     "compact_transition"
                     if transition is not None
-                    else "opaque_snapshot"
+                    else (
+                        "initial_character_snapshot"
+                        if initial_snapshot is not None
+                        else "opaque_snapshot"
+                    )
                 ),
             }
-            if transition is None:
+            event_identifiers: dict[str, object] = {}
+            if initial_snapshot is not None:
+                character = initial_snapshot.character
+                self.state.initial_field_snapshots += 1
+                self.state.transition_sequence = None
+                self.state.map_id = character.map_id
+                self.state.portal_index = character.portal_index
+                self.state.current_hp = character.current_hp
+                self.state.max_hp = character.max_hp
+                self.state.current_mp = character.current_mp
+                self.state.max_mp = character.max_mp
+                self.state.character_level = character.level
+                self.state.job_id = character.job_id
+                self.state.strength = character.strength
+                self.state.dexterity = character.dexterity
+                self.state.intelligence = character.intelligence
+                self.state.luck = character.luck
+                self.state.ability_points = character.ability_points
+                self.state.skill_points = character.skill_points
+                self.state.experience = character.experience
+                self.state.fame = character.fame
+                self.state.server_local_filetime_ticks = None
+                if (
+                    self.state.entry_character_id is not None
+                    and character.character_id != self.state.entry_character_id
+                ):
+                    self.issues.append(
+                        "initial field snapshot character id does not match "
+                        "the world entry request"
+                    )
+                details.update(
+                    {
+                        "typed_prefix_bytes": initial_snapshot.typed_prefix_bytes,
+                        "opaque_tail_bytes": len(initial_snapshot.opaque_tail),
+                        "character_data_flags": character.data_flags,
+                        "character_name_code_units": (
+                            len(character.name.encode("utf-16-le")) // 2
+                        ),
+                        "level": character.level,
+                        "job_id": character.job_id,
+                        "strength": character.strength,
+                        "dexterity": character.dexterity,
+                        "intelligence": character.intelligence,
+                        "luck": character.luck,
+                        "current_hp": character.current_hp,
+                        "max_hp": character.max_hp,
+                        "current_mp": character.current_mp,
+                        "max_mp": character.max_mp,
+                        "ability_points": character.ability_points,
+                        "skill_points": character.skill_points,
+                        "experience": character.experience,
+                        "fame": character.fame,
+                        "map_id": character.map_id,
+                        "portal_index": character.portal_index,
+                    }
+                )
+                event_identifiers["character_id"] = character.character_id
+            elif transition is None:
                 self.state.transition_sequence = None
                 self.state.map_id = None
                 self.state.portal_index = None
@@ -910,25 +1008,46 @@ class GameplayStateFold:
                         "unknown_tail_u32": transition.unknown_tail_u32,
                     }
                 )
-            self._event(frame, "field_snapshot_received", details=details)
+            self._event(
+                frame,
+                "field_snapshot_received",
+                details=details,
+                identifiers=event_identifiers,
+            )
             return self._observation(
                 frame,
                 kind=(
                     "compact_field_transition"
                     if transition is not None
-                    else "field_snapshot"
+                    else (
+                        "initial_field_snapshot"
+                        if initial_snapshot is not None
+                        else "field_snapshot"
+                    )
                 ),
                 coverage=(
                     ShapeCoverage.FULL
                     if transition is not None
                     else ShapeCoverage.PARTIAL
                 ),
-                parsed=transition if transition is not None else snapshot,
+                parsed=(
+                    transition
+                    if transition is not None
+                    else (
+                        initial_snapshot
+                        if initial_snapshot is not None
+                        else snapshot
+                    )
+                ),
                 details=details,
                 issues=(
                     ()
                     if transition is not None
-                    else ("field snapshot body remains opaque",)
+                    else (
+                        ("initial field snapshot tail remains opaque",)
+                        if initial_snapshot is not None
+                        else ("field snapshot body remains opaque",)
+                    )
                 ),
             )
         if opcode == 300:
@@ -1539,7 +1658,16 @@ def render_gameplay_analysis(
             f"field=map_id:{state.map_id} portal_index:{state.portal_index} "
             f"current_hp:{state.current_hp} "
             f"transition_sequence:{state.transition_sequence} "
+            f"initial_snapshots:{state.initial_field_snapshots} "
             f"compact_transitions:{state.compact_field_transitions}"
+        ),
+        (
+            f"player=level:{state.character_level} job_id:{state.job_id} "
+            f"hp:{state.current_hp}/{state.max_hp} "
+            f"mp:{state.current_mp}/{state.max_mp} "
+            f"str:{state.strength} dex:{state.dexterity} "
+            f"int:{state.intelligence} luk:{state.luck} "
+            f"exp:{state.experience} fame:{state.fame}"
         ),
         (
             f"frames=client:{state.packets_by_direction['client_to_server']} "

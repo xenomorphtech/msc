@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 61 tests.
+- The custom-server suite currently passes all 96 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -44,6 +44,12 @@
   receives the policy-restriction result before gameplay.
 - `/home/sdancer/Downloads/111.pcapng` supplies a separate successful
   protocol-compatible reference: login stream `83` and world stream `92`.
+- The first large opcode-`157` world packet now has a capture-validated typed
+  112-byte character/stat prefix. Both streams `92` and `114` round-trip
+  byte-for-byte; their remaining 4,352-byte and 4,394-byte nested tails stay
+  explicitly opaque. The gameplay fold seeds level/job/base stats, HP/MP,
+  AP/SP, EXP/fame, map, and portal, emits them on the field event, and validates
+  the embedded character id against the world-entry request.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
