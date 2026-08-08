@@ -1817,6 +1817,303 @@ class MobLeaveField:
 
 
 @dataclass(frozen=True)
+class PlayerMovementCommand:
+    command_type: int
+    opaque_payload: bytes
+
+    _PAYLOAD_LENGTHS = {0: 13, 1: 7, 3: 5, 5: 13}
+
+    @classmethod
+    def absolute(
+        cls,
+        *,
+        command_type: int = 0,
+        position_x: int,
+        position_y: int,
+        velocity_x: int,
+        velocity_y: int,
+        foothold_id: int,
+        stance: int,
+        duration_ms: int,
+    ) -> "PlayerMovementCommand":
+        if command_type not in {0, 5}:
+            raise PacketShapeError(
+                "absolute player movement command type must be zero or five"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=struct.pack(
+                "<hhhhHBH",
+                position_x,
+                position_y,
+                velocity_x,
+                velocity_y,
+                foothold_id,
+                stance,
+                duration_ms,
+            ),
+        )
+
+    @classmethod
+    def relative(
+        cls,
+        *,
+        velocity_x: int,
+        velocity_y: int,
+        stance: int,
+        duration_ms: int,
+    ) -> "PlayerMovementCommand":
+        return cls(
+            command_type=1,
+            opaque_payload=struct.pack(
+                "<hhBH", velocity_x, velocity_y, stance, duration_ms
+            ),
+        )
+
+    @classmethod
+    def compact(cls, opaque_payload: bytes) -> "PlayerMovementCommand":
+        return cls(command_type=3, opaque_payload=opaque_payload)
+
+    @property
+    def byte_length(self) -> int:
+        return 1 + len(self.opaque_payload)
+
+    @property
+    def position(self) -> tuple[int, int] | None:
+        if self.command_type not in {0, 5}:
+            return None
+        return struct.unpack_from("<hh", self.opaque_payload)
+
+    def safe_dict(self) -> dict[str, object]:
+        if self.command_type in {0, 5}:
+            (
+                position_x,
+                position_y,
+                velocity_x,
+                velocity_y,
+                foothold_id,
+                stance,
+                duration_ms,
+            ) = struct.unpack("<hhhhHBH", self.opaque_payload)
+            return {
+                "type": self.command_type,
+                "kind": (
+                    "absolute"
+                    if self.command_type == 0
+                    else "alternate_absolute"
+                ),
+                "position_x": position_x,
+                "position_y": position_y,
+                "velocity_x": velocity_x,
+                "velocity_y": velocity_y,
+                "foothold_id": foothold_id,
+                "stance": stance,
+                "duration_ms": duration_ms,
+            }
+        if self.command_type == 1:
+            velocity_x, velocity_y, stance, duration_ms = struct.unpack(
+                "<hhBH", self.opaque_payload
+            )
+            return {
+                "type": self.command_type,
+                "kind": "relative",
+                "velocity_x": velocity_x,
+                "velocity_y": velocity_y,
+                "stance": stance,
+                "duration_ms": duration_ms,
+            }
+        return {
+            "type": self.command_type,
+            "kind": "compact_opaque",
+            "opaque_payload_bytes": len(self.opaque_payload),
+        }
+
+    @classmethod
+    def parse(
+        cls,
+        reader: PacketReader,
+        *,
+        command_index: int,
+        field_prefix: str = "movement",
+    ) -> "PlayerMovementCommand":
+        field = f"{field_prefix}.commands[{command_index}]"
+        command_type = reader.u8(f"{field}.type")
+        payload_length = cls._PAYLOAD_LENGTHS.get(command_type)
+        if payload_length is None:
+            expected = ", ".join(str(value) for value in cls._PAYLOAD_LENGTHS)
+            raise PacketShapeError(
+                f"{reader.packet_name}.{field}.type is {command_type}, "
+                f"expected one of {expected}"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=reader.bytes(
+                payload_length, f"{field}.opaque_payload"
+            ),
+        )
+
+    def to_bytes(self) -> bytes:
+        expected_length = self._PAYLOAD_LENGTHS.get(self.command_type)
+        if expected_length is None:
+            expected = ", ".join(str(value) for value in self._PAYLOAD_LENGTHS)
+            raise PacketShapeError(
+                f"player movement command type is {self.command_type}, "
+                f"expected one of {expected}"
+            )
+        if len(self.opaque_payload) != expected_length:
+            raise PacketShapeError(
+                f"player movement command type {self.command_type} needs "
+                f"{expected_length} opaque bytes, got "
+                f"{len(self.opaque_payload)}"
+            )
+        return bytes((self.command_type,)) + self.opaque_payload
+
+
+@dataclass(frozen=True)
+class PlayerMovementPath:
+    reference_x: int
+    reference_y: int
+    commands: tuple[PlayerMovementCommand, ...]
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, field_prefix: str = "movement"
+    ) -> "PlayerMovementPath":
+        reference_x = reader.i16(f"{field_prefix}.reference_x")
+        reference_y = reader.i16(f"{field_prefix}.reference_y")
+        command_count = reader.u8(f"{field_prefix}.command_count")
+        if command_count == 0:
+            raise PacketShapeError("player movement path has no commands")
+        commands = tuple(
+            PlayerMovementCommand.parse(
+                reader,
+                command_index=index,
+                field_prefix=field_prefix,
+            )
+            for index in range(command_count)
+        )
+        return cls(
+            reference_x=reference_x,
+            reference_y=reference_y,
+            commands=commands,
+        )
+
+    @property
+    def final_position(self) -> tuple[int, int] | None:
+        return next(
+            (
+                command.position
+                for command in reversed(self.commands)
+                if command.position is not None
+            ),
+            None,
+        )
+
+    def to_bytes(self) -> bytes:
+        if not self.commands:
+            raise PacketShapeError("player movement path must contain a command")
+        if len(self.commands) > 255:
+            raise PacketShapeError(
+                "player movement path cannot contain more than 255 commands"
+            )
+        return (
+            struct.pack(
+                "<hhB",
+                self.reference_x,
+                self.reference_y,
+                len(self.commands),
+            )
+            + b"".join(command.to_bytes() for command in self.commands)
+        )
+
+
+@dataclass(frozen=True)
+class PlayerMovementSubmission:
+    control_value: int
+    movement: PlayerMovementPath
+    trailer_marker: int
+    path_start_x: int
+    path_start_y: int
+    path_end_x: int
+    path_end_y: int
+    opcode: int = 182
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "PlayerMovementSubmission":
+        reader = PacketReader(payload, packet_name="player_movement_submission")
+        _expect_opcode(reader, 182)
+        control_value = reader.u32("control_value")
+        movement = PlayerMovementPath.parse_from(reader)
+        trailer_marker = reader.u8("trailer_marker")
+        if trailer_marker != 0:
+            raise PacketShapeError(
+                "player movement submission trailer marker must be zero"
+            )
+        path_start_x = reader.i16("path_start_x")
+        path_start_y = reader.i16("path_start_y")
+        path_end_x = reader.i16("path_end_x")
+        path_end_y = reader.i16("path_end_y")
+        reader.finish()
+        return cls(
+            control_value=control_value,
+            movement=movement,
+            trailer_marker=trailer_marker,
+            path_start_x=path_start_x,
+            path_start_y=path_start_y,
+            path_end_x=path_end_x,
+            path_end_y=path_end_y,
+        )
+
+    def to_bytes(self) -> bytes:
+        if self.trailer_marker != 0:
+            raise PacketShapeError(
+                "player movement submission trailer marker must be zero"
+            )
+        return (
+            struct.pack("<HI", self.opcode, self.control_value)
+            + self.movement.to_bytes()
+            + struct.pack(
+                "<Bhhhh",
+                self.trailer_marker,
+                self.path_start_x,
+                self.path_start_y,
+                self.path_end_x,
+                self.path_end_y,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class PlayerMovementBroadcast:
+    object_id: int
+    control_value: int
+    movement: PlayerMovementPath
+    opcode: int = 202
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "PlayerMovementBroadcast":
+        reader = PacketReader(payload, packet_name="player_movement_broadcast")
+        _expect_opcode(reader, 202)
+        object_id = reader.u32("object_id")
+        control_value = reader.u32("control_value")
+        movement = PlayerMovementPath.parse_from(reader)
+        reader.finish()
+        return cls(
+            object_id=object_id,
+            control_value=control_value,
+            movement=movement,
+        )
+
+    def to_bytes(self) -> bytes:
+        return (
+            struct.pack(
+                "<HII", self.opcode, self.object_id, self.control_value
+            )
+            + self.movement.to_bytes()
+        )
+
+
+@dataclass(frozen=True)
 class MobMovementCommand:
     command_type: int
     opaque_payload: bytes

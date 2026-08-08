@@ -220,8 +220,9 @@ is the next boundary.
    opcode-`4` response and name its exact fields.
 2. Trace the two opcode-`402` branches only if the capture-faithful 2.5-second
    sequence still fails to produce client opcode `5`.
-3. Trace narrowly selected player-action and stat/inventory update handlers,
-   correlating each reader boundary with a short frame-aligned world capture.
+3. Trace the bounded five-byte player-movement type-`3` command only if a
+   controlled effect requires its semantics; prioritize isolated stat and
+   inventory update handlers for the next state transitions.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory

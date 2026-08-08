@@ -430,6 +430,50 @@ The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server
 clock without replacing the initial player-stat model.
 
+## Player movement (`client 182`, `server 202`)
+
+Local-player movement submissions have this capture-validated shape:
+
+```text
+uint16 opcode = 182
+uint32 control_value
+int16  reference_x
+int16  reference_y
+uint8  command_count
+repeat command_count: movement_command
+uint8  trailer_marker = 0
+int16  path_start_x
+int16  path_start_y
+int16  path_end_x
+int16  path_end_y
+```
+
+Remote-player broadcasts use opcode `202`, insert a `uint32 object_id` before
+the control value, and end immediately after the same reference/count/command
+stream; they do not carry the nine-byte client trailer. Reports replace the
+object id with a stable `player:N` alias.
+
+The command discriminants and payload boundaries are exact across both
+directions:
+
+```text
+type 0: int16 position_x/y, int16 velocity_x/y,
+        uint16 foothold_id, uint8 stance, uint16 duration_ms  # 13 bytes
+type 1: int16 velocity_x/y, uint8 stance, uint16 duration_ms # 7 bytes
+type 3: byte[5] bounded semantic unknown
+type 5: same 13-byte fields as type 0
+```
+
+Stream `92` contains 531 client submissions with 3,606 commands
+(`0:3526, 1:53, 3:20, 5:7`) and 113 server broadcasts with 675 commands
+(`0:646, 1:18, 3:4, 5:7`). All 644 packets and 4,281 commands round-trip
+byte-for-byte. All client control values are zero in that stream; the two
+stream-`114` broadcasts demonstrate values zero and one, so the field remains
+neutrally named. The fold uses the client trailer endpoint for local position
+and the last absolute command for each observed remote player, emitting typed
+events for both directions. Stream `114` ends at local path endpoint
+`(633,-2677)` with two identifier-safe remote-player aliases.
+
 ## `58880` exchange
 
 The client sent a stable HTTP/1.1 request:
@@ -497,8 +541,10 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
   several fields still have unknown semantics.
 - The character-list opcode/result envelope is validated, but its inner 167
   bytes remain intentionally opaque/partial.
-- The 19-byte handoff shape is validated; the initial stream-`92` world/map
-  state still needs semantic decoding beyond encrypted-frame replay.
+- The 19-byte handoff and large initial world snapshot are structurally
+  validated; equipment-specific metadata, keyed-property roles, parts of the
+  fixed trailer, and several one-time field bootstrap opcodes remain
+  semantically neutral.
 - The purpose and required state for the TLS `5050` connection remain unknown.
 - The exact semantics of captured opcode-`0` result values other than the
   observed policy result `2` remain unknown.

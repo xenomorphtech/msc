@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 98 tests.
+- The custom-server suite currently passes all 100 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -63,6 +63,14 @@
   to `active`, map `101000000`, HP `1/222`, unchanged inventory/progression,
   nine NPCs, and fully matched generated heartbeats. The loopback runtime API
   exposes the identifier-free plan and patch count.
+- Player movement is now distinct from mob movement: client opcode `182` and
+  server opcode `202` parse and re-encode all 644 stream-`92` packets and all
+  4,281 commands. Fixed command tags `0/1/3/5` have payload lengths
+  `13/7/5/13`; typed absolute/relative fields are emitted while type `3`
+  remains a bounded five-byte semantic unknown. The game-state fold records
+  local path endpoint `(633,-2677)` in both reference streams, maintains
+  identifier-safe remote-player positions, and emits local submission and
+  remote broadcast events. Both streams remain valid with no warnings.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -179,9 +187,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 1. Decode the captured opcode-`4` character-list inner records and generate the
    list from typed player state rather than replay bytes.
-2. Model and validate player-originated gameplay interactions and their server
-   effects, beginning with movement/stat/inventory deltas that can be isolated
-   in short captures.
+2. Continue from the completed player-movement fold to stat and inventory
+   deltas that can be isolated in short captures, then correlate each request
+   with its server-side effect.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.

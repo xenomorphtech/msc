@@ -183,6 +183,11 @@ The gameplay fold currently models these capture-backed boundaries:
   use, setup, etc, and cash inventory lists, while the repeated 95-byte compact
   transition variant is fully bounded,
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence,
+- client opcode `182`: local-player movement with a neutral 32-bit control
+  value, signed reference position, typed command stream, and zero-marked
+  start/end-position trailer,
+- server opcode `202`: remote-player movement with an aliased object id, the
+  same control value and command stream, and no client-only trailer,
 - server opcode `300`: complete 22-byte NPC spawn records,
 - server opcode `303`: complete 8-byte NPC state updates,
 - server opcode `279`: mob-entry envelope with object id, template id,
@@ -212,9 +217,11 @@ runtime object ids with stable session-local aliases such as `npc:1`; use
 The full stream-`92` validation reaches `active` across 13 field epochs and
 then changes to `terminated` on its final server opcode-`9` packet. All 26
 field-load messages form 13 ordered stage pairs; all 53 NPC spawns and 77 NPC
-state updates validate; 11,949 movement acknowledgements match prior captured
-submissions; and all 75 server heartbeat probes pair with the next 75 client
-responses. Two movement submissions remain pending at capture end.
+state updates validate; all 531 local-player movement submissions and 113
+remote-player broadcasts round-trip; 11,949 mob movement acknowledgements
+match prior captured submissions; and all 75 server heartbeat probes pair with
+the next 75 client responses. Two mob movement submissions remain pending at
+capture end.
 
 Twelve of the 13 opcode-`157` packets use an exact 95-byte compact transition
 shape (two-byte opcode plus 93-byte body). `CompactFieldTransition` decodes the
@@ -266,6 +273,20 @@ the replay-observed transcript independently folded to `active`, map
 matched heartbeat probes/responses with none pending. The source packet held
 HP `50/222`, so this is a controlled field effect rather than passive replay
 liveness.
+
+Player movement is now a separate typed family rather than being confused with
+the mob controller protocol. In stream `92`, client opcode `182` contains 531
+local submissions and 3,606 commands; server opcode `202` contains 113 remote
+broadcasts and 675 commands. Only tags `0/1/3/5` occur. Their payload lengths
+are exactly `13/7/5/13` bytes, excluding the tag. Tags `0` and `5` expose
+signed position/velocity pairs, foothold, stance, and duration; tag `1`
+exposes relative velocity, stance, and duration; tag `3` remains a bounded
+five-byte semantic unknown. Every packet round-trips. The fold updates the
+local path endpoint, maintains session-local aliases and final absolute
+positions for observed remote players, and emits `player_movement_submitted`
+and `remote_player_movement_broadcast` events. Short stream `114` folds its one
+local submission to `(633,-2677)` and its two broadcasts to two redacted
+remote-player aliases.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
@@ -535,3 +556,6 @@ It intentionally cannot launch an authenticated official session.
 20. Generate a same-length initial field snapshot with typed HP `1`, validate
     the packet before encryption, and confirm the predicted value in both the
     real client HUD and the independently folded replay transcript.
+21. Separate player movement from mob movement, bound client opcode `182` and
+    server opcode `202`, round-trip all 644 captured packets and 4,281 commands,
+    and fold local/remote positions into identifier-safe events and state.

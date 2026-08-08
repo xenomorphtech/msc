@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 98 tests.
+The last run passed all 100 tests.
 
 ## Inspect and compare captures
 
@@ -66,6 +66,12 @@ python -m maple_server analyze-gameplay \
 It validates frame shapes and state invariants, emits typed field events, and
 folds the initial player/map/inventory/progression snapshot plus subsequent
 NPC, mob, movement, transition, termination, and heartbeat traffic.
+
+Player movement appears as decoded opcode-`182` submissions and opcode-`202`
+broadcasts. The short stream prints one local path ending at `(633,-2677)` and
+two remote-player broadcasts under session-local aliases. The long stream
+validates and round-trips 531 submissions, 113 broadcasts, and all 4,281
+commands, with fixed tags `0/1/3/5` and payload sizes `13/7/5/13` bytes.
 
 ## Replay the login capture locally
 
@@ -391,6 +397,9 @@ project's own `README.md` for all options.
 - A typed initial opcode-`157` HP rewrite changed `50/222 -> 1/222`; the real
   HUD and independently folded active game state both reported `1/222` while
   map, inventory, progression, and client liveness matched the prediction.
+- The gameplay analyzer now emits typed local/remote player movement records
+  and folds their endpoints instead of reporting opcodes `182` and `202` as
+  unknown packets. Both PCAP world streams validate without warnings.
 
 ## Next server milestone
 

@@ -41,6 +41,10 @@ from maple_server.packets import (  # noqa: E402
     NpcSpawn,
     NpcStateUpdate,
     PacketShapeError,
+    PlayerMovementBroadcast,
+    PlayerMovementCommand,
+    PlayerMovementPath,
+    PlayerMovementSubmission,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -62,6 +66,7 @@ HANDSHAKE = bytes.fromhex(
 CHARACTER_ID = 300_001
 NPC_OBJECT_ID = 10_001
 MOB_OBJECT_ID = 20_001
+PLAYER_OBJECT_ID = 30_001
 
 
 def fixture_npc() -> NpcSpawn:
@@ -99,6 +104,50 @@ def fixture_movement_path() -> MobMovementPath:
         path_start_y=-200,
         path_end_x=110,
         path_end_y=-200,
+    )
+
+
+def fixture_player_movement_path() -> PlayerMovementPath:
+    return PlayerMovementPath(
+        reference_x=100,
+        reference_y=-200,
+        commands=(
+            PlayerMovementCommand.absolute(
+                position_x=110,
+                position_y=-195,
+                velocity_x=10,
+                velocity_y=5,
+                foothold_id=7,
+                stance=2,
+                duration_ms=90,
+            ),
+            PlayerMovementCommand.relative(
+                velocity_x=4,
+                velocity_y=-8,
+                stance=3,
+                duration_ms=12,
+            ),
+            PlayerMovementCommand.compact(b"\x01\x02\x03\x04\x05"),
+            PlayerMovementCommand.absolute(
+                command_type=5,
+                position_x=120,
+                position_y=-180,
+                velocity_x=6,
+                velocity_y=0,
+                foothold_id=8,
+                stance=4,
+                duration_ms=40,
+            ),
+            PlayerMovementCommand.absolute(
+                position_x=130,
+                position_y=-170,
+                velocity_x=2,
+                velocity_y=1,
+                foothold_id=9,
+                stance=5,
+                duration_ms=20,
+            ),
+        ),
     )
 
 
@@ -238,6 +287,7 @@ def fixture_gameplay_transcript(
     acknowledgement_auxiliary_2: int = 0,
     compact_transition: bool = False,
     initial_snapshot: bool = False,
+    player_movement: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -330,6 +380,27 @@ def fixture_gameplay_transcript(
     )
     append("client_to_server", FieldLoadStage(stage=1).to_bytes())
     append("client_to_server", FieldLoadStage(stage=2).to_bytes())
+    if player_movement:
+        append(
+            "client_to_server",
+            PlayerMovementSubmission(
+                control_value=0,
+                movement=fixture_player_movement_path(),
+                trailer_marker=0,
+                path_start_x=90,
+                path_start_y=-205,
+                path_end_x=132,
+                path_end_y=-168,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            PlayerMovementBroadcast(
+                object_id=PLAYER_OBJECT_ID,
+                control_value=1,
+                movement=fixture_player_movement_path(),
+            ).to_bytes(),
+        )
     append(
         "client_to_server",
         MobMovementSubmission(
@@ -458,6 +529,57 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 range_left=10,
                 range_right=-10,
                 hidden=False,
+            ).to_bytes()
+
+    def test_player_movement_submission_and_broadcast_round_trip(self) -> None:
+        path = fixture_player_movement_path()
+        submission = PlayerMovementSubmission(
+            control_value=0,
+            movement=path,
+            trailer_marker=0,
+            path_start_x=90,
+            path_start_y=-205,
+            path_end_x=132,
+            path_end_y=-168,
+        )
+        broadcast = PlayerMovementBroadcast(
+            object_id=PLAYER_OBJECT_ID,
+            control_value=1,
+            movement=path,
+        )
+
+        self.assertEqual(
+            PlayerMovementSubmission.parse(submission.to_bytes()), submission
+        )
+        self.assertEqual(
+            PlayerMovementBroadcast.parse(broadcast.to_bytes()), broadcast
+        )
+        self.assertEqual(
+            [command.byte_length for command in path.commands],
+            [14, 8, 6, 14, 14],
+        )
+        self.assertEqual(path.final_position, (130, -170))
+        self.assertEqual(
+            path.commands[2].safe_dict(),
+            {
+                "type": 3,
+                "kind": "compact_opaque",
+                "opaque_payload_bytes": 5,
+            },
+        )
+        with self.assertRaisesRegex(PacketShapeError, "expected one of"):
+            PlayerMovementPath(
+                reference_x=0,
+                reference_y=0,
+                commands=(PlayerMovementCommand(4, b""),),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 5 opaque bytes"):
+            PlayerMovementCommand.compact(b"four").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must contain a command"):
+            PlayerMovementPath(
+                reference_x=0,
+                reference_y=0,
+                commands=(),
             ).to_bytes()
 
     def test_movement_header_and_ack_round_trip(self) -> None:
@@ -695,6 +817,43 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("partially opaque", observation.issues[0])
         self.assertNotIn('"name": "player"', analysis.to_json())
 
+    def test_folds_player_movement_into_local_and_remote_state(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(player_movement=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.state.player_x, 132)
+        self.assertEqual(analysis.state.player_y, -168)
+        self.assertEqual(analysis.state.player_movement_submissions, 1)
+        self.assertEqual(analysis.state.player_movement_commands, 5)
+        self.assertEqual(
+            analysis.state.player_movement_commands_by_type,
+            {0: 2, 1: 1, 3: 1, 5: 1},
+        )
+        self.assertEqual(analysis.state.remote_player_movement_broadcasts, 1)
+        self.assertEqual(analysis.state.remote_player_movement_commands, 5)
+        self.assertEqual(
+            analysis.state.remote_player_movement_commands_by_type,
+            {0: 2, 1: 1, 3: 1, 5: 1},
+        )
+        self.assertEqual(
+            (
+                analysis.state.observed_players[PLAYER_OBJECT_ID].x,
+                analysis.state.observed_players[PLAYER_OBJECT_ID].y,
+            ),
+            (130, -170),
+        )
+        event_kinds = [event.kind for event in analysis.events]
+        self.assertIn("player_movement_submitted", event_kinds)
+        self.assertIn("remote_player_movement_broadcast", event_kinds)
+        report = analysis.safe_dict()
+        self.assertEqual(report["state"]["player"]["x"], 132)
+        self.assertEqual(report["state"]["observed_remote_player_count"], 1)
+        self.assertNotIn(
+            "object_id", report["state"]["observed_remote_players"][0]
+        )
+
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
 
@@ -768,7 +927,10 @@ class GameplayStateFoldTest(unittest.TestCase):
 
     def test_folds_compact_transition_into_map_state(self) -> None:
         analysis = analyze_gameplay_transcript(
-            fixture_gameplay_transcript(compact_transition=True)
+            fixture_gameplay_transcript(
+                compact_transition=True,
+                player_movement=True,
+            )
         )
 
         self.assertTrue(analysis.valid)
@@ -781,6 +943,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.current_hp, 70)
         self.assertEqual(len(analysis.state.npcs), 0)
         self.assertEqual(len(analysis.state.mobs), 0)
+        self.assertIsNone(analysis.state.player_x)
+        self.assertIsNone(analysis.state.player_y)
+        self.assertEqual(len(analysis.state.observed_players), 0)
+        self.assertEqual(analysis.state.player_movement_submissions, 1)
+        self.assertEqual(analysis.state.remote_player_movement_broadcasts, 1)
         observation = next(
             item
             for item in analysis.observations

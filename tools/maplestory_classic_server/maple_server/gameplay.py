@@ -30,6 +30,9 @@ from .packets import (
     NpcSpawn,
     NpcStateUpdate,
     PacketShapeError,
+    PlayerMovementBroadcast,
+    PlayerMovementPath,
+    PlayerMovementSubmission,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -61,6 +64,13 @@ class MobEntity:
     x: int = 0
     y: int = 0
     stance: int = 0
+
+
+@dataclass
+class ObservedPlayerEntity:
+    alias: str
+    x: int
+    y: int
 
 
 @dataclass(frozen=True)
@@ -119,6 +129,8 @@ class GameplayGameState:
     skill_points: int | None = None
     experience: int | None = None
     fame: int | None = None
+    player_x: int | None = None
+    player_y: int | None = None
     inventory_region_bytes: int | None = None
     progression_region_bytes: int | None = None
     inventory_items: dict[str, tuple[InitialInventoryItem, ...]] = field(
@@ -139,6 +151,9 @@ class GameplayGameState:
     npcs: dict[int, NpcEntity] = field(default_factory=dict, repr=False)
     mobs: dict[int, MobEntity] = field(default_factory=dict, repr=False)
     mob_templates: dict[int, int] = field(default_factory=dict, repr=False)
+    observed_players: dict[int, ObservedPlayerEntity] = field(
+        default_factory=dict, repr=False
+    )
     packets_by_direction: Counter[str] = field(default_factory=Counter)
     plaintext_bytes_by_direction: Counter[str] = field(default_factory=Counter)
     npc_spawns: int = 0
@@ -151,6 +166,16 @@ class GameplayGameState:
     unknown_mob_broadcasts: int = 0
     mob_broadcast_commands: int = 0
     mob_broadcast_commands_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    player_movement_submissions: int = 0
+    player_movement_commands: int = 0
+    player_movement_commands_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    remote_player_movement_broadcasts: int = 0
+    remote_player_movement_commands: int = 0
+    remote_player_movement_commands_by_type: Counter[int] = field(
         default_factory=Counter
     )
     movement_submissions: int = 0
@@ -366,6 +391,18 @@ class GameplayAnalysis:
             if show_identifiers:
                 record["object_id"] = object_id
             mobs.append(record)
+        observed_players: list[dict[str, object]] = []
+        for object_id, entity in sorted(
+            self.state.observed_players.items(), key=lambda item: item[1].alias
+        ):
+            record = {
+                "entity": entity.alias,
+                "x": entity.x,
+                "y": entity.y,
+            }
+            if show_identifiers:
+                record["object_id"] = object_id
+            observed_players.append(record)
         entry_character_id: int | str | None = None
         if self.state.entry_character_id is not None:
             entry_character_id = (
@@ -424,6 +461,8 @@ class GameplayAnalysis:
                     "skill_points": self.state.skill_points,
                     "experience": self.state.experience,
                     "fame": self.state.fame,
+                    "x": self.state.player_x,
+                    "y": self.state.player_y,
                 },
                 "inventory": {
                     "region_bytes": self.state.inventory_region_bytes,
@@ -452,6 +491,10 @@ class GameplayAnalysis:
                     self.state.server_local_filetime_ticks
                 ),
                 "entry_character_id": entry_character_id,
+                "observed_remote_player_count": len(
+                    self.state.observed_players
+                ),
+                "observed_remote_players": observed_players,
                 "active_npc_count": len(self.state.npcs),
                 "npcs": npcs,
                 "active_mob_count": len(self.state.mobs),
@@ -480,6 +523,22 @@ class GameplayAnalysis:
                 "mob_broadcast_commands": self.state.mob_broadcast_commands,
                 "mob_broadcast_commands_by_type": dict(
                     self.state.mob_broadcast_commands_by_type
+                ),
+                "player_movement_submissions": (
+                    self.state.player_movement_submissions
+                ),
+                "player_movement_commands": self.state.player_movement_commands,
+                "player_movement_commands_by_type": dict(
+                    self.state.player_movement_commands_by_type
+                ),
+                "remote_player_movement_broadcasts": (
+                    self.state.remote_player_movement_broadcasts
+                ),
+                "remote_player_movement_commands": (
+                    self.state.remote_player_movement_commands
+                ),
+                "remote_player_movement_commands_by_type": dict(
+                    self.state.remote_player_movement_commands_by_type
                 ),
                 "movement_submissions": self.state.movement_submissions,
                 "movement_submissions_for_unknown_mobs": (
@@ -618,6 +677,7 @@ class GameplayStateFold:
         self.events: list[GameplayEvent] = []
         self._npc_aliases: dict[int, str] = {}
         self._mob_aliases: dict[int, str] = {}
+        self._player_aliases: dict[int, str] = {}
         self._pending_movements: dict[
             tuple[int, int], deque[PendingMobMovement]
         ] = {}
@@ -645,6 +705,29 @@ class GameplayStateFold:
             "spawn_effect": spawn.spawn_effect,
             "opaque_tail_bytes": len(spawn.opaque_tail),
         }
+
+    @staticmethod
+    def _player_movement_details(
+        movement: PlayerMovementPath,
+    ) -> dict[str, object]:
+        details: dict[str, object] = {
+            "reference_x": movement.reference_x,
+            "reference_y": movement.reference_y,
+            "command_count": len(movement.commands),
+            "command_types": [
+                command.command_type for command in movement.commands
+            ],
+            "commands": [
+                command.safe_dict() for command in movement.commands
+            ],
+            "opaque_command_payload_bytes": sum(
+                len(command.opaque_payload) for command in movement.commands
+            ),
+        }
+        final_position = movement.final_position
+        if final_position is not None:
+            details["final_x"], details["final_y"] = final_position
+        return details
 
     def _event(
         self,
@@ -801,6 +884,37 @@ class GameplayStateFold:
                     "field_epoch": self.state.field_epoch,
                     "stage": stage.stage,
                 },
+            )
+        if opcode == 182:
+            movement = PlayerMovementSubmission.parse(payload)
+            path = movement.movement
+            self.state.player_movement_submissions += 1
+            self.state.player_movement_commands += len(path.commands)
+            self.state.player_movement_commands_by_type.update(
+                command.command_type for command in path.commands
+            )
+            self.state.player_x = movement.path_end_x
+            self.state.player_y = movement.path_end_y
+            details = {
+                "control_value": movement.control_value,
+                **self._player_movement_details(path),
+                "path_start_x": movement.path_start_x,
+                "path_start_y": movement.path_start_y,
+                "path_end_x": movement.path_end_x,
+                "path_end_y": movement.path_end_y,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "player_movement_submitted", details=details)
+            return self._observation(
+                frame,
+                kind="player_movement_submission",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=movement,
+                details=details,
+                issues=(
+                    "player movement control value and type-3 command "
+                    "meaning remain opaque",
+                ),
             )
         if opcode == 207:
             movement = MobMovementSubmission.parse(payload)
@@ -968,6 +1082,9 @@ class GameplayStateFold:
             self.state.npcs.clear()
             self.state.mobs.clear()
             self.state.mob_templates.clear()
+            self.state.observed_players.clear()
+            self.state.player_x = None
+            self.state.player_y = None
             self._pending_movements.clear()
             self.state.pending_movements = 0
             details = {
@@ -1286,6 +1403,52 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=update,
                 details=details,
+            )
+        if opcode == 202:
+            broadcast = PlayerMovementBroadcast.parse(payload)
+            path = broadcast.movement
+            alias = self._alias(
+                self._player_aliases, broadcast.object_id, "player"
+            )
+            existing = self.state.observed_players.get(broadcast.object_id)
+            final_position = path.final_position
+            if final_position is None:
+                final_position = (path.reference_x, path.reference_y)
+            self.state.observed_players[broadcast.object_id] = (
+                ObservedPlayerEntity(
+                    alias=alias,
+                    x=final_position[0],
+                    y=final_position[1],
+                )
+            )
+            self.state.remote_player_movement_broadcasts += 1
+            self.state.remote_player_movement_commands += len(path.commands)
+            self.state.remote_player_movement_commands_by_type.update(
+                command.command_type for command in path.commands
+            )
+            details = {
+                "entity": alias,
+                "previously_observed": existing is not None,
+                "control_value": broadcast.control_value,
+                **self._player_movement_details(path),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "remote_player_movement_broadcast",
+                details=details,
+                identifiers={"object_id": broadcast.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="player_movement_broadcast",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=broadcast,
+                details=details,
+                issues=(
+                    "player movement control value and type-3 command "
+                    "meaning remain opaque",
+                ),
             )
         if opcode == 279:
             entered = MobEnterField.parse(payload)
@@ -1837,6 +2000,12 @@ def render_gameplay_analysis(
     movement_command_types = json.dumps(
         dict(sorted(state.movement_commands_by_type.items()))
     )
+    player_movement_command_types = json.dumps(
+        dict(sorted(state.player_movement_commands_by_type.items()))
+    )
+    remote_player_movement_command_types = json.dumps(
+        dict(sorted(state.remote_player_movement_commands_by_type.items()))
+    )
     acknowledgement_template_values = json.dumps(
         {
             template_id: sorted(status_values)
@@ -1912,6 +2081,20 @@ def render_gameplay_analysis(
             f"movement_broadcasts:{state.mob_movement_broadcasts} "
             f"broadcast_commands:{state.mob_broadcast_commands} "
             f"field_known_templates:{len(state.mob_templates)}"
+        ),
+        (
+            f"player_movement=position:{state.player_x},{state.player_y} "
+            f"submitted:{state.player_movement_submissions} "
+            f"commands:{state.player_movement_commands} "
+            f"command_types:{player_movement_command_types} "
+            "remote_observed:"
+            f"{len(state.observed_players)} "
+            "remote_broadcasts:"
+            f"{state.remote_player_movement_broadcasts} "
+            "remote_commands:"
+            f"{state.remote_player_movement_commands} "
+            "remote_command_types:"
+            f"{remote_player_movement_command_types}"
         ),
         (
             f"movement=submitted:{state.movement_submissions} "
