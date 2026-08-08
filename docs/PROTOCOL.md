@@ -209,6 +209,14 @@ ordering gate is a client-side completion and character-selection transition;
 the available evidence does not make it a server-side security-validation
 requirement.
 
+Replaying the successful stream's six-byte server opcode `23` at this point is
+also insufficient. In the live synthetic-callback probe it produced only a
+fully decoded client opcode-`13` type-`15` status with an empty message. The
+client stayed in `character_selection` and sent no opcode `7`. Because that
+session had already produced a native opcode-`6` packet during startup, opcode
+`23` is best classified as an NGSX initialization/status trigger, not the
+missing post-selection security completion packet.
+
 The successful 63-byte account packet is fully bounded as follows. Its three
 strings use a `uint16` UTF-16 code-unit count without the extra world-string
 trailing byte:

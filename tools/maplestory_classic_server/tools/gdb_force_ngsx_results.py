@@ -42,16 +42,27 @@ def game_assembly_base(pid: int) -> int:
 
 
 class NgsxResultBreakpoint(gdb.Breakpoint):
-    def __init__(self, stage: str, address: int, force_success: bool) -> None:
+    def __init__(
+        self,
+        stage: str,
+        address: int,
+        force_success: bool,
+        max_run_results: int,
+    ) -> None:
         super().__init__(f"*0x{address:x}", internal=False)
         self.stage = stage
         self.force_success = force_success
+        self.max_run_results = max_run_results
+        self.result_count = 0
 
     def stop(self) -> bool:
+        self.result_count += 1
         inferior = gdb.selected_inferior()
         result = int(gdb.parse_and_eval("$rdx"))
         if result == 0:
-            print(f"ngsx_result stage={self.stage} result=null")
+            print(
+                f"ngsx_result stage={self.stage} count={self.result_count} result=null"
+            )
         else:
             raw = bytes(inferior.read_memory(result + 0x10, 8))
             is_ok = raw[0] != 0
@@ -61,11 +72,13 @@ class NgsxResultBreakpoint(gdb.Breakpoint):
                 inferior.write_memory(result + 0x14, b"\x00\x00\x00\x00")
             print(
                 "ngsx_result "
-                f"stage={self.stage} is_ok={str(is_ok).lower()} code={code} "
+                f"stage={self.stage} count={self.result_count} "
+                f"is_ok={str(is_ok).lower()} code={code} "
                 f"forced={str(self.force_success).lower()}"
             )
-        self.delete()
-        return self.stage == "run"
+        if self.stage != "run" or self.result_count >= self.max_run_results:
+            self.delete()
+        return self.stage == "run" and self.result_count >= self.max_run_results
 
 
 inferior = gdb.selected_inferior()
@@ -73,6 +86,12 @@ if inferior.pid <= 0:
     raise gdb.GdbError("No live inferior is attached")
 
 force_success = os.environ.get("MAPLE_NGSX_FORCE_SUCCESS") == "1"
+try:
+    max_run_results = int(os.environ.get("MAPLE_NGSX_MAX_RUN_RESULTS", "1"))
+except ValueError as error:
+    raise gdb.GdbError("MAPLE_NGSX_MAX_RUN_RESULTS must be an integer") from error
+if max_run_results < 1:
+    raise gdb.GdbError("MAPLE_NGSX_MAX_RUN_RESULTS must be at least 1")
 base = game_assembly_base(inferior.pid)
 for stage, rva, expected_prefix in HANDLERS:
     address = base + rva
@@ -82,10 +101,11 @@ for stage, rva, expected_prefix in HANDLERS:
             f"NGSX {stage} handler prologue mismatch: "
             f"expected={expected_prefix.hex()} actual={actual_prefix.hex()}"
         )
-    NgsxResultBreakpoint(stage, address, force_success)
+    NgsxResultBreakpoint(stage, address, force_success, max_run_results)
 
 print(
     "ngsx_result_probe "
-    f"handlers={len(HANDLERS)} forced={str(force_success).lower()} validated=true"
+    f"handlers={len(HANDLERS)} forced={str(force_success).lower()} "
+    f"max_run_results={max_run_results} validated=true"
 )
 gdb.execute("continue")

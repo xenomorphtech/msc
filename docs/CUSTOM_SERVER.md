@@ -133,6 +133,15 @@ the scene: no TCP connection reaches `12857`, and the client exits after the
 login connection closes. The unresolved requirement is the client-side
 completion/selection transition, not server validation of frame `19`.
 
+A follow-up live probe sent the successful capture's server opcode `23` again
+after the character list, time, and type-`7` envelope. The client answered with
+an opcode-`13` type-`15` status carrying an empty message, remained at character
+selection, and emitted neither opcode `7` nor another type-`6` packet. The same
+session had already emitted one native opcode-`6` packet during startup. This
+separates the two exchanges: opcode `23` retriggers NGSX initialization/status,
+but it is not the missing completion packet and cannot substitute for the
+client-side security completion state.
+
 Start the local target for the transformed handoff separately:
 
 ```sh
@@ -280,8 +289,9 @@ project's own `README.md` for all options.
 - The two opcode-`402` packets require their observed 2.5-second gap; sending
   them together stalls before the client emits channel opcode `5`.
 - With the gap and live-world rewrite, the client emits opcode `5` and accepts
-  the character list and server time. The remaining login gate is server
-  security type `7` -> client type `6` responses -> character opcode `7`.
+  the character list and server time. The remaining login gate is a client-side
+  security completion state before character opcode `7`; replaying type `7`,
+  opcode `23`, or the handoff individually does not satisfy it.
 - Proactively sending a valid handoff without that gate produces a black scene,
   no world-port connection, and client exit after the login socket closes.
 - The MapleStory PipeWire stream is kept muted by the enabled

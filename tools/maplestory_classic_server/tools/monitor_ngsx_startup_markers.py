@@ -16,8 +16,11 @@ import time
 
 MARKERS = {
     "plugin_update": 0x6EFE9C6,
+    "plugin_run": 0x6EFE9CB,
     "on_init_callback": 0x6EFE9FA,
+    "on_run_callback": 0x6EFE9FB,
     "app_on_init": 0x6BE5EA2,
+    "app_run_request": 0x6BE5EA3,
     "bootstrap_task": 0x6E02D18,
     "bootstrap_awake": 0x6E02D19,
     "bootstrap_af0f6": 0x6E02D1A,

@@ -132,6 +132,13 @@ it. Skipping directly to a valid transformed handoff also remains
 insufficient: the scene goes black and no connection reaches local port
 `12857`. The unresolved gate is a client-side completion/selection state.
 
+A subsequent patched live run sent the successful capture's server opcode `23`
+after character-list/time/type-`7`. The client replied only with a decoded
+opcode-`13` type-`15` empty status and stayed in `character_selection`; it sent
+no opcode `7` or additional type-`6` packet. The run had already emitted one
+native startup opcode-`6`, so opcode `23` is an initialization/status exchange,
+not the missing completion exchange.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
