@@ -86,7 +86,9 @@ class GameplayGameState:
     movement_commands: int = 0
     movement_commands_by_type: Counter[int] = field(default_factory=Counter)
     movement_acknowledgements: int = 0
-    movement_acknowledgement_statuses: Counter[tuple[int, int]] = field(
+    movement_acknowledgement_statuses: Counter[
+        tuple[int, int, int, int]
+    ] = field(
         default_factory=Counter
     )
     matched_movement_acknowledgements: int = 0
@@ -202,8 +204,19 @@ class GameplayAnalysis:
                     self.state.movement_acknowledgements
                 ),
                 "movement_acknowledgement_statuses": [
-                    {"flag": flag, "value": value, "count": count}
-                    for (flag, value), count in sorted(
+                    {
+                        "flag": flag,
+                        "value": value,
+                        "auxiliary_1": auxiliary_1,
+                        "auxiliary_2": auxiliary_2,
+                        "count": count,
+                    }
+                    for (
+                        flag,
+                        value,
+                        auxiliary_1,
+                        auxiliary_2,
+                    ), count in sorted(
                         self.state.movement_acknowledgement_statuses.items()
                     )
                 ],
@@ -471,6 +484,9 @@ class GameplayStateFold:
                 "command_types": [
                     command.command_type for command in movement_path.commands
                 ],
+                "commands": [
+                    command.safe_dict() for command in movement_path.commands
+                ],
                 "opaque_command_payload_bytes": sum(
                     len(command.opaque_payload)
                     for command in movement_path.commands
@@ -494,8 +510,7 @@ class GameplayStateFold:
                 parsed=movement,
                 details=details,
                 issues=(
-                    "movement control metadata and command payload semantics "
-                    "remain opaque",
+                    "movement control metadata remains opaque",
                 ),
             )
         if opcode == 23:
@@ -678,7 +693,12 @@ class GameplayStateFold:
                 self.state.unmatched_movement_acknowledgements += 1
             self.state.movement_acknowledgements += 1
             self.state.movement_acknowledgement_statuses[
-                (acknowledgement.status_flag, acknowledgement.status_value)
+                (
+                    acknowledgement.status_flag,
+                    acknowledgement.status_value,
+                    acknowledgement.status_auxiliary_1,
+                    acknowledgement.status_auxiliary_2,
+                )
             ] += 1
             details = {
                 "entity": alias,
@@ -686,6 +706,8 @@ class GameplayStateFold:
                 "matched_submission": matched,
                 "status_flag": acknowledgement.status_flag,
                 "status_value": acknowledgement.status_value,
+                "status_auxiliary_1": acknowledgement.status_auxiliary_1,
+                "status_auxiliary_2": acknowledgement.status_auxiliary_2,
                 "field_epoch": self.state.field_epoch,
             }
             self._event(

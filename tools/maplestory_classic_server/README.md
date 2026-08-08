@@ -164,9 +164,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `303`: complete 8-byte NPC state updates,
 - client opcode `207`: correlated mob movement submissions with a bounded
   19-byte control prefix, signed reference position, command count, typed
-  command boundaries, and zero-marked start/end-position trailer,
+  commands, and zero-marked start/end-position trailer,
 - server opcode `283`: correlated mob movement acknowledgements with a one-byte
-  boolean-like flag and four-byte little-endian status value,
+  boolean-like flag, 16-bit little-endian status/resource value, and two
+  auxiliary bytes,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
@@ -190,16 +191,27 @@ boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
 13-byte payloads, 706 type-`1` commands with seven-byte payloads, and 102
 type-`2` commands with seven-byte payloads. Including each one-byte type tag,
 their wire sizes are 14, 8, and 8 bytes. No other command type occurs and every
-body ends exactly at its nine-byte zero-marker/start/end trailer. The control
-prefix and per-command payload meanings remain intentionally opaque, while
-reports now emit reference/start/end coordinates, command counts/types, and
-opaque byte counts instead of one undifferentiated movement blob.
+body ends exactly at its nine-byte zero-marker/start/end trailer. Type `0`
+decodes into signed position and velocity pairs, an unsigned foothold id,
+stance byte, and duration; types `1` and `2` decode into signed relative
+velocity, stance, and duration. All 40,090 typed commands and all 12,100 paths
+round-trip byte-for-byte. The 19-byte control prefix remains intentionally
+opaque. Reports emit reference/start/end coordinates and the decoded command
+records instead of one undifferentiated movement blob.
 
-All 11,949 acknowledgement bodies also fit one exact primitive boundary:
-flag `0` or `1` followed by a little-endian value in `{0,25,30,35,100}`. The
-fold reports all nine observed flag/value combinations and their counts while
-leaving their behavioral meanings unnamed. This validates the body shape
-without promoting numeric adjacency or frequency into unsupported semantics.
+All 11,949 acknowledgement bodies also fit one exact primitive boundary: flag
+`0` or `1`, a 16-bit little-endian value in `{0,25,30,35,100}`, and two zero
+auxiliary bytes. The fold reports all nine observed combinations and their
+counts while leaving their behavioral meanings unnamed. This validates the
+body shape without promoting numeric adjacency or frequency into unsupported
+semantics.
+
+A generic reactive opcode-`283` generator is not enabled yet. The response flag
+matches whether control-prefix byte `0` is nonzero in 11,948 of 11,949 captured
+pairs, leaving one counterexample, while the 16-bit value is stable per runtime
+mob but differs between mobs. Generating it safely therefore depends on first
+modeling mob spawn/controller state; blindly echoing a majority rule would hide
+the remaining protocol dependency.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
@@ -373,6 +385,9 @@ It intentionally cannot launch an authenticated official session.
     generated packet, and identifier-free runtime prediction/telemetry.
 13. Bound all captured opcode-`207` movement command streams and fold command
     counts/types plus reference/start/end positions into gameplay state/events.
-14. Decode the inner character list, player records, field snapshot body, and
-    the next reactive movement semantics needed to replace finite replay
-    content with generated world state.
+14. Decode type-`0` absolute and type-`1`/`2` relative movement fields with
+    exact command/path round trips, while retaining the 19-byte control prefix
+    as opaque.
+15. Decode mob spawn/controller envelopes, the inner character list, player
+    records, and field snapshot body needed to replace finite replay content
+    with generated world state.

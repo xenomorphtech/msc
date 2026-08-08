@@ -70,7 +70,15 @@ def fixture_movement_path() -> MobMovementPath:
         reference_x=100,
         reference_y=-200,
         commands=(
-            MobMovementCommand(command_type=0, opaque_payload=b"a" * 13),
+            MobMovementCommand.absolute(
+                position_x=110,
+                position_y=-200,
+                velocity_x=10,
+                velocity_y=0,
+                foothold_id=7,
+                stance=2,
+                duration_ms=90,
+            ),
         ),
         trailer_marker=0,
         path_start_x=90,
@@ -218,9 +226,29 @@ class GameplayPacketShapeTest(unittest.TestCase):
             reference_x=-12,
             reference_y=34,
             commands=(
-                MobMovementCommand(command_type=0, opaque_payload=b"0" * 13),
-                MobMovementCommand(command_type=1, opaque_payload=b"1" * 7),
-                MobMovementCommand(command_type=2, opaque_payload=b"2" * 7),
+                MobMovementCommand.absolute(
+                    position_x=-10,
+                    position_y=35,
+                    velocity_x=3,
+                    velocity_y=-4,
+                    foothold_id=5,
+                    stance=6,
+                    duration_ms=90,
+                ),
+                MobMovementCommand.relative(
+                    command_type=1,
+                    velocity_x=100,
+                    velocity_y=-555,
+                    stance=7,
+                    duration_ms=0,
+                ),
+                MobMovementCommand.relative(
+                    command_type=2,
+                    velocity_x=-117,
+                    velocity_y=-54,
+                    stance=3,
+                    duration_ms=0,
+                ),
             ),
             trailer_marker=0,
             path_start_x=-20,
@@ -251,11 +279,38 @@ class GameplayPacketShapeTest(unittest.TestCase):
             [14, 8, 8],
         )
         self.assertEqual(
+            parsed_path.commands[0].safe_dict(),
+            {
+                "type": 0,
+                "kind": "absolute",
+                "position_x": -10,
+                "position_y": 35,
+                "velocity_x": 3,
+                "velocity_y": -4,
+                "foothold_id": 5,
+                "stance": 6,
+                "duration_ms": 90,
+            },
+        )
+        self.assertEqual(
+            parsed_path.commands[1].safe_dict(),
+            {
+                "type": 1,
+                "kind": "relative",
+                "velocity_x": 100,
+                "velocity_y": -555,
+                "stance": 7,
+                "duration_ms": 0,
+            },
+        )
+        self.assertEqual(
             MobMovementAcknowledgement.parse(acknowledgement.to_bytes()),
             acknowledgement,
         )
         self.assertEqual(acknowledgement.status_flag, 1)
         self.assertEqual(acknowledgement.status_value, 35)
+        self.assertEqual(acknowledgement.status_auxiliary_1, 0)
+        self.assertEqual(acknowledgement.status_auxiliary_2, 0)
         with self.assertRaises(PacketShapeError):
             replace(
                 acknowledgement, opaque_status=b"\x02\x23\x00\x00\x00"
@@ -310,7 +365,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.matched_movement_acknowledgements, 1)
         self.assertEqual(
             analysis.state.movement_acknowledgement_statuses,
-            {(0, 0): 1},
+            {(0, 0, 0, 0): 1},
         )
         self.assertEqual(analysis.state.pending_movements, 0)
         self.assertEqual(analysis.state.heartbeat_probes, 1)

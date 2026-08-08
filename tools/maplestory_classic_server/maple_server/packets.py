@@ -804,6 +804,96 @@ class MobMovementCommand:
         return 1 + len(self.opaque_payload)
 
     @classmethod
+    def absolute(
+        cls,
+        *,
+        position_x: int,
+        position_y: int,
+        velocity_x: int,
+        velocity_y: int,
+        foothold_id: int,
+        stance: int,
+        duration_ms: int,
+    ) -> "MobMovementCommand":
+        return cls(
+            command_type=0,
+            opaque_payload=struct.pack(
+                "<hhhhHBH",
+                position_x,
+                position_y,
+                velocity_x,
+                velocity_y,
+                foothold_id,
+                stance,
+                duration_ms,
+            ),
+        )
+
+    @classmethod
+    def relative(
+        cls,
+        *,
+        command_type: int,
+        velocity_x: int,
+        velocity_y: int,
+        stance: int,
+        duration_ms: int,
+    ) -> "MobMovementCommand":
+        if command_type not in {1, 2}:
+            raise PacketShapeError(
+                "relative movement command type must be one or two"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=struct.pack(
+                "<hhBH", velocity_x, velocity_y, stance, duration_ms
+            ),
+        )
+
+    @property
+    def position(self) -> tuple[int, int] | None:
+        if self.command_type != 0:
+            return None
+        return struct.unpack_from("<hh", self.opaque_payload)
+
+    @property
+    def velocity(self) -> tuple[int, int]:
+        offset = 4 if self.command_type == 0 else 0
+        return struct.unpack_from("<hh", self.opaque_payload, offset)
+
+    @property
+    def foothold_id(self) -> int | None:
+        if self.command_type != 0:
+            return None
+        return struct.unpack_from("<H", self.opaque_payload, 8)[0]
+
+    @property
+    def stance(self) -> int:
+        offset = 10 if self.command_type == 0 else 4
+        return self.opaque_payload[offset]
+
+    @property
+    def duration_ms(self) -> int:
+        offset = 11 if self.command_type == 0 else 5
+        return struct.unpack_from("<H", self.opaque_payload, offset)[0]
+
+    def safe_dict(self) -> dict[str, object]:
+        velocity_x, velocity_y = self.velocity
+        result: dict[str, object] = {
+            "type": self.command_type,
+            "kind": "absolute" if self.command_type == 0 else "relative",
+            "velocity_x": velocity_x,
+            "velocity_y": velocity_y,
+            "stance": self.stance,
+            "duration_ms": self.duration_ms,
+        }
+        position = self.position
+        if position is not None:
+            result["position_x"], result["position_y"] = position
+            result["foothold_id"] = self.foothold_id
+        return result
+
+    @classmethod
     def parse(
         cls, reader: PacketReader, *, command_index: int
     ) -> "MobMovementCommand":
@@ -998,7 +1088,15 @@ class MobMovementAcknowledgement:
 
     @property
     def status_value(self) -> int:
-        return int.from_bytes(self.opaque_status[1:], "little")
+        return int.from_bytes(self.opaque_status[1:3], "little")
+
+    @property
+    def status_auxiliary_1(self) -> int:
+        return self.opaque_status[3]
+
+    @property
+    def status_auxiliary_2(self) -> int:
+        return self.opaque_status[4]
 
 
 @dataclass(frozen=True)
