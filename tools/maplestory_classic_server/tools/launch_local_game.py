@@ -216,7 +216,9 @@ def ensure_audio_mute_service() -> None:
         raise RuntimeError("MapleStory audio mute service is not active")
 
 
-def window_is_ready(sway_socket: Path) -> bool:
+def maple_window_id(
+    sway_socket: Path, expected_processes: set[int] | None = None
+) -> int | None:
     try:
         tree = json.loads(
             command_output(
@@ -224,16 +226,29 @@ def window_is_ready(sway_socket: Path) -> bool:
             )
         )
     except (json.JSONDecodeError, RuntimeError):
-        return False
+        return None
     pending = [tree]
     while pending:
         node = pending.pop()
         properties = node.get("window_properties") or {}
         if str(properties.get("class", "")).lower() == GAME_WINDOW_CLASS:
-            return True
+            process_id = node.get("pid")
+            if (
+                expected_processes is None
+                or process_id in expected_processes
+            ):
+                window_id = node.get("id")
+                if isinstance(window_id, int):
+                    return window_id
         pending.extend(node.get("nodes") or ())
         pending.extend(node.get("floating_nodes") or ())
-    return False
+    return None
+
+
+def window_is_ready(
+    sway_socket: Path, expected_processes: set[int] | None = None
+) -> bool:
+    return maple_window_id(sway_socket, expected_processes) is not None
 
 
 def launch_game(
@@ -334,13 +349,17 @@ def main() -> int:
     )
     deadline = time.monotonic() + arguments.timeout
     while time.monotonic() < deadline:
-        if maple_processes() and window_is_ready(sway_socket):
+        processes = maple_processes()
+        window_id = (
+            maple_window_id(sway_socket, processes) if processes else None
+        )
+        if window_id is not None:
             subprocess.run(
                 [
                     "swaymsg",
                     "-s",
                     str(sway_socket),
-                    f'[class="{GAME_WINDOW_CLASS}"] focus',
+                    f"[con_id={window_id}] focus",
                 ],
                 check=False,
                 stdout=subprocess.DEVNULL,
@@ -355,6 +374,7 @@ def main() -> int:
                         "sway_socket": str(sway_socket),
                         "audio_mute_active": True,
                         "window_ready": True,
+                        "window_id": window_id,
                     },
                     sort_keys=True,
                 )

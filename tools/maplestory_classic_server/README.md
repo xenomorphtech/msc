@@ -294,7 +294,9 @@ python tools/maplestory_classic_server/tools/launch_local_game.py --restart
 
 The script discovers nested Sway/Xwayland, checks both namespace listeners,
 requires the Maple-only audio mute service to be active, launches the local
-placeholder argument tuple, waits for the window, and focuses it through Sway.
+placeholder argument tuple, waits for a Maple window whose PID belongs to the
+newly live client process set, and focuses that exact Sway container. This keeps
+stale Xwayland Maple nodes from satisfying launch readiness.
 It intentionally cannot launch an authenticated official session.
 
 ## Current implementation steps

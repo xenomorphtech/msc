@@ -42,6 +42,8 @@ class LaunchLocalGameTest(unittest.TestCase):
             "nodes": [],
             "floating_nodes": [
                 {
+                    "id": 42,
+                    "pid": 1001,
                     "window_properties": {"class": "maplestory_classic.exe"},
                     "nodes": [],
                     "floating_nodes": [],
@@ -51,7 +53,22 @@ class LaunchLocalGameTest(unittest.TestCase):
         with patch.object(
             launch_local_game, "command_output", return_value=json.dumps(tree)
         ):
-            self.assertTrue(launch_local_game.window_is_ready(Path("sway.sock")))
+            self.assertTrue(
+                launch_local_game.window_is_ready(
+                    Path("sway.sock"), {1001}
+                )
+            )
+            self.assertEqual(
+                launch_local_game.maple_window_id(
+                    Path("sway.sock"), {1001}
+                ),
+                42,
+            )
+            self.assertFalse(
+                launch_local_game.window_is_ready(
+                    Path("sway.sock"), {9999}
+                )
+            )
 
     def test_launch_uses_only_local_placeholder_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
