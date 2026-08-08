@@ -99,6 +99,27 @@ class GameplayGameState:
 
 
 @dataclass(frozen=True)
+class NpcStateReplayPlan:
+    update: NpcStateUpdate = field(repr=False)
+    entity: str
+    field_epoch: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "entity": self.entity,
+            "field_epoch": self.field_epoch,
+            "action": self.update.action,
+            "parameter": self.update.parameter,
+            "prediction": {
+                "npc_state_updates_delta": 1,
+                "events_delta": 1,
+                "active_npc_count_delta": 0,
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
 class GameplayAnalysis:
     source: str
     decoded: DecodedSession
@@ -744,6 +765,38 @@ def analyze_gameplay_transcript(transcript: Transcript) -> GameplayAnalysis:
         transport_closed=transport_closed,
         issues=tuple(fold.issues),
         warnings=tuple(fold.warnings),
+    )
+
+
+def plan_final_field_npc_state_replay(
+    transcript: Transcript,
+) -> NpcStateReplayPlan:
+    """Select a fully modeled, known-NPC update from the final field epoch."""
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    for observation in reversed(analysis.observations):
+        if observation.kind != "npc_state_update":
+            continue
+        if observation.details.get("field_epoch") != analysis.state.field_epoch:
+            continue
+        if observation.details.get("known_entity") is not True:
+            continue
+        update = observation.parsed
+        if not isinstance(update, NpcStateUpdate):
+            continue
+        if update.object_id not in analysis.state.npcs:
+            continue
+        entity = observation.details.get("entity")
+        if not isinstance(entity, str):
+            continue
+        return NpcStateReplayPlan(
+            update=update,
+            entity=entity,
+            field_epoch=analysis.state.field_epoch,
+        )
+    raise ValueError(
+        "world transcript has no modeled known-NPC state update in its final field"
     )
 
 

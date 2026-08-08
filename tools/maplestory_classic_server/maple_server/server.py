@@ -21,6 +21,7 @@ from .gamestate import (
 )
 from .gameplay import (
     analyze_gameplay_transcript,
+    plan_final_field_npc_state_replay,
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
@@ -354,6 +355,7 @@ async def replay_connection(
     rewrite_channel_transition_world: bool = False,
     keep_world_open: bool = False,
     world_heartbeat_interval_seconds: float | None = None,
+    npc_state_replay_plaintext: bytes | None = None,
     runtime_protocol: dict[str, object] | None = None,
 ) -> None:
     if hold_open_seconds < 0:
@@ -385,6 +387,13 @@ async def replay_connection(
         raise ValueError("client_opcode_reply_delays cannot be negative")
     if strict and client_opcode_replies:
         raise ValueError("client opcode replies require non-strict replay")
+    if (
+        npc_state_replay_plaintext is not None
+        and npc_state_replay_plaintext not in post_transcript_server_frames
+    ):
+        raise ValueError(
+            "npc_state_replay_plaintext must be a post-transcript server frame"
+        )
     previous_timestamp_ns: int | None = None
     patched_server_events = iter(
         patch_server_event_data(
@@ -408,6 +417,15 @@ async def replay_connection(
         heartbeat_metrics, dict
     ):
         raise TypeError("runtime world_heartbeat telemetry must be a dictionary")
+    npc_state_replay_metrics = (
+        runtime_protocol.get("npc_state_replay")
+        if runtime_protocol is not None
+        else None
+    )
+    if npc_state_replay_metrics is not None and not isinstance(
+        npc_state_replay_metrics, dict
+    ):
+        raise TypeError("runtime npc_state_replay telemetry must be a dictionary")
     client_iv = (
         parse_handshake(transcript.server_bytes).first_iv
         if client_opcode_replies or world_heartbeat_interval_seconds is not None
@@ -453,6 +471,9 @@ async def replay_connection(
                 "keep_world_open": keep_world_open,
                 "world_heartbeat_interval_seconds": (
                     world_heartbeat_interval_seconds
+                ),
+                "repeat_final_field_npc_state_update": (
+                    npc_state_replay_plaintext is not None
                 ),
             },
         )
@@ -599,6 +620,14 @@ async def replay_connection(
                 if gap_delay_seconds > 0:
                     await asyncio.sleep(gap_delay_seconds)
             await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+            if (
+                npc_state_replay_plaintext is not None
+                and plaintext == npc_state_replay_plaintext
+                and npc_state_replay_metrics is not None
+            ):
+                npc_state_replay_metrics["packets_sent"] = (
+                    int(npc_state_replay_metrics.get("packets_sent", 0)) + 1
+                )
 
         for plaintext in post_transcript_replies:
             if remaining_opcode_replies:
@@ -1529,6 +1558,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--repeat-final-field-npc-state-update",
+        action="store_true",
+        help=(
+            "select the final fully modeled update for a known NPC in the "
+            "capture's final field and send it once after replay; requires "
+            "--keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--send-after-transcript",
         dest="post_transcript_server_frames",
         action="append",
@@ -1978,6 +2016,19 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 raise ValueError(
                     "world transcript heartbeat probes/responses do not pair"
                 )
+        npc_state_replay_plan = None
+        if arguments.repeat_final_field_npc_state_update:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--repeat-final-field-npc-state-update requires "
+                    "--keep-world-open"
+                )
+            npc_state_replay_plan = plan_final_field_npc_state_replay(transcript)
+            runtime_protocol["npc_state_replay"] = {
+                **npc_state_replay_plan.safe_dict(),
+                "packets_planned": 1,
+                "packets_sent": 0,
+            }
         if arguments.validate_login_state or arguments.rewrite_handoff:
             analysis = analyze_login_transcript(transcript)
             print(render_login_analysis(analysis))
@@ -2042,6 +2093,13 @@ async def async_main(arguments: argparse.Namespace) -> None:
         patch_server_frames(
             transcript, server_frame_patches, dropped_server_frames
         )
+        post_transcript_server_frames = tuple(
+            arguments.post_transcript_server_frames
+        )
+        npc_state_replay_plaintext = None
+        if npc_state_replay_plan is not None:
+            npc_state_replay_plaintext = npc_state_replay_plan.update.to_bytes()
+            post_transcript_server_frames += (npc_state_replay_plaintext,)
         handler = functools.partial(
             replay_connection,
             transcript=transcript,
@@ -2053,9 +2111,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             initial_delay_seconds=arguments.initial_delay_seconds,
             server_frame_patches=server_frame_patches,
             dropped_server_frames=dropped_server_frames,
-            post_transcript_server_frames=tuple(
-                arguments.post_transcript_server_frames
-            ),
+            post_transcript_server_frames=post_transcript_server_frames,
             post_transcript_start_delay_seconds=(
                 arguments.post_transcript_start_delay_seconds
             ),
@@ -2075,6 +2131,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             world_heartbeat_interval_seconds=(
                 arguments.world_heartbeat_interval_seconds
             ),
+            npc_state_replay_plaintext=npc_state_replay_plaintext,
             runtime_protocol=runtime_protocol,
         )
         runtime_config = {
@@ -2086,6 +2143,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "keep_world_open": arguments.keep_world_open,
             "world_heartbeat_interval_seconds": (
                 arguments.world_heartbeat_interval_seconds
+            ),
+            "repeat_final_field_npc_state_update": (
+                arguments.repeat_final_field_npc_state_update
             ),
             "dropped_server_frame_indices": sorted(dropped_server_frames),
         }

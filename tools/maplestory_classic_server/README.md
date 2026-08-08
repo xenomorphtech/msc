@@ -105,6 +105,7 @@ python -m maple_server replay \
   --pcap /path/to/reference.pcapng \
   --tcp-stream 114 \
   --keep-world-open \
+  --repeat-final-field-npc-state-update \
   --world-heartbeat-interval-seconds 10 \
   --hold-open-seconds 600 \
   --transcript-dir captures/replay-observed
@@ -196,6 +197,22 @@ prediction. Both sessions returned to login because the short capture's final
 opcode-`9` packet explicitly terminates the world session, not because of
 opcode `303`.
 
+`--repeat-final-field-npc-state-update` makes that experiment typed and
+repeatable. It first validates the gameplay fold, selects the last complete
+opcode-`303` update for an NPC still known in the final field epoch, generates
+the eight-byte packet through `NpcStateUpdate.to_bytes()`, and sends it once
+after the capture. The option requires `--keep-world-open`; it refuses captures
+without a safe final-field candidate. Its identifier-free prediction is one
+additional `npc_state_updated` event and state-update count, with no change to
+the active NPC count or phase.
+
+The typed option was then exercised through the real client and local handoff.
+Runtime status reported one planned and one sent packet for final-field alias
+`npc:8`. Compared with a keep-open baseline, the observed fold changed NPC
+state updates and corresponding events from `2 -> 3`, while both sessions
+remained `active` with nine NPCs. The client also continued answering generated
+heartbeats after the update, confirming the predicted field-local effect.
+
 Repeating the real-client stream-`114` replay with its validated terminal
 server frame omitted kept the character in the field for the complete
 configured 600-second hold. The observed connection lasted 605.85 seconds
@@ -242,7 +259,10 @@ listener mode/address, safe replay configuration, start time,
 accepted/active/completed/failed connection counters, and a `protocol` object.
 When periodic world heartbeats are enabled,
 `protocol.world_heartbeat` reports the interval, probes sent, responses
-observed, pending probes, and last/maximum round-trip milliseconds. Other
+observed, pending probes, and last/maximum round-trip milliseconds.
+When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
+reports its session-local entity alias, field epoch, decoded action/parameter,
+planned/sent packet counts, and the predicted fold delta. Other
 methods are rejected with `405`; unknown paths return `404`. The API
 deliberately has no remote binding or mutating route: startup rejects
 non-loopback addresses, so the current local-only threat model relies on
@@ -328,6 +348,8 @@ It intentionally cannot launch an authenticated official session.
 11. Correct the heartbeat direction from temporal evidence, correlate opcode
     `10 -> 23` pairs, and emit periodic post-replay probes. A real client
     answered every generated probe while remaining active in the field.
-12. Decode the inner character list, player records, field snapshot body, and
-    the next reactive movement/NPC boundaries needed to replace finite replay
+12. Promote the validated NPC-update A/B into a typed final-field replay plan,
+    generated packet, and identifier-free runtime prediction/telemetry.
+13. Decode the inner character list, player records, field snapshot body, and
+    the next reactive movement boundaries needed to replace finite replay
     content with generated world state.

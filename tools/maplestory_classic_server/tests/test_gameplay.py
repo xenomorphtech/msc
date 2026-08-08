@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     analyze_gameplay_transcript,
+    plan_final_field_npc_state_replay,
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
@@ -304,6 +305,37 @@ class GameplayStateFoldTest(unittest.TestCase):
             baseline.state.npc_state_updates + 1,
         )
         self.assertEqual(len(injected.events), len(baseline.events) + 1)
+
+    def test_plans_identifier_free_final_field_npc_state_replay(self) -> None:
+        plan = plan_final_field_npc_state_replay(
+            fixture_gameplay_transcript(terminate=True)
+        )
+
+        self.assertEqual(
+            plan.update,
+            NpcStateUpdate(
+                object_id=NPC_OBJECT_ID,
+                action=3,
+                parameter=1,
+            ),
+        )
+        self.assertEqual(plan.field_epoch, 1)
+        self.assertEqual(
+            plan.safe_dict(),
+            {
+                "entity": "npc:1",
+                "field_epoch": 1,
+                "action": 3,
+                "parameter": 1,
+                "prediction": {
+                    "npc_state_updates_delta": 1,
+                    "events_delta": 1,
+                    "active_npc_count_delta": 0,
+                    "phase": "unchanged",
+                },
+            },
+        )
+        self.assertNotIn(str(NPC_OBJECT_ID), str(plan.safe_dict()))
 
     def test_terminal_packet_changes_phase_and_is_discoverable_for_omission(
         self,
