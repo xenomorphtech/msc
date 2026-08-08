@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from ipaddress import IPv4Address
 from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -18,11 +20,14 @@ from maple_server.server import (  # noqa: E402
     capture_proxy_connection,
     common_prefix_length,
     common_suffix_length,
+    drop_normalized_client_frames,
     parse_client_opcode_reply,
+    parse_client_opcode_reply_delays,
     parse_client_opcode_result_rewrite,
     parse_server_opcode_byte_rewrite,
     parse_server_frame_patch,
     parse_plaintext_hex,
+    parse_pcap_plaintext_reference,
     parse_zero_filled_frame,
     patch_server_event_data,
     patch_server_frames,
@@ -35,7 +40,12 @@ from maple_server.protocol import (  # noqa: E402
     parse_handshake,
     shuffle_iv,
 )
-from maple_server.transcript import Transcript, TranscriptWriter  # noqa: E402
+from maple_server.packets import WorldHandoff  # noqa: E402
+from maple_server.transcript import (  # noqa: E402
+    Transcript,
+    TranscriptEvent,
+    TranscriptWriter,
+)
 
 
 class TranscriptTest(unittest.TestCase):
@@ -71,6 +81,48 @@ class TranscriptTest(unittest.TestCase):
             arguments.post_transcript_gap_delays_seconds,
             [0.0, 18.0, 1.0],
         )
+
+    def test_pcap_replay_accepts_explicit_launcher_frame_omission(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12082",
+                "--pcap",
+                "reference.pcapng",
+                "--tcp-stream",
+                "83",
+                "--drop-client-frame",
+                "0",
+            ]
+        )
+        self.assertEqual(arguments.drop_client_frame, [0])
+
+    def test_drops_only_selected_frame_aligned_client_event(self) -> None:
+        transcript = Transcript(
+            path=Path("fixture.pcapng"),
+            events=(
+                TranscriptEvent(event="connect", timestamp_ns=1),
+                TranscriptEvent(
+                    event="data",
+                    timestamp_ns=2,
+                    direction="client_to_server",
+                    data=b"launcher",
+                    metadata={"frame_index": 0},
+                ),
+                TranscriptEvent(
+                    event="data",
+                    timestamp_ns=3,
+                    direction="client_to_server",
+                    data=b"login",
+                    metadata={"frame_index": 1},
+                ),
+            ),
+        )
+
+        filtered = drop_normalized_client_frames(transcript, {0})
+
+        self.assertEqual(filtered.client_bytes, b"login")
 
     def test_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -186,6 +238,35 @@ class TranscriptTest(unittest.TestCase):
     def test_parse_plaintext_hex(self) -> None:
         self.assertEqual(parse_plaintext_hex("0d0000"), b"\x0d\x00\x00")
 
+    def test_pcap_plaintext_reference_can_rewrite_only_opcode(self) -> None:
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(b"\x00\x00private",),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@83:0?opcode=1"
+            )
+        self.assertEqual(payload, b"\x01\x00private")
+
+    def test_pcap_plaintext_reference_can_rewrite_validated_handoff(self) -> None:
+        original = WorldHandoff(
+            result=0,
+            address=IPv4Address("203.0.113.10"),
+            port=8587,
+            character_id=1234,
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@83:0?handoff=127.0.0.1:12857"
+            )
+        parsed = WorldHandoff.parse(payload)
+        self.assertEqual(str(parsed.address), "127.0.0.1")
+        self.assertEqual(parsed.port, 12857)
+        self.assertEqual(parsed.character_id, 1234)
+
     def test_parse_zero_filled_frame_with_selector(self) -> None:
         self.assertEqual(
             parse_zero_filled_frame("1:6:1"),
@@ -196,6 +277,12 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(
             parse_client_opcode_reply("13=0d0000"),
             (13, b"\x0d\x00\x00"),
+        )
+
+    def test_parse_client_opcode_reply_delays(self) -> None:
+        self.assertEqual(
+            parse_client_opcode_reply_delays("4=0,2.5"),
+            (4, (0.0, 2.5)),
         )
 
     def test_parse_client_opcode_result_rewrite(self) -> None:
@@ -697,6 +784,76 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             reply = await reader.readexactly(7)
             self.assertEqual(
                 crypt_payload(reply[4:], shuffle_iv(server_iv)), b"ack"
+            )
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+    async def test_replay_preserves_delays_inside_reactive_reply_sequence(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="reactive-sequence-delay", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            hold_open_seconds=0.2,
+                            client_opcode_replies={4: (b"one", b"two")},
+                            client_opcode_reply_delays={4: (0.0, 0.05)},
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            reactive_plaintext = b"\x04\x00world"
+            writer.write(
+                encode_frame_header(len(reactive_plaintext), client_iv, 300)
+                + crypt_payload(reactive_plaintext, client_iv)
+            )
+            await writer.drain()
+            first = await reader.readexactly(7)
+            first_iv = shuffle_iv(server_iv)
+            self.assertEqual(crypt_payload(first[4:], first_iv), b"one")
+            started = asyncio.get_running_loop().time()
+            second = await reader.readexactly(7)
+            self.assertGreaterEqual(
+                asyncio.get_running_loop().time() - started, 0.035
+            )
+            self.assertEqual(
+                crypt_payload(second[4:], shuffle_iv(first_iv)), b"two"
             )
             writer.close()
             await writer.wait_closed()

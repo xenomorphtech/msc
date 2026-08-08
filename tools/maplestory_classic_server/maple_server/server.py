@@ -5,11 +5,21 @@ import asyncio
 import base64
 from dataclasses import dataclass
 import functools
+from ipaddress import IPv4Address
 import os
 from pathlib import Path
 import sys
 from typing import Awaitable, Callable
 
+from .gamestate import (
+    ShapeCoverage,
+    analyze_login_transcript,
+    decode_transcript,
+    normalize_maple_transcript,
+    render_login_analysis,
+)
+from .packets import WorldHandoff
+from .pcap import load_pcap_tcp_stream
 from .protocol import (
     ProtocolError,
     crypt_payload,
@@ -297,7 +307,8 @@ async def replay_connection(
     post_transcript_frame_delay_seconds: float = 0.0,
     post_transcript_gap_delays_seconds: tuple[float, ...] = (),
     post_transcript_replies: tuple[bytes, ...] = (),
-    client_opcode_replies: dict[int, bytes] | None = None,
+    client_opcode_replies: dict[int, bytes | tuple[bytes, ...]] | None = None,
+    client_opcode_reply_delays: dict[int, tuple[float, ...]] | None = None,
 ) -> None:
     if hold_open_seconds < 0:
         raise ValueError("hold_open_seconds cannot be negative")
@@ -307,13 +318,22 @@ async def replay_connection(
         raise ValueError("post_transcript_frame_delay_seconds cannot be negative")
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
+    if any(
+        delay < 0
+        for delays in (client_opcode_reply_delays or {}).values()
+        for delay in delays
+    ):
+        raise ValueError("client_opcode_reply_delays cannot be negative")
     if strict and client_opcode_replies:
         raise ValueError("client opcode replies require non-strict replay")
     previous_timestamp_ns: int | None = None
     patched_server_events = iter(
         patch_server_event_data(transcript, server_frame_patches or {})
     )
-    remaining_opcode_replies = dict(client_opcode_replies or {})
+    remaining_opcode_replies = {
+        opcode: (payloads if isinstance(payloads, tuple) else (payloads,))
+        for opcode, payloads in (client_opcode_replies or {}).items()
+    }
     pending_opcode_replies: list[bytes] = []
     client_iv = (
         parse_handshake(transcript.server_bytes).first_iv
@@ -344,6 +364,10 @@ async def replay_connection(
                     post_transcript_gap_delays_seconds
                 ),
                 "client_reply_opcodes": sorted(remaining_opcode_replies),
+                "client_reply_delays": {
+                    str(opcode): list(delays)
+                    for opcode, delays in (client_opcode_reply_delays or {}).items()
+                },
             },
         )
         if transcript_directory is not None
@@ -371,6 +395,24 @@ async def replay_connection(
         client_writer.write(frame)
         await client_writer.drain()
 
+    async def send_reactive_plaintexts(
+        opcode: int, plaintexts: tuple[bytes, ...]
+    ) -> None:
+        delays = (client_opcode_reply_delays or {}).get(
+            opcode, (0.0,) * len(plaintexts)
+        )
+        if len(delays) != len(plaintexts):
+            raise ValueError(
+                f"client opcode {opcode} has {len(plaintexts)} replies but "
+                f"{len(delays)} delays"
+            )
+        for delay, reactive_plaintext in zip(delays, plaintexts, strict=True):
+            if delay > 0:
+                await asyncio.sleep(delay)
+            await send_encrypted_frame(
+                encrypt_next_server_frame(reactive_plaintext)
+            )
+
     try:
         if initial_delay_seconds > 0:
             await asyncio.sleep(initial_delay_seconds)
@@ -386,7 +428,7 @@ async def replay_connection(
                         received, opcode = await read_live_frame()
                         if opcode not in remaining_opcode_replies:
                             break
-                        pending_opcode_replies.append(
+                        pending_opcode_replies.extend(
                             remaining_opcode_replies.pop(opcode)
                         )
                 elif strict:
@@ -461,10 +503,8 @@ async def replay_connection(
                     _, opcode = await read_live_frame()
                     if opcode not in remaining_opcode_replies:
                         break
-                    await send_encrypted_frame(
-                        encrypt_next_server_frame(
-                            remaining_opcode_replies.pop(opcode)
-                        )
+                    await send_reactive_plaintexts(
+                        opcode, remaining_opcode_replies.pop(opcode)
                     )
             else:
                 await read_and_record_encrypted_frame(client_reader, observed)
@@ -490,9 +530,8 @@ async def replay_connection(
                 if not received:
                     break
                 if opcode in remaining_opcode_replies:
-                    reactive_plaintext = remaining_opcode_replies.pop(opcode)
-                    await send_encrypted_frame(
-                        encrypt_next_server_frame(reactive_plaintext)
+                    await send_reactive_plaintexts(
+                        opcode, remaining_opcode_replies.pop(opcode)
                     )
     except Exception as exception:
         error = f"{type(exception).__name__}: {exception}"
@@ -697,6 +736,230 @@ def parse_plaintext_hex(specification: str) -> bytes:
         return bytes.fromhex(specification)
     except ValueError as error:
         raise argparse.ArgumentTypeError("payload is not valid hex") from error
+
+
+def parse_ipv4_endpoint(specification: str) -> tuple[IPv4Address, int]:
+    try:
+        address_text, port_text = specification.rsplit(":", 1)
+        address = IPv4Address(address_text)
+        port = int(port_text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "endpoint must be an IPv4 address and port, such as 127.0.0.1:8587"
+        ) from error
+    if not 1 <= port <= 0xFFFF:
+        raise argparse.ArgumentTypeError("endpoint port must be between 1 and 65535")
+    return address, port
+
+
+def parse_non_negative_int(specification: str) -> int:
+    try:
+        value = int(specification, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"expected a non-negative integer, got {specification!r}"
+        ) from error
+    if value < 0:
+        raise argparse.ArgumentTypeError("value cannot be negative")
+    return value
+
+
+@functools.lru_cache(maxsize=8)
+def _load_pcap_plaintexts(path: str, tcp_stream: int) -> tuple[bytes, ...]:
+    transcript = load_pcap_tcp_stream(Path(path), tcp_stream)
+    decoded = decode_transcript(transcript)
+    return tuple(
+        frame.plaintext
+        for frame in decoded.frames
+        if frame.direction == "server_to_client"
+    )
+
+
+def parse_pcap_plaintext_reference(specification: str) -> bytes:
+    """Resolve PCAP@STREAM:SERVER_FRAME[?TRANSFORM] without logging payload."""
+    reference, separator, transform = specification.partition("?")
+    source_text, index_separator, frame_index_text = reference.rpartition(":")
+    path_text, stream_separator, stream_text = source_text.rpartition("@")
+    if not index_separator or not stream_separator or not path_text:
+        raise argparse.ArgumentTypeError(
+            "pcap frame reference must have the form PCAP@STREAM:SERVER_FRAME"
+        )
+    try:
+        tcp_stream = int(stream_text, 0)
+        frame_index = int(frame_index_text, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "pcap stream and server frame index must be integers"
+        ) from error
+    if tcp_stream < 0 or frame_index < 0:
+        raise argparse.ArgumentTypeError(
+            "pcap stream and server frame index cannot be negative"
+        )
+    try:
+        payload = _load_pcap_plaintexts(path_text, tcp_stream)[frame_index]
+    except IndexError as error:
+        raise argparse.ArgumentTypeError(
+            f"pcap stream {tcp_stream} has no server frame {frame_index}"
+        ) from error
+    if not separator:
+        return payload
+    if transform.startswith("opcode="):
+        try:
+            opcode = int(transform.removeprefix("opcode="), 0)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap opcode transform must be an integer"
+            ) from error
+        if not 0 <= opcode <= 0xFFFF:
+            raise argparse.ArgumentTypeError(
+                "pcap opcode transform must be between 0 and 65535"
+            )
+        if len(payload) < 2:
+            raise argparse.ArgumentTypeError(
+                "cannot rewrite the opcode of a plaintext shorter than 2 bytes"
+            )
+        return opcode.to_bytes(2, "little") + payload[2:]
+    if transform.startswith("handoff="):
+        endpoint = parse_ipv4_endpoint(transform.removeprefix("handoff="))
+        try:
+            original = WorldHandoff.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap handoff transform requires a validated handoff packet"
+            ) from error
+        address, port = endpoint
+        return WorldHandoff(
+            result=original.result,
+            address=address,
+            port=port,
+            character_id=original.character_id,
+            trailing=original.trailing,
+            opcode=original.opcode,
+        ).to_bytes()
+    raise argparse.ArgumentTypeError(
+        "unknown pcap frame transform; use opcode=N or handoff=IPV4:PORT"
+    )
+
+
+def parse_client_opcode_pcap_reply(specification: str) -> tuple[int, bytes]:
+    opcode_text, separator, reference = specification.partition("=")
+    if not separator:
+        raise argparse.ArgumentTypeError(
+            "pcap client opcode reply must have the form OPCODE=REFERENCE"
+        )
+    try:
+        opcode = int(opcode_text, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"invalid client opcode: {opcode_text!r}"
+        ) from error
+    if not 0 <= opcode <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "client opcode must be between 0 and 65535"
+        )
+    return opcode, parse_pcap_plaintext_reference(reference)
+
+
+def parse_client_opcode_reply_delays(
+    specification: str,
+) -> tuple[int, tuple[float, ...]]:
+    opcode_text, separator, delays_text = specification.partition("=")
+    if not separator:
+        raise argparse.ArgumentTypeError(
+            "reply delays must have the form OPCODE=SECONDS[,SECONDS...]"
+        )
+    try:
+        opcode = int(opcode_text, 0)
+        delays = tuple(float(value) for value in delays_text.split(","))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "reply opcode and delays must be numeric"
+        ) from error
+    if not 0 <= opcode <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "client opcode must be between 0 and 65535"
+        )
+    if not delays or any(delay < 0 for delay in delays):
+        raise argparse.ArgumentTypeError(
+            "reply delays must contain non-negative seconds"
+        )
+    return opcode, delays
+
+
+def parse_server_frame_pcap_patch(specification: str) -> tuple[int, bytes]:
+    index_text, separator, reference = specification.partition("=")
+    if not separator:
+        raise argparse.ArgumentTypeError(
+            "pcap server frame patch must have the form INDEX=REFERENCE"
+        )
+    try:
+        index = int(index_text, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"invalid server frame index: {index_text!r}"
+        ) from error
+    if index < 0:
+        raise argparse.ArgumentTypeError("server frame index cannot be negative")
+    return index, parse_pcap_plaintext_reference(reference)
+
+
+def drop_normalized_client_frames(
+    transcript: Transcript, frame_indices: set[int]
+) -> Transcript:
+    found: set[int] = set()
+    events = []
+    for event in transcript.events:
+        frame_index = (
+            event.metadata.get("frame_index")
+            if event.metadata is not None
+            else None
+        )
+        if (
+            event.event == "data"
+            and event.direction == "client_to_server"
+            and isinstance(frame_index, int)
+            and frame_index in frame_indices
+        ):
+            found.add(frame_index)
+            continue
+        events.append(event)
+    missing = frame_indices - found
+    if missing:
+        raise ValueError(
+            f"client frame indices are absent from normalized transcript: "
+            f"{sorted(missing)}"
+        )
+    return Transcript(path=transcript.path, events=tuple(events))
+
+
+def build_handoff_frame_patch(
+    transcript: Transcript, endpoint: tuple[IPv4Address, int]
+) -> tuple[int, bytes]:
+    analysis = analyze_login_transcript(transcript)
+    handoffs = [
+        observation
+        for observation in analysis.observations
+        if observation.kind == "world_handoff"
+        and observation.coverage == ShapeCoverage.FULL
+    ]
+    if len(handoffs) != 1:
+        raise ValueError(
+            f"expected exactly one validated world handoff, found {len(handoffs)}"
+        )
+    observation = handoffs[0]
+    if not isinstance(observation.parsed, WorldHandoff):
+        raise RuntimeError("validated handoff observation has no parsed packet")
+    address, port = endpoint
+    original = observation.parsed
+    replacement = WorldHandoff(
+        result=original.result,
+        address=address,
+        port=port,
+        character_id=original.character_id,
+        trailing=original.trailing,
+        opcode=original.opcode,
+    )
+    return observation.direction_index, replacement.to_bytes()
 
 
 def parse_zero_filled_frame(specification: str) -> bytes:
@@ -951,7 +1214,19 @@ def build_parser() -> argparse.ArgumentParser:
         "replay", help="Replay one captured server session to a client"
     )
     add_listener_arguments(replay)
-    replay.add_argument("--transcript", required=True, type=Path)
+    replay_source = replay.add_mutually_exclusive_group(required=True)
+    replay_source.add_argument("--transcript", type=Path)
+    replay_source.add_argument(
+        "--pcap", type=Path, help="read one Maple TCP stream directly from pcap"
+    )
+    replay.add_argument(
+        "--tcp-stream",
+        type=int,
+        help="Wireshark tcp.stream index (required with --pcap)",
+    )
+    replay.add_argument(
+        "--tshark", default="tshark", help="tshark executable used for pcap input"
+    )
     replay.add_argument(
         "--transcript-dir",
         type=Path,
@@ -983,6 +1258,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--server-frame-patch-from-pcap",
+        dest="server_frame_patch",
+        action="append",
+        type=parse_server_frame_pcap_patch,
+        metavar="INDEX=PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help="replace a captured replay frame with plaintext sourced from pcap",
+    )
+    replay.add_argument(
         "--send-after-transcript",
         dest="post_transcript_server_frames",
         action="append",
@@ -1003,6 +1286,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "send a plaintext frame containing a two-byte opcode followed by "
             "zeros after the captured transcript; may be repeated"
+        ),
+    )
+    replay.add_argument(
+        "--send-after-transcript-from-pcap",
+        dest="post_transcript_server_frames",
+        action="append",
+        type=parse_pcap_plaintext_reference,
+        metavar="PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help=(
+            "append plaintext extracted and validated from one pcap server frame; "
+            "may be repeated"
         ),
     )
     replay.add_argument(
@@ -1035,6 +1329,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reply-after-client-frame-from-pcap",
+        dest="reply_after_client_frame",
+        action="append",
+        type=parse_pcap_plaintext_reference,
+        metavar="PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help="reply to the next client frame with pcap-sourced plaintext",
+    )
+    replay.add_argument(
         "--reply-on-client-opcode",
         action="append",
         default=[],
@@ -1044,6 +1346,53 @@ def build_parser() -> argparse.ArgumentParser:
             "in non-strict replay, skip one matching client frame and send this "
             "plaintext after the captured transcript (or immediately if it "
             "arrives during hold-open); may be repeated for distinct opcodes"
+        ),
+    )
+    replay.add_argument(
+        "--reply-on-client-opcode-from-pcap",
+        dest="reply_on_client_opcode",
+        action="append",
+        type=parse_client_opcode_pcap_reply,
+        metavar="OPCODE=PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help=(
+            "react to a client opcode with pcap-sourced plaintext; repeated "
+            "entries for one opcode form an ordered response sequence"
+        ),
+    )
+    replay.add_argument(
+        "--client-opcode-reply-delays",
+        action="append",
+        default=[],
+        type=parse_client_opcode_reply_delays,
+        metavar="OPCODE=SECONDS[,SECONDS...]",
+        help=(
+            "delay before each ordered response for one reactive opcode; the "
+            "number of delays must match that opcode's response count"
+        ),
+    )
+    replay.add_argument(
+        "--validate-login-state",
+        action="store_true",
+        help="validate interpreted login packet shapes/state before listening",
+    )
+    replay.add_argument(
+        "--rewrite-handoff",
+        type=parse_ipv4_endpoint,
+        metavar="IPV4:PORT",
+        help=(
+            "replace the validated login handoff endpoint while preserving its "
+            "result and selected character id"
+        ),
+    )
+    replay.add_argument(
+        "--drop-client-frame",
+        action="append",
+        default=[],
+        type=parse_non_negative_int,
+        metavar="INDEX",
+        help=(
+            "omit one frame-aligned captured client event before replay; intended "
+            "for launcher-only frames and may be repeated"
         ),
     )
 
@@ -1063,6 +1412,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compare_parser.add_argument("first", type=Path)
     compare_parser.add_argument("second", type=Path)
+
+    analyze_parser = subparsers.add_parser(
+        "analyze-login",
+        help=(
+            "decrypt a transcript or pcap stream, fold interpreted packets into "
+            "login game state, and validate packet shapes"
+        ),
+    )
+    source = analyze_parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--transcript", type=Path)
+    source.add_argument("--pcap", type=Path)
+    analyze_parser.add_argument(
+        "--tcp-stream",
+        type=int,
+        help="Wireshark tcp.stream index (required with --pcap)",
+    )
+    analyze_parser.add_argument(
+        "--tshark", default="tshark", help="tshark executable used for pcap input"
+    )
+    analyze_parser.add_argument("--json", action="store_true")
+    analyze_parser.add_argument(
+        "--show-identifiers",
+        action="store_true",
+        help="include account/character numeric identifiers in output",
+    )
+    analyze_parser.add_argument(
+        "--fail-on-invalid",
+        action="store_true",
+        help="exit with status 2 if a shape or state invariant is invalid",
+    )
     return parser
 
 
@@ -1202,13 +1581,71 @@ async def async_main(arguments: argparse.Namespace) -> None:
         )
         handler = functools.partial(capture_proxy_connection, config=config)
     elif arguments.command == "replay":
-        transcript = Transcript.load(arguments.transcript)
+        if arguments.pcap is not None:
+            if arguments.tcp_stream is None:
+                raise ValueError("--tcp-stream is required with --pcap")
+            transcript = load_pcap_tcp_stream(
+                arguments.pcap,
+                arguments.tcp_stream,
+                tshark=arguments.tshark,
+            )
+        else:
+            if arguments.tcp_stream is not None:
+                raise ValueError("--tcp-stream is only valid with --pcap")
+            transcript = Transcript.load(arguments.transcript)
         server_frame_patches = dict(arguments.server_frame_patch)
         if len(server_frame_patches) != len(arguments.server_frame_patch):
             raise ValueError("Each server frame patch index may be specified only once")
-        client_opcode_replies = dict(arguments.reply_on_client_opcode)
-        if len(client_opcode_replies) != len(arguments.reply_on_client_opcode):
-            raise ValueError("Each reactive client opcode may be specified only once")
+        if arguments.validate_login_state or arguments.rewrite_handoff:
+            analysis = analyze_login_transcript(transcript)
+            print(render_login_analysis(analysis))
+            if not analysis.valid:
+                raise ValueError("login transcript failed packet/state validation")
+        if arguments.rewrite_handoff:
+            handoff_index, handoff_payload = build_handoff_frame_patch(
+                transcript, arguments.rewrite_handoff
+            )
+            if handoff_index in server_frame_patches:
+                raise ValueError(
+                    f"server frame {handoff_index} is set by both "
+                    "--server-frame-patch and --rewrite-handoff"
+                )
+            server_frame_patches[handoff_index] = handoff_payload
+        if arguments.pcap is not None:
+            transcript = normalize_maple_transcript(transcript)
+        elif arguments.drop_client_frame:
+            raise ValueError("--drop-client-frame currently requires --pcap")
+        if len(set(arguments.drop_client_frame)) != len(
+            arguments.drop_client_frame
+        ):
+            raise ValueError("Each dropped client frame index may be specified once")
+        if arguments.drop_client_frame:
+            transcript = drop_normalized_client_frames(
+                transcript, set(arguments.drop_client_frame)
+            )
+        grouped_client_opcode_replies: dict[int, list[bytes]] = {}
+        for opcode, payload in arguments.reply_on_client_opcode:
+            grouped_client_opcode_replies.setdefault(opcode, []).append(payload)
+        client_opcode_replies = {
+            opcode: tuple(payloads)
+            for opcode, payloads in grouped_client_opcode_replies.items()
+        }
+        client_opcode_reply_delays = dict(arguments.client_opcode_reply_delays)
+        if len(client_opcode_reply_delays) != len(
+            arguments.client_opcode_reply_delays
+        ):
+            raise ValueError("Each reactive client opcode may define delays once")
+        for opcode, delays in client_opcode_reply_delays.items():
+            replies = client_opcode_replies.get(opcode)
+            if replies is None:
+                raise ValueError(
+                    f"client opcode {opcode} defines delays but has no replies"
+                )
+            if len(delays) != len(replies):
+                raise ValueError(
+                    f"client opcode {opcode} has {len(replies)} replies but "
+                    f"{len(delays)} delays"
+                )
         patch_server_frames(transcript, server_frame_patches)
         handler = functools.partial(
             replay_connection,
@@ -1231,6 +1668,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             post_transcript_replies=tuple(arguments.reply_after_client_frame),
             client_opcode_replies=client_opcode_replies,
+            client_opcode_reply_delays=client_opcode_reply_delays,
         )
     elif arguments.command == "stub":
         handler = functools.partial(
@@ -1252,6 +1690,36 @@ def main() -> None:
         return
     if arguments.command == "compare":
         compare_transcripts(arguments.first, arguments.second)
+        return
+    if arguments.command == "analyze-login":
+        if arguments.pcap is not None:
+            if arguments.tcp_stream is None:
+                parser.error("--tcp-stream is required with --pcap")
+            transcript = load_pcap_tcp_stream(
+                arguments.pcap,
+                arguments.tcp_stream,
+                tshark=arguments.tshark,
+            )
+        else:
+            if arguments.tcp_stream is not None:
+                parser.error("--tcp-stream is only valid with --pcap")
+            transcript = Transcript.load(arguments.transcript)
+        analysis = analyze_login_transcript(transcript)
+        if arguments.json:
+            print(
+                analysis.to_json(
+                    show_identifiers=arguments.show_identifiers
+                )
+            )
+        else:
+            print(
+                render_login_analysis(
+                    analysis,
+                    show_identifiers=arguments.show_identifiers,
+                )
+            )
+        if arguments.fail_on_invalid and not analysis.valid:
+            raise SystemExit(2)
         return
     try:
         asyncio.run(async_main(arguments))

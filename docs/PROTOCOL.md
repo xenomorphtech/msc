@@ -69,6 +69,12 @@ client 13  native NGS result/proof (observed result selector 15)
 server 13  NGS result acknowledgment
 server 1   account/login result
 server 2   one world record, or a signed world-id -1 sentinel
+client 4   select world (`uint32 world_id`)
+server 402 channel transition (12-byte then 8-byte response)
+client 5   select channel (`uint8 world`, `uint16 channel`, IPv4)
+server 4   character-list response
+client 7   select character (`uint32 character_id`)
+server 5   world-server handoff
 ```
 
 The custom replay currently ignores the opaque native proof and acknowledges
@@ -90,6 +96,70 @@ and reaches world selection after an informational modal is dismissed. This is
 still a structural probe, not a decoded production account response. Direct
 transition probes separately established state `1` as world selection and
 state `2` as character selection.
+
+## Successful login reference (`111.pcapng`, stream 83)
+
+The successful reference uses the same 33-byte version-`300`, subversion-`300`,
+locale-`4` handshake and the same directional cipher masks (`3` client,
+`~300` server). Validate and fold it into typed game state with:
+
+```sh
+cd /home/sdancer/ms/tools/maplestory_classic_server
+python -m maple_server analyze-login \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 83 \
+  --fail-on-invalid
+```
+
+The final state is `handoff_ready`: five worlds, selected world `4`, selected
+channel `23`, a received character list, a character selection, and a matching
+handoff. Numeric account and character identifiers are redacted by default.
+The validated server sequence is:
+
+```text
+frame 3       opcode 0, 63-byte successful account result
+frames 5-9   opcode 2, five 2,183-byte world records
+frame 10     opcode 2, signed world-id -1 sentinel
+frames 15-16 opcode 402, 12-byte then 8-byte transition results
+frame 17     opcode 4, 170-byte character-list response
+frame 20     opcode 5, 19-byte world handoff
+```
+
+All world packets parse to their exact ends. Worlds `1` through `4` use
+visible/online flag `1`; world `5` uses flag `2`. Each has 60 channels,
+event EXP/drop values `100`, channel unknown value `200`, and no balloons.
+This explains why flag-`0` test worlds were retained in memory but rendered
+with blank labels.
+
+The client selects a world with six-byte opcode `4`, then a channel with
+nine-byte opcode `5`, and finally a character with six-byte opcode `7`. The
+opcode-`5` fields are one world byte, a little-endian channel `uint16`, and four
+IPv4 octets.
+
+Timing is part of the channel transition. The first opcode-`402` response
+arrives about 28 ms after client opcode `4`; the second arrives about 2.54 s
+later, and client opcode `5` follows immediately. Sending both `402` packets
+back-to-back reproduces a live stall after the channel button is clicked.
+
+The successful 63-byte account packet is fully bounded as follows. Its three
+strings use a `uint16` UTF-16 code-unit count without the extra world-string
+trailing byte:
+
+```text
+uint16 opcode (0 in reference; rewritten to 1 for the local handler)
+uint8  result = 0
+uint32 account_id
+uint8  gender
+uint8  administrator
+bool8  restricted
+string account_name
+uint16 unknown
+uint8[3] account_flags
+int64  created_at_ticks
+string secondary_name
+string tertiary_name
+byte[2] trailing
+```
 
 ## World-list packet (`server opcode 2`)
 
@@ -128,10 +198,31 @@ channel named `test-1`, zero population, and no balloons. Do not place the raw
 hex in general logs; the replay command in `CUSTOM_SERVER.md` is the canonical
 lab recipe.
 
-A transparent process-local trampoline confirms that opcode `2` reaches the
-build-specific handler without leaving GDB attached. The signed-id `-1`
-sentinel consumes or clears the controller's staging list, so world/channel
-counts must be inspected before the sentinel rather than after it.
+Dual transparent process-local trampolines confirm that opcode `2` reaches the
+build-specific handler and the world parser without leaving GDB attached. The
+51-byte test record decodes exactly as world id `0`, name `test`, one channel
+named `test-1`, and zero-valued remaining fields. Focused Cpp2IL established
+that controller field `+0xc8` is a wrapper whose `List<World>` backing field is
+at wrapper `+0x50`; the corrected live dump shows one retained world both
+before and after the signed-id `-1` sentinel. The former `worlds=0` observation
+read wrapper `+0x18` and was not a list count.
+
+## World handoff packet (`server opcode 5`)
+
+The successful 19-byte shape is fully consumed as:
+
+```text
+uint16 opcode = 5
+uint16 result = 0
+byte[4] IPv4 address (network octet order)
+uint16 port (little-endian)
+uint32 character_id
+byte[5] trailing zeros
+```
+
+The selected character ID must equal the handoff character ID. The replay's
+`?handoff=127.0.0.1:PORT` PCAP-frame transform changes only address and port
+after validating this shape.
 
 ## `58880` exchange
 
@@ -151,6 +242,11 @@ aewwawuiaryatp
 
 Date and cache/entity metadata varied. The role appears to be a probe or
 handoff rather than the encrypted login channel.
+
+This is the complete observed HTTP surface; there is no JSON management API.
+Custom-server control is CLI-based and observations are mode-`0600` JSONL. In
+the successful `111.pcapng` flow, the actual encrypted world handoff is instead
+`43.142.194.150:8587`.
 
 ## Bootstrap connection
 
@@ -176,12 +272,27 @@ Important files:
 1786118473811233268_54.65.46.47_5050.jsonl
 ```
 
+The fresh HK SOCKS5 official reference is:
+
+```text
+hk_official_reference_20260808/1786166652482700663_35.73.142.21_10282.jsonl
+hk_official_reference_20260808/1786166661254491571_54.238.121.146_58880.jsonl
+```
+
+It contains 1,377 client bytes and 22,092 server bytes on `10282`. Decryption
+produces server opcodes `27, 28, 22, 0, 23`, followed by ten opcode-`10`
+heartbeats; the client produces opcodes `31, 6`, followed by ten opcode-`23`
+frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
+
 ## Current unknowns
 
-- The complete successful opcode-`1` account payload is not decoded; the
-  bounded zero-filled probe only supplies enough data for structural progress.
-- The character-list opcode and minimum character/map handoff payload are not
-  yet decoded.
+- The successful account shape is decoded, but the regional opcode mapping
+  differs (`0` in the successful capture, `1` for the local handler), and
+  several fields still have unknown semantics.
+- The character-list opcode/result envelope is validated, but its inner 167
+  bytes remain intentionally opaque/partial.
+- The 19-byte handoff shape is validated; the initial stream-`92` world/map
+  state still needs semantic decoding beyond encrypted-frame replay.
 - The purpose and required state for the TLS `5050` connection remain unknown.
 - The exact semantics of captured opcode-`0` result values other than the
   observed policy result `2` remain unknown.

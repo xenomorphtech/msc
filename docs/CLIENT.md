@@ -109,8 +109,11 @@ For repeatable automation, load `.env` and run
 `tools/maplestory_classic_server/tools/refresh_hk_ticket_from_cdp.mjs` first.
 It prints only `ticketReady` and whether the new argument differs from the
 previous one; it never prints the argument or credentials. The helper now uses
-a cache-busted, URL-encoded Galaxy login transaction and waits before both
-login clicks so a fresh flow can establish its cookies. Then launch with:
+a cache-busted, URL-encoded Galaxy login transaction, hard-reloads the
+authenticated main page, and waits before both authorization clicks so a fresh
+flow can establish its cookies. It reuses an already-authenticated main page
+without requiring account variables; credentials are required only if the ID
+and password form actually appears. Then launch with:
 
 ```sh
 MAPLE_NETWORK_NAMESPACE=mapleproxy \
@@ -131,10 +134,9 @@ sudo ip netns exec mapleproxy ss -ltnp | rg ':12082'
 ```
 
 If the dedicated profile's cookies are cleared, Beanfun may temporarily return
-login-flow timeout `01004`. The same timeout was observed through both HK and
-Taiwan exits; repeated proxy switching does not resolve it. Let the transaction
-cool down, cold-start the dedicated Chromium profile, then rerun the refresh
-helper.
+login-flow timeout `01004`. A forced fresh login followed by the helper's
+cache-busting, main-page reload, and delayed clicks restored repeatable ticket
+issuance. Region switching alone did not resolve the timeout.
 
 An early GDB attach can be observed by the startup/NGS path, and a persistent
 attach stalls Wine rendering. For protocol probes, use brief validated patches
@@ -152,20 +154,48 @@ WINEPREFIX=/home/sdancer/ms/downloads/maplestory_classic_wine_prefix wineserver 
 Use this before a cold launch if stale NGM, Unity, or wineserver processes are
 interfering.
 
-## Mute only MapleStory
+## Keep only MapleStory muted
 
-PipeWire creates a new node when the client relaunches, so the numeric node ID
-is not stable:
+Do not rely on the changing PipeWire node number. The repository includes a
+user service that continuously matches output nodes whose application or node
+name is exactly `Maplestory_Classic.exe` and mutes them within a 250 ms poll:
 
 ```sh
-wpctl status
-wpctl set-mute NODE_ID 1
-wpctl get-volume NODE_ID
+systemctl --user link \
+  /home/sdancer/ms/tools/maplestory_classic_server/maplestory-audio-mute.service
+systemctl --user enable --now maplestory-audio-mute.service
+systemctl --user is-active maplestory-audio-mute.service
 ```
 
-Select the node named `Maplestory_Classic.exe`. A successful result ends with
-`[MUTED]`. The last observed node was `90`, but always verify it rather than
-assuming that ID still belongs to the game.
+The service is currently linked and enabled. Verify the live stream with
+`wpctl status --name`, then run `wpctl get-volume NODE_ID`; it must end in
+`[MUTED]`. The helper intentionally ignores other output applications and all
+input streams. Its implementation is `maple_server/audio_mute.py` and it can
+also be run once for diagnostics:
+
+```sh
+cd /home/sdancer/ms/tools/maplestory_classic_server
+python -m maple_server.audio_mute --once --verbose
+```
+
+## Interact inside the nested Wayland desktop
+
+The current game surface is inside the nested Sway compositor on
+`wayland-2`, not on the host desktop. Do not use `xdotool` to move the host
+cursor. Resolve the nested compositor socket and operate on its own seat:
+
+```sh
+nested_sway_socket=/run/user/1000/sway-ipc.1000.195243.sock
+SWAYSOCK=$nested_sway_socket swaymsg -t get_tree
+SWAYSOCK=$nested_sway_socket swaymsg '[class="maplestory_classic.exe"] focus'
+SWAYSOCK=$nested_sway_socket swaymsg 'seat seat0 cursor set X Y'
+SWAYSOCK=$nested_sway_socket swaymsg 'seat seat0 cursor press button1'
+SWAYSOCK=$nested_sway_socket swaymsg 'seat seat0 cursor release button1'
+```
+
+The Sway PID/socket is not stable across compositor restarts; list
+`/run/user/1000/sway-ipc.*.sock` and identify the one whose output is
+`X11-1`. Coordinates above are in that nested output's coordinate space.
 
 ## Wine graphics selection
 

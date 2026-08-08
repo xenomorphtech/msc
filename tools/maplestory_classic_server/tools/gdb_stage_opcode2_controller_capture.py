@@ -64,6 +64,8 @@ def managed_string(address: int) -> tuple[int, str]:
     if address == 0:
         return 0, ""
     length = unsigned(address + 0x10, 4)
+    if length == 0:
+        return 0, ""
     if length > 256:
         return length, "<oversized>"
     value = bytes(inferior.read_memory(address + 0x14, length * 2)).decode(
@@ -231,13 +233,14 @@ elif action == "dump":
     if controller == 0:
         raise gdb.GdbError("Opcode-2 controller was not captured")
     world = unsigned(scratch + 16, 8)
-    world_list = unsigned(controller + 0xC8, 8)
+    world_collection = unsigned(controller + 0xC8, 8)
+    world_list = unsigned(world_collection + 0x50, 8) if world_collection else 0
     world_count = unsigned(world_list + 0x18, 4) if world_list else -1
     print(
         "opcode2_controller_capture "
-        f"action=dump controller_field_present={world_list != 0} "
-        f"controller_field_type={object_type(world_list)!r} "
-        f"field_value_at_18={world_count} "
+        f"action=dump collection_present={world_collection != 0} "
+        f"collection_type={object_type(world_collection)!r} "
+        f"world_list_present={world_list != 0} worlds={world_count} "
         f"parser_called={world != 0}"
     )
     if world:
@@ -248,6 +251,10 @@ elif action == "dump":
             "opcode2_parser_world_dump "
             f"id={unsigned(world + 0x10, 4)} "
             f"name_length={world_name[0]} name={world_name[1]!r} "
+            f"flag={unsigned(world + 0x20, 1)} "
+            f"event_name={managed_string(unsigned(world + 0x28, 8))[1]!r} "
+            f"event_drop_rate={unsigned(world + 0x30, 2)} "
+            f"event_exp_rate={unsigned(world + 0x32, 2)} "
             f"channels={channel_count}"
         )
         if channel_count > 0:
@@ -273,6 +280,10 @@ elif action == "dump":
             "opcode2_world_dump "
             f"id={unsigned(world + 0x10, 4)} "
             f"name_length={world_name[0]} name={world_name[1]!r} "
+            f"flag={unsigned(world + 0x20, 1)} "
+            f"event_name={managed_string(unsigned(world + 0x28, 8))[1]!r} "
+            f"event_drop_rate={unsigned(world + 0x30, 2)} "
+            f"event_exp_rate={unsigned(world + 0x32, 2)} "
             f"channels={channel_count}"
         )
         if channel_count > 0:

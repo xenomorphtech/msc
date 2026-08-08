@@ -11,7 +11,9 @@ The serialized `GameConfig` and a post-bootstrap packet capture establish:
 - login hostname: `tw-login.maplestoryclassic.games.gamania.com`
 - login TCP port: `10282`
 - observed login address: `35.73.142.21:10282`
-- observed world handoff: `54.238.121.146:58880`
+- legacy HTTP probe/handoff: `54.238.121.146:58880`
+- successful reference login: `43.142.194.25:10282` (`tcp.stream 83`)
+- successful reference world: `43.142.194.150:8587` (`tcp.stream 92`)
 
 The world connection exchanged 77 client bytes and 218 server bytes before it
 closed. Login uses a 33-byte cleartext greeting followed by encrypted frames
@@ -55,6 +57,19 @@ python -m maple_server replay \
   --transcript-dir captures/replay-observed
 ```
 
+PCAP streams can be consumed directly. The loader uses `tshark` without a
+shell, reassembles TCP sequence space, identifies the server from the Maple
+handshake, and normalizes segment data to one event per encrypted frame:
+
+```sh
+python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 10282 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 83
+```
+
 Replay is strict by default: client bytes must match the recorded session.
 This is useful for identifying which bytes are stable framing and which are
 per-session authentication or cryptographic material. `--no-strict` is
@@ -67,6 +82,29 @@ Exploratory login work also supports `--server-frame-patch`, reactive
 `--post-transcript-gap-delay-seconds` values. Gap-specific delays apply to the
 combined queued-reactive-reply and appended-frame sequence; missing values
 fall back to the uniform delay.
+
+Plaintext frames may also be sourced privately at runtime with
+`--send-after-transcript-from-pcap`,
+`--server-frame-patch-from-pcap`, or
+`--reply-on-client-opcode-from-pcap`. A repeated reactive opcode creates an
+ordered response sequence. `--client-opcode-reply-delays` supplies one delay
+per response, which is required for the observed 2.5-second gap between the
+two server opcode-`402` channel-transition packets.
+
+Validate a login capture and fold it into typed game state without printing
+account or character identifiers:
+
+```sh
+python -m maple_server analyze-login \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 83 \
+  --fail-on-invalid
+```
+
+The analyzer reports full, partial, unknown, and invalid interpretations.
+Account success, world records/sentinel, world/channel/character selections,
+and handoff are fully validated. The character-list envelope is deliberately
+partial until its inner records are decoded.
 
 Inspect a transcript without dumping its entire payload:
 
@@ -84,13 +122,31 @@ Transcripts are JSONL files created with mode `0600`. Every data record has a
 nanosecond timestamp, direction, and base64 payload. Credentials are read from
 environment variables and are never stored in a transcript.
 
+## Keep MapleStory audio muted
+
+The included user service discovers PipeWire output nodes by stable
+application identity (`Maplestory_Classic.exe`) rather than a changing numeric
+node ID:
+
+```sh
+systemctl --user link \
+  /home/sdancer/ms/tools/maplestory_classic_server/maplestory-audio-mute.service
+systemctl --user enable --now maplestory-audio-mute.service
+systemctl --user status maplestory-audio-mute.service
+```
+
+It checks every 250 ms and mutes newly created/recreated MapleStory streams
+without affecting other applications.
+
 ## Current implementation steps
 
 1. Run the replay listener inside the client's network namespace; host-only
    listeners do not receive namespace-local port redirects.
-2. Replace captured server frame `3` with a heartbeat and use the bounded
-   128-byte opcode-`1` payload to initialize the original account handler.
-3. Delay the opcode-`2` sentinel and dump the world/channel staging list with
-   `tools/gdb_stage_opcode2_controller_capture.py` before it is cleared.
-4. Capture and decode the channel-selection and character-list exchange.
-5. Implement stateful account, character, and map handlers incrementally.
+2. Validate the successful login reference before sourcing any replay frames.
+3. Acknowledge native client opcode `13`, then return the validated account,
+   world records, and world-list sentinel as one reactive sequence.
+4. Return server opcode `402` frames for client opcode `4` with delays
+   `0,2.5`; the client otherwise stalls before emitting channel opcode `5`.
+5. Return the partially decoded character list for opcode `5`, then rewrite
+   the validated opcode-`5` handoff to the local stream-`92` replay listener.
+6. Finish the inner character-list and initial world/map packet models.

@@ -6,8 +6,9 @@
 /home/sdancer/ms/tools/maplestory_classic_server/
 ```
 
-This is a standalone Python standard-library project. It is intentionally not
-part of the Albion Phoenix application.
+This is a standalone Python tool (with PyCryptodome for Maple AES and optional
+`tshark` for PCAP input). It is intentionally not part of the Albion Phoenix
+application.
 
 ## Tests
 
@@ -16,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 31 tests.
+The last run passed all 49 tests.
 
 ## Inspect and compare captures
 
@@ -34,6 +35,19 @@ python -m maple_server compare \
 `inspect` prints structural information without dumping payloads. `compare`
 reports event sizes, common prefixes/suffixes, and equal-position counts while
 keeping sensitive bytes out of terminal output.
+
+For PCAP or JSONL login logs, use the typed state fold instead:
+
+```sh
+python -m maple_server analyze-login \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 83 \
+  --fail-on-invalid
+```
+
+It reassembles TCP, validates cipher headers and IV progression, parses known
+packet shapes, and applies them to account/world/channel/character/handoff
+state. Account and character IDs are redacted unless explicitly requested.
 
 ## Replay the login capture locally
 
@@ -64,7 +78,54 @@ sudo ip netns exec mapleproxy sudo -u sdancer python -m maple_server replay \
   --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/login
 ```
 
-## Current staged login/world experiment
+## Current capture-backed login/world experiment
+
+`111.pcapng` stream `83` is a successful login reference and stream `92` is
+its successful world connection. PCAP plaintext is resolved inside the server
+process, so private account/character records never appear as command-line hex
+or committed fixtures. The working login composition is:
+
+1. replay the proven local HK bootstrap/NGS transcript;
+2. on native client opcode `13`, send the local acknowledgment followed by
+   successful account frame `3` (opcode rewritten `0` to local handler `1`),
+   world frames `5` through `9`, and sentinel frame `10`;
+3. on client opcode `4`, send frames `15` and `16` with delays `0,2.5`;
+4. on client opcode `5`, send character frames `17`, `18`, and `19` with
+   delays `0,0,1.0`;
+5. on client opcode `7`, send handoff frame `20` after transforming only its
+   endpoint to `127.0.0.1:12857`.
+
+Repeated `--reply-on-client-opcode-from-pcap` options for one opcode form the
+ordered response sequence. Configure the capture-faithful waits with:
+
+```text
+--client-opcode-reply-delays 4=0,2.5
+--client-opcode-reply-delays 5=0,0,1.0
+```
+
+The live client now renders all five world tabs and their online channels.
+The first untimed run sent both opcode-`402` frames back-to-back: selecting
+world `2` made the client emit opcode `4` twice, receive both `402` frames, and
+then stall without emitting channel opcode `5`. This is the evidence for the
+2.5-second reactive delay, not a guessed UI delay.
+
+Start the local target for the transformed handoff separately:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 92 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/world
+```
+
+PCAP replay normalizes TCP segments to handshake/frame-aligned transcript
+events before serving them. The login handoff builder validates that the
+selected and handed-off character IDs match before rewriting the endpoint.
+
+## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
 opcode, append plaintext frames, and control every gap independently. The
@@ -188,13 +249,23 @@ project's own `README.md` for all options.
 - Uniform post-frame timing delivered world packets during the opcode-`1`
   scene change, before the opcode-`2` handler was active. Per-gap scheduling
   was added specifically to remove that race.
+- The successful PCAP account packet, five full 60-channel worlds, sentinel,
+  selections, and handoff all pass the typed packet/state validator.
+- A live capture-backed replay renders the five world tabs and their online
+  channels. Client opcode `4` identifies the selected world.
+- The two opcode-`402` packets require their observed 2.5-second gap; sending
+  them together stalls before the client emits channel opcode `5`.
+- The MapleStory PipeWire stream is kept muted by the enabled
+  `maplestory-audio-mute.service`, using application identity rather than a
+  changing node number.
 
 ## Next server milestone
 
-Replace transcript replay with stateful handling:
+Replace the remaining opaque replay portions with stateful handling:
 
-1. Dump the one-world/one-channel staging list before the delayed sentinel.
-2. Select its channel and capture the next client operation.
-3. Implement the minimum character list and selection response.
-4. Implement the first map handoff.
-5. Replace the bounded account probe with a fully decoded account payload.
+1. Verify the timed opcode-`402` pair causes client opcode `5` live.
+2. Decode the inner 167 bytes of the character-list response.
+3. Verify character opcode `7` reaches the locally rewritten handoff.
+4. Decode enough of stream `92` to synthesize the initial map state instead of
+   replaying its encrypted reference frames.
+5. Name the still-unknown fields in the now-bounded account/world structures.

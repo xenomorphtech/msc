@@ -123,6 +123,21 @@ transition therefore skips essential setup. A bounded 128-byte zero-filled
 payload is currently used to exercise the original parser safely while the
 full account schema is recovered.
 
+The successful stream-`83` reference now closes that structural gap. Its
+63-byte account response parses exactly through result, account ID, three
+flags/booleans, three UTF-16 strings, a `uint16`, three additional flag bytes,
+an `int64` timestamp, and two trailing bytes. Account strings do not consume
+the world parser's extra trailing byte. The reference opcode is `0`, while the
+local build reaches this handler with opcode `1`; replay rewrites only those
+two opcode bytes.
+
+The same reference validates the world parser without GDB: all five
+2,183-byte records consume exactly, including 60 channels apiece. Flags `1`
+and `2` render named/online tabs live. Client opcode `4` selects a world,
+server opcode `402` performs a two-packet timed transition, client opcode `5`
+selects a channel, server opcode `4` carries the character list, client opcode
+`7` selects a character, and server opcode `5` performs the handoff.
+
 Focused Cpp2IL output for the world parser is stored under:
 
 ```text
@@ -147,23 +162,38 @@ stalls Wine/Unity rendering even when the probe is armed after startup, so it is
 not suitable for timing-sensitive validation.
 
 `gdb_stage_opcode2_controller_capture.py` is the current non-stalling probe. It
-validates the opcode-`2` prologue, redirects it through 32 bytes of verified
-zero-filled executable padding at RVA `0x52de900`, stores the controller pointer
-in verified writable padding at RVA `0x6be5b80`, executes the exact displaced
-prologue, and returns to the original handler. Its `arm`, `status`, `restore`,
-and `dump` actions each attach only briefly. The transparent run confirmed that
-the handler is reached roughly 60–80 seconds into the current staged replay and
-that the account probe initializes an empty controller world list.
+validates the opcode-`2` and world-parser prologues, redirects both through
+separate verified zero-filled executable padding regions at RVAs `0x52de900`
+and `0x52de940`, stores controller/stream/world arguments in writable padding at
+RVA `0x6be5b80`, executes the exact displaced prologues, and returns to the
+original functions. Its `arm`, `status`, `restore`, and `dump` actions each
+attach only briefly. The transparent run confirmed that the handler and parser
+both execute and that the parsed object contains world `test` with channel
+`test-1`.
+
+Focused Cpp2IL output for controller field `+0xc8` is stored under:
+
+```text
+/home/sdancer/ms/.codex_tmp/maple_world_event_isil/IsilDump/Assembly-CSharp/
+```
+
+That field is wrapper type
+`b7915082055ad4e85ef9b377003089ac7f24de4489704b7129555d1243d4684`.
+Its `List<World>` backing field is wrapper `+0x50`, and its add method is the
+handler's call at RVA `0xa9a540`. Reading wrapper `+0x18` as a list count caused
+the earlier false zero-world result. The corrected dump reports `worlds=1`.
 
 Attaching before NGS finishes startup can still invalidate the run. Do not
 leave a breakpoint probe attached, and always restore process-local patches.
 
 ## Next debugger work
 
-1. Delay the `-1` sentinel and record world/channel counts from the transparent
-   controller probe before the sentinel clears the staging list.
-2. Verify the channel row in the world-selection UI.
-3. After selecting a channel, locate and decode the character-list handler.
+1. Locate the inner character-record parser reached from the 170-byte server
+   opcode-`4` response and name its exact fields.
+2. Trace the two opcode-`402` branches only if the capture-faithful 2.5-second
+   sequence still fails to produce client opcode `5`.
+3. Locate initial stream-`92` map-state handlers and correlate them with the
+   frame-aligned world replay.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory

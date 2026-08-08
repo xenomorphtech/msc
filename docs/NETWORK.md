@@ -8,8 +8,9 @@ Raw account and proxy values are stored only in:
 /home/sdancer/ms/.env
 ```
 
-The file is mode `0600`. It contains separate Taiwan and Hong Kong proxy
-profiles plus generic `MAPLE_PROXY_*` variables selecting the current default.
+The file is mode `0600`. It contains Taiwan, Hong Kong CONNECT, and Hong Kong
+SOCKS5 proxy profiles plus generic `MAPLE_PROXY_*` variables selecting the
+current default.
 Load it without echoing it:
 
 ```sh
@@ -26,6 +27,8 @@ See `SECURITY.md` before copying commands or captures elsewhere.
 tw-login.maplestoryclassic.games.gamania.com:10282  login
 54.238.121.146:58880                                HTTP probe/handoff
 54.65.46.47:5050                                   TLS bootstrap observed
+43.142.194.25:10282                                 successful PCAP login stream
+43.142.194.150:8587                                 successful encrypted world stream
 ```
 
 The login hostname resolved to different AWS addresses across sessions,
@@ -35,8 +38,8 @@ one login address when proxying the official service.
 ## `mapleproxy` namespace
 
 The browser and game were run in a Linux network namespace named
-`mapleproxy`. TCP egress was transparently redirected to the local CONNECT
-relay at port `12345`, while explicit returns prevented loops for loopback,
+`mapleproxy`. TCP egress was transparently redirected to the local proxy relay
+at port `12345`, while explicit returns prevented loops for loopback,
 the namespace subnet, and proxy-server addresses.
 
 Inspect the existing setup with:
@@ -53,12 +56,16 @@ The last custom-server layout added these redirects before the general relay:
 ```text
 destination TCP 10282 -> local 12082  (login replay/server)
 destination TCP 58880 -> local 12080  (HTTP probe/world replay)
-all other selected TCP -> local 12345 (transparent HTTP CONNECT relay)
+validated handoff rewritten to 127.0.0.1:12857 (stream-92 world replay)
+all other selected TCP -> local 12345 (transparent HTTP CONNECT/SOCKS5 relay)
 ```
 
 These are namespace-local redirects. A replay process bound only on the host
 does not receive them even if it listens on `0.0.0.0`; run ports `12082` and
 `12080` inside `mapleproxy` or install an explicit namespace-to-host bridge.
+The current capture-backed world listener also runs inside the namespace on
+`12857`, so a validated handoff can safely be rewritten to loopback without
+escaping to the captured public server.
 This topology error caused the earlier false conclusion that an all-HK launch
 never opened the login socket.
 
@@ -66,7 +73,7 @@ Loopback and the namespace's own `10.207.0.0/24` subnet must return before the
 general redirect. The upstream proxy addresses must also return or the relay
 will proxy itself recursively.
 
-## Transparent CONNECT relay
+## Transparent proxy relay
 
 Implementation:
 
@@ -74,15 +81,18 @@ Implementation:
 /home/sdancer/ms/.codex_tmp/maple_transparent_proxy.py
 ```
 
-It obtains the original destination with `SO_ORIGINAL_DST`, opens an HTTP
-CONNECT tunnel through the selected proxy, and records configured ports as
-lossless JSONL. It expects:
+It obtains the original destination with `SO_ORIGINAL_DST`, opens either an
+HTTP CONNECT or authenticated SOCKS5 tunnel through the selected proxy, and
+records configured ports as lossless JSONL. SOCKS5 uses the already-resolved
+original destination IP; this matters because the current HK SOCKS5 endpoint
+rejects remote hostname resolution but accepts the same login IP. It expects:
 
 ```text
 MAPLE_PROXY_HOST
 MAPLE_PROXY_PORT
 MAPLE_PROXY_USER
 MAPLE_PROXY_PASSWORD
+MAPLE_PROXY_SCHEME          default: http; supports http, socks5, socks5h
 MAPLE_CAPTURE_DIR           optional
 MAPLE_CAPTURE_PORTS         default: 10282,58880
 MAPLE_CAPTURE_MAX_BYTES     default: 16777216 per direction
@@ -96,9 +106,9 @@ set -a
 . /home/sdancer/ms/.env
 set +a
 export MAPLE_CAPTURE_DIR=/home/sdancer/ms/downloads/maple_protocol_captures
-sudo --preserve-env=MAPLE_PROXY_HOST,MAPLE_PROXY_PORT,MAPLE_PROXY_USER,MAPLE_PROXY_PASSWORD,MAPLE_CAPTURE_DIR \
+sudo --preserve-env=MAPLE_PROXY_SCHEME,MAPLE_PROXY_HOST,MAPLE_PROXY_PORT,MAPLE_PROXY_USER,MAPLE_PROXY_PASSWORD,MAPLE_CAPTURE_DIR \
   ip netns exec mapleproxy \
-  sudo -u sdancer --preserve-env=MAPLE_PROXY_HOST,MAPLE_PROXY_PORT,MAPLE_PROXY_USER,MAPLE_PROXY_PASSWORD,MAPLE_CAPTURE_DIR \
+  sudo -u sdancer --preserve-env=MAPLE_PROXY_SCHEME,MAPLE_PROXY_HOST,MAPLE_PROXY_PORT,MAPLE_PROXY_USER,MAPLE_PROXY_PASSWORD,MAPLE_CAPTURE_DIR \
   python /home/sdancer/ms/.codex_tmp/maple_transparent_proxy.py
 ```
 
@@ -117,6 +127,25 @@ Capture directories are mode `0700`; transcripts are mode `0600`. JSONL data
 records contain timestamps, direction, and base64 payload. They can include
 session tickets or identifiers even though proxy credentials are not recorded.
 
+The successful reference `/home/sdancer/Downloads/111.pcapng` is read directly
+with `tshark` by the custom server. It is not copied into the repository. TCP
+stream `83` is login and stream `92` is world/game.
+
+## Observed HTTP API
+
+The only observed plaintext HTTP endpoint is TCP `58880`:
+
+```http
+GET / HTTP/1.1
+Host: 54.238.121.146:58880
+Cache-Control: no-cache
+```
+
+It returns an HTTP success response whose fixed 14-byte body is
+`aewwawuiaryatp`; date and cache/entity headers vary. No other route, request
+body, authentication scheme, or JSON management API has been observed. The
+custom server is controlled by CLI options and writes JSONL observations.
+
 ## What the proxy experiments showed
 
 - The full HK browser/game route reaches the custom login server when the
@@ -127,10 +156,17 @@ session tickets or identifiers even though proxy credentials are not recorded.
 - Taiwan routing can also reach the local redirects, but it is no longer
   preferred over a consistent all-HK launch.
 - After the dedicated browser cookies were deliberately cleared, fresh login
-  attempts through both HK and Taiwan returned Beanfun timeout `01004`. The
-  identical result on both exits rules out proxy country as the immediate
-  cause; wait for the login transaction cooldown before further launches.
+  attempts through both HK and Taiwan returned Beanfun timeout `01004`. A
+  forced login, cache-busted transaction, authenticated-page reload, and
+  delayed authorization clicks restored repeatable ticket issuance.
 - Proxifying the game itself fixed local-routing leakage after excluding
   loopback from transparent redirection.
 - Local redirects for `10282` and `58880` were proven: the upstream relay saw
   neither connection during the replay test.
+- The IPRoyal CN residential route reaches ordinary web sites but the HK
+  Beanfun authorization endpoint closes or returns proxy `504`. Its HK route
+  reaches Beanfun but blocks `10282` in both HTTP CONNECT and SOCKS5 modes.
+- The added HK SOCKS5 endpoint at the protected `.env` profile reaches ordinary
+  HK web traffic and the resolved Maple login IP on `10282`. It produced the
+  complete official captures under
+  `downloads/maple_protocol_captures/hk_official_reference_20260808/`.
