@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import json
 
@@ -207,6 +207,31 @@ class NpcStateReplayPlan:
                 "npc_state_updates_delta": 1,
                 "events_delta": 1,
                 "active_npc_count_delta": 0,
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class InitialPlayerHpReplayPlan:
+    server_frame_index: int
+    original_current_hp: int
+    rewritten_current_hp: int
+    max_hp: int
+    replacement: InitialFieldSnapshot = field(repr=False)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "server_frame_index": self.server_frame_index,
+            "original_current_hp": self.original_current_hp,
+            "rewritten_current_hp": self.rewritten_current_hp,
+            "max_hp": self.max_hp,
+            "prediction": {
+                "current_hp": self.rewritten_current_hp,
+                "max_hp": self.max_hp,
+                "map_id": "unchanged",
+                "inventory": "unchanged",
+                "progression": "unchanged",
                 "phase": "unchanged",
             },
         }
@@ -1717,6 +1742,50 @@ def derive_mob_movement_acknowledgement_policy(
             state.movement_acknowledgement_zero_auxiliary_pairs
         ),
         pending_submissions=state.pending_movements,
+    )
+
+
+def plan_initial_player_hp_rewrite(
+    transcript: Transcript,
+    current_hp: int,
+) -> InitialPlayerHpReplayPlan:
+    """Rewrite only the typed current-HP field in the initial snapshot."""
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    observations = tuple(
+        observation
+        for observation in analysis.observations
+        if observation.kind == "initial_field_snapshot"
+    )
+    if len(observations) != 1:
+        raise ValueError(
+            "world transcript must contain exactly one initial field snapshot"
+        )
+    observation = observations[0]
+    snapshot = observation.parsed
+    if not isinstance(snapshot, InitialFieldSnapshot):
+        raise ValueError("initial field observation has no typed snapshot")
+    if not 0 <= current_hp <= snapshot.character.max_hp:
+        raise ValueError(
+            f"rewritten current HP must be between 0 and "
+            f"{snapshot.character.max_hp}"
+        )
+    replacement = replace(
+        snapshot,
+        character=replace(snapshot.character, current_hp=current_hp),
+    )
+    replacement_payload = replacement.to_bytes()
+    if len(replacement_payload) != observation.length:
+        raise ValueError("initial HP rewrite unexpectedly changed packet length")
+    if InitialFieldSnapshot.parse(replacement_payload) != replacement:
+        raise ValueError("initial HP rewrite failed packet round-trip validation")
+    return InitialPlayerHpReplayPlan(
+        server_frame_index=observation.direction_index,
+        original_current_hp=snapshot.character.current_hp,
+        rewritten_current_hp=current_hp,
+        max_hp=snapshot.character.max_hp,
+        replacement=replacement,
     )
 
 

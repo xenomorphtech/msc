@@ -121,6 +121,26 @@ two server opcode-`402` channel-transition packets.
 `--rewrite-channel-transition-world` binds the stage-1 world id to the live
 client opcode-`4` selection instead of replaying the captured world verbatim.
 
+`--rewrite-initial-current-hp HP` is the typed field-state mutation path. It
+requires exactly one valid large opcode-`157` snapshot, validates the complete
+gameplay fold, replaces only `InitialCharacterSnapshot.current_hp`, checks the
+requested value against the decoded maximum, and round-trips the same-length
+packet before replay patches and re-encrypts that server frame. It refuses an
+explicit patch of the same frame. For example:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --rewrite-initial-current-hp 1 \
+  --hold-open-seconds 300
+```
+
 Validate a login capture and fold it into typed game state without printing
 account or character identifiers:
 
@@ -237,6 +257,15 @@ identifier. The same event includes per-group item counts and slot/template/
 quantity records. Its packet observation is deliberately `partial`, because
 equipment-specific metadata and several progression/trailer roles are
 structurally bounded but not yet semantically named.
+
+The typed HP rewrite was validated through the real client using stream `114`.
+The planner predicted HP `1/222` with map, inventory, progression, and phase
+unchanged. The client entered the field and displayed `HP 1 / 222`; analysis of
+the replay-observed transcript independently folded to `active`, map
+`101000000`, HP `1/222`, the same inventory/progression state, nine NPCs, and
+matched heartbeat probes/responses with none pending. The source packet held
+HP `50/222`, so this is a controlled field effect rather than passive replay
+liveness.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
@@ -388,6 +417,10 @@ accepted/active/completed/failed connection counters, and a `protocol` object.
 When periodic world heartbeats are enabled,
 `protocol.world_heartbeat` reports the interval, probes sent, responses
 observed, pending probes, and last/maximum round-trip milliseconds.
+When the initial player HP is rewritten,
+`protocol.initial_player_hp_rewrite` reports the original/current/max values,
+the patched server-frame index, patch count, and the identifier-free predicted
+unchanged state components.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
 planned/sent packet counts, and the predicted fold delta. When reactive mob
@@ -496,6 +529,9 @@ It intentionally cannot launch an authenticated official session.
     acknowledgement policy through a real-client prediction/effect A/B.
 18. Decode and fold the repeated compact opcode-`157` transition into sequence,
     map, portal, HP, bounded text/timestamps, and field reset state.
-19. Decode the inner character list, player records, and initial large field
-    snapshot body needed to replace finite replay content with generated world
-    state.
+19. Decode the large initial field snapshot through player, inventory, and
+    progression state while keeping the inner character-list records as the
+    remaining login-side boundary.
+20. Generate a same-length initial field snapshot with typed HP `1`, validate
+    the packet before encryption, and confirm the predicted value in both the
+    real client HUD and the independently folded replay transcript.

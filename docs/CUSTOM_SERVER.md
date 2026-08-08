@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 61 tests.
+The last run passed all 98 tests.
 
 ## Inspect and compare captures
 
@@ -51,6 +51,21 @@ packet shapes, and applies them to account/world/channel/character/handoff
 state. `--packets` prints frame-aligned decoded fields and timing; `--json`
 emits the same records for tooling. Account and character IDs are redacted
 unless explicitly requested.
+
+World logs use the corresponding gameplay fold:
+
+```sh
+python -m maple_server analyze-gameplay \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 114 \
+  --packets \
+  --events \
+  --fail-on-invalid
+```
+
+It validates frame shapes and state invariants, emits typed field events, and
+folds the initial player/map/inventory/progression snapshot plus subsequent
+NPC, mob, movement, transition, termination, and heartbeat traffic.
 
 ## Replay the login capture locally
 
@@ -189,6 +204,50 @@ PCAP replay normalizes TCP segments to handshake/frame-aligned transcript
 events before serving them. The login handoff builder validates that the
 selected and handed-off character IDs match before rewriting the endpoint.
 
+## Typed initial-HP effect validation
+
+The first state-driven field mutation uses the complete large opcode-`157`
+model instead of a raw byte offset. Start the stream-`114` world target inside
+`mapleproxy` with:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --rewrite-initial-current-hp 1 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/initial_hp_1 \
+  --timing-scale 1 \
+  --hold-open-seconds 300
+```
+
+The planner first requires a valid gameplay fold and exactly one typed initial
+snapshot. It bounds HP by the decoded maximum, replaces only the nested
+`current_hp`, requires the generated packet to retain its length, parses it
+back, and refuses a raw patch targeting the same server frame. The loopback
+status route is:
+
+```sh
+sudo ip netns exec mapleproxy curl \
+  http://127.0.0.1:12858/api/v1/status
+```
+
+The 2026-08-08 real-client run planned captured HP `50/222 -> 1/222`, patched
+one frame, entered map `101000000`, and displayed `HP 1 / 222`. Runtime status
+reported one completed connection, all 29 generated probes answered, and none
+pending. Its observed transcript folded validly to `active`, HP `1/222`, the
+original inventory and progression, nine NPCs, and all 30 heartbeat pairs
+matched including the captured pair. This matches the planner's
+identifier-free prediction across packet, client, and folded-state evidence.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
@@ -320,23 +379,30 @@ project's own `README.md` for all options.
 - The two opcode-`402` packets require their observed 2.5-second gap; sending
   them together stalls before the client emits channel opcode `5`.
 - With the gap and live-world rewrite, the client emits opcode `5` and accepts
-  the character list and server time. The remaining login gate is a client-side
-  security completion state before character opcode `7`; replaying type `7`,
-  opcode `23`, or the handoff individually does not satisfy it.
+  the character list and server time. Withholding the captured opcode-`23`
+  response until native client opcode `6` completes the security exchange; the
+  client then emits character opcode `7`, accepts the rewritten handoff, and
+  connects to the local world replay.
 - Proactively sending a valid handoff without that gate produces a black scene,
   no world-port connection, and client exit after the login socket closes.
 - The MapleStory PipeWire stream is kept muted by the enabled
   `maplestory-audio-mute.service`, using application identity rather than a
   changing node number.
+- A typed initial opcode-`157` HP rewrite changed `50/222 -> 1/222`; the real
+  HUD and independently folded active game state both reported `1/222` while
+  map, inventory, progression, and client liveness matched the prediction.
 
 ## Next server milestone
 
 Replace the remaining opaque replay portions with stateful handling:
 
-1. Complete or safely bypass the type-`7`/type-`6` client security transition
-   so the client emits character opcode `7`.
-2. Decode the inner 167 bytes of the character-list response.
-3. Verify character opcode `7` reaches the locally rewritten handoff.
-4. Decode enough of stream `92` to synthesize the initial map state instead of
-   replaying its encrypted reference frames.
-5. Name the still-unknown fields in the now-bounded account/world structures.
+1. Decode the inner 167 bytes of each character-list response record and emit
+   it from typed player state.
+2. Capture short, isolated player interactions and model their request/effect
+   pairs as game-state events.
+3. Expand the proven typed opcode-`157` mutation into a generated initial field
+   snapshot, then replace subsequent capture frames with state-driven packets.
+4. Obtain a short final-field capture with a known mob and validate the typed
+   movement-acknowledgement policy through the real client.
+5. Name the remaining neutral account, equipment, progression, and trailer
+   fields only when independent captures or controlled effects support them.

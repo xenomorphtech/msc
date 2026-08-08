@@ -13,6 +13,7 @@ from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     analyze_gameplay_transcript,
     derive_mob_movement_acknowledgement_policy,
+    plan_initial_player_hp_rewrite,
     plan_final_field_npc_state_replay,
     render_gameplay_analysis,
     world_session_termination_frame_index,
@@ -640,6 +641,23 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
 
 class GameplayStateFoldTest(unittest.TestCase):
+    def test_plans_typed_initial_player_hp_rewrite(self) -> None:
+        transcript = fixture_gameplay_transcript(initial_snapshot=True)
+        plan = plan_initial_player_hp_rewrite(transcript, 1)
+
+        self.assertEqual(plan.server_frame_index, 0)
+        self.assertEqual(plan.original_current_hp, 70)
+        self.assertEqual(plan.rewritten_current_hp, 1)
+        self.assertEqual(plan.max_hp, 222)
+        self.assertEqual(plan.replacement.character.current_hp, 1)
+        self.assertEqual(
+            InitialFieldSnapshot.parse(plan.replacement.to_bytes()),
+            plan.replacement,
+        )
+        self.assertEqual(plan.safe_dict()["prediction"]["phase"], "unchanged")
+        with self.assertRaisesRegex(ValueError, "between 0 and 222"):
+            plan_initial_player_hp_rewrite(transcript, 223)
+
     def test_folds_initial_snapshot_character_prefix_into_player_state(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(initial_snapshot=True)

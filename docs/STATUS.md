@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 96 tests.
+- The custom-server suite currently passes all 98 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -56,6 +56,13 @@
   fold seeds player, field, inventory, progression, and server-clock state,
   emits it on the field event, and validates the embedded character id against
   the world-entry request.
+- `--rewrite-initial-current-hp` now performs a validated, same-length typed
+  mutation of only the large opcode-`157` player HP field. A real stream-`114`
+  replay changed captured HP `50/222` to `1/222`; the client entered the field
+  and showed `HP 1 / 222`. The replay-observed transcript independently folded
+  to `active`, map `101000000`, HP `1/222`, unchanged inventory/progression,
+  nine NPCs, and fully matched generated heartbeats. The loopback runtime API
+  exposes the identifier-free plan and patch count.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -170,11 +177,14 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Validate the captured opcode-`4` character-list envelope in the local
-   controller and decode its 167-byte inner records.
-2. Decode/fold the initial world/map transcript now reached after the validated
-   local handoff.
-3. Replace initial world/map replay with typed stateful packets.
+1. Decode the captured opcode-`4` character-list inner records and generate the
+   list from typed player state rather than replay bytes.
+2. Model and validate player-originated gameplay interactions and their server
+   effects, beginning with movement/stat/inventory deltas that can be isolated
+   in short captures.
+3. Promote the complete initial opcode-`157` model from a safe one-field
+   mutation to a generated field snapshot, then replace more finite replay
+   frames with state-driven emitters.
 
 ## Useful proof artifacts
 

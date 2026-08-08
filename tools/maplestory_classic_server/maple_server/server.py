@@ -24,6 +24,7 @@ from .gameplay import (
     analyze_gameplay_transcript,
     derive_mob_movement_acknowledgement_policy,
     plan_final_field_npc_state_replay,
+    plan_initial_player_hp_rewrite,
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
@@ -1599,6 +1600,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="delay transcript playback after accept (useful for debugger attach)",
     )
     replay.add_argument(
+        "--rewrite-initial-current-hp",
+        type=int,
+        metavar="HP",
+        help=(
+            "rewrite only the typed current-HP field in the initial opcode-157 "
+            "snapshot after validating the complete packet model"
+        ),
+    )
+    replay.add_argument(
         "--server-frame-patch",
         action="append",
         default=[],
@@ -2176,6 +2186,24 @@ async def async_main(arguments: argparse.Namespace) -> None:
             transcript = drop_normalized_client_frames(
                 transcript, set(arguments.drop_client_frame)
             )
+        initial_hp_replay_plan = None
+        if arguments.rewrite_initial_current_hp is not None:
+            initial_hp_replay_plan = plan_initial_player_hp_rewrite(
+                transcript, arguments.rewrite_initial_current_hp
+            )
+            if initial_hp_replay_plan.server_frame_index in server_frame_patches:
+                raise ValueError(
+                    f"server frame {initial_hp_replay_plan.server_frame_index} "
+                    "is set by both --server-frame-patch and "
+                    "--rewrite-initial-current-hp"
+                )
+            server_frame_patches[initial_hp_replay_plan.server_frame_index] = (
+                initial_hp_replay_plan.replacement.to_bytes()
+            )
+            runtime_protocol["initial_player_hp_rewrite"] = {
+                **initial_hp_replay_plan.safe_dict(),
+                "frames_patched": 1,
+            }
         grouped_client_opcode_replies: dict[int, list[bytes]] = {}
         for opcode, payload in arguments.reply_on_client_opcode:
             grouped_client_opcode_replies.setdefault(opcode, []).append(payload)
@@ -2274,6 +2302,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "repeat_final_field_npc_state_update": (
                 arguments.repeat_final_field_npc_state_update
+            ),
+            "rewrite_initial_current_hp": (
+                arguments.rewrite_initial_current_hp
             ),
             "reactive_mob_movement_acknowledgements": (
                 arguments.reactive_mob_movement_acknowledgements

@@ -345,6 +345,21 @@ class TranscriptTest(unittest.TestCase):
         self.assertTrue(arguments.keep_world_open)
         self.assertEqual(arguments.hold_open_seconds, 600)
 
+    def test_replay_parser_accepts_typed_initial_hp_rewrite(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--rewrite-initial-current-hp",
+                "1",
+            ]
+        )
+
+        self.assertEqual(arguments.rewrite_initial_current_hp, 1)
+
     def test_replay_parser_accepts_world_heartbeat_interval(self) -> None:
         arguments = build_parser().parse_args(
             [
