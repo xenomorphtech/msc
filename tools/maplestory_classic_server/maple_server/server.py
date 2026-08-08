@@ -18,7 +18,12 @@ from .gamestate import (
     normalize_maple_transcript,
     render_login_analysis,
 )
-from .packets import WorldHandoff
+from .packets import (
+    ChannelTransitionResponse,
+    PacketShapeError,
+    WorldHandoff,
+    WorldSelection,
+)
 from .pcap import load_pcap_tcp_stream
 from .protocol import (
     ProtocolError,
@@ -291,6 +296,33 @@ async def copy_maple_streams_with_rewrites(
     await asyncio.gather(server_to_client(), client_to_server())
 
 
+def rewrite_channel_transition_world_from_selection(
+    replies: tuple[bytes, ...], client_plaintext: bytes
+) -> tuple[bytes, ...]:
+    """Bind captured stage-1 opcode-402 replies to the live world selection."""
+
+    selection = WorldSelection.parse(client_plaintext)
+    rewritten: list[bytes] = []
+    found_stage_one = False
+    for reply in replies:
+        opcode = int.from_bytes(reply[:2], "little") if len(reply) >= 2 else None
+        if opcode != 402:
+            rewritten.append(reply)
+            continue
+        transition = ChannelTransitionResponse.parse(reply)
+        if transition.stage == 1:
+            transition = ChannelTransitionResponse(
+                stage=1, world_id=selection.world_id
+            )
+            found_stage_one = True
+        rewritten.append(transition.to_bytes())
+    if not found_stage_one:
+        raise PacketShapeError(
+            "reactive world-selection replies contain no opcode-402 stage 1"
+        )
+    return tuple(rewritten)
+
+
 async def replay_connection(
     client_reader: asyncio.StreamReader,
     client_writer: asyncio.StreamWriter,
@@ -304,16 +336,22 @@ async def replay_connection(
     initial_delay_seconds: float = 0.0,
     server_frame_patches: dict[int, bytes] | None = None,
     post_transcript_server_frames: tuple[bytes, ...] = (),
+    post_transcript_start_delay_seconds: float = 0.0,
     post_transcript_frame_delay_seconds: float = 0.0,
     post_transcript_gap_delays_seconds: tuple[float, ...] = (),
     post_transcript_replies: tuple[bytes, ...] = (),
     client_opcode_replies: dict[int, bytes | tuple[bytes, ...]] | None = None,
     client_opcode_reply_delays: dict[int, tuple[float, ...]] | None = None,
+    rewrite_channel_transition_world: bool = False,
 ) -> None:
     if hold_open_seconds < 0:
         raise ValueError("hold_open_seconds cannot be negative")
     if initial_delay_seconds < 0:
         raise ValueError("initial_delay_seconds cannot be negative")
+    if post_transcript_start_delay_seconds < 0:
+        raise ValueError(
+            "post_transcript_start_delay_seconds cannot be negative"
+        )
     if post_transcript_frame_delay_seconds < 0:
         raise ValueError("post_transcript_frame_delay_seconds cannot be negative")
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
@@ -357,6 +395,9 @@ async def replay_connection(
                 "post_transcript_server_frame_lengths": [
                     len(payload) for payload in post_transcript_server_frames
                 ],
+                "post_transcript_start_delay_seconds": (
+                    post_transcript_start_delay_seconds
+                ),
                 "post_transcript_frame_delay_seconds": (
                     post_transcript_frame_delay_seconds
                 ),
@@ -368,6 +409,9 @@ async def replay_connection(
                     str(opcode): list(delays)
                     for opcode, delays in (client_opcode_reply_delays or {}).items()
                 },
+                "rewrite_channel_transition_world": (
+                    rewrite_channel_transition_world
+                ),
             },
         )
         if transcript_directory is not None
@@ -375,7 +419,7 @@ async def replay_connection(
     )
     error: str | None = None
 
-    async def read_live_frame() -> tuple[bytes, int | None]:
+    async def read_live_frame() -> tuple[bytes, int | None, bytes]:
         nonlocal client_iv
         if client_iv is None:
             raise RuntimeError("Client cipher state is not initialized")
@@ -387,7 +431,7 @@ async def replay_connection(
             if len(plaintext) >= 2
             else None
         )
-        return frame, opcode
+        return frame, opcode, plaintext
 
     async def send_encrypted_frame(frame: bytes) -> None:
         if observed is not None:
@@ -396,8 +440,14 @@ async def replay_connection(
         await client_writer.drain()
 
     async def send_reactive_plaintexts(
-        opcode: int, plaintexts: tuple[bytes, ...]
+        opcode: int,
+        plaintexts: tuple[bytes, ...],
+        client_plaintext: bytes,
     ) -> None:
+        if rewrite_channel_transition_world and opcode == 4:
+            plaintexts = rewrite_channel_transition_world_from_selection(
+                plaintexts, client_plaintext
+            )
         delays = (client_opcode_reply_delays or {}).get(
             opcode, (0.0,) * len(plaintexts)
         )
@@ -425,12 +475,17 @@ async def replay_connection(
             if event.direction == "client_to_server":
                 if remaining_opcode_replies:
                     while True:
-                        received, opcode = await read_live_frame()
+                        received, opcode, client_plaintext = await read_live_frame()
                         if opcode not in remaining_opcode_replies:
                             break
-                        pending_opcode_replies.extend(
-                            remaining_opcode_replies.pop(opcode)
-                        )
+                        plaintexts = remaining_opcode_replies.pop(opcode)
+                        if rewrite_channel_transition_world and opcode == 4:
+                            plaintexts = (
+                                rewrite_channel_transition_world_from_selection(
+                                    plaintexts, client_plaintext
+                                )
+                            )
+                        pending_opcode_replies.extend(plaintexts)
                 elif strict:
                     received = await read_and_record_exactly(
                         client_reader, len(event.data), observed
@@ -483,9 +538,12 @@ async def replay_connection(
             server_iv = shuffle_iv(server_iv)
             return outgoing
 
-        for index, plaintext in enumerate(
+        post_transcript_plaintexts = (
             tuple(pending_opcode_replies) + post_transcript_server_frames
-        ):
+        )
+        if post_transcript_plaintexts and post_transcript_start_delay_seconds > 0:
+            await asyncio.sleep(post_transcript_start_delay_seconds)
+        for index, plaintext in enumerate(post_transcript_plaintexts):
             if index > 0:
                 gap_index = index - 1
                 gap_delay_seconds = (
@@ -500,11 +558,13 @@ async def replay_connection(
         for plaintext in post_transcript_replies:
             if remaining_opcode_replies:
                 while True:
-                    _, opcode = await read_live_frame()
+                    _, opcode, client_plaintext = await read_live_frame()
                     if opcode not in remaining_opcode_replies:
                         break
                     await send_reactive_plaintexts(
-                        opcode, remaining_opcode_replies.pop(opcode)
+                        opcode,
+                        remaining_opcode_replies.pop(opcode),
+                        client_plaintext,
                     )
             else:
                 await read_and_record_encrypted_frame(client_reader, observed)
@@ -515,7 +575,7 @@ async def replay_connection(
             while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
                 try:
                     if remaining_opcode_replies:
-                        received, opcode = await asyncio.wait_for(
+                        received, opcode, client_plaintext = await asyncio.wait_for(
                             read_live_frame(), timeout=remaining
                         )
                     else:
@@ -531,7 +591,9 @@ async def replay_connection(
                     break
                 if opcode in remaining_opcode_replies:
                     await send_reactive_plaintexts(
-                        opcode, remaining_opcode_replies.pop(opcode)
+                        opcode,
+                        remaining_opcode_replies.pop(opcode),
+                        client_plaintext,
                     )
     except Exception as exception:
         error = f"{type(exception).__name__}: {exception}"
@@ -1300,6 +1362,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--post-transcript-start-delay-seconds",
+        type=float,
+        default=0.0,
+        help="delay before the first post-transcript server frame",
+    )
+    replay.add_argument(
         "--post-transcript-frame-delay-seconds",
         type=float,
         default=0.0,
@@ -1371,6 +1439,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--rewrite-channel-transition-world",
+        action="store_true",
+        help=(
+            "rewrite opcode-402 stage-1 reactive replies with the world id "
+            "from the triggering client opcode-4 selection"
+        ),
+    )
+    replay.add_argument(
         "--validate-login-state",
         action="store_true",
         help="validate interpreted login packet shapes/state before listening",
@@ -1432,6 +1508,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--tshark", default="tshark", help="tshark executable used for pcap input"
     )
     analyze_parser.add_argument("--json", action="store_true")
+    analyze_parser.add_argument(
+        "--packets",
+        action="store_true",
+        help=(
+            "append one structured, frame-aligned decoded packet record to "
+            "the text report for every plaintext frame"
+        ),
+    )
     analyze_parser.add_argument(
         "--show-identifiers",
         action="store_true",
@@ -1646,6 +1730,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     f"client opcode {opcode} has {len(replies)} replies but "
                     f"{len(delays)} delays"
                 )
+        if (
+            arguments.rewrite_channel_transition_world
+            and 4 not in client_opcode_replies
+        ):
+            raise ValueError(
+                "--rewrite-channel-transition-world requires reactive "
+                "client opcode 4 replies"
+            )
         patch_server_frames(transcript, server_frame_patches)
         handler = functools.partial(
             replay_connection,
@@ -1660,6 +1752,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             post_transcript_server_frames=tuple(
                 arguments.post_transcript_server_frames
             ),
+            post_transcript_start_delay_seconds=(
+                arguments.post_transcript_start_delay_seconds
+            ),
             post_transcript_frame_delay_seconds=(
                 arguments.post_transcript_frame_delay_seconds
             ),
@@ -1669,6 +1764,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             post_transcript_replies=tuple(arguments.reply_after_client_frame),
             client_opcode_replies=client_opcode_replies,
             client_opcode_reply_delays=client_opcode_reply_delays,
+            rewrite_channel_transition_world=(
+                arguments.rewrite_channel_transition_world
+            ),
         )
     elif arguments.command == "stub":
         handler = functools.partial(
@@ -1716,6 +1814,7 @@ def main() -> None:
                 render_login_analysis(
                     analysis,
                     show_identifiers=arguments.show_identifiers,
+                    show_packets=arguments.packets,
                 )
             )
         if arguments.fail_on_invalid and not analysis.valid:

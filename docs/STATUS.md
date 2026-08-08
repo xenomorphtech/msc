@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 49 tests.
+- The custom-server suite currently passes all 56 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -48,6 +48,9 @@
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
 - The live capture-backed server renders five world tabs and online channels.
+- Capture-faithful opcode-`402` timing plus the live selected-world rewrite now
+  makes the client emit channel-selection opcode `5` and enter the character
+  controller.
 - The enabled user service `maplestory-audio-mute.service` continuously mutes
   only PipeWire nodes named `Maplestory_Classic.exe` across relaunches.
 
@@ -114,6 +117,21 @@ first channel test, selecting world `2` emitted opcode `4` twice and the server
 returned both opcode-`402` frames immediately. The client then stalled and
 never emitted opcode `5`. The reference has a 2.54-second gap between those
 responses, so reactive response-sequence delays now reproduce that boundary.
+The frame-aligned decoder exposed a second invariant: opcode-`402` stage 1
+contains the selected world id. The stalled live run selected world `1` but
+replayed reference world `4`; the fold now rejects that mismatch, and reactive
+replay can rewrite the field from the triggering client opcode `4`.
+
+The next gate is now bounded. After character list opcode `4` and server time
+opcode `134`, the reference sends opcode `13` message type `7` with a
+length-prefixed 27-byte opaque body. The official client answers with three
+type-`6` messages and then character-selection opcode `7`. A direct launch has
+not reproduced those type-`6` bodies yet. Skipping the exchange and sending a
+valid transformed handoff immediately is not sufficient: the scene goes
+black, no connection reaches local port `12857`, and the client exits after
+the login socket is closed. This proves the client-side completion/selection
+state is required, without implying that a custom server must validate the
+opaque proof contents.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
@@ -121,8 +139,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Confirm the capture-faithful 2.5-second opcode-`402` gap produces client
-   channel-selection opcode `5` live.
+1. Complete or safely bypass the type-`7`/type-`6` client security transition
+   and obtain live character opcode `7`.
 2. Validate the captured opcode-`4` character-list envelope in the local
    controller and decode its 167-byte inner records.
 3. Select the character, verify opcode `7`, and follow the endpoint-rewritten

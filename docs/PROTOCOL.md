@@ -64,9 +64,9 @@ the main blocker is obsolete.
 ## Login opcodes recovered so far
 
 ```text
-server 0   NGS challenge
-client 13  native NGS result/proof (observed result selector 15)
-server 13  NGS result acknowledgment
+server 0   bootstrap NGS challenge
+client 13  typed security/status message
+server 13  typed security message or three-byte acknowledgment
 server 1   account/login result
 server 2   one world record, or a signed world-id -1 sentinel
 client 4   select world (`uint32 world_id`)
@@ -81,6 +81,35 @@ The custom replay currently ignores the opaque native proof and acknowledges
 opcode `13` with plaintext `0d0000`. That is enough for the client to continue
 into the login controller. It is a local-server behavior, not a claim that the
 official NGS proof has been reproduced.
+
+Opcode `13` has three bounded envelopes in the observed sessions:
+
+```text
+acknowledgment (3 bytes)
+uint16 opcode = 13
+uint8  result
+
+security message (7 + payload_length bytes)
+uint16 opcode = 13
+uint8  message_type
+uint32 payload_length
+byte[payload_length] opaque security body
+
+client status message
+uint16 opcode = 13
+uint8  message_type = 15
+uint16 UTF-16 code-unit count
+char16[code-unit count] message
+uint8  zero trailing byte
+```
+
+The successful reference sends server message type `7` with 27 opaque bytes
+after the character list and time. The client answers with three type-`6`
+messages whose opaque bodies are 176, 184, and 137 bytes, then emits character
+selection opcode `7`. The bodies remain deliberately opaque; their length
+prefixes and exact packet boundaries are validated. Direct placeholder
+launches also emit a fully decoded type-`15` status message containing “Please
+check the network connection status.”
 
 The captured server frame at index `3` is a second opcode-`0` message with
 plaintext result byte `2`. It is the direct source of the replayed
@@ -108,6 +137,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m maple_server analyze-login \
   --pcap /home/sdancer/Downloads/111.pcapng \
   --tcp-stream 83 \
+  --packets \
   --fail-on-invalid
 ```
 
@@ -122,6 +152,8 @@ frames 5-9   opcode 2, five 2,183-byte world records
 frame 10     opcode 2, signed world-id -1 sentinel
 frames 15-16 opcode 402, 12-byte then 8-byte transition results
 frame 17     opcode 4, 170-byte character-list response
+frame 18     opcode 134, 10-byte server time
+frame 19     opcode 13, type-7 security request with 27 opaque bytes
 frame 20     opcode 5, 19-byte world handoff
 ```
 
@@ -140,6 +172,36 @@ Timing is part of the channel transition. The first opcode-`402` response
 arrives about 28 ms after client opcode `4`; the second arrives about 2.54 s
 later, and client opcode `5` follows immediately. Sending both `402` packets
 back-to-back reproduces a live stall after the channel button is clicked.
+
+Both opcode-`402` variants are now structurally bounded:
+
+```text
+stage 0 (12 bytes)
+uint16 opcode = 402
+uint16 stage = 0
+uint32 transition_value_0
+uint32 transition_value_1
+
+stage 1 (8 bytes)
+uint16 opcode = 402
+uint16 stage = 1
+uint32 selected_world_id
+```
+
+The reference stage-0 values are `267748` and `267744`; their higher-level
+meaning remains unnamed, but no bytes are opaque. The stage-1 world id must
+match the triggering client opcode-`4` selection. Replaying the captured world
+`4` after a live world-`1` selection is now rejected by the game-state fold and
+reproduces the channel-button stall even with correct timing.
+
+The login state machine cannot skip directly from character-list/time to the
+handoff. A live bypass sent the valid endpoint-rewritten frame `20` without
+frame `19` or the client type-`6`/opcode-`7` sequence. The client accepted the
+handoff far enough to blank the scene, but never connected to the local world
+port and then exited after the login socket closed. Therefore a successful
+client-side security completion and character-selection transition are a real
+ordering gate, even if a custom server ultimately elects not to validate the
+opaque proof bodies.
 
 The successful 63-byte account packet is fully bounded as follows. Its three
 strings use a `uint16` UTF-16 code-unit count without the extra world-string

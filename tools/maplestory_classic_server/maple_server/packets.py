@@ -385,6 +385,164 @@ class WorldSelection:
 
 
 @dataclass(frozen=True)
+class ChannelTransitionResponse:
+    """Observed two-stage response between world and channel selection.
+
+    Stage 0 carries two transition values whose application-level meaning is
+    not named yet. Stage 1 carries the selected world id. Both variants are
+    nevertheless structurally complete and consume every observed byte.
+    """
+
+    stage: int
+    transition_values: tuple[int, int] | None = None
+    world_id: int | None = None
+    opcode: int = 402
+
+    def __post_init__(self) -> None:
+        if self.stage == 0:
+            if self.transition_values is None or self.world_id is not None:
+                raise PacketShapeError(
+                    "channel_transition stage 0 requires two transition values"
+                )
+            if any(not 0 <= value <= 0xFFFFFFFF for value in self.transition_values):
+                raise PacketShapeError(
+                    "channel_transition transition values must be uint32"
+                )
+            return
+        if self.stage == 1:
+            if self.transition_values is not None or self.world_id is None:
+                raise PacketShapeError(
+                    "channel_transition stage 1 requires one world id"
+                )
+            if not 0 <= self.world_id <= 0xFFFFFFFF:
+                raise PacketShapeError(
+                    "channel_transition world id must be uint32"
+                )
+            return
+        raise PacketShapeError(
+            f"channel_transition stage is {self.stage}, expected 0 or 1"
+        )
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ChannelTransitionResponse":
+        reader = PacketReader(payload, packet_name="channel_transition")
+        _expect_opcode(reader, 402)
+        stage = reader.u16("stage")
+        if stage == 0:
+            transition_values = (
+                reader.u32("transition_value_0"),
+                reader.u32("transition_value_1"),
+            )
+            reader.finish()
+            return cls(stage=stage, transition_values=transition_values)
+        if stage == 1:
+            world_id = reader.u32("world_id")
+            reader.finish()
+            return cls(stage=stage, world_id=world_id)
+        raise PacketShapeError(
+            f"channel_transition.stage is {stage}, expected 0 or 1"
+        )
+
+    def to_bytes(self) -> bytes:
+        if self.stage == 0:
+            assert self.transition_values is not None
+            return struct.pack(
+                "<HHII", self.opcode, self.stage, *self.transition_values
+            )
+        assert self.world_id is not None
+        return struct.pack("<HHI", self.opcode, self.stage, self.world_id)
+
+
+@dataclass(frozen=True)
+class SecurityAck:
+    result: int
+    opcode: int = 13
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SecurityAck":
+        reader = PacketReader(payload, packet_name="security_ack")
+        _expect_opcode(reader, 13)
+        result = reader.u8("result")
+        reader.finish()
+        return cls(result=result)
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<HB", self.opcode, self.result)
+
+
+@dataclass(frozen=True)
+class SecurityMessage:
+    message_type: int
+    opaque_payload: bytes
+    opcode: int = 13
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SecurityMessage":
+        reader = PacketReader(payload, packet_name="security_message")
+        _expect_opcode(reader, 13)
+        message_type = reader.u8("message_type")
+        payload_length = reader.u32("payload_length")
+        opaque_payload = reader.bytes(payload_length, "opaque_payload")
+        reader.finish()
+        return cls(
+            message_type=message_type,
+            opaque_payload=opaque_payload,
+        )
+
+    def to_bytes(self) -> bytes:
+        return (
+            struct.pack(
+                "<HBI", self.opcode, self.message_type, len(self.opaque_payload)
+            )
+            + self.opaque_payload
+        )
+
+
+@dataclass(frozen=True)
+class ClientStatusMessage:
+    message: str
+    message_type: int = 15
+    opcode: int = 13
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientStatusMessage":
+        reader = PacketReader(payload, packet_name="client_status_message")
+        _expect_opcode(reader, 13)
+        message_type = reader.u8("message_type")
+        if message_type != 15:
+            raise PacketShapeError(
+                f"client_status_message.message_type is {message_type}, "
+                "expected 15"
+            )
+        message = reader.utf16_string("message", trailing_byte=True)
+        reader.finish()
+        return cls(message=message)
+
+    def to_bytes(self) -> bytes:
+        return (
+            struct.pack("<HB", self.opcode, self.message_type)
+            + encode_utf16_string(self.message, trailing_byte=True)
+        )
+
+
+@dataclass(frozen=True)
+class ServerTime:
+    ticks: int
+    opcode: int = 134
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerTime":
+        reader = PacketReader(payload, packet_name="server_time")
+        _expect_opcode(reader, 134)
+        ticks = reader.i64("ticks")
+        reader.finish()
+        return cls(ticks=ticks)
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<Hq", self.opcode, self.ticks)
+
+
+@dataclass(frozen=True)
 class ChannelSelection:
     world_id: int
     channel_id: int

@@ -13,14 +13,20 @@ from maple_server.gamestate import (  # noqa: E402
     LoginPhase,
     ShapeCoverage,
     analyze_login_transcript,
+    render_login_analysis,
 )
 from maple_server.packets import (  # noqa: E402
     AccountLoginResponse,
     ChannelRecord,
     ChannelSelection,
+    ChannelTransitionResponse,
     CharacterListEnvelope,
     CharacterSelection,
+    ClientStatusMessage,
     PacketShapeError,
+    SecurityAck,
+    SecurityMessage,
+    ServerTime,
     WorldHandoff,
     WorldListEnd,
     WorldRecord,
@@ -85,7 +91,9 @@ def fixture_world() -> WorldRecord:
     )
 
 
-def fixture_login_transcript(*, selected_channel: int = 23) -> Transcript:
+def fixture_login_transcript(
+    *, selected_channel: int = 23, transition_world: int = 4
+) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
         TranscriptEvent(
@@ -124,6 +132,20 @@ def fixture_login_transcript(*, selected_channel: int = 23) -> Transcript:
     append("server_to_client", fixture_world().to_bytes())
     append("server_to_client", WorldListEnd().to_bytes())
     append("client_to_server", WorldSelection(world_id=4).to_bytes())
+    append(
+        "server_to_client",
+        ChannelTransitionResponse(
+            stage=0,
+            transition_values=(267_748, 267_744),
+        ).to_bytes(),
+    )
+    append(
+        "server_to_client",
+        ChannelTransitionResponse(
+            stage=1,
+            world_id=transition_world,
+        ).to_bytes(),
+    )
     append(
         "client_to_server",
         ChannelSelection(
@@ -186,6 +208,43 @@ class PacketShapeTest(unittest.TestCase):
         self.assertEqual(payload[8:10], struct.pack("<H", 8587))
         self.assertEqual(WorldHandoff.parse(payload), handoff)
 
+    def test_channel_transition_variants_round_trip(self) -> None:
+        stage_zero = ChannelTransitionResponse(
+            stage=0,
+            transition_values=(267_748, 267_744),
+        )
+        stage_one = ChannelTransitionResponse(stage=1, world_id=4)
+
+        self.assertEqual(len(stage_zero.to_bytes()), 12)
+        self.assertEqual(len(stage_one.to_bytes()), 8)
+        self.assertEqual(
+            ChannelTransitionResponse.parse(stage_zero.to_bytes()), stage_zero
+        )
+        self.assertEqual(
+            ChannelTransitionResponse.parse(stage_one.to_bytes()), stage_one
+        )
+
+    def test_security_envelopes_round_trip_and_validate_length(self) -> None:
+        acknowledgment = SecurityAck(result=0)
+        message = SecurityMessage(message_type=7, opaque_payload=b"challenge")
+
+        self.assertEqual(SecurityAck.parse(acknowledgment.to_bytes()), acknowledgment)
+        self.assertEqual(SecurityMessage.parse(message.to_bytes()), message)
+        with self.assertRaisesRegex(PacketShapeError, "needs 9 bytes"):
+            SecurityMessage.parse(message.to_bytes()[:-1])
+
+    def test_client_status_message_round_trip(self) -> None:
+        status = ClientStatusMessage(
+            message="Please check the network connection status."
+        )
+
+        self.assertEqual(ClientStatusMessage.parse(status.to_bytes()), status)
+
+    def test_server_time_round_trip(self) -> None:
+        server_time = ServerTime(ticks=134_145_748_450_000_000)
+
+        self.assertEqual(ServerTime.parse(server_time.to_bytes()), server_time)
+
 
 class GameStateFoldTest(unittest.TestCase):
     def test_folds_sanitized_successful_login_to_handoff(self) -> None:
@@ -215,6 +274,27 @@ class GameStateFoldTest(unittest.TestCase):
             "client selected unadvertised channel 99 in world 4",
             analysis.issues,
         )
+
+    def test_rejects_transition_for_different_world(self) -> None:
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(transition_world=2)
+        )
+
+        self.assertFalse(analysis.valid)
+        self.assertIn(
+            "channel transition world 2 does not match selected world 4",
+            analysis.issues,
+        )
+
+    def test_text_report_can_include_frame_aligned_packet_decoding(self) -> None:
+        analysis = analyze_login_transcript(fixture_login_transcript())
+
+        report = render_login_analysis(analysis, show_packets=True)
+
+        self.assertIn(
+            "opcode=402 kind=channel_transition coverage=full", report
+        )
+        self.assertIn('details={"stage":1,"world_id":4}', report)
 
     def test_safe_report_redacts_account_and_character_identifiers(self) -> None:
         analysis = analyze_login_transcript(fixture_login_transcript())

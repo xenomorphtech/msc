@@ -6,10 +6,15 @@ import json
 
 from .packets import (
     AccountLoginResponse,
+    ChannelTransitionResponse,
     ChannelSelection,
     CharacterListEnvelope,
     CharacterSelection,
+    ClientStatusMessage,
     PacketShapeError,
+    SecurityAck,
+    SecurityMessage,
+    ServerTime,
     WorldHandoff,
     WorldListEnd,
     WorldRecord,
@@ -78,6 +83,8 @@ class PacketObservation:
     timestamp_ns: int
     opcode: int | None
     length: int
+    wire_offset: int
+    wire_length: int
     kind: str
     coverage: ShapeCoverage
     details: dict[str, object] = field(default_factory=dict)
@@ -92,6 +99,7 @@ class LoginGameState:
     worlds: dict[int, WorldRecord] = field(default_factory=dict)
     world_list_complete: bool = False
     selected_world_id: int | None = None
+    channel_transition_stage: int | None = None
     selected_channel_id: int | None = None
     client_address: str | None = None
     character_list: CharacterListEnvelope | None = field(
@@ -175,6 +183,9 @@ class LoginAnalysis:
                     for world in self.state.worlds.values()
                 ],
                 "selected_world_id": self.state.selected_world_id,
+                "channel_transition_stage": (
+                    self.state.channel_transition_stage
+                ),
                 "selected_channel_id": self.state.selected_channel_id,
                 "client_address": self.state.client_address,
                 "character_list_received": self.state.character_list is not None,
@@ -189,6 +200,8 @@ class LoginAnalysis:
                     "timestamp_ns": observation.timestamp_ns,
                     "opcode": observation.opcode,
                     "length": observation.length,
+                    "wire_offset": observation.wire_offset,
+                    "wire_length": observation.wire_length,
                     "kind": observation.kind,
                     "coverage": observation.coverage.value,
                     "details": observation.details,
@@ -384,6 +397,8 @@ class LoginStateFold:
             timestamp_ns=frame.timestamp_ns,
             opcode=frame.opcode,
             length=len(frame.plaintext),
+            wire_offset=frame.wire_offset,
+            wire_length=frame.wire_length,
             kind=kind,
             coverage=ShapeCoverage.INVALID,
             issues=(str(error),),
@@ -406,6 +421,8 @@ class LoginStateFold:
             timestamp_ns=frame.timestamp_ns,
             opcode=frame.opcode,
             length=len(frame.plaintext),
+            wire_offset=frame.wire_offset,
+            wire_length=frame.wire_length,
             kind=kind,
             coverage=coverage,
             parsed=parsed,
@@ -433,6 +450,37 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 13:
+            if len(payload) == 3:
+                acknowledgment = SecurityAck.parse(payload)
+                return self._observation(
+                    frame,
+                    kind="security_ack",
+                    coverage=ShapeCoverage.FULL,
+                    parsed=acknowledgment,
+                    details={"result": acknowledgment.result},
+                )
+            message = SecurityMessage.parse(payload)
+            return self._observation(
+                frame,
+                kind="security_message",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=message,
+                details={
+                    "message_type": message.message_type,
+                    "opaque_bytes": len(message.opaque_payload),
+                },
+                issues=("security-message payload remains opaque",),
+            )
+        if opcode == 134:
+            server_time = ServerTime.parse(payload)
+            return self._observation(
+                frame,
+                kind="server_time",
+                coverage=ShapeCoverage.FULL,
+                parsed=server_time,
+                details={"ticks": server_time.ticks},
+            )
         account_shape_candidate = opcode == 1 or (
             opcode == 0 and len(payload) >= 31 and len(payload) % 2 == 1
         )
@@ -487,9 +535,65 @@ class LoginStateFold:
                     "world_id": world.world_id,
                     "name": world.name,
                     "flag": world.flag,
+                    "event_description": world.event_description,
+                    "event_exp_rate": world.event_exp_rate,
+                    "event_drop_rate": world.event_drop_rate,
                     "channel_count": len(world.channels),
+                    "channels": [
+                        {
+                            "name": channel.name,
+                            "population": channel.population,
+                            "world_id": channel.world_id,
+                            "channel_id": channel.channel_id,
+                            "adult_channel": channel.adult_channel,
+                            "unknown": channel.unknown,
+                        }
+                        for channel in world.channels
+                    ],
                     "balloon_count": len(world.balloons),
+                    "balloons": [
+                        {
+                            "x": balloon.x,
+                            "y": balloon.y,
+                            "message": balloon.message,
+                        }
+                        for balloon in world.balloons
+                    ],
                 },
+            )
+        if opcode == 402:
+            transition = ChannelTransitionResponse.parse(payload)
+            details: dict[str, object] = {"stage": transition.stage}
+            if transition.stage == 0:
+                if self.state.channel_transition_stage is not None:
+                    self.issues.append(
+                        "channel transition stage 0 restarted an active transition"
+                    )
+                self.state.channel_transition_stage = 0
+                details["transition_values"] = list(
+                    transition.transition_values or ()
+                )
+            else:
+                if self.state.channel_transition_stage != 0:
+                    self.issues.append(
+                        "channel transition stage 1 arrived before stage 0"
+                    )
+                self.state.channel_transition_stage = 1
+                details["world_id"] = transition.world_id
+                if (
+                    self.state.selected_world_id is not None
+                    and transition.world_id != self.state.selected_world_id
+                ):
+                    self.issues.append(
+                        f"channel transition world {transition.world_id} does not "
+                        f"match selected world {self.state.selected_world_id}"
+                    )
+            return self._observation(
+                frame,
+                kind="channel_transition",
+                coverage=ShapeCoverage.FULL,
+                parsed=transition,
+                details=details,
             )
         if opcode == 4:
             character_list = CharacterListEnvelope.parse(payload)
@@ -544,9 +648,35 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 13:
+            if len(payload) >= 3 and payload[2] == 15:
+                status = ClientStatusMessage.parse(payload)
+                return self._observation(
+                    frame,
+                    kind="client_status_message",
+                    coverage=ShapeCoverage.FULL,
+                    parsed=status,
+                    details={
+                        "message_type": status.message_type,
+                        "message": status.message,
+                    },
+                )
+            message = SecurityMessage.parse(payload)
+            return self._observation(
+                frame,
+                kind="security_message",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=message,
+                details={
+                    "message_type": message.message_type,
+                    "opaque_bytes": len(message.opaque_payload),
+                },
+                issues=("security-message payload remains opaque",),
+            )
         if opcode == 4:
             selection = WorldSelection.parse(payload)
             self.state.selected_world_id = selection.world_id
+            self.state.channel_transition_stage = None
             if selection.world_id not in self.state.worlds:
                 self.issues.append(
                     f"client selected unadvertised world {selection.world_id}"
@@ -629,7 +759,10 @@ def analyze_login_transcript(transcript: Transcript) -> LoginAnalysis:
 
 
 def render_login_analysis(
-    analysis: LoginAnalysis, *, show_identifiers: bool = False
+    analysis: LoginAnalysis,
+    *,
+    show_identifiers: bool = False,
+    show_packets: bool = False,
 ) -> str:
     report = analysis.safe_dict(show_identifiers=show_identifiers)
     state = report["state"]
@@ -662,4 +795,40 @@ def render_login_analysis(
     ]
     lines.extend(f"issue={issue}" for issue in analysis.issues)
     lines.extend(f"warning={warning}" for warning in analysis.warnings)
+    if show_packets and analysis.observations:
+        base_timestamp_ns = analysis.observations[0].timestamp_ns
+        previous_timestamp_ns = base_timestamp_ns
+        for observation in analysis.observations:
+            elapsed_ms = (observation.timestamp_ns - base_timestamp_ns) / 1e6
+            delta_ms = (observation.timestamp_ns - previous_timestamp_ns) / 1e6
+            previous_timestamp_ns = observation.timestamp_ns
+            direction = (
+                "C>S"
+                if observation.direction == "client_to_server"
+                else "S>C"
+            )
+            details = json.dumps(
+                observation.details,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            issues = json.dumps(
+                observation.issues,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            lines.append(
+                "packet "
+                f"frame={observation.frame_index} "
+                f"direction={direction} "
+                f"direction_frame={observation.direction_index} "
+                f"elapsed_ms={elapsed_ms:.3f} delta_ms={delta_ms:.3f} "
+                f"wire_offset={observation.wire_offset} "
+                f"wire_length={observation.wire_length} "
+                f"plaintext_length={observation.length} "
+                f"opcode={observation.opcode} kind={observation.kind} "
+                f"coverage={observation.coverage.value} details={details} "
+                f"issues={issues}"
+            )
     return "\n".join(lines)

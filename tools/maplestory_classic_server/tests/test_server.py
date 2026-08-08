@@ -32,6 +32,7 @@ from maple_server.server import (  # noqa: E402
     patch_server_event_data,
     patch_server_frames,
     replay_connection,
+    rewrite_channel_transition_world_from_selection,
 )
 from maple_server.protocol import (  # noqa: E402
     crypt_payload,
@@ -40,7 +41,11 @@ from maple_server.protocol import (  # noqa: E402
     parse_handshake,
     shuffle_iv,
 )
-from maple_server.packets import WorldHandoff  # noqa: E402
+from maple_server.packets import (  # noqa: E402
+    ChannelTransitionResponse,
+    WorldHandoff,
+    WorldSelection,
+)
 from maple_server.transcript import (  # noqa: E402
     Transcript,
     TranscriptEvent,
@@ -49,6 +54,30 @@ from maple_server.transcript import (  # noqa: E402
 
 
 class TranscriptTest(unittest.TestCase):
+    def test_rewrites_captured_channel_transition_to_live_world(self) -> None:
+        replies = (
+            ChannelTransitionResponse(
+                stage=0,
+                transition_values=(267_748, 267_744),
+            ).to_bytes(),
+            ChannelTransitionResponse(stage=1, world_id=4).to_bytes(),
+        )
+
+        rewritten = rewrite_channel_transition_world_from_selection(
+            replies, WorldSelection(world_id=1).to_bytes()
+        )
+
+        self.assertEqual(
+            ChannelTransitionResponse.parse(rewritten[0]),
+            ChannelTransitionResponse(
+                stage=0,
+                transition_values=(267_748, 267_744),
+            ),
+        )
+        self.assertEqual(
+            ChannelTransitionResponse.parse(rewritten[1]).world_id, 1
+        )
+
     def test_post_transcript_cli_frames_preserve_argument_order(self) -> None:
         arguments = build_parser().parse_args(
             [
@@ -586,7 +615,9 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             server.close()
             await server.wait_closed()
 
-    async def test_replay_delays_between_post_transcript_server_frames(self) -> None:
+    async def test_replay_delays_before_and_between_post_transcript_frames(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             first_iv = bytes.fromhex("6e3c795a")
             second_iv = bytes.fromhex("885db958")
@@ -615,6 +646,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             post_transcript_server_frames=(b"first", b"second"),
+                            post_transcript_start_delay_seconds=0.05,
                             post_transcript_gap_delays_seconds=(0.05,),
                         )
                     )
@@ -627,7 +659,12 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 await reader.readexactly(len(greeting + captured_frame)),
                 greeting + captured_frame,
             )
+            started = asyncio.get_running_loop().time()
             first = await reader.readexactly(9)
+            self.assertGreaterEqual(
+                asyncio.get_running_loop().time() - started,
+                0.035,
+            )
             first_appended_iv = shuffle_iv(second_iv)
             self.assertEqual(
                 crypt_payload(first[4:], first_appended_iv), b"first"

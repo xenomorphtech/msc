@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 49 tests.
+The last run passed all 56 tests.
 
 ## Inspect and compare captures
 
@@ -42,12 +42,15 @@ For PCAP or JSONL login logs, use the typed state fold instead:
 python -m maple_server analyze-login \
   --pcap /home/sdancer/Downloads/111.pcapng \
   --tcp-stream 83 \
+  --packets \
   --fail-on-invalid
 ```
 
 It reassembles TCP, validates cipher headers and IV progression, parses known
 packet shapes, and applies them to account/world/channel/character/handoff
-state. Account and character IDs are redacted unless explicitly requested.
+state. `--packets` prints frame-aligned decoded fields and timing; `--json`
+emits the same records for tooling. Account and character IDs are redacted
+unless explicitly requested.
 
 ## Replay the login capture locally
 
@@ -89,7 +92,8 @@ or committed fixtures. The working login composition is:
 2. on native client opcode `13`, send the local acknowledgment followed by
    successful account frame `3` (opcode rewritten `0` to local handler `1`),
    world frames `5` through `9`, and sentinel frame `10`;
-3. on client opcode `4`, send frames `15` and `16` with delays `0,2.5`;
+3. on client opcode `4`, send frames `15` and `16` with delays `0,2.5`, and
+   rewrite frame `16`'s stage-1 world id from the live selection;
 4. on client opcode `5`, send character frames `17`, `18`, and `19` with
    delays `0,0,1.0`;
 5. on client opcode `7`, send handoff frame `20` after transforming only its
@@ -101,6 +105,7 @@ ordered response sequence. Configure the capture-faithful waits with:
 ```text
 --client-opcode-reply-delays 4=0,2.5
 --client-opcode-reply-delays 5=0,0,1.0
+--rewrite-channel-transition-world
 ```
 
 The live client now renders all five world tabs and their online channels.
@@ -108,6 +113,20 @@ The first untimed run sent both opcode-`402` frames back-to-back: selecting
 world `2` made the client emit opcode `4` twice, receive both `402` frames, and
 then stall without emitting channel opcode `5`. This is the evidence for the
 2.5-second reactive delay, not a guessed UI delay.
+The next timed run exposed a separate packet-shape mismatch: the client chose
+world `1`, while captured frame `16` still named world `4`. The typed fold now
+rejects this combination before replay, and the reactive rewrite binds the
+stage-1 response to the triggering opcode-`4` world id.
+
+The corrected timing and live-world rewrite now produce client opcode `5`
+reliably and reach the character-selection controller. Frames `17` and `18`
+are accepted, while frame `19` is a type-`7` security request. The reference
+client answers it with three type-`6` messages before character opcode `7`.
+Sending the valid transformed handoff frame `20` proactively, while omitting
+that security exchange, only blanks the scene: no TCP connection reaches
+`12857`, and the client exits after the login connection closes. Security
+proof validation can remain a local policy decision, but the client-side
+completion transition cannot simply be omitted.
 
 Start the local target for the transformed handoff separately:
 
@@ -255,6 +274,11 @@ project's own `README.md` for all options.
   channels. Client opcode `4` identifies the selected world.
 - The two opcode-`402` packets require their observed 2.5-second gap; sending
   them together stalls before the client emits channel opcode `5`.
+- With the gap and live-world rewrite, the client emits opcode `5` and accepts
+  the character list and server time. The remaining login gate is server
+  security type `7` -> client type `6` responses -> character opcode `7`.
+- Proactively sending a valid handoff without that gate produces a black scene,
+  no world-port connection, and client exit after the login socket closes.
 - The MapleStory PipeWire stream is kept muted by the enabled
   `maplestory-audio-mute.service`, using application identity rather than a
   changing node number.
@@ -263,7 +287,8 @@ project's own `README.md` for all options.
 
 Replace the remaining opaque replay portions with stateful handling:
 
-1. Verify the timed opcode-`402` pair causes client opcode `5` live.
+1. Complete or safely bypass the type-`7`/type-`6` client security transition
+   so the client emits character opcode `7`.
 2. Decode the inner 167 bytes of the character-list response.
 3. Verify character opcode `7` reaches the locally rewritten handoff.
 4. Decode enough of stream `92` to synthesize the initial map state instead of

@@ -90,6 +90,8 @@ Plaintext frames may also be sourced privately at runtime with
 ordered response sequence. `--client-opcode-reply-delays` supplies one delay
 per response, which is required for the observed 2.5-second gap between the
 two server opcode-`402` channel-transition packets.
+`--rewrite-channel-transition-world` binds the stage-1 world id to the live
+client opcode-`4` selection instead of replaying the captured world verbatim.
 
 Validate a login capture and fold it into typed game state without printing
 account or character identifiers:
@@ -98,13 +100,20 @@ account or character identifiers:
 python -m maple_server analyze-login \
   --pcap /path/to/reference.pcapng \
   --tcp-stream 83 \
+  --packets \
   --fail-on-invalid
 ```
 
-The analyzer reports full, partial, unknown, and invalid interpretations.
+`--packets` appends one frame-aligned structured record with direction, timing,
+wire offsets, opcode, shape coverage, and decoded fields. `--json` exposes the
+same packet records as machine-readable objects. The analyzer reports full,
+partial, unknown, and invalid interpretations.
 Account success, world records/sentinel, world/channel/character selections,
-and handoff are fully validated. The character-list envelope is deliberately
-partial until its inner records are decoded.
+the two-stage opcode-`402` transition, and handoff are fully validated. The
+character-list envelope is deliberately partial until its inner records are
+decoded. Opcode-`13` acknowledgments and client status messages are fully
+decoded; length-prefixed type-`6`/type-`7` security bodies are structurally
+bounded and intentionally reported as opaque.
 
 Inspect a transcript without dumping its entire payload:
 
@@ -146,7 +155,12 @@ without affecting other applications.
 3. Acknowledge native client opcode `13`, then return the validated account,
    world records, and world-list sentinel as one reactive sequence.
 4. Return server opcode `402` frames for client opcode `4` with delays
-   `0,2.5`; the client otherwise stalls before emitting channel opcode `5`.
-5. Return the partially decoded character list for opcode `5`, then rewrite
-   the validated opcode-`5` handoff to the local stream-`92` replay listener.
-6. Finish the inner character-list and initial world/map packet models.
+   `0,2.5`, and use `--rewrite-channel-transition-world`; the client otherwise
+   stalls before emitting channel opcode `5` when the captured world differs.
+5. Return the partially decoded character list, server time, and type-`7`
+   security request for opcode `5`; the client must complete its type-`6`
+   response sequence and emit character opcode `7` before handoff.
+6. Rewrite the validated opcode-`5` handoff to the local stream-`92` replay
+   listener only after opcode `7`. Sending it proactively blanks the scene but
+   does not open a world connection.
+7. Finish the inner character-list and initial world/map packet models.
