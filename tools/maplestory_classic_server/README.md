@@ -15,11 +15,12 @@ The serialized `GameConfig` and a post-bootstrap packet capture establish:
 - successful reference login: `43.142.194.25:10282` (`tcp.stream 83`)
 - successful reference world: `43.142.194.150:8587` (`tcp.stream 92`)
 
-The world connection exchanged 77 client bytes and 218 server bytes before it
-closed. Login uses a 33-byte cleartext greeting followed by encrypted frames
-whose four-byte headers encode payload length as the XOR of two little-endian
-16-bit words. The observed greeting identifies protocol version `300`,
-subversion `300`, and locale `4`.
+The sustained world reference (`tcp.stream 92`) lasts about 12.6 minutes and
+contains 35,207 decrypted Maple frames: 14,640 client frames and 20,567 server
+frames. Login and world sessions use a 33-byte cleartext greeting followed by
+encrypted frames whose four-byte headers encode payload length as the XOR of
+two little-endian 16-bit words. The observed greeting identifies protocol
+version `300`, subversion `300`, and locale `4`.
 
 ## Commands
 
@@ -121,6 +122,48 @@ decoded; other length-prefixed type-`6`/type-`7` envelopes are structurally
 bounded and intentionally reported as opaque. They use neutral opcode-envelope
 names because adjacency in one capture does not establish security semantics.
 
+Validate a world capture, fold it into field state, and optionally emit the
+timestamped gameplay event stream:
+
+```sh
+python -m maple_server analyze-gameplay \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 92 \
+  --events \
+  --fail-on-invalid
+```
+
+The gameplay fold currently models these capture-backed boundaries:
+
+- client opcode `8`: world-entry envelope (character id plus opaque ticket),
+- server opcode `157`: field snapshot/change envelope (opaque body),
+- client opcode `158`: the complete `1 -> 2` field-load stage sequence,
+- server opcode `300`: complete 22-byte NPC spawn records,
+- server opcode `303`: complete 8-byte NPC state updates,
+- client opcode `207` and server opcode `283`: correlated mob movement headers
+  with opaque movement/status bodies,
+- client opcode `301`: the world-bootstrap acknowledgement envelope, and
+- client opcode `23` / server opcode `10`: heartbeat request/acknowledgement.
+
+Unknown opcodes remain lossless frame observations and do not acquire semantic
+names from frequency or adjacency alone. Default reports replace character and
+runtime object ids with stable session-local aliases such as `npc:1`; use
+`--show-identifiers` only for private debugging.
+
+The full stream-`92` validation reaches `active` across 13 field epochs. All 26
+field-load messages form 13 ordered stage pairs; all 53 NPC spawns and 77 NPC
+state updates validate; 11,949 movement acknowledgements match prior captured
+submissions; and all 75 heartbeats pair. Two movement submissions remain
+pending at capture end.
+
+A live replay A/B used the short stream-`114` field and repeated its server
+frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
+injected sessions both reached `active` with nine NPCs. The injected fold had
+one additional server frame and one additional `npc_state_updated` event
+(`2 -> 3`) while entity count and session phase stayed unchanged, matching the
+prediction. Both sessions later returned to login, so that disconnect is a
+short-replay continuation gap rather than an effect of opcode `303`.
+
 Inspect a transcript without dumping its entire payload:
 
 ```sh
@@ -186,4 +229,10 @@ It intentionally cannot launch an authenticated official session.
 7. Rewrite the validated opcode-`5` handoff to the local stream-`92` replay
    listener only after opcode `7`. The ordered NGSX run produced opcode `7`, a
    valid `handoff_ready` fold, and a real connection to the local world replay.
-8. Finish the inner character-list and initial world/map packet models.
+8. Use `analyze-gameplay` to validate field epochs, NPC state, movement
+   request/ack correlation, and heartbeat traffic before replay experiments.
+9. Repeat only a modeled, field-local packet in a baseline/injected A/B and
+   compare the emitted state events rather than inferring effects from client
+   liveness alone.
+10. Decode the inner character list, player records, field snapshot body, and
+    the world-session continuation packets needed to keep a replay live.

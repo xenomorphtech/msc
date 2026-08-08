@@ -18,6 +18,7 @@ from .gamestate import (
     normalize_maple_transcript,
     render_login_analysis,
 )
+from .gameplay import analyze_gameplay_transcript, render_gameplay_analysis
 from .packets import (
     ChannelTransitionResponse,
     PacketShapeError,
@@ -1578,6 +1579,46 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="exit with status 2 if a shape or state invariant is invalid",
     )
+
+    gameplay_parser = subparsers.add_parser(
+        "analyze-gameplay",
+        help=(
+            "decrypt a world transcript or pcap stream, fold gameplay events "
+            "into field state, and validate packet shapes"
+        ),
+    )
+    gameplay_source = gameplay_parser.add_mutually_exclusive_group(required=True)
+    gameplay_source.add_argument("--transcript", type=Path)
+    gameplay_source.add_argument("--pcap", type=Path)
+    gameplay_parser.add_argument(
+        "--tcp-stream",
+        type=int,
+        help="Wireshark tcp.stream index (required with --pcap)",
+    )
+    gameplay_parser.add_argument(
+        "--tshark", default="tshark", help="tshark executable used for pcap input"
+    )
+    gameplay_parser.add_argument("--json", action="store_true")
+    gameplay_parser.add_argument(
+        "--events",
+        action="store_true",
+        help="append the timestamped, state-changing gameplay event stream",
+    )
+    gameplay_parser.add_argument(
+        "--packets",
+        action="store_true",
+        help="append one structured packet record for every plaintext frame",
+    )
+    gameplay_parser.add_argument(
+        "--show-identifiers",
+        action="store_true",
+        help="include character and runtime object identifiers in output",
+    )
+    gameplay_parser.add_argument(
+        "--fail-on-invalid",
+        action="store_true",
+        help="exit with status 2 if a shape or state invariant is invalid",
+    )
     return parser
 
 
@@ -1847,7 +1888,7 @@ def main() -> None:
     if arguments.command == "compare":
         compare_transcripts(arguments.first, arguments.second)
         return
-    if arguments.command == "analyze-login":
+    if arguments.command in {"analyze-login", "analyze-gameplay"}:
         if arguments.pcap is not None:
             if arguments.tcp_stream is None:
                 parser.error("--tcp-stream is required with --pcap")
@@ -1860,7 +1901,10 @@ def main() -> None:
             if arguments.tcp_stream is not None:
                 parser.error("--tcp-stream is only valid with --pcap")
             transcript = Transcript.load(arguments.transcript)
-        analysis = analyze_login_transcript(transcript)
+        if arguments.command == "analyze-login":
+            analysis = analyze_login_transcript(transcript)
+        else:
+            analysis = analyze_gameplay_transcript(transcript)
         if arguments.json:
             print(
                 analysis.to_json(
@@ -1868,13 +1912,23 @@ def main() -> None:
                 )
             )
         else:
-            print(
-                render_login_analysis(
-                    analysis,
-                    show_identifiers=arguments.show_identifiers,
-                    show_packets=arguments.packets,
+            if arguments.command == "analyze-login":
+                print(
+                    render_login_analysis(
+                        analysis,
+                        show_identifiers=arguments.show_identifiers,
+                        show_packets=arguments.packets,
+                    )
                 )
-            )
+            else:
+                print(
+                    render_gameplay_analysis(
+                        analysis,
+                        show_identifiers=arguments.show_identifiers,
+                        show_packets=arguments.packets,
+                        show_events=arguments.events,
+                    )
+                )
         if arguments.fail_on_invalid and not analysis.valid:
             raise SystemExit(2)
         return

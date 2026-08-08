@@ -39,6 +39,9 @@ class PacketReader:
     def u16(self, field: str) -> int:
         return int.from_bytes(self._read(2, field), "little")
 
+    def i16(self, field: str) -> int:
+        return int.from_bytes(self._read(2, field), "little", signed=True)
+
     def u32(self, field: str) -> int:
         return int.from_bytes(self._read(4, field), "little")
 
@@ -649,3 +652,289 @@ class WorldHandoff:
                 self.trailing,
             )
         )
+
+
+@dataclass(frozen=True)
+class WorldEntryRequest:
+    """Observed world-session entry envelope; the inner ticket stays opaque."""
+
+    character_id: int
+    opaque_ticket: bytes
+    opcode: int = 8
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "WorldEntryRequest":
+        reader = PacketReader(payload, packet_name="world_entry_request")
+        _expect_opcode(reader, 8)
+        character_id = reader.u32("character_id")
+        opaque_ticket = reader.bytes(60, "opaque_ticket")
+        reader.finish()
+        return cls(character_id=character_id, opaque_ticket=opaque_ticket)
+
+    def to_bytes(self) -> bytes:
+        if len(self.opaque_ticket) != 60:
+            raise PacketShapeError("world entry ticket must contain exactly 60 bytes")
+        return struct.pack("<HI", self.opcode, self.character_id) + self.opaque_ticket
+
+
+@dataclass(frozen=True)
+class FieldSnapshotEnvelope:
+    """Field-change packet with a validated opcode and opaque snapshot body."""
+
+    opaque_snapshot: bytes
+    opcode: int = 157
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FieldSnapshotEnvelope":
+        reader = PacketReader(payload, packet_name="field_snapshot")
+        _expect_opcode(reader, 157)
+        opaque_snapshot = reader.bytes(reader.remaining, "opaque_snapshot")
+        reader.finish()
+        if not opaque_snapshot:
+            raise PacketShapeError("field_snapshot has an empty snapshot body")
+        return cls(opaque_snapshot=opaque_snapshot)
+
+    def to_bytes(self) -> bytes:
+        if not self.opaque_snapshot:
+            raise PacketShapeError("field snapshot body cannot be empty")
+        return struct.pack("<H", self.opcode) + self.opaque_snapshot
+
+
+@dataclass(frozen=True)
+class NpcSpawn:
+    object_id: int
+    template_id: int
+    x: int
+    cy: int
+    faces_left: bool
+    foothold_id: int
+    range_left: int
+    range_right: int
+    hidden: bool
+    opcode: int = 300
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "NpcSpawn":
+        reader = PacketReader(payload, packet_name="npc_spawn")
+        _expect_opcode(reader, 300)
+        object_id = reader.u32("object_id")
+        template_id = reader.u32("template_id")
+        x = reader.i16("x")
+        cy = reader.i16("cy")
+        faces_left_raw = reader.u8("faces_left")
+        if faces_left_raw not in {0, 1}:
+            raise PacketShapeError(
+                f"npc_spawn.faces_left is {faces_left_raw}, expected boolean 0 or 1"
+            )
+        foothold_id = reader.u16("foothold_id")
+        range_left = reader.i16("range_left")
+        range_right = reader.i16("range_right")
+        hidden_raw = reader.u8("hidden")
+        if hidden_raw not in {0, 1}:
+            raise PacketShapeError(
+                f"npc_spawn.hidden is {hidden_raw}, expected boolean 0 or 1"
+            )
+        reader.finish()
+        if range_left > range_right:
+            raise PacketShapeError(
+                f"npc_spawn range is reversed: {range_left} > {range_right}"
+            )
+        return cls(
+            object_id=object_id,
+            template_id=template_id,
+            x=x,
+            cy=cy,
+            faces_left=bool(faces_left_raw),
+            foothold_id=foothold_id,
+            range_left=range_left,
+            range_right=range_right,
+            hidden=bool(hidden_raw),
+        )
+
+    def to_bytes(self) -> bytes:
+        if self.range_left > self.range_right:
+            raise PacketShapeError(
+                f"npc spawn range is reversed: {self.range_left} > {self.range_right}"
+            )
+        return struct.pack(
+            "<HIIhhBHhhB",
+            self.opcode,
+            self.object_id,
+            self.template_id,
+            self.x,
+            self.cy,
+            int(self.faces_left),
+            self.foothold_id,
+            self.range_left,
+            self.range_right,
+            int(self.hidden),
+        )
+
+
+@dataclass(frozen=True)
+class NpcStateUpdate:
+    object_id: int
+    action: int
+    parameter: int
+    opcode: int = 303
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "NpcStateUpdate":
+        reader = PacketReader(payload, packet_name="npc_state_update")
+        _expect_opcode(reader, 303)
+        object_id = reader.u32("object_id")
+        action = reader.u8("action")
+        parameter = reader.u8("parameter")
+        reader.finish()
+        return cls(object_id=object_id, action=action, parameter=parameter)
+
+    def to_bytes(self) -> bytes:
+        return struct.pack(
+            "<HIBB", self.opcode, self.object_id, self.action, self.parameter
+        )
+
+
+@dataclass(frozen=True)
+class MobMovementSubmission:
+    object_id: int
+    sequence: int
+    opaque_movement: bytes
+    opcode: int = 207
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobMovementSubmission":
+        reader = PacketReader(payload, packet_name="mob_movement_submission")
+        _expect_opcode(reader, 207)
+        object_id = reader.u32("object_id")
+        sequence = reader.u16("sequence")
+        opaque_movement = reader.bytes(reader.remaining, "opaque_movement")
+        reader.finish()
+        if not opaque_movement:
+            raise PacketShapeError("mob movement payload is empty")
+        return cls(
+            object_id=object_id,
+            sequence=sequence,
+            opaque_movement=opaque_movement,
+        )
+
+    def to_bytes(self) -> bytes:
+        if not self.opaque_movement:
+            raise PacketShapeError("mob movement payload cannot be empty")
+        return (
+            struct.pack("<HIH", self.opcode, self.object_id, self.sequence)
+            + self.opaque_movement
+        )
+
+
+@dataclass(frozen=True)
+class MobMovementAcknowledgement:
+    object_id: int
+    sequence: int
+    opaque_status: bytes
+    opcode: int = 283
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobMovementAcknowledgement":
+        reader = PacketReader(payload, packet_name="mob_movement_acknowledgement")
+        _expect_opcode(reader, 283)
+        object_id = reader.u32("object_id")
+        sequence = reader.u16("sequence")
+        opaque_status = reader.bytes(5, "opaque_status")
+        reader.finish()
+        return cls(
+            object_id=object_id,
+            sequence=sequence,
+            opaque_status=opaque_status,
+        )
+
+    def to_bytes(self) -> bytes:
+        if len(self.opaque_status) != 5:
+            raise PacketShapeError(
+                "mob movement acknowledgement status must contain exactly 5 bytes"
+            )
+        return (
+            struct.pack("<HIH", self.opcode, self.object_id, self.sequence)
+            + self.opaque_status
+        )
+
+
+@dataclass(frozen=True)
+class WorldBootstrapAcknowledgement:
+    opaque_value: int
+    opcode: int = 301
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "WorldBootstrapAcknowledgement":
+        reader = PacketReader(payload, packet_name="world_bootstrap_acknowledgement")
+        _expect_opcode(reader, 301)
+        opaque_value = reader.u32("opaque_value")
+        reader.finish()
+        return cls(opaque_value=opaque_value)
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<HI", self.opcode, self.opaque_value)
+
+
+@dataclass(frozen=True)
+class FieldLoadStage:
+    stage: int
+    trailing: int = 0
+    opcode: int = 158
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FieldLoadStage":
+        reader = PacketReader(payload, packet_name="field_load_stage")
+        _expect_opcode(reader, 158)
+        stage = reader.u32("stage")
+        trailing = reader.u32("trailing")
+        reader.finish()
+        if stage not in {1, 2}:
+            raise PacketShapeError(
+                f"field_load_stage.stage is {stage}, expected observed stage 1 or 2"
+            )
+        if trailing != 0:
+            raise PacketShapeError(
+                f"field_load_stage.trailing is {trailing}, expected 0"
+            )
+        return cls(stage=stage, trailing=trailing)
+
+    def to_bytes(self) -> bytes:
+        if self.stage not in {1, 2}:
+            raise PacketShapeError("field load stage must be 1 or 2")
+        if self.trailing != 0:
+            raise PacketShapeError("field load trailing value must be zero")
+        return struct.pack("<HII", self.opcode, self.stage, self.trailing)
+
+
+@dataclass(frozen=True)
+class HeartbeatRequest:
+    opaque_token: bytes
+    opcode: int = 23
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "HeartbeatRequest":
+        reader = PacketReader(payload, packet_name="heartbeat_request")
+        _expect_opcode(reader, 23)
+        opaque_token = reader.bytes(8, "opaque_token")
+        reader.finish()
+        return cls(opaque_token=opaque_token)
+
+    def to_bytes(self) -> bytes:
+        if len(self.opaque_token) != 8:
+            raise PacketShapeError("heartbeat token must contain exactly 8 bytes")
+        return struct.pack("<H", self.opcode) + self.opaque_token
+
+
+@dataclass(frozen=True)
+class HeartbeatAcknowledgement:
+    opcode: int = 10
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "HeartbeatAcknowledgement":
+        reader = PacketReader(payload, packet_name="heartbeat_acknowledgement")
+        _expect_opcode(reader, 10)
+        reader.finish()
+        return cls()
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<H", self.opcode)
