@@ -795,6 +795,127 @@ class NpcStateUpdate:
 
 
 @dataclass(frozen=True)
+class MobMovementCommand:
+    command_type: int
+    opaque_payload: bytes
+
+    @property
+    def byte_length(self) -> int:
+        return 1 + len(self.opaque_payload)
+
+    @classmethod
+    def parse(
+        cls, reader: PacketReader, *, command_index: int
+    ) -> "MobMovementCommand":
+        command_type = reader.u8(f"commands[{command_index}].type")
+        payload_lengths = {0: 13, 1: 7, 2: 7}
+        try:
+            payload_length = payload_lengths[command_type]
+        except KeyError as error:
+            raise PacketShapeError(
+                "mob_movement_path.commands"
+                f"[{command_index}].type is {command_type}, expected 0, 1, or 2"
+            ) from error
+        return cls(
+            command_type=command_type,
+            opaque_payload=reader.bytes(
+                payload_length, f"commands[{command_index}].opaque_payload"
+            ),
+        )
+
+    def to_bytes(self) -> bytes:
+        payload_lengths = {0: 13, 1: 7, 2: 7}
+        expected_length = payload_lengths.get(self.command_type)
+        if expected_length is None:
+            raise PacketShapeError(
+                f"movement command type is {self.command_type}, expected 0, 1, or 2"
+            )
+        if len(self.opaque_payload) != expected_length:
+            raise PacketShapeError(
+                f"movement command type {self.command_type} needs "
+                f"{expected_length} opaque bytes, got {len(self.opaque_payload)}"
+            )
+        return bytes((self.command_type,)) + self.opaque_payload
+
+
+@dataclass(frozen=True)
+class MobMovementPath:
+    opaque_control: bytes
+    reference_x: int
+    reference_y: int
+    commands: tuple[MobMovementCommand, ...]
+    trailer_marker: int
+    path_start_x: int
+    path_start_y: int
+    path_end_x: int
+    path_end_y: int
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobMovementPath":
+        reader = PacketReader(payload, packet_name="mob_movement_path")
+        opaque_control = reader.bytes(19, "opaque_control")
+        reference_x = reader.i16("reference_x")
+        reference_y = reader.i16("reference_y")
+        command_count = reader.u8("command_count")
+        if command_count == 0:
+            raise PacketShapeError("mob movement path has no commands")
+        commands = tuple(
+            MobMovementCommand.parse(reader, command_index=index)
+            for index in range(command_count)
+        )
+        trailer_marker = reader.u8("trailer_marker")
+        if trailer_marker != 0:
+            raise PacketShapeError(
+                f"mob movement path trailer marker is {trailer_marker}, expected 0"
+            )
+        path_start_x = reader.i16("path_start_x")
+        path_start_y = reader.i16("path_start_y")
+        path_end_x = reader.i16("path_end_x")
+        path_end_y = reader.i16("path_end_y")
+        reader.finish()
+        return cls(
+            opaque_control=opaque_control,
+            reference_x=reference_x,
+            reference_y=reference_y,
+            commands=commands,
+            trailer_marker=trailer_marker,
+            path_start_x=path_start_x,
+            path_start_y=path_start_y,
+            path_end_x=path_end_x,
+            path_end_y=path_end_y,
+        )
+
+    def to_bytes(self) -> bytes:
+        if len(self.opaque_control) != 19:
+            raise PacketShapeError(
+                "mob movement path control prefix must contain exactly 19 bytes"
+            )
+        if not self.commands:
+            raise PacketShapeError("mob movement path must contain a command")
+        if len(self.commands) > 255:
+            raise PacketShapeError(
+                "mob movement path cannot contain more than 255 commands"
+            )
+        if self.trailer_marker != 0:
+            raise PacketShapeError("mob movement path trailer marker must be zero")
+        return (
+            self.opaque_control
+            + struct.pack(
+                "<hhB", self.reference_x, self.reference_y, len(self.commands)
+            )
+            + b"".join(command.to_bytes() for command in self.commands)
+            + struct.pack(
+                "<Bhhhh",
+                self.trailer_marker,
+                self.path_start_x,
+                self.path_start_y,
+                self.path_end_x,
+                self.path_end_y,
+            )
+        )
+
+
+@dataclass(frozen=True)
 class MobMovementSubmission:
     object_id: int
     sequence: int
@@ -811,6 +932,7 @@ class MobMovementSubmission:
         reader.finish()
         if not opaque_movement:
             raise PacketShapeError("mob movement payload is empty")
+        MobMovementPath.parse(opaque_movement)
         return cls(
             object_id=object_id,
             sequence=sequence,
@@ -820,10 +942,15 @@ class MobMovementSubmission:
     def to_bytes(self) -> bytes:
         if not self.opaque_movement:
             raise PacketShapeError("mob movement payload cannot be empty")
+        MobMovementPath.parse(self.opaque_movement)
         return (
             struct.pack("<HIH", self.opcode, self.object_id, self.sequence)
             + self.opaque_movement
         )
+
+    @property
+    def movement_path(self) -> MobMovementPath:
+        return MobMovementPath.parse(self.opaque_movement)
 
 
 @dataclass(frozen=True)
@@ -841,6 +968,10 @@ class MobMovementAcknowledgement:
         sequence = reader.u16("sequence")
         opaque_status = reader.bytes(5, "opaque_status")
         reader.finish()
+        if opaque_status[0] not in {0, 1}:
+            raise PacketShapeError(
+                "mob movement acknowledgement status flag must be zero or one"
+            )
         return cls(
             object_id=object_id,
             sequence=sequence,
@@ -852,10 +983,22 @@ class MobMovementAcknowledgement:
             raise PacketShapeError(
                 "mob movement acknowledgement status must contain exactly 5 bytes"
             )
+        if self.opaque_status[0] not in {0, 1}:
+            raise PacketShapeError(
+                "mob movement acknowledgement status flag must be zero or one"
+            )
         return (
             struct.pack("<HIH", self.opcode, self.object_id, self.sequence)
             + self.opaque_status
         )
+
+    @property
+    def status_flag(self) -> int:
+        return self.opaque_status[0]
+
+    @property
+    def status_value(self) -> int:
+        return int.from_bytes(self.opaque_status[1:], "little")
 
 
 @dataclass(frozen=True)

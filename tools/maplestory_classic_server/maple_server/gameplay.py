@@ -83,7 +83,12 @@ class GameplayGameState:
     npc_spawns: int = 0
     npc_state_updates: int = 0
     movement_submissions: int = 0
+    movement_commands: int = 0
+    movement_commands_by_type: Counter[int] = field(default_factory=Counter)
     movement_acknowledgements: int = 0
+    movement_acknowledgement_statuses: Counter[tuple[int, int]] = field(
+        default_factory=Counter
+    )
     matched_movement_acknowledgements: int = 0
     unmatched_movement_acknowledgements: int = 0
     heartbeat_probes: int = 0
@@ -189,9 +194,19 @@ class GameplayAnalysis:
                 "npc_spawns": self.state.npc_spawns,
                 "npc_state_updates": self.state.npc_state_updates,
                 "movement_submissions": self.state.movement_submissions,
+                "movement_commands": self.state.movement_commands,
+                "movement_commands_by_type": dict(
+                    self.state.movement_commands_by_type
+                ),
                 "movement_acknowledgements": (
                     self.state.movement_acknowledgements
                 ),
+                "movement_acknowledgement_statuses": [
+                    {"flag": flag, "value": value, "count": count}
+                    for (flag, value), count in sorted(
+                        self.state.movement_acknowledgement_statuses.items()
+                    )
+                ],
                 "matched_movement_acknowledgements": (
                     self.state.matched_movement_acknowledgements
                 ),
@@ -433,6 +448,7 @@ class GameplayStateFold:
             )
         if opcode == 207:
             movement = MobMovementSubmission.parse(payload)
+            movement_path = movement.movement_path
             alias = self._alias(
                 self._movement_aliases, movement.object_id, "mob"
             )
@@ -440,10 +456,29 @@ class GameplayStateFold:
             self._pending_movements[key] += 1
             self.state.pending_movements += 1
             self.state.movement_submissions += 1
+            self.state.movement_commands += len(movement_path.commands)
+            self.state.movement_commands_by_type.update(
+                command.command_type for command in movement_path.commands
+            )
             details = {
                 "entity": alias,
                 "sequence": movement.sequence,
-                "opaque_movement_bytes": len(movement.opaque_movement),
+                "movement_body_bytes": len(movement.opaque_movement),
+                "opaque_control_bytes": len(movement_path.opaque_control),
+                "reference_x": movement_path.reference_x,
+                "reference_y": movement_path.reference_y,
+                "command_count": len(movement_path.commands),
+                "command_types": [
+                    command.command_type for command in movement_path.commands
+                ],
+                "opaque_command_payload_bytes": sum(
+                    len(command.opaque_payload)
+                    for command in movement_path.commands
+                ),
+                "path_start_x": movement_path.path_start_x,
+                "path_start_y": movement_path.path_start_y,
+                "path_end_x": movement_path.path_end_x,
+                "path_end_y": movement_path.path_end_y,
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -458,7 +493,10 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=movement,
                 details=details,
-                issues=("movement command stream remains opaque",),
+                issues=(
+                    "movement control metadata and command payload semantics "
+                    "remain opaque",
+                ),
             )
         if opcode == 23:
             response = HeartbeatResponse.parse(payload)
@@ -639,11 +677,15 @@ class GameplayStateFold:
             else:
                 self.state.unmatched_movement_acknowledgements += 1
             self.state.movement_acknowledgements += 1
+            self.state.movement_acknowledgement_statuses[
+                (acknowledgement.status_flag, acknowledgement.status_value)
+            ] += 1
             details = {
                 "entity": alias,
                 "sequence": acknowledgement.sequence,
                 "matched_submission": matched,
-                "opaque_status_bytes": 5,
+                "status_flag": acknowledgement.status_flag,
+                "status_value": acknowledgement.status_value,
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -658,7 +700,9 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=acknowledgement,
                 details=details,
-                issues=("movement acknowledgement status remains opaque",),
+                issues=(
+                    "movement acknowledgement status meanings remain opaque",
+                ),
             )
         if opcode == 10:
             probe = HeartbeatProbe.parse(payload)
@@ -813,6 +857,9 @@ def render_gameplay_analysis(
     )
     event_counts = Counter(event.kind for event in analysis.events)
     state = analysis.state
+    movement_command_types = json.dumps(
+        dict(sorted(state.movement_commands_by_type.items()))
+    )
     lines = [
         f"source={analysis.source}",
         f"valid={analysis.valid}",
@@ -840,6 +887,8 @@ def render_gameplay_analysis(
         ),
         (
             f"movement=submitted:{state.movement_submissions} "
+            f"commands:{state.movement_commands} "
+            f"command_types:{movement_command_types} "
             f"acknowledged:{state.movement_acknowledgements} "
             f"matched:{state.matched_movement_acknowledgements} "
             f"unmatched:{state.unmatched_movement_acknowledgements} "

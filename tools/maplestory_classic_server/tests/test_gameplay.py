@@ -21,6 +21,8 @@ from maple_server.packets import (  # noqa: E402
     HeartbeatProbe,
     HeartbeatResponse,
     MobMovementAcknowledgement,
+    MobMovementCommand,
+    MobMovementPath,
     MobMovementSubmission,
     NpcSpawn,
     NpcStateUpdate,
@@ -59,6 +61,22 @@ def fixture_npc() -> NpcSpawn:
         range_left=-300,
         range_right=200,
         hidden=False,
+    )
+
+
+def fixture_movement_path() -> MobMovementPath:
+    return MobMovementPath(
+        opaque_control=b"sanitized-control".ljust(19, b"\x00"),
+        reference_x=100,
+        reference_y=-200,
+        commands=(
+            MobMovementCommand(command_type=0, opaque_payload=b"a" * 13),
+        ),
+        trailer_marker=0,
+        path_start_x=90,
+        path_start_y=-200,
+        path_end_x=110,
+        path_end_y=-200,
     )
 
 
@@ -133,7 +151,7 @@ def fixture_gameplay_transcript(
         MobMovementSubmission(
             object_id=MOB_OBJECT_ID,
             sequence=9,
-            opaque_movement=b"sanitized-movement",
+            opaque_movement=fixture_movement_path().to_bytes(),
         ).to_bytes(),
     )
     append(
@@ -195,24 +213,67 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ).to_bytes()
 
     def test_movement_header_and_ack_round_trip(self) -> None:
+        movement_path = MobMovementPath(
+            opaque_control=b"opaque-control".ljust(19, b"\x00"),
+            reference_x=-12,
+            reference_y=34,
+            commands=(
+                MobMovementCommand(command_type=0, opaque_payload=b"0" * 13),
+                MobMovementCommand(command_type=1, opaque_payload=b"1" * 7),
+                MobMovementCommand(command_type=2, opaque_payload=b"2" * 7),
+            ),
+            trailer_marker=0,
+            path_start_x=-20,
+            path_start_y=30,
+            path_end_x=-4,
+            path_end_y=38,
+        )
         submission = MobMovementSubmission(
             object_id=MOB_OBJECT_ID,
             sequence=42,
-            opaque_movement=b"opaque",
+            opaque_movement=movement_path.to_bytes(),
         )
         acknowledgement = MobMovementAcknowledgement(
             object_id=MOB_OBJECT_ID,
             sequence=42,
-            opaque_status=b"12345",
+            opaque_status=b"\x01\x23\x00\x00\x00",
         )
 
         self.assertEqual(
             MobMovementSubmission.parse(submission.to_bytes()), submission
         )
+        parsed_path = MobMovementSubmission.parse(
+            submission.to_bytes()
+        ).movement_path
+        self.assertEqual(parsed_path, movement_path)
+        self.assertEqual(
+            [command.byte_length for command in parsed_path.commands],
+            [14, 8, 8],
+        )
         self.assertEqual(
             MobMovementAcknowledgement.parse(acknowledgement.to_bytes()),
             acknowledgement,
         )
+        self.assertEqual(acknowledgement.status_flag, 1)
+        self.assertEqual(acknowledgement.status_value, 35)
+        with self.assertRaises(PacketShapeError):
+            replace(
+                acknowledgement, opaque_status=b"\x02\x23\x00\x00\x00"
+            ).to_bytes()
+
+    def test_movement_path_rejects_unmodeled_or_truncated_commands(self) -> None:
+        encoded = bytearray(fixture_movement_path().to_bytes())
+        encoded[24] = 3
+        with self.assertRaises(PacketShapeError):
+            MobMovementPath.parse(bytes(encoded))
+
+        with self.assertRaises(PacketShapeError):
+            MobMovementPath.parse(fixture_movement_path().to_bytes()[:-1])
+
+        encoded = bytearray(fixture_movement_path().to_bytes())
+        encoded[-9] = 1
+        with self.assertRaises(PacketShapeError):
+            MobMovementPath.parse(bytes(encoded))
 
     def test_world_session_termination_round_trip(self) -> None:
         termination = WorldSessionTermination(opaque_reason=b"ended!!")
@@ -244,7 +305,13 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.npc_spawns, 1)
         self.assertEqual(analysis.state.npc_state_updates, 1)
         self.assertEqual(analysis.state.movement_submissions, 1)
+        self.assertEqual(analysis.state.movement_commands, 1)
+        self.assertEqual(analysis.state.movement_commands_by_type, {0: 1})
         self.assertEqual(analysis.state.matched_movement_acknowledgements, 1)
+        self.assertEqual(
+            analysis.state.movement_acknowledgement_statuses,
+            {(0, 0): 1},
+        )
         self.assertEqual(analysis.state.pending_movements, 0)
         self.assertEqual(analysis.state.heartbeat_probes, 1)
         self.assertEqual(analysis.state.heartbeat_responses, 1)
@@ -289,6 +356,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("kind=npc_spawned", report)
         self.assertIn("opcode=300 kind=npc_spawn coverage=full", report)
         self.assertIn("matched_submission\":true", report)
+        self.assertIn("command_types\":[0]", report)
+        self.assertIn('commands:1 command_types:{"0": 1}', report)
 
     def test_repeated_npc_update_has_the_predicted_field_local_delta(self) -> None:
         baseline = analyze_gameplay_transcript(fixture_gameplay_transcript())

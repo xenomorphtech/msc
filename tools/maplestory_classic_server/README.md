@@ -162,8 +162,11 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence,
 - server opcode `300`: complete 22-byte NPC spawn records,
 - server opcode `303`: complete 8-byte NPC state updates,
-- client opcode `207` and server opcode `283`: correlated mob movement headers
-  with opaque movement/status bodies,
+- client opcode `207`: correlated mob movement submissions with a bounded
+  19-byte control prefix, signed reference position, command count, typed
+  command boundaries, and zero-marked start/end-position trailer,
+- server opcode `283`: correlated mob movement acknowledgements with a one-byte
+  boolean-like flag and four-byte little-endian status value,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
@@ -181,6 +184,22 @@ field-load messages form 13 ordered stage pairs; all 53 NPC spawns and 77 NPC
 state updates validate; 11,949 movement acknowledgements match prior captured
 submissions; and all 75 server heartbeat probes pair with the next 75 client
 responses. Two movement submissions remain pending at capture end.
+
+All 12,100 movement submissions now validate through the command-stream
+boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
+13-byte payloads, 706 type-`1` commands with seven-byte payloads, and 102
+type-`2` commands with seven-byte payloads. Including each one-byte type tag,
+their wire sizes are 14, 8, and 8 bytes. No other command type occurs and every
+body ends exactly at its nine-byte zero-marker/start/end trailer. The control
+prefix and per-command payload meanings remain intentionally opaque, while
+reports now emit reference/start/end coordinates, command counts/types, and
+opaque byte counts instead of one undifferentiated movement blob.
+
+All 11,949 acknowledgement bodies also fit one exact primitive boundary:
+flag `0` or `1` followed by a little-endian value in `{0,25,30,35,100}`. The
+fold reports all nine observed flag/value combinations and their counts while
+leaving their behavioral meanings unnamed. This validates the body shape
+without promoting numeric adjacency or frequency into unsupported semantics.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
@@ -210,8 +229,10 @@ The typed option was then exercised through the real client and local handoff.
 Runtime status reported one planned and one sent packet for final-field alias
 `npc:8`. Compared with a keep-open baseline, the observed fold changed NPC
 state updates and corresponding events from `2 -> 3`, while both sessions
-remained `active` with nine NPCs. The client also continued answering generated
-heartbeats after the update, confirming the predicted field-local effect.
+remained `active` with nine NPCs. The injected run completed its full configured
+600-second hold with no termination packet and matched all 60 heartbeat
+probe/response pairs (one captured plus 59 generated), confirming the predicted
+field-local effect and continued client liveness.
 
 Repeating the real-client stream-`114` replay with its validated terminal
 server frame omitted kept the character in the field for the complete
@@ -350,6 +371,8 @@ It intentionally cannot launch an authenticated official session.
     answered every generated probe while remaining active in the field.
 12. Promote the validated NPC-update A/B into a typed final-field replay plan,
     generated packet, and identifier-free runtime prediction/telemetry.
-13. Decode the inner character list, player records, field snapshot body, and
-    the next reactive movement boundaries needed to replace finite replay
+13. Bound all captured opcode-`207` movement command streams and fold command
+    counts/types plus reference/start/end positions into gameplay state/events.
+14. Decode the inner character list, player records, field snapshot body, and
+    the next reactive movement semantics needed to replace finite replay
     content with generated world state.
