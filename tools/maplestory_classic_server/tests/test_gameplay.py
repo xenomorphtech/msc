@@ -107,7 +107,14 @@ def fixture_attack_relay_body(
     tail_length: int,
     zero_targets: bool = False,
 ) -> bytes:
-    body = bytearray(prefix_length)
+    if tail_length == 4:
+        ranged_prefixes = {
+            11: bytes.fromhex("10000016000600e06e1f00"),
+            15: bytes.fromhex("1008400e3d00001a800600f0951f00"),
+        }
+        body = bytearray(ranged_prefixes[prefix_length])
+    else:
+        body = bytearray(prefix_length)
     for target_index in range(target_count):
         object_id = 0 if zero_targets else MOB_OBJECT_ID + target_index
         body.extend(object_id.to_bytes(4, "little"))
@@ -117,7 +124,10 @@ def fixture_attack_relay_body(
             if not zero_targets and hit_index == 0:
                 damage |= 0x8000_0000
             body.extend(damage.to_bytes(4, "little"))
-    body.extend(b"\x00" * tail_length)
+    if tail_length == 4:
+        body.extend(struct.pack("<hh", 122, -198))
+    else:
+        body.extend(b"\x00" * tail_length)
     return bytes(body)
 
 
@@ -1951,6 +1961,29 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             two_hit_relay.targets[0].high_bit_markers, (True, False)
         )
+        ranged_metadata = two_hit_relay.ranged_metadata
+        self.assertIsNotNone(ranged_metadata)
+        assert ranged_metadata is not None
+        self.assertEqual(ranged_metadata.relay_tag, 16)
+        self.assertEqual(ranged_metadata.skill_level, 8)
+        self.assertEqual(ranged_metadata.skill_id, 4_001_344)
+        self.assertEqual(ranged_metadata.unknown_value, 0)
+        self.assertEqual(ranged_metadata.display, 0x1A)
+        self.assertEqual(ranged_metadata.facing_flags, 0x80)
+        self.assertEqual(ranged_metadata.attack_speed, 6)
+        self.assertEqual(ranged_metadata.mastery, 0)
+        self.assertEqual(ranged_metadata.projectile_id, 2_070_000)
+        self.assertEqual(
+            (ranged_metadata.position_x, ranged_metadata.position_y),
+            (122, -198),
+        )
+        basic_ranged_metadata = server_attack_relays[5].ranged_metadata
+        self.assertIsNotNone(basic_ranged_metadata)
+        assert basic_ranged_metadata is not None
+        self.assertEqual(basic_ranged_metadata.skill_level, 0)
+        self.assertIsNone(basic_ranged_metadata.skill_id)
+        self.assertIsNone(server_attack_relays[0].ranged_metadata)
+        self.assertEqual(two_hit_relay.safe_dict()["skill_id"], 4_001_344)
         self.assertNotIn("object_id", two_hit_relay.safe_dict())
         self.assertNotIn("object_id", two_hit_relay.targets[0].safe_dict())
         with self.assertRaisesRegex(PacketShapeError, "suffix needs 26 bytes"):
@@ -1961,6 +1994,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(server_attack_relays[0], opaque_body=b"\x00" * 12).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "imply a 7-byte prefix"):
             replace(server_attack_relays[2], packed_counts=0x12).to_bytes()
+        invalid_skill_prefix = bytearray(server_attack_relays[6].opaque_body)
+        invalid_skill_prefix[1] = 0
+        with self.assertRaisesRegex(
+            PacketShapeError, "skill level 0 requires a 11-byte prefix"
+        ):
+            replace(
+                server_attack_relays[6],
+                opaque_body=bytes(invalid_skill_prefix),
+            ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "flag_1 must fit"):
             ClientOpcode54AttackAction(
                 control_value=364_201,
@@ -2850,6 +2892,49 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.server_attack_relays_for_unknown_players, 0
         )
+        self.assertEqual(analysis.state.server_ranged_attack_relays, 1)
+        self.assertEqual(analysis.state.server_ranged_attack_tags, {16: 1})
+        self.assertEqual(
+            analysis.state.server_ranged_attack_skill_levels, {8: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_skill_ids, {4_001_344: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_unknown_values, {0: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_displays, {0x1A: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_facing_flags, {0x80: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_speeds, {6: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_mastery_values, {0: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_projectile_ids,
+            {2_070_000: 1},
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_positions_for_known_players,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_position_delta_x_min, -8
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_position_delta_x_max, -8
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_position_delta_y_min, -28
+        )
+        self.assertEqual(
+            analysis.state.server_ranged_attack_position_delta_y_max, -28
+        )
         self.assertEqual(analysis.state.server_attack_target_records, 2)
         self.assertEqual(analysis.state.server_attack_zero_object_targets, 0)
         self.assertEqual(
@@ -2904,6 +2989,15 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn("kind=client_attack_submitted", report)
         self.assertIn("kind=server_attack_relay_received", report)
+        self.assertIn(
+            'ranged_relays:1 ranged_skill_levels:{"8": 1} '
+            'ranged_skill_ids:{"4001344": 1} '
+            'ranged_projectiles:{"2070000": 1}',
+            report,
+        )
+        self.assertIn('"position_delta_x":-8', report)
+        self.assertIn('"position_delta_y":-28', report)
+        self.assertIn('"projectile_id":2070000', report)
         self.assertIn('"damage_values":[40,41]', report)
         self.assertIn('"high_bit_markers":[true,false]', report)
         self.assertNotIn("987654321", report)

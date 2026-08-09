@@ -3154,6 +3154,36 @@ class ServerAttackRelayTarget:
 
 
 @dataclass(frozen=True)
+class ServerRangedAttackRelayMetadata:
+    relay_tag: int
+    skill_level: int
+    skill_id: int | None
+    unknown_value: int
+    display: int
+    facing_flags: int
+    attack_speed: int
+    mastery: int
+    projectile_id: int
+    position_x: int
+    position_y: int
+
+    def safe_dict(self) -> dict[str, int | None]:
+        return {
+            "relay_tag": self.relay_tag,
+            "skill_level": self.skill_level,
+            "skill_id": self.skill_id,
+            "unknown_value": self.unknown_value,
+            "display": self.display,
+            "facing_flags": self.facing_flags,
+            "attack_speed": self.attack_speed,
+            "mastery": self.mastery,
+            "projectile_id": self.projectile_id,
+            "position_x": self.position_x,
+            "position_y": self.position_y,
+        }
+
+
+@dataclass(frozen=True)
 class ServerAttackRelay:
     object_id: int
     packed_counts: int
@@ -3235,6 +3265,51 @@ class ServerAttackRelay:
     def opaque_tail(self) -> bytes:
         return self._split_body()[2]
 
+    @property
+    def ranged_metadata(self) -> ServerRangedAttackRelayMetadata | None:
+        if self.opcode != 219:
+            return None
+        opaque_prefix, _, opaque_tail = self._split_body()
+        reader = PacketReader(
+            opaque_prefix, packet_name="server_ranged_attack_relay_prefix"
+        )
+        relay_tag = reader.u8("relay_tag")
+        skill_level = reader.u8("skill_level")
+        expected_prefix_length = 15 if skill_level else 11
+        if len(opaque_prefix) != expected_prefix_length:
+            raise PacketShapeError(
+                "server opcode-219 attack relay skill level "
+                f"{skill_level} requires a {expected_prefix_length}-byte "
+                f"prefix, got {len(opaque_prefix)}"
+            )
+        skill_id = reader.u32("skill_id") if skill_level else None
+        unknown_value = reader.u8("unknown_value")
+        display = reader.u8("display")
+        facing_flags = reader.u8("facing_flags")
+        attack_speed = reader.u8("attack_speed")
+        mastery = reader.u8("mastery")
+        projectile_id = reader.u32("projectile_id")
+        reader.finish()
+        position_reader = PacketReader(
+            opaque_tail, packet_name="server_ranged_attack_relay_position"
+        )
+        position_x = position_reader.i16("x")
+        position_y = position_reader.i16("y")
+        position_reader.finish()
+        return ServerRangedAttackRelayMetadata(
+            relay_tag=relay_tag,
+            skill_level=skill_level,
+            skill_id=skill_id,
+            unknown_value=unknown_value,
+            display=display,
+            facing_flags=facing_flags,
+            attack_speed=attack_speed,
+            mastery=mastery,
+            projectile_id=projectile_id,
+            position_x=position_x,
+            position_y=position_y,
+        )
+
     @classmethod
     def parse(cls, payload: bytes) -> "ServerAttackRelay":
         reader = PacketReader(payload, packet_name="server_attack_relay")
@@ -3258,11 +3333,12 @@ class ServerAttackRelay:
         )
         reader.finish()
         relay._split_body()
+        _ = relay.ranged_metadata
         return relay
 
-    def safe_dict(self) -> dict[str, int]:
+    def safe_dict(self) -> dict[str, object]:
         opaque_prefix, targets, opaque_tail = self._split_body()
-        return {
+        details: dict[str, object] = {
             "target_count": self.target_count,
             "hit_count": self.hit_count,
             "opaque_body_bytes": len(self.opaque_body),
@@ -3276,6 +3352,10 @@ class ServerAttackRelay:
             ),
             "opaque_tail_bytes": len(opaque_tail),
         }
+        ranged_metadata = self.ranged_metadata
+        if ranged_metadata is not None:
+            details.update(ranged_metadata.safe_dict())
+        return details
 
     def to_bytes(self) -> bytes:
         total_lengths = self._TOTAL_LENGTHS.get(self.opcode)
@@ -3301,6 +3381,7 @@ class ServerAttackRelay:
                     f"u{maximum.bit_length()}"
                 )
         self._split_body()
+        _ = self.ranged_metadata
         return (
             struct.pack("<HIB", self.opcode, self.object_id, self.packed_counts)
             + self.opaque_body

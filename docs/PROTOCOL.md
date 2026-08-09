@@ -1061,7 +1061,19 @@ uint8  packed_counts
 target_count = packed_counts >> 4
 hit_count    = packed_counts & 0x0f
 
-byte[prefix_length] opaque_prefix   # 218: 6/11; 219: 11/15
+if opcode == 218:
+  byte[prefix_length] opaque_prefix # 6 or 11 bytes
+else:
+  uint8  relay_tag                  # captured 14, 16, 30, or 33; role unknown
+  uint8  skill_level
+  if skill_level != 0:
+    uint32 skill_id
+  uint8  unknown_value              # zero in both sustained captures
+  uint8  display                    # captured 0x16, 0x18, 0x19, or 0x1a
+  uint8  facing_flags               # captured 0 or 0x80
+  uint8  attack_speed               # captured 3, 4, or 6
+  uint8  mastery                    # captured 0, 1, or 3
+  uint32 projectile_id
 repeat target_count:
   uint32 mob_object_id              # aliased; zero in five 218 placeholders
   uint8  hit_action                 # 6 for every nonzero captured target
@@ -1069,17 +1081,37 @@ repeat target_count:
     uint32 raw_damage
       damage_value = raw_damage & 0x7fffffff
       high_bit_marker = raw_damage >> 31
-byte[4] opaque_tail                 # opcode 219 only
+if opcode == 219:
+  int16 position_x
+  int16 position_y
 ```
 
 Opcode `218` has observed total lengths `18`, `22`, and `27`; opcode `219` has
 lengths `22`, `26`, `31`, `35`, `39`, `44`, `53`, and `62`. Stream `126`
 contains 41 opcode-`218` and 99 opcode-`219` relays. Stream `92` contains one
-and 42. Every prefix object id is a player object id observed somewhere in the
+and 42. Every outer player object id is observed somewhere in the
 same capture. The nibble split is supported by the manifest's packed
 attack-count prefix and by body-length scaling. Given those counts, every body
-decomposes exactly into a 6/11-byte opcode-`218` prefix or 11/15-byte opcode-
-`219` prefix, repeated target records, and the opcode-`219` four-byte tail.
+decomposes exactly into a 6/11-byte opcode-`218` prefix or the typed opcode-
+`219` fields, repeated target records, and the opcode-`219` signed position.
+
+All 141 ranged relays obey the conditional skill-id rule: the prefix is 11
+bytes when `skill_level == 0` and 15 bytes otherwise. Stream `126` contains 51
+basic attacks, 45 level-8 skill `4001344` attacks, and three level-1 skill
+`3001005` attacks. Its projectiles are `2060000` (54) and `2070000` (45).
+Stream `92` independently contributes skill ids `3001005`, `3101005`, and
+`4001344`, with projectile ids `2060000`, `2070009`, and `2070015`. These
+values are emitted as numeric protocol fields; item/skill names are not inferred
+by the decoder.
+
+The final four bytes decode as two plausible signed field coordinates. All 99
+stream-`126` ranged relays and 30 of 42 stream-`92` relays have an actor whose
+last movement position was already observed. The fold records the packet
+position and its delta from that prior position; common vertical differences
+cluster around `-22..-28`, while larger differences coincide with stale remote
+movement state. This establishes the coordinate shape and supports an attack-
+position interpretation without treating that position as an authoritative
+movement update.
 
 Stream `126` has 123 target records and 166 damage words. Of those records,
 118 name known mobs and use hit action `6`; five short opcode-`218` records are
@@ -1095,9 +1127,10 @@ magnitudes plus a neutral high-bit marker. Active mob entities accumulate the
 observed relay hit/damage totals without replacing the authoritative opcode-
 `293` health percentage. Raw ids and raw body bytes remain hidden. These
 captures validate action-to-health/leave correlations and damage array
-boundaries, but do not establish the varying attack prefixes, opcode-`219`
-tail, high-bit meaning, or mob maximum HP needed to predict the next percentage
-update. The custom server therefore does not yet generate or replay attacks.
+boundaries. The opcode-`218` prefix, opcode-`219` relay-tag/unknown-byte roles,
+damage high bit, client action suffixes, and mob maximum HP remain insufficient
+to predict the next percentage update. The custom server therefore does not
+yet generate or replay attacks.
 
 ## `58880` exchange
 

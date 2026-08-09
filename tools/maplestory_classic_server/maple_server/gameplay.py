@@ -398,6 +398,37 @@ class GameplayGameState:
     server_attack_hit_counts: Counter[int] = field(default_factory=Counter)
     server_attack_relays_for_known_players: int = 0
     server_attack_relays_for_unknown_players: int = 0
+    server_ranged_attack_relays: int = 0
+    server_ranged_attack_tags: Counter[int] = field(default_factory=Counter)
+    server_ranged_attack_skill_levels: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_skill_ids: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_unknown_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_displays: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_facing_flags: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_speeds: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_mastery_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_projectile_ids: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_ranged_attack_positions_for_known_players: int = 0
+    server_ranged_attack_position_delta_x_min: int | None = None
+    server_ranged_attack_position_delta_x_max: int | None = None
+    server_ranged_attack_position_delta_y_min: int | None = None
+    server_ranged_attack_position_delta_y_max: int | None = None
     server_attack_target_records: int = 0
     server_attack_zero_object_targets: int = 0
     server_attack_targets_for_active_mobs: int = 0
@@ -1678,6 +1709,51 @@ class GameplayAnalysis:
                 ),
                 "server_attack_relays_for_unknown_players": (
                     self.state.server_attack_relays_for_unknown_players
+                ),
+                "server_ranged_attack_relays": (
+                    self.state.server_ranged_attack_relays
+                ),
+                "server_ranged_attack_tags": dict(
+                    self.state.server_ranged_attack_tags
+                ),
+                "server_ranged_attack_skill_levels": dict(
+                    self.state.server_ranged_attack_skill_levels
+                ),
+                "server_ranged_attack_skill_ids": dict(
+                    self.state.server_ranged_attack_skill_ids
+                ),
+                "server_ranged_attack_unknown_values": dict(
+                    self.state.server_ranged_attack_unknown_values
+                ),
+                "server_ranged_attack_displays": dict(
+                    self.state.server_ranged_attack_displays
+                ),
+                "server_ranged_attack_facing_flags": dict(
+                    self.state.server_ranged_attack_facing_flags
+                ),
+                "server_ranged_attack_speeds": dict(
+                    self.state.server_ranged_attack_speeds
+                ),
+                "server_ranged_attack_mastery_values": dict(
+                    self.state.server_ranged_attack_mastery_values
+                ),
+                "server_ranged_attack_projectile_ids": dict(
+                    self.state.server_ranged_attack_projectile_ids
+                ),
+                "server_ranged_attack_positions_for_known_players": (
+                    self.state.server_ranged_attack_positions_for_known_players
+                ),
+                "server_ranged_attack_position_delta_x_min": (
+                    self.state.server_ranged_attack_position_delta_x_min
+                ),
+                "server_ranged_attack_position_delta_x_max": (
+                    self.state.server_ranged_attack_position_delta_x_max
+                ),
+                "server_ranged_attack_position_delta_y_min": (
+                    self.state.server_ranged_attack_position_delta_y_min
+                ),
+                "server_ranged_attack_position_delta_y_max": (
+                    self.state.server_ranged_attack_position_delta_y_max
                 ),
                 "server_attack_target_records": (
                     self.state.server_attack_target_records
@@ -4055,7 +4131,8 @@ class GameplayStateFold:
             actor_alias = self._alias(
                 self._player_aliases, relay.object_id, "player"
             )
-            known_actor = relay.object_id in self.state.observed_players
+            actor_entity = self.state.observed_players.get(relay.object_id)
+            known_actor = actor_entity is not None
             self.state.server_attack_relays += 1
             self.state.server_attack_relays_by_opcode[relay.opcode] += 1
             self.state.server_attack_target_counts[relay.target_count] += 1
@@ -4064,6 +4141,76 @@ class GameplayStateFold:
                 self.state.server_attack_relays_for_known_players += 1
             else:
                 self.state.server_attack_relays_for_unknown_players += 1
+            ranged_details: dict[str, object] = {}
+            ranged_metadata = relay.ranged_metadata
+            if ranged_metadata is not None:
+                self.state.server_ranged_attack_relays += 1
+                self.state.server_ranged_attack_tags[
+                    ranged_metadata.relay_tag
+                ] += 1
+                self.state.server_ranged_attack_skill_levels[
+                    ranged_metadata.skill_level
+                ] += 1
+                if ranged_metadata.skill_id is not None:
+                    self.state.server_ranged_attack_skill_ids[
+                        ranged_metadata.skill_id
+                    ] += 1
+                self.state.server_ranged_attack_unknown_values[
+                    ranged_metadata.unknown_value
+                ] += 1
+                self.state.server_ranged_attack_displays[
+                    ranged_metadata.display
+                ] += 1
+                self.state.server_ranged_attack_facing_flags[
+                    ranged_metadata.facing_flags
+                ] += 1
+                self.state.server_ranged_attack_speeds[
+                    ranged_metadata.attack_speed
+                ] += 1
+                self.state.server_ranged_attack_mastery_values[
+                    ranged_metadata.mastery
+                ] += 1
+                self.state.server_ranged_attack_projectile_ids[
+                    ranged_metadata.projectile_id
+                ] += 1
+                if actor_entity is not None:
+                    delta_x = ranged_metadata.position_x - actor_entity.x
+                    delta_y = ranged_metadata.position_y - actor_entity.y
+                    self.state.server_ranged_attack_positions_for_known_players += 1
+                    self.state.server_ranged_attack_position_delta_x_min = min(
+                        self.state.server_ranged_attack_position_delta_x_min
+                        if self.state.server_ranged_attack_position_delta_x_min
+                        is not None
+                        else delta_x,
+                        delta_x,
+                    )
+                    self.state.server_ranged_attack_position_delta_x_max = max(
+                        self.state.server_ranged_attack_position_delta_x_max
+                        if self.state.server_ranged_attack_position_delta_x_max
+                        is not None
+                        else delta_x,
+                        delta_x,
+                    )
+                    self.state.server_ranged_attack_position_delta_y_min = min(
+                        self.state.server_ranged_attack_position_delta_y_min
+                        if self.state.server_ranged_attack_position_delta_y_min
+                        is not None
+                        else delta_y,
+                        delta_y,
+                    )
+                    self.state.server_ranged_attack_position_delta_y_max = max(
+                        self.state.server_ranged_attack_position_delta_y_max
+                        if self.state.server_ranged_attack_position_delta_y_max
+                        is not None
+                        else delta_y,
+                        delta_y,
+                    )
+                    ranged_details = {
+                        "actor_position_x": actor_entity.x,
+                        "actor_position_y": actor_entity.y,
+                        "position_delta_x": delta_x,
+                        "position_delta_y": delta_y,
+                    }
             target_details: list[dict[str, object]] = []
             target_object_ids: list[int] = []
             for target in relay.targets:
@@ -4135,6 +4282,7 @@ class GameplayStateFold:
                 "known_actor": known_actor,
                 "targets": target_details,
                 "field_epoch": self.state.field_epoch,
+                **ranged_details,
             }
             identifiers: dict[str, object] = {"object_id": relay.object_id}
             if target_object_ids:
@@ -4152,9 +4300,15 @@ class GameplayStateFold:
                 parsed=relay,
                 details=details,
                 issues=(
-                    "target/damage arrays are capture-bounded; attack relay "
-                    "prefix/tail fields and damage high-bit marker remain "
-                    "uninterpreted",
+                    (
+                        "target/damage arrays are capture-bounded; ranged "
+                        "relay tag/unknown byte and damage high-bit marker "
+                        "roles remain uninterpreted"
+                        if relay.opcode == 219
+                        else "target/damage arrays are capture-bounded; "
+                        "melee relay prefix variants and damage high-bit "
+                        "marker remain uninterpreted"
+                    ),
                 ),
             )
         if opcode == 293:
@@ -4934,6 +5088,15 @@ def render_gameplay_analysis(
     server_attack_hit_actions = json.dumps(
         dict(sorted(state.server_attack_hit_actions.items()))
     )
+    server_ranged_attack_skill_levels = json.dumps(
+        dict(sorted(state.server_ranged_attack_skill_levels.items()))
+    )
+    server_ranged_attack_skill_ids = json.dumps(
+        dict(sorted(state.server_ranged_attack_skill_ids.items()))
+    )
+    server_ranged_attack_projectile_ids = json.dumps(
+        dict(sorted(state.server_ranged_attack_projectile_ids.items()))
+    )
     client_opcode_101_header_values = json.dumps(
         dict(sorted(state.client_opcode_101_header_values.items()))
     )
@@ -5198,6 +5361,18 @@ def render_gameplay_analysis(
             f"{state.server_attack_relays_for_known_players} "
             "unknown_player_relays:"
             f"{state.server_attack_relays_for_unknown_players} "
+            f"ranged_relays:{state.server_ranged_attack_relays} "
+            f"ranged_skill_levels:{server_ranged_attack_skill_levels} "
+            f"ranged_skill_ids:{server_ranged_attack_skill_ids} "
+            f"ranged_projectiles:{server_ranged_attack_projectile_ids} "
+            "ranged_known_position_samples:"
+            f"{state.server_ranged_attack_positions_for_known_players} "
+            "ranged_position_delta_x:"
+            f"{state.server_ranged_attack_position_delta_x_min}.."
+            f"{state.server_ranged_attack_position_delta_x_max} "
+            "ranged_position_delta_y:"
+            f"{state.server_ranged_attack_position_delta_y_min}.."
+            f"{state.server_ranged_attack_position_delta_y_max} "
             f"target_records:{state.server_attack_target_records} "
             f"zero_object_targets:{state.server_attack_zero_object_targets} "
             "active_relay_targets:"
