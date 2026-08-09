@@ -21,6 +21,7 @@ from .gamestate import (
 )
 from .gameplay import (
     MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
+    MAX_PLAYER_MOB_PROXIMITY_RADIUS,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
@@ -30,6 +31,7 @@ from .gameplay import (
     MobMovementBroadcastScheduler,
     MobMovementPlanningContext,
     MobMovementRelativeDecisionPolicy,
+    PlayerMobProximityPredicate,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
     derive_item_pickup_response_policy,
@@ -58,6 +60,7 @@ from .packets import (
     MobControllerChange,
     MobEnterField,
     MobMovementSubmission,
+    PlayerMovementSubmission,
     PacketShapeError,
     WorldHandoff,
     WorldSelection,
@@ -397,6 +400,7 @@ async def replay_connection(
         MobMovementRelativeDecisionPolicy | None
     ) = None,
     mob_movement_policy_trigger: str = "immediate",
+    mob_movement_proximity_radius: int | None = None,
     mob_movement_evidence_transcript: Transcript | None = None,
     mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
@@ -485,6 +489,7 @@ async def replay_connection(
     if mob_movement_policy_trigger not in {
         "immediate",
         "matched_heartbeat",
+        "player_proximity",
         "served_mob_movement",
     }:
         raise ValueError("unknown mob movement policy trigger")
@@ -511,6 +516,34 @@ async def replay_connection(
             "served-mob-movement trigger requires reactive movement "
             "acknowledgements"
         )
+    if (
+        mob_movement_proximity_radius is not None
+        and not (
+            1
+            <= mob_movement_proximity_radius
+            <= MAX_PLAYER_MOB_PROXIMITY_RADIUS
+        )
+    ):
+        raise ValueError("mob movement proximity radius must be in 1..4096")
+    if (
+        mob_movement_policy_trigger == "player_proximity"
+        and mob_movement_proximity_radius is None
+    ):
+        raise ValueError(
+            "player-proximity trigger requires a proximity radius"
+        )
+    if (
+        mob_movement_proximity_radius is not None
+        and mob_movement_policy_trigger != "player_proximity"
+    ):
+        raise ValueError(
+            "mob movement proximity radius requires player-proximity trigger"
+        )
+    player_proximity_predicate = (
+        PlayerMobProximityPredicate(mob_movement_proximity_radius)
+        if mob_movement_proximity_radius is not None
+        else None
+    )
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
     if any(
@@ -735,6 +768,13 @@ async def replay_connection(
         raise TypeError(
             "runtime movement policy trigger telemetry must be a dictionary"
         )
+    if (
+        movement_policy_trigger_metrics is not None
+        and player_proximity_predicate is not None
+    ):
+        movement_policy_trigger_metrics["proximity"] = (
+            player_proximity_predicate.safe_dict()
+        )
     if movement_schedule is not None and movement_broadcast_metrics is not None:
         movement_broadcast_metrics.update(
             movement_schedule.telemetry_dict()
@@ -748,6 +788,7 @@ async def replay_connection(
             or item_use_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
+            or player_proximity_predicate is not None
         )
         else None
     )
@@ -827,6 +868,9 @@ async def replay_connection(
                     else None
                 ),
                 "mob_movement_policy_trigger": mob_movement_policy_trigger,
+                "mob_movement_proximity_radius": (
+                    mob_movement_proximity_radius
+                ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
                 ),
@@ -1303,6 +1347,33 @@ async def replay_connection(
                             max(float(prior_max or 0.0), round_trip_ms), 3
                         )
                     if mob_movement_policy_trigger == "matched_heartbeat":
+                        await observe_movement_policy_trigger_event()
+                if (
+                    opcode == 182
+                    and player_proximity_predicate is not None
+                    and isinstance(
+                        movement_schedule,
+                        MobMovementBroadcastDecisionQueue,
+                    )
+                ):
+                    player_movement = PlayerMovementSubmission.parse(
+                        client_plaintext
+                    )
+                    qualifies = player_proximity_predicate.observe(
+                        player_x=player_movement.path_end_x,
+                        player_y=player_movement.path_end_y,
+                        mob_x=(
+                            movement_schedule.active_schedule.current_x
+                        ),
+                        mob_y=(
+                            movement_schedule.active_schedule.current_y
+                        ),
+                    )
+                    if movement_policy_trigger_metrics is not None:
+                        movement_policy_trigger_metrics["proximity"] = (
+                            player_proximity_predicate.safe_dict()
+                        )
+                    if qualifies:
                         await observe_movement_policy_trigger_event()
                 if (
                     opcode == 185
@@ -2801,13 +2872,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "immediate",
             "matched-heartbeat",
+            "player-proximity",
             "served-mob-movement",
         ),
         default="immediate",
         help=(
             "start each relative-policy decision immediately, after one "
-            "matched periodic heartbeat response, or after one accepted "
-            "mob-movement submission is acknowledged"
+            "matched periodic heartbeat response, after the local player "
+            "enters a bounded mob radius, or after one accepted mob-movement "
+            "submission is acknowledged"
+        ),
+    )
+    replay.add_argument(
+        "--mob-movement-proximity-radius",
+        type=int,
+        metavar="PIXELS",
+        help=(
+            "Manhattan radius in 1..4096 for the player-proximity movement "
+            "policy trigger"
         ),
     )
     replay.add_argument(
@@ -3650,6 +3732,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         mob_movement_policy_trigger = (
             arguments.mob_movement_policy_trigger.replace("-", "_")
         )
+        mob_movement_proximity_radius = (
+            arguments.mob_movement_proximity_radius
+        )
         if (
             mob_movement_follow_up_targets
             and mob_movement_follow_up_policy is not None
@@ -3681,6 +3766,33 @@ async def async_main(arguments: argparse.Namespace) -> None:
             raise ValueError(
                 "served-mob-movement movement policy trigger requires "
                 "--reactive-mob-movement-acknowledgements"
+            )
+        if (
+            mob_movement_proximity_radius is not None
+            and not (
+                1
+                <= mob_movement_proximity_radius
+                <= MAX_PLAYER_MOB_PROXIMITY_RADIUS
+            )
+        ):
+            raise ValueError(
+                "--mob-movement-proximity-radius must be in 1..4096"
+            )
+        if (
+            mob_movement_policy_trigger == "player_proximity"
+            and mob_movement_proximity_radius is None
+        ):
+            raise ValueError(
+                "player-proximity movement policy trigger requires "
+                "--mob-movement-proximity-radius"
+            )
+        if (
+            mob_movement_proximity_radius is not None
+            and mob_movement_policy_trigger != "player_proximity"
+        ):
+            raise ValueError(
+                "--mob-movement-proximity-radius requires "
+                "--mob-movement-policy-trigger player-proximity"
             )
         if (
             (
@@ -3870,6 +3982,13 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "decisions_started": 0,
                 "decisions_completed": 0,
                 "events_ignored_after_completion": 0,
+                "proximity": (
+                    PlayerMobProximityPredicate(
+                        mob_movement_proximity_radius
+                    ).safe_dict()
+                    if mob_movement_proximity_radius is not None
+                    else None
+                ),
             }
             post_transcript_server_frames += tuple(
                 plan.broadcast.to_bytes()
@@ -3955,6 +4074,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 mob_movement_follow_up_policy
             ),
             mob_movement_policy_trigger=mob_movement_policy_trigger,
+            mob_movement_proximity_radius=mob_movement_proximity_radius,
             mob_movement_evidence_transcript=(
                 movement_evidence_transcript
             ),
@@ -4029,6 +4149,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 else None
             ),
             "mob_movement_policy_trigger": mob_movement_policy_trigger,
+            "mob_movement_proximity_radius": (
+                mob_movement_proximity_radius
+            ),
             "mob_movement_step_delay_seconds": (
                 arguments.mob_movement_step_delay_seconds
             ),

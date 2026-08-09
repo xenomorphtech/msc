@@ -86,6 +86,9 @@ from maple_server.packets import (  # noqa: E402
     MobMovementSubmission,
     MobSpawnData,
     NpcStateUpdate,
+    PlayerMovementCommand,
+    PlayerMovementPath,
+    PlayerMovementSubmission,
     PickupGainNotice,
     WorldHandoff,
     WorldSelection,
@@ -727,6 +730,32 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(
             served_arguments.mob_movement_policy_trigger,
             "served-mob-movement",
+        )
+        proximity_arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--keep-world-open",
+                "--emit-mob-movement-auto-path",
+                "833:-2677:635",
+                "--mob-movement-relative-policy",
+                "1:2:96:0:635",
+                "--mob-movement-policy-trigger",
+                "player-proximity",
+                "--mob-movement-proximity-radius",
+                "64",
+            ]
+        )
+        self.assertEqual(
+            proximity_arguments.mob_movement_policy_trigger,
+            "player-proximity",
+        )
+        self.assertEqual(
+            proximity_arguments.mob_movement_proximity_radius,
+            64,
         )
         self.assertEqual(
             parse_mob_movement_relative_policy("1:4:-32:16:7").safe_dict(),
@@ -2892,6 +2921,270 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(trigger_metrics["decisions_completed"], 1)
             self.assertEqual(
                 trigger_metrics["events_ignored_after_completion"], 0
+            )
+
+    async def test_relative_mob_policy_waits_for_player_proximity_entry(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="player-proximity-trigger", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            object_id = 20_001
+
+            def broadcast(reference_x: int, target_x: int, stance: int):
+                return MobMovementBroadcast(
+                    object_id=object_id,
+                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    reference_x=reference_x,
+                    reference_y=-200,
+                    commands=(
+                        MobMovementCommand.absolute(
+                            position_x=target_x,
+                            position_y=-200,
+                            velocity_x=50,
+                            velocity_y=0,
+                            foothold_id=7,
+                            stance=stance,
+                            duration_ms=1_080,
+                        ),
+                    ),
+                )
+
+            def player_submission(path_end_x: int) -> bytes:
+                return PlayerMovementSubmission(
+                    control_value=0,
+                    movement=PlayerMovementPath(
+                        reference_x=path_end_x,
+                        reference_y=-200,
+                        commands=(
+                            PlayerMovementCommand.absolute(
+                                position_x=path_end_x,
+                                position_y=-200,
+                                velocity_x=0,
+                                velocity_y=0,
+                                foothold_id=7,
+                                stance=4,
+                                duration_ms=100,
+                            ),
+                        ),
+                    ),
+                    trailer_marker=0,
+                    path_start_x=path_end_x,
+                    path_start_y=-200,
+                    path_end_x=path_end_x,
+                    path_end_y=-200,
+                ).to_bytes()
+
+            first_broadcast = broadcast(100, 150, 2)
+            second_broadcast = broadcast(150, 200, 4)
+            first_plan = fixture_mob_movement_broadcast_plan(
+                first_broadcast,
+                previous_x=100,
+                previous_y=-200,
+                previous_foothold_id=7,
+                previous_stance=3,
+                target_x=150,
+                target_y=-200,
+                target_foothold_id=7,
+                target_stance=2,
+                source_server_frame_index=10,
+            )
+            second_plan = fixture_mob_movement_broadcast_plan(
+                second_broadcast,
+                previous_x=150,
+                previous_y=-200,
+                previous_foothold_id=7,
+                previous_stance=2,
+                target_x=200,
+                target_y=-200,
+                target_foothold_id=7,
+                target_stance=4,
+                source_server_frame_index=11,
+            )
+            follow_up_plan = MobMovementBroadcastSequencePlan(
+                steps=(second_plan,),
+                max_steps=2,
+                usable_displacements=1,
+                ambiguous_displacements=0,
+                shortest_sequence_count=1,
+            )
+            relative_policy = MobMovementRelativeDecisionPolicy(
+                decision_count=1,
+                max_steps=2,
+                displacement_x=50,
+                displacement_y=0,
+                foothold_id=7,
+            )
+            runtime_protocol = {
+                "mob_movement_broadcast": {
+                    "policy_trigger": {
+                        "mode": "player_proximity",
+                        "awaiting_event": False,
+                        "matched_events_observed": 0,
+                        "decisions_started": 0,
+                        "decisions_completed": 0,
+                        "events_ignored_after_completion": 0,
+                        "proximity": None,
+                    }
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            post_transcript_server_frames=(
+                                first_broadcast.to_bytes(),
+                            ),
+                            mob_movement_broadcast_plans=(first_plan,),
+                            mob_movement_follow_up_policy=relative_policy,
+                            mob_movement_policy_trigger="player_proximity",
+                            mob_movement_proximity_radius=10,
+                            mob_movement_evidence_transcript=source,
+                            hold_open_seconds=0.2,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            with patch(
+                "maple_server.gameplay.plan_composed_mob_movement_broadcasts",
+                return_value=follow_up_plan,
+            ) as planner:
+                server = await asyncio.start_server(
+                    accept, "127.0.0.1", 0
+                )
+                port = server.sockets[0].getsockname()[1]
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1", port
+                )
+                self.assertEqual(
+                    await reader.readexactly(len(greeting + captured_frame)),
+                    greeting + captured_frame,
+                )
+                first_wire = await reader.readexactly(
+                    len(first_broadcast.to_bytes()) + 4
+                )
+                first_iv = shuffle_iv(server_iv)
+                self.assertEqual(
+                    MobMovementBroadcast.parse(
+                        crypt_payload(first_wire[4:], first_iv)
+                    ),
+                    first_broadcast,
+                )
+                with self.assertRaises(TimeoutError):
+                    await asyncio.wait_for(reader.read(1), timeout=0.02)
+                planner.assert_not_called()
+
+                outside = player_submission(0)
+                writer.write(
+                    encode_frame_header(len(outside), client_iv, 300)
+                    + crypt_payload(outside, client_iv)
+                )
+                await writer.drain()
+                for _ in range(20):
+                    if (
+                        runtime_protocol["mob_movement_broadcast"][
+                            "policy_trigger"
+                        ]["proximity"]["events_observed"]
+                        == 1
+                    ):
+                        break
+                    await asyncio.sleep(0.005)
+                completed_tasks = [task for task in tasks if task.done()]
+                self.assertFalse(
+                    completed_tasks,
+                    [repr(task.exception()) for task in completed_tasks],
+                )
+                with self.assertRaises(TimeoutError):
+                    await asyncio.wait_for(reader.read(1), timeout=0.02)
+                planner.assert_not_called()
+                trigger_metrics = runtime_protocol[
+                    "mob_movement_broadcast"
+                ]["policy_trigger"]
+                self.assertTrue(trigger_metrics["awaiting_event"])
+                self.assertEqual(trigger_metrics["matched_events_observed"], 0)
+                self.assertEqual(
+                    trigger_metrics["proximity"]["events_observed"],
+                    1,
+                )
+                self.assertEqual(
+                    trigger_metrics["proximity"]["entries_observed"], 0
+                )
+                self.assertEqual(
+                    trigger_metrics["proximity"]["last_observation"][
+                        "manhattan_distance"
+                    ],
+                    150,
+                )
+
+                inside = player_submission(145)
+                next_client_iv = shuffle_iv(client_iv)
+                writer.write(
+                    encode_frame_header(len(inside), next_client_iv, 300)
+                    + crypt_payload(inside, next_client_iv)
+                )
+                await writer.drain()
+                follow_wire = await reader.readexactly(
+                    len(second_broadcast.to_bytes()) + 4
+                )
+                follow_iv = shuffle_iv(first_iv)
+                self.assertEqual(
+                    MobMovementBroadcast.parse(
+                        crypt_payload(follow_wire[4:], follow_iv)
+                    ),
+                    second_broadcast,
+                )
+                planner.assert_called_once()
+                writer.close()
+                await writer.wait_closed()
+                await asyncio.gather(*tasks)
+                server.close()
+                await server.wait_closed()
+
+            movement_metrics = runtime_protocol["mob_movement_broadcast"]
+            self.assertEqual(movement_metrics["packets_sent"], 2)
+            self.assertEqual(movement_metrics["state"]["phase"], "complete")
+            trigger_metrics = movement_metrics["policy_trigger"]
+            self.assertFalse(trigger_metrics["awaiting_event"])
+            self.assertEqual(trigger_metrics["matched_events_observed"], 1)
+            self.assertEqual(trigger_metrics["decisions_started"], 1)
+            self.assertEqual(trigger_metrics["decisions_completed"], 1)
+            self.assertEqual(
+                trigger_metrics["events_ignored_after_completion"], 0
+            )
+            self.assertEqual(
+                trigger_metrics["proximity"]["events_observed"], 2
+            )
+            self.assertEqual(
+                trigger_metrics["proximity"]["entries_observed"], 1
+            )
+            self.assertTrue(
+                trigger_metrics["proximity"]["last_observation"][
+                    "entered_radius"
+                ]
             )
 
     async def test_replay_generates_typed_mob_acknowledgement_during_hold_open(

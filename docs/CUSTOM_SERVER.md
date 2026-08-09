@@ -1004,6 +1004,35 @@ finishes the decision 1.000714 seconds later. The fold reports three known
 broadcasts, fifteen type-`0` commands, one matched movement pair, no pending or
 unmatched movement, and 4/4 matched heartbeats.
 
+For a geometric gameplay predicate, use:
+
+```text
+--mob-movement-relative-policy '1:2:96:0:635'
+--mob-movement-policy-trigger player-proximity
+--mob-movement-proximity-radius 64
+```
+
+The radius is a required Manhattan-distance bound in `1..4096`. Each typed
+local-player opcode `182` compares its explicit path-end coordinates with the
+movement scheduler's transmission-confirmed mob position. The trigger is
+edge-based: the first in-radius observation, or a later outside-to-inside
+transition, can authorize one decision; repeated observations while already
+inside cannot. Safe `policy_trigger.proximity` telemetry reports the radius,
+observation/entry counts, prior inside state, and the last player/mob
+coordinates, distance, and predicate result.
+
+The real-client negative control used direct nested-Wayland Left input and
+observed player endpoint `(548,-2652)`, distance `310` from mob
+`(833,-2677)`. Two typed observations remained outside, with no entry or
+decision. Direct Right then produced four more observations; frame `107`
+ended at `(855,-2695)`, distance `40`, and became the first entry. Generated
+movement frames `108`/`109` followed 0.009526/1.001263 seconds later and
+completed `833 -> 881 -> 929`. Transcript
+`generated_mob_player_proximity_policy_visual_20260809/1786301943288947015_replay_12857.jsonl`
+folds validly with no warnings: seven total player submissions (one replayed,
+six predicate observations), three known mob broadcasts, fifteen type-`0`
+commands, and 11/11 matched heartbeats.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client

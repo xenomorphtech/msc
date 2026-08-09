@@ -1539,6 +1539,7 @@ class MobMovementBroadcastScheduler:
 
 
 MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS = 8
+MAX_PLAYER_MOB_PROXIMITY_RADIUS = 4096
 
 
 @dataclass(frozen=True)
@@ -1589,6 +1590,69 @@ class MobMovementRelativeDecisionPolicy:
             "displacement_x": self.displacement_x,
             "displacement_y": self.displacement_y,
             "foothold_id": self.foothold_id,
+        }
+
+
+@dataclass
+class PlayerMobProximityPredicate:
+    """Edge-trigger a decision when a local player enters a mob radius."""
+
+    radius: int
+    events_observed: int = field(default=0, init=False)
+    entries_observed: int = field(default=0, init=False)
+    _was_within_radius: bool | None = field(default=None, init=False)
+    _last_observation: dict[str, object] | None = field(
+        default=None, init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.radius <= MAX_PLAYER_MOB_PROXIMITY_RADIUS:
+            raise ValueError(
+                "player-mob proximity radius must be in 1..4096"
+            )
+
+    def observe(
+        self,
+        *,
+        player_x: int,
+        player_y: int,
+        mob_x: int,
+        mob_y: int,
+    ) -> bool:
+        distance = abs(player_x - mob_x) + abs(player_y - mob_y)
+        within_radius = distance <= self.radius
+        entered_radius = (
+            within_radius and self._was_within_radius is not True
+        )
+        self.events_observed += 1
+        if entered_radius:
+            self.entries_observed += 1
+        self._was_within_radius = within_radius
+        self._last_observation = {
+            "player": {"x": player_x, "y": player_y},
+            "mob": {"x": mob_x, "y": mob_y},
+            "manhattan_distance": distance,
+            "within_radius": within_radius,
+            "entered_radius": entered_radius,
+        }
+        return entered_radius
+
+    def safe_dict(self) -> dict[str, object]:
+        last_observation = (
+            {
+                **self._last_observation,
+                "player": dict(self._last_observation["player"]),
+                "mob": dict(self._last_observation["mob"]),
+            }
+            if self._last_observation is not None
+            else None
+        )
+        return {
+            "radius": self.radius,
+            "events_observed": self.events_observed,
+            "entries_observed": self.entries_observed,
+            "player_was_within_radius": self._was_within_radius,
+            "last_observation": last_observation,
         }
 
 

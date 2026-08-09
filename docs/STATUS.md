@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 149 tests.
+- The custom-server suite currently passes all 151 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -459,6 +459,18 @@ type-`0` commands, one matched movement pair, zero pending/unmatched movement,
 and 4/4 separately matched heartbeats. Runtime finished one event/decision and
 `awaiting_event:false`; HTTP remains read-only.
 
+A bounded local-player proximity predicate is now the third policy trigger.
+It compares each typed opcode-`182` path endpoint with the confirmed mob using
+a required `1..4096` Manhattan radius and fires only on an outside-to-inside
+edge. The live radius-`64` negative control observed endpoint `(548,-2652)` at
+distance `310` without sending movement. A later frame-`107` endpoint
+`(855,-2695)` was distance `40` from mob `(833,-2677)`, triggered frames
+`108`/`109`, and completed the predicted `833 -> 881 -> 929` state. The
+independent transcript is valid with six live predicate observations/one
+entry, three broadcasts, fifteen type-`0` commands, and 11/11 separately
+matched heartbeats. Safe API telemetry records no identifiers and HTTP remains
+read-only.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -473,9 +485,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Add a bounded local-player/mob proximity predicate as the next modeled
-   movement-policy trigger, retaining deterministic cooldowns and the read-only
-   HTTP boundary.
+4. Add an explicit deterministic cooldown/re-arm policy across the three
+   modeled movement triggers, preserving their read-only HTTP boundary.
 
 ## Useful proof artifacts
 

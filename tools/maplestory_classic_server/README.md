@@ -791,6 +791,24 @@ commands, one submitted/acknowledged/matched movement with nothing pending,
 and 4/4 independently matched heartbeats. Runtime completed one gated decision
 and cleared `awaiting_event`; HTTP remains read-only.
 
+`--mob-movement-policy-trigger player-proximity` uses typed local-player
+opcode-`182` path endpoints and requires
+`--mob-movement-proximity-radius PIXELS` in `1..4096`. It compares Manhattan
+distance with the scheduler's confirmed mob position and is edge-triggered:
+the first inside observation or a later outside-to-inside transition may start
+one decision, while repeated inside observations may not. Identifier-free
+`proximity` API state reports safe positions, distance, radius, and event/entry
+counts.
+
+In the live negative control, direct nested-Wayland Left input produced an
+endpoint 310 pixels from the mob and no movement decision. Direct Right later
+produced frame `107` at `(855,-2695)`, 40 pixels from confirmed
+`(833,-2677)` inside radius `64`. Generated movement frames `108`/`109`
+followed 0.009526/1.001263 seconds later and completed
+`833 -> 881 -> 929`. The valid transcript contains six live predicate
+observations/one entry, three broadcasts/fifteen type-`0` commands, and 11/11
+independently matched heartbeats. HTTP remains read-only.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold

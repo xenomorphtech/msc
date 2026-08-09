@@ -18,6 +18,7 @@ from maple_server.gameplay import (  # noqa: E402
     MobMovementBroadcastDecisionQueue,
     MobMovementBroadcastScheduler,
     MobMovementRelativeDecisionPolicy,
+    PlayerMobProximityPredicate,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
     derive_item_pickup_response_policy,
@@ -2132,6 +2133,46 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
 
 class GameplayStateFoldTest(unittest.TestCase):
+    def test_player_mob_proximity_predicate_is_edge_triggered(self) -> None:
+        with self.assertRaisesRegex(ValueError, "radius must be in 1..4096"):
+            PlayerMobProximityPredicate(radius=0)
+        with self.assertRaisesRegex(ValueError, "radius must be in 1..4096"):
+            PlayerMobProximityPredicate(radius=4097)
+        predicate = PlayerMobProximityPredicate(radius=10)
+
+        self.assertFalse(
+            predicate.observe(player_x=0, player_y=0, mob_x=20, mob_y=0)
+        )
+        self.assertTrue(
+            predicate.observe(player_x=11, player_y=0, mob_x=20, mob_y=0)
+        )
+        self.assertFalse(
+            predicate.observe(player_x=10, player_y=0, mob_x=20, mob_y=0)
+        )
+        self.assertFalse(
+            predicate.observe(player_x=0, player_y=0, mob_x=20, mob_y=0)
+        )
+        self.assertTrue(
+            predicate.observe(player_x=20, player_y=0, mob_x=20, mob_y=0)
+        )
+
+        self.assertEqual(
+            predicate.safe_dict(),
+            {
+                "radius": 10,
+                "events_observed": 5,
+                "entries_observed": 2,
+                "player_was_within_radius": True,
+                "last_observation": {
+                    "player": {"x": 20, "y": 0},
+                    "mob": {"x": 20, "y": 0},
+                    "manhattan_distance": 0,
+                    "within_radius": True,
+                    "entered_radius": True,
+                },
+            },
+        )
+
     def test_correlates_client_damage_array_with_mob_health_update(
         self,
     ) -> None:

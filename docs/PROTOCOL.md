@@ -1139,6 +1139,26 @@ the composed decision. The valid fold reports three broadcasts/fifteen
 type-`0` commands, one submitted/acknowledged/matched movement, zero pending or
 unmatched movement, and 4/4 independently matched heartbeats.
 
+The third event mode is a bounded predicate over an already typed packet.
+`player-proximity` parses each live local-player opcode `182`, takes its
+explicit trailer `path_end_x/path_end_y`, and computes Manhattan distance to
+the scheduler's confirmed mob coordinates. A required radius is limited to
+`1..4096`. Only an outside-to-inside edge (including the first observation
+when it is inside) authorizes a decision; repeated in-radius submissions do
+not. The server exposes only safe coordinates, distance, boolean result, and
+observation/entry counts. This adds no new interpretation to movement command
+payloads and changes no wire shape.
+
+The live negative observations ended at `(633,-2673)` and `(548,-2652)`, both
+outside radius `64`; the latter was distance `310` from confirmed mob
+`(833,-2677)`, and neither sent an opcode `282`. After four rightward
+submissions, frame `107` ended at `(855,-2695)`, distance `40`, and crossed the
+predicate. Opcode-`282` frames `108`/`109` followed, ending at `881`/`929`; the
+entry-to-first-broadcast gap was 0.009526 seconds and the configured internal
+pace was 1.001263 seconds. The valid fold has seven player submissions, three
+mob broadcasts/fifteen type-`0` commands, and 11/11 independently matched
+heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:
