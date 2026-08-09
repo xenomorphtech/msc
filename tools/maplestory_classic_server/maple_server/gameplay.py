@@ -1276,6 +1276,57 @@ class MobMovementBroadcastPlan:
 
 
 @dataclass(frozen=True)
+class MobMovementBroadcastSequencePlan:
+    steps: tuple[MobMovementBroadcastPlan, ...] = field(repr=False)
+    max_steps: int
+    usable_displacements: int
+    ambiguous_displacements: int
+    shortest_sequence_count: int
+
+    @property
+    def broadcasts(self) -> tuple[MobMovementBroadcast, ...]:
+        return tuple(step.broadcast for step in self.steps)
+
+    def safe_dict(self) -> dict[str, object]:
+        first = self.steps[0]
+        last = self.steps[-1]
+        return {
+            "mode": "composed_captured_path",
+            "entity": first.entity,
+            "template_id": first.template_id,
+            "field_epoch": first.field_epoch,
+            "previous": {
+                "x": first.previous_x,
+                "y": first.previous_y,
+                "foothold_id": first.previous_foothold_id,
+            },
+            "predicted": {
+                "x": last.target_x,
+                "y": last.target_y,
+                "foothold_id": last.target_foothold_id,
+                "stance": last.stance,
+            },
+            "step_count": len(self.steps),
+            "max_steps": self.max_steps,
+            "source_server_frame_indices": [
+                step.source_server_frame_index for step in self.steps
+            ],
+            "steps": [
+                {
+                    "step_index": index,
+                    **step.safe_dict(),
+                }
+                for index, step in enumerate(self.steps, 1)
+            ],
+            "evidence": {
+                "usable_displacements": self.usable_displacements,
+                "ambiguous_displacements": self.ambiguous_displacements,
+                "shortest_sequence_count": self.shortest_sequence_count,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class MobMovementAcknowledgementPolicy:
     status_values_by_template: dict[int, int]
     observations_by_template: dict[int, int]
@@ -5557,6 +5608,166 @@ def derive_item_pickup_response_policy(
     )
 
 
+@dataclass(frozen=True)
+class _CapturedMobMovementPath:
+    server_frame_index: int
+    template_id: int | None
+    broadcast: MobMovementBroadcast = field(repr=False)
+    relative_motion_shape: tuple[object, ...] | None
+    displacement: tuple[int, int] | None
+
+
+def _relative_mob_motion_shape(
+    broadcast: MobMovementBroadcast,
+) -> tuple[object, ...] | None:
+    if any(command.position is None for command in broadcast.commands):
+        return None
+    relative_positions = tuple(
+        (
+            command.position[0] - broadcast.reference_x,
+            command.position[1] - broadcast.reference_y,
+        )
+        for command in broadcast.commands
+    )
+    motion = tuple(
+        (
+            command.command_type,
+            command.velocity,
+            command.stance,
+            command.duration_ms,
+        )
+        for command in broadcast.commands
+    )
+    return relative_positions, motion
+
+
+def _captured_mob_movement_paths(
+    analysis: GameplayAnalysis,
+) -> tuple[_CapturedMobMovementPath, ...]:
+    known_templates: dict[int, int] = {}
+    paths: list[_CapturedMobMovementPath] = []
+    for frame in analysis.decoded.frames:
+        if frame.direction != "server_to_client" or len(frame.plaintext) < 2:
+            continue
+        opcode = int.from_bytes(frame.plaintext[:2], "little")
+        if opcode == 157:
+            known_templates.clear()
+        elif opcode == 279:
+            entered = MobEnterField.parse(frame.plaintext)
+            known_templates[entered.object_id] = entered.spawn.template_id
+        elif opcode == 281:
+            controller = MobControllerChange.parse(frame.plaintext)
+            if controller.spawn is not None:
+                known_templates[controller.object_id] = (
+                    controller.spawn.template_id
+                )
+        elif opcode == 280:
+            left = MobLeaveField.parse(frame.plaintext)
+            known_templates.pop(left.object_id, None)
+        elif opcode == 282:
+            broadcast = MobMovementBroadcast.parse(frame.plaintext)
+            endpoint = broadcast.commands[-1].position
+            displacement = (
+                (
+                    endpoint[0] - broadcast.reference_x,
+                    endpoint[1] - broadcast.reference_y,
+                )
+                if endpoint is not None
+                else None
+            )
+            paths.append(
+                _CapturedMobMovementPath(
+                    server_frame_index=frame.direction_index,
+                    template_id=known_templates.get(broadcast.object_id),
+                    broadcast=broadcast,
+                    relative_motion_shape=(
+                        _relative_mob_motion_shape(broadcast)
+                    ),
+                    displacement=displacement,
+                )
+            )
+    return tuple(paths)
+
+
+def _active_mobs_after_server_frames(
+    analysis: GameplayAnalysis,
+    server_frames: tuple[bytes, ...],
+) -> dict[int, tuple[str, int, int, int, int]]:
+    active_mobs: dict[int, tuple[str, int, int, int, int]] = {
+        object_id: (
+            mob.alias,
+            mob.spawn.template_id,
+            mob.x,
+            mob.y,
+            mob.foothold_id,
+        )
+        for object_id, mob in analysis.state.mobs.items()
+    }
+    runtime_aliases: dict[int, str] = {}
+
+    def adopt_spawn(object_id: int, spawn: MobSpawnData) -> None:
+        if object_id in active_mobs:
+            entity = active_mobs[object_id][0]
+        else:
+            entity = runtime_aliases.setdefault(
+                object_id, f"mob:runtime:{len(runtime_aliases) + 1}"
+            )
+        active_mobs[object_id] = (
+            entity,
+            spawn.template_id,
+            spawn.x,
+            spawn.y,
+            spawn.foothold_id,
+        )
+
+    for plaintext in server_frames:
+        if len(plaintext) < 2:
+            continue
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 279:
+            entered = MobEnterField.parse(plaintext)
+            adopt_spawn(entered.object_id, entered.spawn)
+        elif opcode == 281:
+            controller = MobControllerChange.parse(plaintext)
+            if controller.spawn is not None:
+                adopt_spawn(controller.object_id, controller.spawn)
+        elif opcode == 280:
+            left = MobLeaveField.parse(plaintext)
+            active_mobs.pop(left.object_id, None)
+        elif opcode == 282:
+            broadcast = MobMovementBroadcast.parse(plaintext)
+            current = active_mobs.get(broadcast.object_id)
+            if current is None:
+                continue
+            entity, template_id, current_x, current_y, current_foothold = (
+                current
+            )
+            absolute_commands = tuple(
+                command
+                for command in broadcast.commands
+                if command.position is not None
+            )
+            if absolute_commands:
+                final_command = absolute_commands[-1]
+                current_x, current_y = final_command.position or (
+                    current_x,
+                    current_y,
+                )
+                if final_command.foothold_id is not None:
+                    current_foothold = final_command.foothold_id
+            else:
+                current_x = broadcast.reference_x
+                current_y = broadcast.reference_y
+            active_mobs[broadcast.object_id] = (
+                entity,
+                template_id,
+                current_x,
+                current_y,
+                current_foothold,
+            )
+    return active_mobs
+
+
 def plan_mob_movement_broadcast(
     transcript: Transcript,
     *,
@@ -5637,77 +5848,9 @@ def plan_mob_movement_broadcast(
             f"stance {stance}"
         )
 
-    active_mobs: dict[int, tuple[str, int, int, int, int]] = {
-        object_id: (
-            mob.alias,
-            mob.spawn.template_id,
-            mob.x,
-            mob.y,
-            mob.foothold_id,
-        )
-        for object_id, mob in analysis.state.mobs.items()
-    }
-    runtime_aliases: dict[int, str] = {}
-
-    def adopt_spawn(object_id: int, spawn: MobSpawnData) -> None:
-        if object_id in active_mobs:
-            entity = active_mobs[object_id][0]
-        else:
-            entity = runtime_aliases.setdefault(
-                object_id, f"mob:runtime:{len(runtime_aliases) + 1}"
-            )
-        active_mobs[object_id] = (
-            entity,
-            spawn.template_id,
-            spawn.x,
-            spawn.y,
-            spawn.foothold_id,
-        )
-
-    for plaintext in post_transcript_server_frames:
-        if len(plaintext) < 2:
-            continue
-        opcode = int.from_bytes(plaintext[:2], "little")
-        if opcode == 279:
-            entered = MobEnterField.parse(plaintext)
-            adopt_spawn(entered.object_id, entered.spawn)
-        elif opcode == 281:
-            controller = MobControllerChange.parse(plaintext)
-            if controller.spawn is not None:
-                adopt_spawn(controller.object_id, controller.spawn)
-        elif opcode == 280:
-            left = MobLeaveField.parse(plaintext)
-            active_mobs.pop(left.object_id, None)
-        elif opcode == 282:
-            broadcast = MobMovementBroadcast.parse(plaintext)
-            current = active_mobs.get(broadcast.object_id)
-            if current is None:
-                continue
-            entity, template_id, current_x, current_y, current_foothold = current
-            absolute_commands = tuple(
-                command
-                for command in broadcast.commands
-                if command.position is not None
-            )
-            if absolute_commands:
-                final_command = absolute_commands[-1]
-                current_x, current_y = final_command.position or (
-                    current_x,
-                    current_y,
-                )
-                final_foothold = final_command.foothold_id
-                if final_foothold is not None:
-                    current_foothold = final_foothold
-            else:
-                current_x = broadcast.reference_x
-                current_y = broadcast.reference_y
-            active_mobs[broadcast.object_id] = (
-                entity,
-                template_id,
-                current_x,
-                current_y,
-                current_foothold,
-            )
+    active_mobs = _active_mobs_after_server_frames(
+        analysis, post_transcript_server_frames
+    )
 
     if len(active_mobs) != 1:
         raise ValueError(
@@ -5745,111 +5888,46 @@ def plan_mob_movement_broadcast(
             ),
         )
     else:
-        known_evidence_templates: dict[int, int] = {}
-        path_evidence_candidates: list[
-            tuple[int, int | None, MobMovementBroadcast]
-        ] = []
-        selected_frame_found = False
-        selected_frame_opcode = None
-        for frame in evidence_analysis.decoded.frames:
-            if frame.direction != "server_to_client":
-                continue
-            if len(frame.plaintext) < 2:
-                continue
-            opcode = int.from_bytes(frame.plaintext[:2], "little")
-            if opcode == 157:
-                known_evidence_templates.clear()
-            elif opcode == 279:
-                entered = MobEnterField.parse(frame.plaintext)
-                known_evidence_templates[entered.object_id] = (
-                    entered.spawn.template_id
-                )
-            elif opcode == 281:
-                controller = MobControllerChange.parse(frame.plaintext)
-                if controller.spawn is not None:
-                    known_evidence_templates[controller.object_id] = (
-                        controller.spawn.template_id
-                    )
-            elif opcode == 280:
-                left = MobLeaveField.parse(frame.plaintext)
-                known_evidence_templates.pop(left.object_id, None)
-            if opcode == 282:
-                candidate_broadcast = MobMovementBroadcast.parse(
-                    frame.plaintext
-                )
-                path_evidence_candidates.append(
-                    (
-                        frame.direction_index,
-                        known_evidence_templates.get(
-                            candidate_broadcast.object_id
-                        ),
-                        candidate_broadcast,
-                    )
-                )
-            if frame.direction_index == path_evidence_server_frame_index:
-                selected_frame_found = True
-                selected_frame_opcode = opcode
-
-        def relative_motion_shape(
-            candidate: MobMovementBroadcast,
-        ) -> tuple[object, ...] | None:
-            if any(
-                command.position is None
-                for command in candidate.commands
-            ):
-                return None
-            relative_positions = tuple(
-                (
-                    command.position[0] - candidate.reference_x,
-                    command.position[1] - candidate.reference_y,
-                )
-                for command in candidate.commands
-            )
-            motion = tuple(
-                (
-                    command.command_type,
-                    command.velocity,
-                    command.stance,
-                    command.duration_ms,
-                )
-                for command in candidate.commands
-            )
-            return relative_positions, motion
+        path_evidence_candidates = _captured_mob_movement_paths(
+            evidence_analysis
+        )
+        selected_frame = next(
+            (
+                frame
+                for frame in evidence_analysis.decoded.frames
+                if frame.direction == "server_to_client"
+                and frame.direction_index
+                == path_evidence_server_frame_index
+            ),
+            None,
+        )
 
         desired_displacement = (
             target_x - previous_x,
             target_y - previous_y,
         )
-        matching_displacement_paths: list[
-            tuple[int, int | None, MobMovementBroadcast]
-        ] = []
+        matching_displacement_paths: list[_CapturedMobMovementPath] = []
         matching_displacement_shapes: set[tuple[object, ...]] = set()
         for candidate in path_evidence_candidates:
-            _, candidate_template_id, candidate_broadcast = candidate
             if (
-                candidate_template_id != template_id
-                or candidate_broadcast.opaque_control != control_prefix
-                or len(candidate_broadcast.commands) < 2
+                candidate.template_id != template_id
+                or candidate.broadcast.opaque_control != control_prefix
+                or len(candidate.broadcast.commands) < 2
                 or any(
                     command.command_type != 0
-                    for command in candidate_broadcast.commands
+                    for command in candidate.broadcast.commands
                 )
             ):
                 continue
-            shape = relative_motion_shape(candidate_broadcast)
-            if shape is None:
-                continue
-            endpoint = candidate_broadcast.commands[-1].position
-            if endpoint is None:
-                continue
-            displacement = (
-                endpoint[0] - candidate_broadcast.reference_x,
-                endpoint[1] - candidate_broadcast.reference_y,
-            )
-            if displacement != desired_displacement:
+            if (
+                candidate.relative_motion_shape is None
+                or candidate.displacement != desired_displacement
+            ):
                 continue
             matching_displacement_paths.append(candidate)
-            matching_displacement_shapes.add(shape)
+            matching_displacement_shapes.add(
+                candidate.relative_motion_shape
+            )
         matching_displacement_path_evidence = len(
             matching_displacement_paths
         )
@@ -5870,17 +5948,16 @@ def plan_mob_movement_broadcast(
                     f"for displacement {desired_displacement}: "
                     f"{len(matching_displacement_shapes)}"
                 )
-            (
-                source_server_frame_index,
-                source_template_id,
-                source_broadcast,
-            ) = matching_displacement_paths[0]
+            selected_path = matching_displacement_paths[0]
             mode = "auto_selected_captured_path"
         else:
-            if not selected_frame_found:
+            if selected_frame is None:
                 raise ValueError(
                     "mob movement path evidence server frame was not found"
                 )
+            selected_frame_opcode = int.from_bytes(
+                selected_frame.plaintext[:2], "little"
+            )
             if selected_frame_opcode != 282:
                 raise ValueError(
                     "mob movement path evidence server frame is opcode "
@@ -5889,17 +5966,17 @@ def plan_mob_movement_broadcast(
             selected_candidates = tuple(
                 candidate
                 for candidate in path_evidence_candidates
-                if candidate[0] == path_evidence_server_frame_index
+                if candidate.server_frame_index
+                == path_evidence_server_frame_index
             )
             if len(selected_candidates) != 1:
                 raise ValueError(
                     "mob movement path evidence server frame was not found"
                 )
-            (
-                source_server_frame_index,
-                source_template_id,
-                source_broadcast,
-            ) = selected_candidates[0]
+            selected_path = selected_candidates[0]
+        source_server_frame_index = selected_path.server_frame_index
+        source_template_id = selected_path.template_id
+        source_broadcast = selected_path.broadcast
         if source_template_id != template_id:
             raise ValueError(
                 "mob movement path evidence template does not match the "
@@ -5973,22 +6050,18 @@ def plan_mob_movement_broadcast(
             for value in (reference_x, reference_y)
         ):
             raise ValueError("translated mob movement reference exceeds int16")
-        source_shape = relative_motion_shape(source_broadcast)
+        source_shape = selected_path.relative_motion_shape
         if source_shape is None:
             raise ValueError(
                 "mob movement path evidence contains a relative command"
             )
-        for (
-            _,
-            evidence_template_id,
-            evidence_broadcast,
-        ) in path_evidence_candidates:
+        for evidence_path in path_evidence_candidates:
             if (
-                evidence_template_id != template_id
-                or evidence_broadcast.opaque_control != control_prefix
+                evidence_path.template_id != template_id
+                or evidence_path.broadcast.opaque_control != control_prefix
             ):
                 continue
-            if relative_motion_shape(evidence_broadcast) == source_shape:
+            if evidence_path.relative_motion_shape == source_shape:
                 exact_relative_motion_shape_evidence += 1
         if exact_relative_motion_shape_evidence == 0:
             raise ValueError(
@@ -6030,6 +6103,207 @@ def plan_mob_movement_broadcast(
         matching_displacement_shape_evidence=(
             matching_displacement_shape_evidence
         ),
+    )
+
+
+def plan_composed_mob_movement_broadcasts(
+    transcript: Transcript,
+    *,
+    post_transcript_server_frames: tuple[bytes, ...] = (),
+    evidence_transcript: Transcript | None = None,
+    target_x: int,
+    target_y: int,
+    foothold_id: int,
+    max_steps: int = 4,
+) -> MobMovementBroadcastSequencePlan:
+    """Compose a unique shortest sequence of captured movement paths."""
+
+    if not 2 <= max_steps <= 8:
+        raise ValueError("composed mob movement max steps must be in 2..8")
+    if not all(-0x8000 <= value <= 0x7FFF for value in (target_x, target_y)):
+        raise ValueError("mob movement target coordinates must fit in int16")
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise ValueError("mob movement target foothold must fit in uint16")
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    evidence_analysis = (
+        analysis
+        if evidence_transcript is None
+        else analyze_gameplay_transcript(evidence_transcript)
+    )
+    if not evidence_analysis.valid:
+        raise ValueError(
+            "mob-movement broadcast evidence transcript failed packet/state "
+            "validation"
+        )
+    active_mobs = _active_mobs_after_server_frames(
+        analysis, post_transcript_server_frames
+    )
+    if len(active_mobs) != 1:
+        raise ValueError(
+            "composed mob movement planning requires exactly one active "
+            f"modeled mob, found {len(active_mobs)}"
+        )
+    _, (
+        _,
+        template_id,
+        previous_x,
+        previous_y,
+        previous_foothold_id,
+    ) = next(iter(active_mobs.items()))
+    if previous_foothold_id != foothold_id:
+        raise ValueError(
+            "active mob foothold does not match the composed path foothold: "
+            f"{previous_foothold_id} != {foothold_id}"
+        )
+    desired_displacement = (
+        target_x - previous_x,
+        target_y - previous_y,
+    )
+    if desired_displacement == (0, 0):
+        raise ValueError("composed mob movement target equals current position")
+
+    control_prefix = bytes.fromhex("0000ff00000000")
+    grouped_paths: dict[
+        tuple[int, int],
+        dict[tuple[object, ...], list[_CapturedMobMovementPath]],
+    ] = {}
+    for path in _captured_mob_movement_paths(evidence_analysis):
+        if (
+            path.template_id != template_id
+            or path.broadcast.opaque_control != control_prefix
+            or len(path.broadcast.commands) < 2
+            or path.relative_motion_shape is None
+            or path.displacement is None
+            or path.displacement == (0, 0)
+            or any(
+                command.command_type != 0
+                for command in path.broadcast.commands
+            )
+        ):
+            continue
+        grouped_paths.setdefault(path.displacement, {}).setdefault(
+            path.relative_motion_shape, []
+        ).append(path)
+    usable_paths: dict[tuple[int, int], _CapturedMobMovementPath] = {}
+    ambiguous_displacements = 0
+    for displacement, shapes in grouped_paths.items():
+        if len(shapes) != 1:
+            ambiguous_displacements += 1
+            continue
+        repeated_paths = next(iter(shapes.values()))
+        usable_paths[displacement] = min(
+            repeated_paths,
+            key=lambda path: path.server_frame_index,
+        )
+    if not usable_paths:
+        raise ValueError(
+            f"movement evidence has no unique path shapes for template "
+            f"{template_id}"
+        )
+
+    target_offset = desired_displacement
+    frontier: dict[
+        tuple[int, int],
+        list[tuple[tuple[int, int], ...]],
+    ] = {(0, 0): [()]}
+    selected_sequences: list[tuple[tuple[int, int], ...]] | None = None
+    ordered_displacements = tuple(sorted(usable_paths))
+    for _ in range(max_steps):
+        next_frontier: dict[
+            tuple[int, int],
+            list[tuple[tuple[int, int], ...]],
+        ] = {}
+        for position, sequences in frontier.items():
+            distance_before = (
+                abs(target_offset[0] - position[0])
+                + abs(target_offset[1] - position[1])
+            )
+            for displacement in ordered_displacements:
+                next_position = (
+                    position[0] + displacement[0],
+                    position[1] + displacement[1],
+                )
+                distance_after = (
+                    abs(target_offset[0] - next_position[0])
+                    + abs(target_offset[1] - next_position[1])
+                )
+                if distance_after >= distance_before:
+                    continue
+                absolute_position = (
+                    previous_x + next_position[0],
+                    previous_y + next_position[1],
+                )
+                if not all(
+                    -0x8000 <= value <= 0x7FFF
+                    for value in absolute_position
+                ):
+                    continue
+                destination_sequences = next_frontier.setdefault(
+                    next_position, []
+                )
+                for sequence in sequences:
+                    candidate_sequence = sequence + (displacement,)
+                    if candidate_sequence in destination_sequences:
+                        continue
+                    if len(destination_sequences) < 2:
+                        destination_sequences.append(candidate_sequence)
+        if len(next_frontier) > 4_096:
+            raise ValueError(
+                "composed mob movement search exceeded 4096 states"
+            )
+        if target_offset in next_frontier:
+            selected_sequences = next_frontier[target_offset]
+            break
+        frontier = next_frontier
+        if not frontier:
+            break
+    if selected_sequences is None:
+        raise ValueError(
+            "movement evidence has no monotonic composed path to displacement "
+            f"{desired_displacement} within {max_steps} steps"
+        )
+    if len(selected_sequences) != 1:
+        raise ValueError(
+            "movement evidence has ambiguous shortest composed paths to "
+            f"displacement {desired_displacement}"
+        )
+    selected_displacements = selected_sequences[0]
+    if len(selected_displacements) < 2:
+        raise ValueError(
+            "movement evidence has a direct path; use automatic single-path "
+            "emission"
+        )
+
+    planned_frames = list(post_transcript_server_frames)
+    steps: list[MobMovementBroadcastPlan] = []
+    current_x = previous_x
+    current_y = previous_y
+    for displacement in selected_displacements:
+        current_x += displacement[0]
+        current_y += displacement[1]
+        source = usable_paths[displacement]
+        step = plan_mob_movement_broadcast(
+            transcript,
+            post_transcript_server_frames=tuple(planned_frames),
+            evidence_transcript=evidence_transcript,
+            target_x=current_x,
+            target_y=current_y,
+            foothold_id=foothold_id,
+            path_evidence_server_frame_index=source.server_frame_index,
+        )
+        steps.append(step)
+        planned_frames.append(step.broadcast.to_bytes())
+    if (current_x, current_y) != (target_x, target_y):
+        raise ValueError("composed mob movement did not reach its target")
+    return MobMovementBroadcastSequencePlan(
+        steps=tuple(steps),
+        max_steps=max_steps,
+        usable_displacements=len(usable_paths),
+        ambiguous_displacements=ambiguous_displacements,
+        shortest_sequence_count=len(selected_sequences),
     )
 
 

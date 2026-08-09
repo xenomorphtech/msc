@@ -701,6 +701,15 @@ shapes. Stream `92` has one path and one shape for template `100100` movement
 and rendered the snail at `(833,-2677)`. The new transcript folds validly with
 five type-`0` commands and 13/13 matched heartbeats.
 
+`--emit-mob-movement-composed-path MAX_STEPS:X:Y:FOOTHOLD` performs bounded
+breadth-first composition from unique capture-backed displacement shapes. It
+excludes ambiguous displacements, requires every step to reduce Manhattan
+distance, checks all intermediate `int16` positions, and refuses multiple
+shortest sequences. Stream `92` has 167 usable and 38 ambiguous displacements
+for template `100100`. The unique route from `(785,-2677)` to `(881,-2677)` is
+frame `18818` twice; the client rendered the final endpoint and the independent
+fold validated two broadcasts, ten commands, and 11/11 heartbeats.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold
@@ -944,6 +953,9 @@ previous and predicted position/foothold/stance, typed packet fields, evidence
 counts, `mode`, optional source server-frame index, and planned/sent counters.
 Automatic plans also report the number of matching displacement paths and
 distinct relative motion shapes, making the uniqueness decision inspectable.
+Composed plans additionally report their step bound, selected source-frame
+sequence, intermediate step plans, usable/ambiguous displacement counts, and
+shortest-sequence count. Planned/sent packet counters cover the whole sequence.
 When reactive mob-health responses are
 enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,

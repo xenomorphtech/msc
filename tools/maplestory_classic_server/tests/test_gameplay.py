@@ -17,6 +17,7 @@ from maple_server.gameplay import (  # noqa: E402
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
     plan_final_field_drop_owner_to_player_rewrite,
@@ -3815,6 +3816,128 @@ class GameplayStateFoldTest(unittest.TestCase):
             automatic_plan.broadcast.to_bytes(),
             plan.broadcast.to_bytes(),
         )
+
+        sequence_plan = plan_composed_mob_movement_broadcasts(
+            fixture_gameplay_transcript(compact_transition=True),
+            post_transcript_server_frames=(post_spawn,),
+            evidence_transcript=evidence,
+            target_x=300,
+            target_y=-200,
+            foothold_id=8,
+            max_steps=2,
+        )
+        self.assertEqual(len(sequence_plan.steps), 2)
+        self.assertEqual(sequence_plan.usable_displacements, 1)
+        self.assertEqual(sequence_plan.ambiguous_displacements, 0)
+        self.assertEqual(sequence_plan.shortest_sequence_count, 1)
+        self.assertEqual(
+            tuple(
+                step.source_server_frame_index
+                for step in sequence_plan.steps
+            ),
+            (source_frame, source_frame),
+        )
+        self.assertEqual(
+            tuple(
+                (step.previous_x, step.target_x)
+                for step in sequence_plan.steps
+            ),
+            ((200, 250), (250, 300)),
+        )
+        self.assertEqual(
+            tuple(
+                (broadcast.reference_x, broadcast.reference_y)
+                for broadcast in sequence_plan.broadcasts
+            ),
+            ((200, -200), (250, -200)),
+        )
+        sequence_fold = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_server_plaintexts=(
+                    post_spawn,
+                    *(
+                        broadcast.to_bytes()
+                        for broadcast in sequence_plan.broadcasts
+                    ),
+                )
+            )
+        )
+        self.assertTrue(sequence_fold.valid)
+        self.assertEqual(
+            (
+                sequence_fold.state.mobs[MOB_OBJECT_ID].x,
+                sequence_fold.state.mobs[MOB_OBJECT_ID].y,
+            ),
+            (300, -200),
+        )
+        baseline_fold = analyze_gameplay_transcript(
+            fixture_gameplay_transcript()
+        )
+        self.assertEqual(
+            sequence_fold.state.mob_movement_broadcasts,
+            baseline_fold.state.mob_movement_broadcasts + 2,
+        )
+        self.assertEqual(
+            sequence_fold.state.mob_broadcast_commands,
+            baseline_fold.state.mob_broadcast_commands + 6,
+        )
+
+        def two_command_path(displacement_x: int) -> bytes:
+            midpoint_x = 100 + displacement_x // 2
+            return MobMovementBroadcast(
+                object_id=MOB_OBJECT_ID,
+                opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                reference_x=100,
+                reference_y=-200,
+                commands=(
+                    MobMovementCommand.absolute(
+                        position_x=midpoint_x,
+                        position_y=-200,
+                        velocity_x=displacement_x // 2,
+                        velocity_y=0,
+                        foothold_id=7,
+                        stance=2,
+                        duration_ms=540,
+                    ),
+                    MobMovementCommand.absolute(
+                        position_x=100 + displacement_x,
+                        position_y=-200,
+                        velocity_x=displacement_x // 2,
+                        velocity_y=0,
+                        foothold_id=7,
+                        stance=2,
+                        duration_ms=540,
+                    ),
+                ),
+            ).to_bytes()
+
+        ambiguous_sequence_evidence = fixture_gameplay_transcript(
+            extra_server_plaintexts=(
+                source_path,
+                two_command_path(40),
+                two_command_path(60),
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "ambiguous shortest"):
+            plan_composed_mob_movement_broadcasts(
+                fixture_gameplay_transcript(compact_transition=True),
+                post_transcript_server_frames=(post_spawn,),
+                evidence_transcript=ambiguous_sequence_evidence,
+                target_x=300,
+                target_y=-200,
+                foothold_id=8,
+                max_steps=2,
+            )
+        with self.assertRaisesRegex(ValueError, "no monotonic composed path"):
+            plan_composed_mob_movement_broadcasts(
+                fixture_gameplay_transcript(compact_transition=True),
+                post_transcript_server_frames=(post_spawn,),
+                evidence_transcript=evidence,
+                target_x=350,
+                target_y=-200,
+                foothold_id=8,
+                max_steps=2,
+            )
 
         alternate_path = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,

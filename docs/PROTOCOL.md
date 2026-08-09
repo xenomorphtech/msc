@@ -1003,6 +1003,25 @@ real client again rendered the snail at `(833,-2677)`, and the new observed
 transcript folds validly with one five-command broadcast, no unknown mob, and
 13/13 matched heartbeats.
 
+Bounded composition uses those same unique displacement primitives rather than
+inventing longer command arrays. The planner excludes every displacement that
+has multiple relative motion shapes, then performs breadth-first search up to
+the requested `2..8` step bound. Every step must strictly reduce Manhattan
+distance to the endpoint, every intermediate absolute position must fit in
+`int16`, and exactly one shortest displacement sequence must remain. Each
+selected primitive becomes its own opcode `282`, so the ordinary gameplay fold
+validates every intermediate state as well as the final endpoint.
+
+For template `100100`, stream `92` provides 167 usable unique displacement
+shapes and 38 ambiguous displacements that are excluded. No direct `(96,0)`
+path exists, but the unique shortest composition is `(48,0) + (48,0)`, using
+frame `18818` twice. Starting at `(785,-2677)`, the generated references were
+`(785,-2677)` and `(833,-2677)`, with endpoints `(833,-2677)` and
+`(881,-2677)`. The real client rendered the snail at final `(881,-2677)`.
+The independent transcript folds validly with two known broadcasts, ten
+type-`0` commands, final foothold `635`/stance `2`, and 11/11 matched
+heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

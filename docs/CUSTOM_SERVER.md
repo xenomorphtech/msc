@@ -785,6 +785,32 @@ Transcript
 folds validly to `(833,-2677)`/foothold `635`/stance `2`, one known broadcast,
 five type-`0` commands, and 13/13 matched heartbeats.
 
+`--emit-mob-movement-composed-path MAX_STEPS:X:Y:FOOTHOLD` plans a bounded
+sequence when no direct unique displacement reaches the target. It excludes
+all ambiguous displacement shapes, searches only moves that strictly reduce
+Manhattan distance, bounds intermediate coordinates to `int16`, and rejects
+zero or multiple shortest sequences. The `MAX_STEPS` bound is `2..8`.
+
+The validated composed run changed the automatic command to:
+
+```text
+--emit-mob-movement-composed-path '2:881:-2677:635'
+--post-transcript-frame-delay-seconds 10
+--transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_composed_path_visual_20260809
+```
+
+For the injected template-`100100` snail at `(785,-2677)`, the evidence catalog
+contained 167 usable displacements and excluded 38 ambiguous ones. There was
+no direct `(96,0)` primitive and exactly one shortest composition:
+frame `18818` for `(48,0)`, then the same shape translated from the intermediate
+state for another `(48,0)`. Runtime status reported source frames
+`[18818,18818]`, intermediate `(833,-2677)`, predicted final `(881,-2677)`,
+and two planned/sent packets. The client rendered the snail at that final
+position. Transcript
+`generated_mob_composed_path_visual_20260809/1786292585566000786_replay_12857.jsonl`
+folds validly with two known broadcasts, ten type-`0` commands, no unknown mob,
+final foothold `635`/stance `2`, and 11/11 matched heartbeats.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client

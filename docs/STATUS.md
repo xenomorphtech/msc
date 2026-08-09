@@ -381,6 +381,16 @@ exactly one candidate and one shape for template `100100` displacement
 rendered the predicted `(833,-2677)` endpoint; its independent fold has one
 five-command broadcast, no unknown mob, and 13/13 matched heartbeats.
 
+Bounded composition is now implemented as well. The server groups evidence by
+template/displacement/relative motion shape, excludes ambiguous displacements,
+and requires one shortest Manhattan-decreasing sequence within `2..8` steps.
+For template `100100`, stream `92` yielded 167 usable displacements and 38
+excluded ambiguous ones. Target displacement `(96,0)` has no direct primitive
+and exactly one two-step route: frame `18818` twice. A live run advanced the
+snail `(785,-2677) -> (833,-2677) -> (881,-2677)` and sent 2/2 planned packets.
+Its independent fold is valid with two known broadcasts, ten type-`0` commands,
+final foothold `635`/stance `2`, and 11/11 matched heartbeats.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -395,9 +405,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Build conservative short-path composition from the proven unique captured
-   displacement selector, validating every intermediate/final state against
-   foothold continuity and the independent real-client fold.
+4. Add a paced runtime movement scheduler whose mutable modeled mob state
+   advances as each generated broadcast is sent, so later planning decisions
+   can start from the confirmed intermediate state rather than a startup-only
+   plan.
 
 ## Useful proof artifacts
 
