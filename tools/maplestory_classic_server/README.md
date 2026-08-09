@@ -284,7 +284,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 24,999 full,
-38,027 partial, 8,074 unknown, and zero invalid packet observations. PCAP
+40,959 partial, 5,142 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata.
@@ -321,11 +321,16 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `41`: masked player-stat deltas for level, job, STR, DEX, INT,
   LUK, current/max HP and MP, AP, SP, EXP, and 64-bit mesos, plus bounded
   neutral flag/tail values,
+- client opcode `47`: structurally exact life-movement relay with local object
+  index, redacted client token, neutral control value, fixed-width command
+  stream, capture-bounded tail variant, marker, and start/end coordinates,
 - client opcode `182`: local-player movement with a neutral 32-bit control
   value, signed reference position, typed command stream, and zero-marked
   start/end-position trailer,
 - server opcode `202`: remote-player movement with an aliased object id, the
   same control value and command stream, and no client-only trailer,
+- server opcode `217`: structurally exact life-movement broadcast with an
+  aliased object id and the same fixed-width command stream as opcode `47`,
 - server opcode `300`: complete 22-byte NPC spawn records whose facing field is
   preserved as the observed byte value rather than narrowed to a boolean,
 - server opcode `303`: an 8-byte typed NPC state prefix plus a losslessly
@@ -362,9 +367,11 @@ field-load messages form 13 ordered stage pairs; all 53 NPC spawns and 77 NPC
 state updates validate; all 531 local-player movement submissions and 113
 remote-player broadcasts round-trip; 11,949 mob movement acknowledgements
 match prior captured submissions; and all 75 server heartbeat probes pair with
-the next 75 client responses. All 54 pickup requests also match their value
-effect, opcode-`49` result, and opcode-`312` removal, while all 100 removal
-packets round-trip. Two mob movement submissions remain pending at capture end.
+the next 75 client responses. All 963 opcode-`47` submissions and 305
+opcode-`217` broadcasts are structurally exact. All 54 pickup requests also
+match their value effect, opcode-`49` result, and opcode-`312` removal. All 100
+removal packets round-trip. Two mob movement submissions remain pending at
+capture end.
 
 Twelve of the 13 opcode-`157` packets use an exact 95-byte compact transition
 shape (two-byte opcode plus 93-byte body). `CompactFieldTransition` decodes the
@@ -430,6 +437,21 @@ positions for observed remote players, and emits `player_movement_submitted`
 and `remote_player_movement_broadcast` events. Short stream `114` folds its one
 local submission to `(633,-2677)` and its two broadcasts to two redacted
 remote-player aliases.
+
+The separate life-movement relay family is now bounded without assigning
+meaning to its command bodies. Client opcode `47` carries a local object index,
+a redacted 32-bit client token, a neutral 32-bit control value, a signed
+reference position, a counted command stream, one of four typed tail layouts,
+a marker, and signed start/end coordinates. Server opcode `217` carries an
+object id plus the same reference/count/command stream. Stream `92` validates
+963 submissions containing 3,869 commands and 305 broadcasts containing 1,441
+commands. Stream `126` validates another 2,585 submissions with 8,189 commands
+and 347 broadcasts with 1,399 commands; 344 of those broadcasts name a player
+already active when received, while three precede player discovery. All 2,932
+long-corpus packets consume exactly and round-trip. Command tags `0..22` and
+client tail tags `17/18/21/24` have capture-derived fixed widths; their field
+roles, the client control value, and the tail marker remain neutral, so reports
+classify the family as partial semantic coverage and omit the token value.
 
 Server opcode `41` now folds stat deltas instead of remaining an unknown
 packet. The stable prefix is a one-byte request flag and 32-bit mask. Observed
@@ -824,3 +846,8 @@ It intentionally cannot launch an authenticated official session.
 26. Derive a guarded item-pickup responder from stream `92`, rewrite only the
     final stream-`114` drop position, and compare the predicted Etc quantity
     `74 -> 75` plus drop removal in a controlled real-client A/B.
+27. Decode and fold server opcode `293` mob-health percentages across both
+    sustained captures while keeping lifecycle removal on opcode `280`.
+28. Bound and round-trip client opcode `47` and server opcode `217` life
+    movement, fold command/tail distributions into identifier-safe events,
+    and validate all 2,932 long-corpus packets without assigning opaque roles.

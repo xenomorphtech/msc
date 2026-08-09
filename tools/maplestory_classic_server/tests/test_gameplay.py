@@ -43,6 +43,10 @@ from maple_server.packets import (  # noqa: E402
     InventoryModification,
     ItemPickupRequest,
     ItemUseRequest,
+    LifeMovementBroadcast,
+    LifeMovementCommand,
+    LifeMovementPath,
+    LifeMovementSubmission,
     MobControllerChange,
     MobEnterField,
     MobHealthPercentageUpdate,
@@ -164,6 +168,20 @@ def fixture_player_movement_path() -> PlayerMovementPath:
                 stance=5,
                 duration_ms=20,
             ),
+        ),
+    )
+
+
+def fixture_life_movement_path() -> LifeMovementPath:
+    return LifeMovementPath(
+        reference_x=100,
+        reference_y=-200,
+        commands=(
+            LifeMovementCommand(command_type=0, opaque_payload=b"\x00" * 13),
+            LifeMovementCommand(command_type=2, opaque_payload=b"\x00" * 7),
+            LifeMovementCommand(command_type=10, opaque_payload=b"\x00"),
+            LifeMovementCommand(command_type=14, opaque_payload=b"\x00" * 9),
+            LifeMovementCommand(command_type=15, opaque_payload=b"\x00" * 15),
         ),
     )
 
@@ -813,6 +831,29 @@ def fixture_gameplay_transcript(
                 movement=fixture_player_movement_path(),
             ).to_bytes(),
         )
+        append(
+            "client_to_server",
+            LifeMovementSubmission(
+                local_object_index=7,
+                client_token=123_456,
+                control_value=0,
+                movement=fixture_life_movement_path(),
+                tail_type=17,
+                opaque_tail_state=b"\x00" * 8,
+                tail_marker=4,
+                path_start_x=90,
+                path_start_y=-205,
+                path_end_x=132,
+                path_end_y=-168,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            LifeMovementBroadcast(
+                object_id=PLAYER_OBJECT_ID,
+                movement=fixture_life_movement_path(),
+            ).to_bytes(),
+        )
     append(
         "client_to_server",
         MobMovementSubmission(
@@ -1293,12 +1334,44 @@ class GameplayPacketShapeTest(unittest.TestCase):
             control_value=1,
             movement=path,
         )
+        life_path = fixture_life_movement_path()
+        life_submission = LifeMovementSubmission(
+            local_object_index=7,
+            client_token=123_456,
+            control_value=0,
+            movement=life_path,
+            tail_type=17,
+            opaque_tail_state=b"\x00" * 8,
+            tail_marker=4,
+            path_start_x=90,
+            path_start_y=-205,
+            path_end_x=132,
+            path_end_y=-168,
+        )
+        life_broadcast = LifeMovementBroadcast(
+            object_id=PLAYER_OBJECT_ID,
+            movement=life_path,
+        )
 
         self.assertEqual(
             PlayerMovementSubmission.parse(submission.to_bytes()), submission
         )
         self.assertEqual(
             PlayerMovementBroadcast.parse(broadcast.to_bytes()), broadcast
+        )
+        self.assertEqual(
+            LifeMovementSubmission.parse(life_submission.to_bytes()),
+            life_submission,
+        )
+        self.assertEqual(
+            LifeMovementBroadcast.parse(life_broadcast.to_bytes()),
+            life_broadcast,
+        )
+        self.assertEqual(len(life_submission.to_bytes()), 84)
+        self.assertEqual(len(life_broadcast.to_bytes()), 61)
+        self.assertEqual(
+            [command.command_type for command in life_path.commands],
+            [0, 2, 10, 14, 15],
         )
         self.assertEqual(
             [command.byte_length for command in path.commands],
@@ -1326,6 +1399,22 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 reference_x=0,
                 reference_y=0,
                 commands=(),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 13 opaque bytes"):
+            LifeMovementCommand(command_type=0, opaque_payload=b"").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "tail type 17 needs 8"):
+            LifeMovementSubmission(
+                local_object_index=0,
+                client_token=0,
+                control_value=0,
+                movement=life_path,
+                tail_type=17,
+                opaque_tail_state=b"short",
+                tail_marker=0,
+                path_start_x=0,
+                path_start_y=0,
+                path_end_x=0,
+                path_end_y=0,
             ).to_bytes()
 
     def test_movement_header_and_ack_round_trip(self) -> None:
@@ -1824,6 +1913,26 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.remote_player_movement_commands_by_type,
             {0: 2, 1: 1, 3: 1, 5: 1},
         )
+        self.assertEqual(analysis.state.life_movement_submissions, 1)
+        self.assertEqual(analysis.state.life_movement_submission_commands, 5)
+        self.assertEqual(
+            analysis.state.life_movement_submission_commands_by_type,
+            {0: 1, 2: 1, 10: 1, 14: 1, 15: 1},
+        )
+        self.assertEqual(analysis.state.life_movement_tail_types, {17: 1})
+        self.assertEqual(analysis.state.life_movement_tail_markers, {4: 1})
+        self.assertEqual(analysis.state.life_movement_broadcasts, 1)
+        self.assertEqual(analysis.state.life_movement_broadcast_commands, 5)
+        self.assertEqual(
+            analysis.state.life_movement_broadcast_commands_by_type,
+            {0: 1, 2: 1, 10: 1, 14: 1, 15: 1},
+        )
+        self.assertEqual(
+            analysis.state.life_movement_broadcasts_for_known_players, 1
+        )
+        self.assertEqual(
+            analysis.state.life_movement_broadcasts_for_unknown_players, 0
+        )
         self.assertEqual(
             (
                 analysis.state.observed_players[PLAYER_OBJECT_ID].x,
@@ -1834,6 +1943,15 @@ class GameplayStateFoldTest(unittest.TestCase):
         event_kinds = [event.kind for event in analysis.events]
         self.assertIn("player_movement_submitted", event_kinds)
         self.assertIn("remote_player_movement_broadcast", event_kinds)
+        self.assertIn("life_movement_submitted", event_kinds)
+        self.assertIn("life_movement_broadcast_received", event_kinds)
+        life_submission_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "life_movement_submitted"
+        )
+        self.assertNotIn("client_token", life_submission_event.details)
+        self.assertTrue(life_submission_event.details["client_token_present"])
         report = analysis.safe_dict()
         self.assertEqual(report["state"]["player"]["x"], 132)
         self.assertEqual(report["state"]["observed_remote_player_count"], 1)
@@ -2205,7 +2323,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(identified["state"]["mobs"][0]["object_id"], MOB_OBJECT_ID)
 
     def test_text_report_can_emit_events_and_packet_shapes(self) -> None:
-        analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(player_movement=True)
+        )
 
         report = render_gameplay_analysis(
             analysis,
@@ -2220,6 +2340,18 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("matched_submission\":true", report)
         self.assertIn("command_types\":[0]", report)
         self.assertIn('commands:1 command_types:{"0": 1}', report)
+        self.assertIn(
+            'life_movement=submitted:1 submission_commands:5 '
+            'submission_command_types:{"0": 1, "2": 1, "10": 1, '
+            '"14": 1, "15": 1} tail_types:{"17": 1} '
+            'tail_markers:{"4": 1}',
+            report,
+        )
+        self.assertIn(
+            "opcode=47 kind=life_movement_submission coverage=partial",
+            report,
+        )
+        self.assertNotIn("123456", report)
         self.assertIn(
             "movement_ack_policy=flag_matches:1 flag_mismatches:0",
             report,

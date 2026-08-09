@@ -2906,6 +2906,258 @@ class FieldDropRemoval:
 
 
 @dataclass(frozen=True)
+class LifeMovementCommand:
+    command_type: int
+    opaque_payload: bytes
+
+    _PAYLOAD_LENGTHS = {
+        0: 13,
+        1: 7,
+        2: 7,
+        3: 9,
+        4: 9,
+        5: 13,
+        6: 7,
+        7: 9,
+        8: 9,
+        9: 9,
+        10: 1,
+        11: 9,
+        12: 7,
+        13: 7,
+        14: 9,
+        15: 15,
+        16: 7,
+        17: 13,
+        18: 7,
+        19: 7,
+        20: 3,
+        21: 3,
+        22: 7,
+    }
+
+    @classmethod
+    def parse(
+        cls,
+        reader: PacketReader,
+        *,
+        command_index: int,
+        field_prefix: str = "movement",
+    ) -> "LifeMovementCommand":
+        field = f"{field_prefix}.commands[{command_index}]"
+        command_type = reader.u8(f"{field}.type")
+        payload_length = cls._PAYLOAD_LENGTHS.get(command_type)
+        if payload_length is None:
+            expected = ", ".join(str(value) for value in cls._PAYLOAD_LENGTHS)
+            raise PacketShapeError(
+                f"{reader.packet_name}.{field}.type is {command_type}, "
+                f"expected one of {expected}"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=reader.bytes(
+                payload_length, f"{field}.opaque_payload"
+            ),
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "type": self.command_type,
+            "opaque_payload_bytes": len(self.opaque_payload),
+        }
+
+    def to_bytes(self) -> bytes:
+        expected_length = self._PAYLOAD_LENGTHS.get(self.command_type)
+        if expected_length is None:
+            expected = ", ".join(str(value) for value in self._PAYLOAD_LENGTHS)
+            raise PacketShapeError(
+                f"life movement command type is {self.command_type}, "
+                f"expected one of {expected}"
+            )
+        if len(self.opaque_payload) != expected_length:
+            raise PacketShapeError(
+                f"life movement command type {self.command_type} needs "
+                f"{expected_length} opaque bytes, got "
+                f"{len(self.opaque_payload)}"
+            )
+        return bytes((self.command_type,)) + self.opaque_payload
+
+
+@dataclass(frozen=True)
+class LifeMovementPath:
+    reference_x: int
+    reference_y: int
+    commands: tuple[LifeMovementCommand, ...]
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, field_prefix: str = "movement"
+    ) -> "LifeMovementPath":
+        reference_x = reader.i16(f"{field_prefix}.reference_x")
+        reference_y = reader.i16(f"{field_prefix}.reference_y")
+        command_count = reader.u8(f"{field_prefix}.command_count")
+        if command_count == 0:
+            raise PacketShapeError("life movement path has no commands")
+        commands = tuple(
+            LifeMovementCommand.parse(
+                reader,
+                command_index=index,
+                field_prefix=field_prefix,
+            )
+            for index in range(command_count)
+        )
+        return cls(
+            reference_x=reference_x,
+            reference_y=reference_y,
+            commands=commands,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "reference_x": self.reference_x,
+            "reference_y": self.reference_y,
+            "command_count": len(self.commands),
+            "command_types": [
+                command.command_type for command in self.commands
+            ],
+            "commands": [command.safe_dict() for command in self.commands],
+        }
+
+    def to_bytes(self) -> bytes:
+        if not self.commands:
+            raise PacketShapeError("life movement path must contain a command")
+        if len(self.commands) > 255:
+            raise PacketShapeError(
+                "life movement path cannot contain more than 255 commands"
+            )
+        return (
+            struct.pack(
+                "<hhB", self.reference_x, self.reference_y, len(self.commands)
+            )
+            + b"".join(command.to_bytes() for command in self.commands)
+        )
+
+
+@dataclass(frozen=True)
+class LifeMovementSubmission:
+    local_object_index: int
+    client_token: int
+    control_value: int
+    movement: LifeMovementPath
+    tail_type: int
+    opaque_tail_state: bytes
+    tail_marker: int
+    path_start_x: int
+    path_start_y: int
+    path_end_x: int
+    path_end_y: int
+    opcode: int = 47
+
+    _TAIL_LENGTHS = {17: 8, 18: 8, 21: 10, 24: 11}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LifeMovementSubmission":
+        reader = PacketReader(payload, packet_name="life_movement_submission")
+        _expect_opcode(reader, 47)
+        local_object_index = reader.u8("local_object_index")
+        client_token = reader.u32("client_token")
+        control_value = reader.u32("control_value")
+        movement = LifeMovementPath.parse_from(reader)
+        tail_type = reader.u8("tail_type")
+        tail_length = cls._TAIL_LENGTHS.get(tail_type)
+        if tail_length is None:
+            expected = ", ".join(str(value) for value in cls._TAIL_LENGTHS)
+            raise PacketShapeError(
+                f"life movement tail type is {tail_type}, expected one of "
+                f"{expected}"
+            )
+        opaque_tail_state = reader.bytes(tail_length, "opaque_tail_state")
+        tail_marker = reader.u8("tail_marker")
+        path_start_x = reader.i16("path_start_x")
+        path_start_y = reader.i16("path_start_y")
+        path_end_x = reader.i16("path_end_x")
+        path_end_y = reader.i16("path_end_y")
+        reader.finish()
+        return cls(
+            local_object_index=local_object_index,
+            client_token=client_token,
+            control_value=control_value,
+            movement=movement,
+            tail_type=tail_type,
+            opaque_tail_state=opaque_tail_state,
+            tail_marker=tail_marker,
+            path_start_x=path_start_x,
+            path_start_y=path_start_y,
+            path_end_x=path_end_x,
+            path_end_y=path_end_y,
+        )
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.local_object_index <= 0xFF:
+            raise PacketShapeError(
+                "life movement local index must fit in one byte"
+            )
+        tail_length = self._TAIL_LENGTHS.get(self.tail_type)
+        if tail_length is None:
+            expected = ", ".join(str(value) for value in self._TAIL_LENGTHS)
+            raise PacketShapeError(
+                f"life movement tail type is {self.tail_type}, expected one of "
+                f"{expected}"
+            )
+        if len(self.opaque_tail_state) != tail_length:
+            raise PacketShapeError(
+                f"life movement tail type {self.tail_type} needs "
+                f"{tail_length} opaque bytes"
+            )
+        if not 0 <= self.tail_marker <= 0xFF:
+            raise PacketShapeError(
+                "life movement tail marker must fit in one byte"
+            )
+        return (
+            struct.pack(
+                "<HBII",
+                self.opcode,
+                self.local_object_index,
+                self.client_token,
+                self.control_value,
+            )
+            + self.movement.to_bytes()
+            + bytes((self.tail_type,))
+            + self.opaque_tail_state
+            + struct.pack(
+                "<Bhhhh",
+                self.tail_marker,
+                self.path_start_x,
+                self.path_start_y,
+                self.path_end_x,
+                self.path_end_y,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class LifeMovementBroadcast:
+    object_id: int
+    movement: LifeMovementPath
+    opcode: int = 217
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LifeMovementBroadcast":
+        reader = PacketReader(payload, packet_name="life_movement_broadcast")
+        _expect_opcode(reader, 217)
+        object_id = reader.u32("object_id")
+        movement = LifeMovementPath.parse_from(reader)
+        reader.finish()
+        return cls(object_id=object_id, movement=movement)
+
+    def to_bytes(self) -> bytes:
+        return (
+            struct.pack("<HI", self.opcode, self.object_id)
+            + self.movement.to_bytes()
+        )
+
+
+@dataclass(frozen=True)
 class PlayerMovementCommand:
     command_type: int
     opaque_payload: bytes

@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 24,999 observations are full, 38,027 partial, 8,074
+`--fail-on-invalid`: 24,999 observations are full, 40,959 partial, 5,142
 unknown-but-lossless, and none invalid. The 12 remaining warnings are state
 correlations, not shape failures. The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
@@ -89,6 +89,14 @@ broadcasts. The short stream prints one local path ending at `(633,-2677)` and
 two remote-player broadcasts under session-local aliases. The long stream
 validates and round-trips 531 submissions, 113 broadcasts, and all 4,281
 commands, with fixed tags `0/1/3/5` and payload sizes `13/7/5/13` bytes.
+
+The analyzer also bounds client opcode `47` and server opcode `217` as a
+separate life-movement relay family. Stream `126` contributes 2,585 client
+submissions and 347 server broadcasts, all consuming exactly; stream `92`
+exercises all fixed client-tail variants. Command bytes and neutral control/
+tail roles remain opaque, so these packets are partial rather than full. With
+this family folded, the long-corpus totals are 24,999 full, 40,959 partial,
+5,142 unknown-but-lossless, and zero invalid observations.
 
 ## Replay the login capture locally
 
@@ -607,6 +615,9 @@ project's own `README.md` for all options.
 - The gameplay analyzer now emits typed local/remote player movement records
   and folds their endpoints instead of reporting opcodes `182` and `202` as
   unknown packets. Both PCAP world streams validate without warnings.
+- The analyzer now structurally decodes life movement opcodes `47`/`217`,
+  folds command and client-tail distributions, redacts the client token, and
+  validates all 2,932 packets from stream `126` without a shape failure.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

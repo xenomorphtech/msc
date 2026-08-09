@@ -836,6 +836,60 @@ and the last absolute command for each observed remote player, emitting typed
 events for both directions. Stream `114` ends at local path endpoint
 `(633,-2677)` with two identifier-safe remote-player aliases.
 
+## Life movement relay (`client 47`, `server 217`)
+
+This is a separate counted movement family. The client packet is:
+
+```text
+uint16 opcode = 47
+uint8  local_object_index
+uint32 client_token                 # redacted from safe reports
+uint32 control_value                # neutral role
+int16  reference_x
+int16  reference_y
+uint8  command_count
+repeat command_count:
+  uint8 command_type
+  byte[command_payload_length(command_type)] opaque_payload
+uint8  tail_type
+byte[tail_payload_length(tail_type)] opaque_tail_state
+uint8  tail_marker                  # neutral role
+int16  path_start_x
+int16  path_start_y
+int16  path_end_x
+int16  path_end_y
+```
+
+The server packet ends after the shared movement path:
+
+```text
+uint16 opcode = 217
+uint32 object_id
+int16  reference_x
+int16  reference_y
+uint8  command_count
+repeat command_count: command_type + fixed opaque payload
+```
+
+Capture-derived command payload sizes, excluding the one-byte tag, are exact:
+
+```text
+type:    0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22
+bytes:  13  7  7  9  9 13  7  9  9  9  1  9  7  7  9 15  7 13  7  7  3  3  7
+```
+
+Client tail types `17`, `18`, `21`, and `24` carry `8`, `8`, `10`, and `11`
+opaque bytes respectively. Stream `92` validates 963 client packets with 3,869
+commands and 305 server packets with 1,441 commands; it observes every tail
+type and command tags `0/1/2/3/4/10/11/14/15`. Stream `126` validates another
+2,585 client packets with 8,189 commands and 347 server packets with 1,399
+commands. In the long corpus, 344 server object ids name players already active
+when the packet arrives and three arrive before player discovery. The fold
+therefore records that correlation without using the opaque command bodies to
+change coordinates. It emits redacted submission/broadcast events and tracks
+command, tail-type, and tail-marker distributions. The shape is exact, but the
+command fields and control/tail roles remain semantically partial.
+
 ## `58880` exchange
 
 The client sent a stable HTTP/1.1 request:
@@ -891,7 +945,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 24,999
-full, 38,027 partial, 8,074 unknown-but-lossless, and zero invalid packet
+full, 40,959 partial, 5,142 unknown-but-lossless, and zero invalid packet
 observations. The fold reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 

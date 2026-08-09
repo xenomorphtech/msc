@@ -27,6 +27,8 @@ from .packets import (
     InventoryModification,
     ItemPickupRequest,
     ItemUseRequest,
+    LifeMovementBroadcast,
+    LifeMovementSubmission,
     MobControllerChange,
     MobEnterField,
     MobHealthPercentageUpdate,
@@ -255,6 +257,20 @@ class GameplayGameState:
     remote_player_movement_commands_by_type: Counter[int] = field(
         default_factory=Counter
     )
+    life_movement_submissions: int = 0
+    life_movement_submission_commands: int = 0
+    life_movement_submission_commands_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    life_movement_tail_types: Counter[int] = field(default_factory=Counter)
+    life_movement_tail_markers: Counter[int] = field(default_factory=Counter)
+    life_movement_broadcasts: int = 0
+    life_movement_broadcast_commands: int = 0
+    life_movement_broadcast_commands_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    life_movement_broadcasts_for_known_players: int = 0
+    life_movement_broadcasts_for_unknown_players: int = 0
     player_stat_updates: int = 0
     player_stat_updates_by_mask: Counter[int] = field(default_factory=Counter)
     player_stat_fields_updated: Counter[str] = field(default_factory=Counter)
@@ -1263,6 +1279,34 @@ class GameplayAnalysis:
                 "remote_player_movement_commands_by_type": dict(
                     self.state.remote_player_movement_commands_by_type
                 ),
+                "life_movement_submissions": (
+                    self.state.life_movement_submissions
+                ),
+                "life_movement_submission_commands": (
+                    self.state.life_movement_submission_commands
+                ),
+                "life_movement_submission_commands_by_type": dict(
+                    self.state.life_movement_submission_commands_by_type
+                ),
+                "life_movement_tail_types": dict(
+                    self.state.life_movement_tail_types
+                ),
+                "life_movement_tail_markers": dict(
+                    self.state.life_movement_tail_markers
+                ),
+                "life_movement_broadcasts": self.state.life_movement_broadcasts,
+                "life_movement_broadcast_commands": (
+                    self.state.life_movement_broadcast_commands
+                ),
+                "life_movement_broadcast_commands_by_type": dict(
+                    self.state.life_movement_broadcast_commands_by_type
+                ),
+                "life_movement_broadcasts_for_known_players": (
+                    self.state.life_movement_broadcasts_for_known_players
+                ),
+                "life_movement_broadcasts_for_unknown_players": (
+                    self.state.life_movement_broadcasts_for_unknown_players
+                ),
                 "player_stat_updates": self.state.player_stat_updates,
                 "player_stat_updates_by_mask": {
                     f"0x{mask:08x}": count
@@ -1935,6 +1979,42 @@ class GameplayStateFold:
                 issues=(
                     "pickup control, validation token, and optional proof "
                     "semantics remain neutral",
+                ),
+            )
+        if opcode == 47:
+            submission = LifeMovementSubmission.parse(payload)
+            path = submission.movement
+            self.state.life_movement_submissions += 1
+            self.state.life_movement_submission_commands += len(path.commands)
+            self.state.life_movement_submission_commands_by_type.update(
+                command.command_type for command in path.commands
+            )
+            self.state.life_movement_tail_types[submission.tail_type] += 1
+            self.state.life_movement_tail_markers[submission.tail_marker] += 1
+            details = {
+                "local_object_index": submission.local_object_index,
+                "client_token_present": True,
+                "control_value": submission.control_value,
+                **path.safe_dict(),
+                "tail_type": submission.tail_type,
+                "opaque_tail_state_bytes": len(submission.opaque_tail_state),
+                "tail_marker": submission.tail_marker,
+                "path_start_x": submission.path_start_x,
+                "path_start_y": submission.path_start_y,
+                "path_end_x": submission.path_end_x,
+                "path_end_y": submission.path_end_y,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "life_movement_submitted", details=details)
+            return self._observation(
+                frame,
+                kind="life_movement_submission",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=submission,
+                details=details,
+                issues=(
+                    "life movement command payload and control/tail roles "
+                    "remain opaque",
                 ),
             )
         if opcode == 182:
@@ -3170,6 +3250,42 @@ class GameplayStateFold:
                     else ()
                 ),
             )
+        if opcode == 217:
+            broadcast = LifeMovementBroadcast.parse(payload)
+            path = broadcast.movement
+            alias = self._alias(
+                self._player_aliases, broadcast.object_id, "player"
+            )
+            known_player = broadcast.object_id in self.state.observed_players
+            self.state.life_movement_broadcasts += 1
+            self.state.life_movement_broadcast_commands += len(path.commands)
+            self.state.life_movement_broadcast_commands_by_type.update(
+                command.command_type for command in path.commands
+            )
+            if known_player:
+                self.state.life_movement_broadcasts_for_known_players += 1
+            else:
+                self.state.life_movement_broadcasts_for_unknown_players += 1
+            details = {
+                "entity": alias,
+                "known_player": known_player,
+                **path.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "life_movement_broadcast_received",
+                details=details,
+                identifiers={"object_id": broadcast.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="life_movement_broadcast",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=broadcast,
+                details=details,
+                issues=("life movement command payload roles remain opaque",),
+            )
         if opcode == 202:
             broadcast = PlayerMovementBroadcast.parse(payload)
             path = broadcast.movement
@@ -4197,6 +4313,18 @@ def render_gameplay_analysis(
     remote_player_movement_command_types = json.dumps(
         dict(sorted(state.remote_player_movement_commands_by_type.items()))
     )
+    life_movement_submission_command_types = json.dumps(
+        dict(sorted(state.life_movement_submission_commands_by_type.items()))
+    )
+    life_movement_broadcast_command_types = json.dumps(
+        dict(sorted(state.life_movement_broadcast_commands_by_type.items()))
+    )
+    life_movement_tail_types = json.dumps(
+        dict(sorted(state.life_movement_tail_types.items()))
+    )
+    life_movement_tail_markers = json.dumps(
+        dict(sorted(state.life_movement_tail_markers.items()))
+    )
     player_stat_masks = json.dumps(
         {
             f"0x{mask:08x}": count
@@ -4358,6 +4486,22 @@ def render_gameplay_analysis(
             f"{state.remote_player_movement_commands} "
             "remote_command_types:"
             f"{remote_player_movement_command_types}"
+        ),
+        (
+            f"life_movement=submitted:{state.life_movement_submissions} "
+            f"submission_commands:{state.life_movement_submission_commands} "
+            "submission_command_types:"
+            f"{life_movement_submission_command_types} "
+            f"tail_types:{life_movement_tail_types} "
+            f"tail_markers:{life_movement_tail_markers} "
+            f"broadcasts:{state.life_movement_broadcasts} "
+            f"broadcast_commands:{state.life_movement_broadcast_commands} "
+            "broadcast_command_types:"
+            f"{life_movement_broadcast_command_types} "
+            "known_players:"
+            f"{state.life_movement_broadcasts_for_known_players} "
+            "unknown_players:"
+            f"{state.life_movement_broadcasts_for_unknown_players}"
         ),
         (
             f"movement=submitted:{state.movement_submissions} "
