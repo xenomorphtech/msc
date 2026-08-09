@@ -24,6 +24,7 @@ from maple_server.server import (  # noqa: E402
     parse_client_opcode_reply,
     parse_client_opcode_reply_delays,
     parse_client_opcode_result_rewrite,
+    parse_inventory_quantity_update,
     parse_server_opcode_byte_rewrite,
     parse_server_frame_patch,
     parse_plaintext_hex,
@@ -51,6 +52,8 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     HeartbeatProbe,
     HeartbeatResponse,
+    InventoryChangeSet,
+    InventoryModification,
     MobMovementAcknowledgement,
     MobMovementCommand,
     MobMovementPath,
@@ -375,6 +378,28 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertEqual(arguments.emit_current_hp_update, 1)
+
+    def test_replay_parser_accepts_typed_inventory_quantity_update(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--emit-inventory-quantity-update",
+                "use:15:1",
+            ]
+        )
+
+        self.assertEqual(
+            arguments.emit_inventory_quantity_update,
+            ("use", 15, 1),
+        )
+        self.assertEqual(
+            parse_inventory_quantity_update("etc:0x12:0x2"),
+            ("etc", 18, 2),
+        )
 
     def test_replay_parser_accepts_world_heartbeat_interval(self) -> None:
         arguments = build_parser().parse_args(
@@ -1025,6 +1050,84 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 runtime_protocol["player_stat_update"]["packets_sent"], 1
+            )
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+    async def test_replay_reports_inventory_quantity_packet_sent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"\x34\x12captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="inventory-quantity-source", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            update = InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.UPDATE_QUANTITY,
+                        inventory_type=2,
+                        slot=15,
+                        quantity=1,
+                    ),
+                ),
+            ).to_bytes()
+            runtime_protocol = {
+                "inventory_quantity_update": {
+                    "packets_planned": 1,
+                    "packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            post_transcript_server_frames=(update,),
+                            inventory_quantity_update_plaintext=update,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            encrypted_update = await reader.readexactly(len(update) + 4)
+            plaintext = crypt_payload(
+                encrypted_update[4:], shuffle_iv(server_iv)
+            )
+            self.assertEqual(
+                InventoryChangeSet.parse(plaintext).to_bytes(), update
+            )
+            self.assertEqual(
+                runtime_protocol["inventory_quantity_update"]["packets_sent"],
+                1,
             )
             writer.close()
             await writer.wait_closed()

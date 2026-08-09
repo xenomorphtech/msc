@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 105 tests.
+- The custom-server suite currently passes all 110 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -80,6 +80,14 @@
   independently observed active fold from `50/222` to `1/222`, kept MP/EXP and
   all other modeled state unchanged, and preserved matched heartbeats. Runtime
   status reported exactly one planned and one sent typed packet.
+- Server opcode `39` now folds typed inventory change sets. All 69 stream-`92`
+  packets round-trip: 40 quantity replacements, 16 complete-record adds, 15
+  removes, and 13 empty packets, totaling 71 modifications with zero unknown
+  slots. The final typed inventory matches stream `114`. A guarded generated
+  packet changed existing Use slot `15`, item template `2000000`, from `27` to
+  `1`; the real inventory UI and independently folded event showed `1`, all
+  counts/player state remained unchanged, and all 18 heartbeat pairs matched.
+  Runtime status reported one planned and one sent opcode-`39` packet.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -196,9 +204,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 1. Decode the captured opcode-`4` character-list inner records and generate the
    list from typed player state rather than replay bytes.
-2. Continue from the completed movement and stat folds to inventory deltas
-   that can be isolated in short captures, then correlate each request with its
-   server-side effect.
+2. Correlate the completed movement, stat, and inventory effects with isolated
+   client requests, beginning with consumable use and item pickup.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.

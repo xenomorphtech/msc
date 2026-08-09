@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 105 tests.
+The last run passed all 110 tests.
 
 ## Inspect and compare captures
 
@@ -290,6 +290,42 @@ client accepted the packet and displayed `HP 1/222`, while MP remained
 nine generated heartbeats matched in the completed transcript. This is a
 post-entry state delta, separate from rewriting the initial snapshot.
 
+## Typed inventory-quantity effect validation
+
+Opcode `39` carries inventory change sets. The decoder handles the observed
+empty, add, stack-quantity, and remove operations, reuses the initial-inventory
+stack/cash record grammar, and applies modifications to known slots. To mutate
+an existing stack after stream `114`:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --emit-inventory-quantity-update use:15:1 \
+  --post-transcript-start-delay-seconds 15 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/inventory_use15_1 \
+  --timing-scale 1 \
+  --hold-open-seconds 180
+```
+
+The planner resolves Use slot `15` to item template `2000000`, validates its
+captured quantity `27`, bounds the replacement, generates
+`2700000101020f000100`, parses it back, and publishes
+`protocol.inventory_quantity_update`. The real inventory window displayed
+quantity `1` in that slot. The completed observed transcript folded validly to
+`active`, recorded `previous_quantity:27` and `quantity:1`, retained the item
+count and player state, resolved every slot, and matched all 18 generated
+heartbeat pairs.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
@@ -439,6 +475,9 @@ project's own `README.md` for all options.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.
+- All 69 stream-`92` opcode-`39` packets now round-trip and fold 71 inventory
+  modifications. A generated Use-slot quantity update produced the predicted
+  live `27 -> 1` inventory UI and event-state effect without losing liveness.
 
 ## Next server milestone
 
@@ -446,8 +485,8 @@ Replace the remaining opaque replay portions with stateful handling:
 
 1. Decode the inner 167 bytes of each character-list response record and emit
    it from typed player state.
-2. Continue the completed stat-delta model with short, isolated inventory
-   request/effect pairs and fold item changes into game-state events.
+2. Correlate the completed server inventory effects with short, isolated
+   client request opcodes, beginning with consumable use and item pickup.
 3. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
 4. Obtain a short final-field capture with a known mob and validate the typed

@@ -222,8 +222,8 @@ is the next boundary.
    sequence still fails to produce client opcode `5`.
 3. Trace the bounded five-byte player-movement type-`3` command only if a
    controlled effect requires its semantics; the opcode-`41` stat-delta
-   grammar and live HP effect are complete, so prioritize isolated inventory
-   update handlers for the next state transitions.
+   grammar and opcode-`39` inventory-effect grammar are complete, so prioritize
+   isolated client request handlers for consumable use and item pickup.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory

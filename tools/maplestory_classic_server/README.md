@@ -162,6 +162,25 @@ python -m maple_server replay \
   --hold-open-seconds 300
 ```
 
+`--emit-inventory-quantity-update INVENTORY:SLOT:QUANTITY` generates one
+typed opcode-`39` stack update for an existing modeled `use`, `setup`, or
+`etc` item. The planner requires the slot to exist, preserves its item
+identity, bounds the quantity, round-trips the packet, and predicts an
+unchanged item count. For example:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --emit-inventory-quantity-update use:15:1 \
+  --post-transcript-start-delay-seconds 15 \
+  --hold-open-seconds 300
+```
+
 Validate a login capture and fold it into typed game state without printing
 account or character identifiers:
 
@@ -204,6 +223,8 @@ The gameplay fold currently models these capture-backed boundaries:
   use, setup, etc, and cash inventory lists, while the repeated 95-byte compact
   transition variant is fully bounded,
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence,
+- server opcode `39`: inventory change sets with empty, add, stack-quantity,
+  and remove operations plus lossless stack/cash item records,
 - server opcode `41`: masked player-stat deltas for the capture-observed INT,
   LUK, HP, MP, AP, EXP, and 64-bit mesos fields, plus bounded neutral flag/tail
   values,
@@ -328,6 +349,24 @@ stayed `1464`. The recorded exchange independently folded to `active`, emitted
 one `player_stats_updated` event with previous/current HP `50/1`, and matched
 every generated heartbeat. Runtime telemetry reported one planned and one sent
 opcode-`41` packet.
+
+Server opcode `39` now mutates the typed inventory instead of remaining
+unknown. Its stable prefix is a neutral byte followed by a modification count.
+Each modification has an operation, inventory type, and signed 16-bit slot.
+Observed operation `0` adds a complete item record, `1` replaces a stack's
+16-bit quantity, and `3` removes a slot. Stream `92` contains 69 packets and 71
+modifications: 40 quantity updates, 16 adds, and 15 removes; 13 packets are
+empty. The adds comprise one etc stack plus 15 cash remove/add refreshes. All
+69 packets round-trip, every mutation applies to a known slot where required,
+and the final inventory matches stream `114` with 24 Use, 18 Etc, two Setup,
+and one Cash item.
+
+A typed stream-`114` replay changed existing Use slot `15`, item template
+`2000000`, from quantity `27 -> 1`. The real inventory window displayed `1` in
+that slot. The recorded exchange independently folded the same
+previous/current quantity event, retained the item count and all player state,
+remained `active`, and matched all 18 generated heartbeat responses. Runtime
+telemetry reported exactly one planned and one sent opcode-`39` packet.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
@@ -487,6 +526,10 @@ When a post-transcript HP stat update is generated,
 `protocol.player_stat_update` reports opcode/mask/flag, field epoch,
 original/emitted/max HP, the predicted unchanged state components, and planned
 versus sent packet counts.
+When a typed stack quantity is emitted,
+`protocol.inventory_quantity_update` reports inventory, slot, item template,
+original/emitted quantity, opcode/flag, field epoch, predicted unchanged state,
+and planned versus sent packet counts.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
 planned/sent packet counts, and the predicted fold delta. When reactive mob
@@ -607,3 +650,6 @@ It intentionally cannot launch an authenticated official session.
 22. Decode masked server opcode `41` stat deltas, round-trip all 333 long-stream
     packets, generate a typed current-HP update, and confirm the predicted
     `50/222 -> 1/222` effect in the HUD, runtime telemetry, and observed fold.
+23. Decode server opcode `39` inventory change sets, fold all 71 captured
+    modifications, generate a guarded Use-slot quantity update, and confirm
+    `27 -> 1` in the real inventory UI, runtime telemetry, and observed fold.

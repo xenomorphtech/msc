@@ -1928,6 +1928,259 @@ class CharacterStatUpdate:
 
 
 @dataclass(frozen=True)
+class InventoryModification:
+    operation: int
+    inventory_type: int
+    slot: int
+    quantity: int | None = None
+    item: InitialInventoryItem | None = None
+
+    ADD = 0
+    UPDATE_QUANTITY = 1
+    REMOVE = 3
+    INVENTORY_NAMES = {
+        1: "equip",
+        2: "use",
+        3: "setup",
+        4: "etc",
+        5: "cash",
+    }
+    OPERATION_NAMES = {
+        ADD: "add",
+        UPDATE_QUANTITY: "update_quantity",
+        REMOVE: "remove",
+    }
+
+    @classmethod
+    def _parse_item(
+        cls,
+        reader: PacketReader,
+        *,
+        inventory_type: int,
+        slot: int,
+        field_prefix: str,
+    ) -> InitialInventoryItem:
+        if inventory_type not in {2, 3, 4, 5}:
+            raise PacketShapeError(
+                "inventory add record supports captured inventory types "
+                "two through five"
+            )
+        record_start = reader.offset
+        expected_record_type = 3 if inventory_type == 5 else 2
+        record_type = reader.u8(f"{field_prefix}.item.record_type")
+        if record_type != expected_record_type:
+            raise PacketShapeError(
+                f"inventory type {inventory_type} add record type is "
+                f"{record_type}, expected {expected_record_type}"
+            )
+        item_id = reader.u32(f"{field_prefix}.item.item_id")
+        cash_flag = reader.u8(f"{field_prefix}.item.cash_flag")
+        if cash_flag not in {0, 1}:
+            raise PacketShapeError(
+                f"inventory item cash flag is {cash_flag}, expected zero or one"
+            )
+        if cash_flag:
+            reader.u64(f"{field_prefix}.item.cash_id")
+        expires_at_ticks = reader.i64(
+            f"{field_prefix}.item.expires_at_ticks"
+        )
+        quantity: int | None = None
+        if inventory_type in {2, 3, 4}:
+            quantity = reader.u16(f"{field_prefix}.item.quantity")
+            reader.utf16_string(
+                f"{field_prefix}.item.owner", trailing_byte=True
+            )
+            reader.bytes(10, f"{field_prefix}.item.opaque_metadata")
+            sentinel = reader.i64(
+                f"{field_prefix}.item.sentinel_filetime_ticks"
+            )
+            if sentinel != INITIAL_ITEM_SENTINEL_TICKS:
+                raise PacketShapeError(
+                    f"inventory item sentinel is {sentinel}, expected "
+                    f"{INITIAL_ITEM_SENTINEL_TICKS}"
+                )
+            reader.u32(f"{field_prefix}.item.opaque_tail_u32")
+        else:
+            reader.utf16_string(
+                f"{field_prefix}.item.owner", trailing_byte=True
+            )
+            reader.u8(f"{field_prefix}.item.opaque_flag_1")
+            reader.u16(f"{field_prefix}.item.opaque_u16_1")
+            reader.u8(f"{field_prefix}.item.opaque_flag_2")
+            reader.i64(f"{field_prefix}.item.opaque_timestamp")
+            reader.bytes(4, f"{field_prefix}.item.opaque_metadata")
+            reader.u32(f"{field_prefix}.item.opaque_u32_1")
+            reader.u16(f"{field_prefix}.item.opaque_u16_2")
+            reader.u8(f"{field_prefix}.item.opaque_flag_3")
+            reader.u32(f"{field_prefix}.item.opaque_u32_2")
+            reader.u16(f"{field_prefix}.item.opaque_u16_3")
+            reader.u32(f"{field_prefix}.item.opaque_u32_3")
+        raw_record = reader.payload[record_start : reader.offset]
+        return InitialInventoryItem(
+            slot=slot,
+            record_type=record_type,
+            item_id=item_id,
+            cash_item=bool(cash_flag),
+            expires_at_ticks=expires_at_ticks,
+            quantity=quantity,
+            raw_record=raw_record,
+        )
+
+    @classmethod
+    def parse(
+        cls,
+        reader: PacketReader,
+        *,
+        modification_index: int,
+    ) -> "InventoryModification":
+        field = f"modifications[{modification_index}]"
+        operation = reader.u8(f"{field}.operation")
+        if operation not in cls.OPERATION_NAMES:
+            expected = ", ".join(str(value) for value in cls.OPERATION_NAMES)
+            raise PacketShapeError(
+                f"inventory operation is {operation}, expected one of {expected}"
+            )
+        inventory_type = reader.u8(f"{field}.inventory_type")
+        if inventory_type not in cls.INVENTORY_NAMES:
+            raise PacketShapeError(
+                f"inventory type is {inventory_type}, expected one through five"
+            )
+        slot = reader.i16(f"{field}.slot")
+        quantity = None
+        item = None
+        if operation == cls.UPDATE_QUANTITY:
+            if inventory_type not in {2, 3, 4}:
+                raise PacketShapeError(
+                    "inventory quantity update requires a stack inventory"
+                )
+            quantity = reader.u16(f"{field}.quantity")
+        elif operation == cls.ADD:
+            item = cls._parse_item(
+                reader,
+                inventory_type=inventory_type,
+                slot=slot,
+                field_prefix=field,
+            )
+        return cls(
+            operation=operation,
+            inventory_type=inventory_type,
+            slot=slot,
+            quantity=quantity,
+            item=item,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        details: dict[str, object] = {
+            "operation": self.OPERATION_NAMES.get(self.operation, "unknown"),
+            "inventory": self.INVENTORY_NAMES.get(
+                self.inventory_type, "unknown"
+            ),
+            "slot": self.slot,
+        }
+        if self.quantity is not None:
+            details["quantity"] = self.quantity
+        if self.item is not None:
+            details["item"] = {
+                "record_type": self.item.record_type,
+                "item_id": self.item.item_id,
+                "cash_item": self.item.cash_item,
+                "expires_at_ticks": self.item.expires_at_ticks,
+                "quantity": self.item.quantity,
+                "record_bytes": len(self.item.raw_record),
+            }
+        return details
+
+    def to_bytes(self) -> bytes:
+        if self.operation not in self.OPERATION_NAMES:
+            expected = ", ".join(str(value) for value in self.OPERATION_NAMES)
+            raise PacketShapeError(
+                f"inventory operation is {self.operation}, expected one of {expected}"
+            )
+        if self.inventory_type not in self.INVENTORY_NAMES:
+            raise PacketShapeError(
+                f"inventory type is {self.inventory_type}, expected one through five"
+            )
+        if not -0x8000 <= self.slot <= 0x7FFF:
+            raise PacketShapeError("inventory slot must fit in a signed short")
+        body = struct.pack(
+            "<BBh", self.operation, self.inventory_type, self.slot
+        )
+        if self.operation == self.UPDATE_QUANTITY:
+            if self.inventory_type not in {2, 3, 4}:
+                raise PacketShapeError(
+                    "inventory quantity update requires a stack inventory"
+                )
+            if self.quantity is None or self.item is not None:
+                raise PacketShapeError(
+                    "inventory quantity update requires quantity and no item"
+                )
+            if not 0 <= self.quantity <= 0xFFFF:
+                raise PacketShapeError(
+                    "inventory quantity must fit in an unsigned short"
+                )
+            return body + struct.pack("<H", self.quantity)
+        if self.operation == self.ADD:
+            if self.quantity is not None or self.item is None:
+                raise PacketShapeError(
+                    "inventory add requires an item and no separate quantity"
+                )
+            if self.item.slot != self.slot:
+                raise PacketShapeError(
+                    "inventory add slot does not match the item slot"
+                )
+            expected_record_type = 3 if self.inventory_type == 5 else 2
+            if self.inventory_type not in {2, 3, 4, 5}:
+                raise PacketShapeError(
+                    "inventory add record supports captured inventory types "
+                    "two through five"
+                )
+            if self.item.record_type != expected_record_type:
+                raise PacketShapeError(
+                    "inventory add item record type does not match inventory"
+                )
+            return body + self.item.to_bytes()[1:]
+        if self.quantity is not None or self.item is not None:
+            raise PacketShapeError("inventory remove has no quantity or item")
+        return body
+
+
+@dataclass(frozen=True)
+class InventoryChangeSet:
+    update_flag: int
+    modifications: tuple[InventoryModification, ...]
+    opcode: int = 39
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "InventoryChangeSet":
+        reader = PacketReader(payload, packet_name="inventory_change_set")
+        _expect_opcode(reader, 39)
+        update_flag = reader.u8("update_flag")
+        modification_count = reader.u8("modification_count")
+        modifications = tuple(
+            InventoryModification.parse(reader, modification_index=index)
+            for index in range(modification_count)
+        )
+        reader.finish()
+        return cls(update_flag=update_flag, modifications=modifications)
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.update_flag <= 0xFF:
+            raise PacketShapeError("inventory update flag must fit in one byte")
+        if len(self.modifications) > 0xFF:
+            raise PacketShapeError(
+                "inventory change set cannot contain more than 255 modifications"
+            )
+        return (
+            struct.pack(
+                "<HBB", self.opcode, self.update_flag, len(self.modifications)
+            )
+            + b"".join(
+                modification.to_bytes() for modification in self.modifications
+            )
+        )
+
+
+@dataclass(frozen=True)
 class PlayerMovementCommand:
     command_type: int
     opaque_payload: bytes

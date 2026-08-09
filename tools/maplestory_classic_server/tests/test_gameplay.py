@@ -14,6 +14,7 @@ from maple_server.gameplay import (  # noqa: E402
     analyze_gameplay_transcript,
     derive_mob_movement_acknowledgement_policy,
     plan_current_hp_stat_update,
+    plan_inventory_quantity_update,
     plan_initial_player_hp_rewrite,
     plan_final_field_npc_state_replay,
     render_gameplay_analysis,
@@ -29,8 +30,11 @@ from maple_server.packets import (  # noqa: E402
     InitialCharacterSnapshot,
     InitialFieldTrailer,
     InitialFieldSnapshot,
+    InitialInventoryItem,
     InitialInventorySnapshot,
     InitialProgressionSnapshot,
+    InventoryChangeSet,
+    InventoryModification,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -150,6 +154,62 @@ def fixture_player_movement_path() -> PlayerMovementPath:
                 duration_ms=20,
             ),
         ),
+    )
+
+
+def fixture_stack_inventory_item(
+    *, slot: int, item_id: int, quantity: int
+) -> InitialInventoryItem:
+    expires_at_ticks = 150_842_304_000_000_000
+    item_sentinel_ticks = 94_354_848_000_000_000
+    raw_record = b"".join(
+        (
+            struct.pack(
+                "<BIBqH", 2, item_id, 0, expires_at_ticks, quantity
+            ),
+            b"\x00\x00\x00",
+            b"\x00" * 10,
+            struct.pack("<qI", item_sentinel_ticks, 0),
+        )
+    )
+    return InitialInventoryItem(
+        slot=slot,
+        record_type=2,
+        item_id=item_id,
+        cash_item=False,
+        expires_at_ticks=expires_at_ticks,
+        quantity=quantity,
+        raw_record=raw_record,
+    )
+
+
+def fixture_cash_inventory_item(*, slot: int) -> InitialInventoryItem:
+    item_id = 5_000_046
+    expires_at_ticks = 150_842_304_000_000_000
+    raw_record = b"".join(
+        (
+            struct.pack(
+                "<BIBQq",
+                3,
+                item_id,
+                1,
+                123_456,
+                expires_at_ticks,
+            ),
+            b"\x00\x00\x00",
+            struct.pack("<BHBq", 1, 2, 0, 3),
+            b"\x00" * 4,
+            struct.pack("<IHBIHI", 4, 5, 0, 6, 7, 8),
+        )
+    )
+    return InitialInventoryItem(
+        slot=slot,
+        record_type=3,
+        item_id=item_id,
+        cash_item=True,
+        expires_at_ticks=expires_at_ticks,
+        quantity=None,
+        raw_record=raw_record,
     )
 
 
@@ -291,6 +351,7 @@ def fixture_gameplay_transcript(
     initial_snapshot: bool = False,
     player_movement: bool = False,
     stat_updates: bool = False,
+    inventory_changes: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -404,6 +465,31 @@ def fixture_gameplay_transcript(
                 mesos=9_001,
             ).to_bytes(),
         )
+    if inventory_changes:
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.UPDATE_QUANTITY,
+                        inventory_type=2,
+                        slot=1,
+                        quantity=5,
+                    ),
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=4,
+                        slot=2,
+                        item=fixture_stack_inventory_item(
+                            slot=2,
+                            item_id=4_010_003,
+                            quantity=1,
+                        ),
+                    ),
+                ),
+            ).to_bytes(),
+        )
     if player_movement:
         append(
             "client_to_server",
@@ -479,6 +565,70 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_inventory_change_set_round_trip(self) -> None:
+        cash_item = fixture_cash_inventory_item(slot=4)
+        changes = InventoryChangeSet(
+            update_flag=0,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.UPDATE_QUANTITY,
+                    inventory_type=2,
+                    slot=15,
+                    quantity=27,
+                ),
+                InventoryModification(
+                    operation=InventoryModification.REMOVE,
+                    inventory_type=5,
+                    slot=4,
+                ),
+                InventoryModification(
+                    operation=InventoryModification.ADD,
+                    inventory_type=5,
+                    slot=4,
+                    item=cash_item,
+                ),
+            ),
+        )
+        empty = InventoryChangeSet(update_flag=0, modifications=())
+
+        self.assertEqual(InventoryChangeSet.parse(changes.to_bytes()), changes)
+        self.assertEqual(InventoryChangeSet.parse(empty.to_bytes()), empty)
+        self.assertEqual(len(cash_item.raw_record), 58)
+        self.assertEqual(
+            changes.modifications[0].safe_dict(),
+            {
+                "operation": "update_quantity",
+                "inventory": "use",
+                "slot": 15,
+                "quantity": 27,
+            },
+        )
+        with self.assertRaisesRegex(PacketShapeError, "expected one of"):
+            InventoryModification(
+                operation=2,
+                inventory_type=2,
+                slot=1,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires quantity"):
+            InventoryModification(
+                operation=InventoryModification.UPDATE_QUANTITY,
+                inventory_type=2,
+                slot=1,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "signed short"):
+            InventoryModification(
+                operation=InventoryModification.REMOVE,
+                inventory_type=5,
+                slot=0x8000,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "unsigned short"):
+            InventoryModification(
+                operation=InventoryModification.UPDATE_QUANTITY,
+                inventory_type=2,
+                slot=1,
+                quantity=0x1_0000,
+            ).to_bytes()
+
     def test_character_stat_update_round_trip(self) -> None:
         combined = CharacterStatUpdate(
             request_flag=1,
@@ -871,6 +1021,29 @@ class GameplayStateFoldTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 0 and 222"):
             plan_current_hp_stat_update(transcript, 223)
 
+    def test_plans_typed_inventory_quantity_update(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            inventory_changes=True,
+        )
+        plan = plan_inventory_quantity_update(transcript, "use", 1, 1)
+
+        self.assertEqual(plan.inventory, "use")
+        self.assertEqual(plan.slot, 1)
+        self.assertEqual(plan.item_id, 2_000_000)
+        self.assertEqual(plan.original_quantity, 5)
+        self.assertEqual(plan.emitted_quantity, 1)
+        self.assertEqual(
+            InventoryChangeSet.parse(plan.update.to_bytes()), plan.update
+        )
+        self.assertEqual(
+            plan.safe_dict()["prediction"]["inventory_item_count_delta"], 0
+        )
+        with self.assertRaisesRegex(ValueError, "no slot 2"):
+            plan_inventory_quantity_update(transcript, "use", 2, 1)
+        with self.assertRaisesRegex(ValueError, "between 1 and 65535"):
+            plan_inventory_quantity_update(transcript, "use", 1, 0)
+
     def test_folds_initial_snapshot_character_prefix_into_player_state(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(initial_snapshot=True)
@@ -982,6 +1155,42 @@ class GameplayStateFoldTest(unittest.TestCase):
             report["state"]["player_stat_updates_by_mask"],
             {"0x00010400": 1, "0x00040000": 1},
         )
+
+    def test_folds_inventory_changes_into_item_state(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                inventory_changes=True,
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.inventory_change_packets, 1)
+        self.assertEqual(analysis.state.inventory_modifications, 2)
+        self.assertEqual(
+            analysis.state.inventory_modifications_by_operation,
+            {"update_quantity": 1, "add": 1},
+        )
+        self.assertEqual(analysis.state.inventory_update_flags, {0: 1})
+        self.assertEqual(analysis.state.inventory_unknown_slot_modifications, 0)
+        self.assertEqual(analysis.state.inventory_items["use"][0].quantity, 5)
+        self.assertEqual(len(analysis.state.inventory_items["etc"]), 1)
+        self.assertEqual(
+            analysis.state.inventory_items["etc"][0].item_id, 4_010_003
+        )
+        event = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_change_set_received"
+        )
+        self.assertEqual(event.details["applied_modifications"], 2)
+        self.assertEqual(
+            event.details["modifications"][0]["previous_quantity"], 3
+        )
+        report = analysis.safe_dict()
+        self.assertEqual(report["state"]["inventory"]["item_counts"]["etc"], 1)
+        self.assertEqual(report["state"]["inventory_modifications"], 2)
 
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())

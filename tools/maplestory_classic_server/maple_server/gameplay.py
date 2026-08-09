@@ -21,6 +21,8 @@ from .packets import (
     HeartbeatResponse,
     InitialFieldSnapshot,
     InitialInventoryItem,
+    InventoryChangeSet,
+    InventoryModification,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -72,6 +74,29 @@ class ObservedPlayerEntity:
     alias: str
     x: int
     y: int
+
+
+@dataclass(frozen=True)
+class InventoryItemEntity:
+    slot: int
+    record_type: int
+    item_id: int
+    cash_item: bool
+    expires_at_ticks: int
+    quantity: int | None
+
+    @classmethod
+    def from_initial(
+        cls, item: InitialInventoryItem
+    ) -> "InventoryItemEntity":
+        return cls(
+            slot=item.slot,
+            record_type=item.record_type,
+            item_id=item.item_id,
+            cash_item=item.cash_item,
+            expires_at_ticks=item.expires_at_ticks,
+            quantity=item.quantity,
+        )
 
 
 @dataclass(frozen=True)
@@ -135,7 +160,7 @@ class GameplayGameState:
     player_y: int | None = None
     inventory_region_bytes: int | None = None
     progression_region_bytes: int | None = None
-    inventory_items: dict[str, tuple[InitialInventoryItem, ...]] = field(
+    inventory_items: dict[str, tuple[InventoryItemEntity, ...]] = field(
         default_factory=dict, repr=False
     )
     skill_levels: dict[int, int] = field(default_factory=dict, repr=False)
@@ -185,6 +210,14 @@ class GameplayGameState:
     player_stat_fields_updated: Counter[str] = field(default_factory=Counter)
     player_stat_request_flags: Counter[int] = field(default_factory=Counter)
     player_stat_zero_mask_updates: int = 0
+    inventory_change_packets: int = 0
+    inventory_modifications: int = 0
+    inventory_modifications_by_operation: Counter[str] = field(
+        default_factory=Counter
+    )
+    inventory_update_flags: Counter[int] = field(default_factory=Counter)
+    inventory_empty_change_packets: int = 0
+    inventory_unknown_slot_modifications: int = 0
     movement_submissions: int = 0
     movement_submissions_for_unknown_mobs: int = 0
     movement_submissions_with_unknown_template: int = 0
@@ -293,6 +326,40 @@ class CurrentHpStatUpdateReplayPlan:
                 "events_delta": 1,
                 "map_id": "unchanged",
                 "inventory": "unchanged",
+                "progression": "unchanged",
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class InventoryQuantityUpdateReplayPlan:
+    update: InventoryChangeSet = field(repr=False)
+    inventory: str
+    slot: int
+    item_id: int
+    original_quantity: int
+    emitted_quantity: int
+    field_epoch: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "opcode": self.update.opcode,
+            "update_flag": self.update.update_flag,
+            "inventory": self.inventory,
+            "slot": self.slot,
+            "item_id": self.item_id,
+            "original_quantity": self.original_quantity,
+            "emitted_quantity": self.emitted_quantity,
+            "field_epoch": self.field_epoch,
+            "prediction": {
+                "quantity": self.emitted_quantity,
+                "inventory_change_packets_delta": 1,
+                "inventory_modifications_delta": 1,
+                "inventory_item_count_delta": 0,
+                "events_delta": 1,
+                "player_stats": "unchanged",
+                "map_id": "unchanged",
                 "progression": "unchanged",
                 "phase": "unchanged",
             },
@@ -593,6 +660,20 @@ class GameplayAnalysis:
                 ),
                 "player_stat_zero_mask_updates": (
                     self.state.player_stat_zero_mask_updates
+                ),
+                "inventory_change_packets": self.state.inventory_change_packets,
+                "inventory_modifications": self.state.inventory_modifications,
+                "inventory_modifications_by_operation": dict(
+                    self.state.inventory_modifications_by_operation
+                ),
+                "inventory_update_flags": dict(
+                    self.state.inventory_update_flags
+                ),
+                "inventory_empty_change_packets": (
+                    self.state.inventory_empty_change_packets
+                ),
+                "inventory_unknown_slot_modifications": (
+                    self.state.inventory_unknown_slot_modifications
                 ),
                 "movement_submissions": self.state.movement_submissions,
                 "movement_submissions_for_unknown_mobs": (
@@ -1095,6 +1176,105 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 39:
+            change_set = InventoryChangeSet.parse(payload)
+            modification_details: list[dict[str, object]] = []
+            applied_modifications = 0
+            self.state.inventory_change_packets += 1
+            self.state.inventory_update_flags[change_set.update_flag] += 1
+            if not change_set.modifications:
+                self.state.inventory_empty_change_packets += 1
+            for modification in change_set.modifications:
+                operation_name = InventoryModification.OPERATION_NAMES[
+                    modification.operation
+                ]
+                inventory_name = InventoryModification.INVENTORY_NAMES[
+                    modification.inventory_type
+                ]
+                self.state.inventory_modifications += 1
+                self.state.inventory_modifications_by_operation[
+                    operation_name
+                ] += 1
+                items = list(self.state.inventory_items.get(inventory_name, ()))
+                existing_index = next(
+                    (
+                        index
+                        for index, item in enumerate(items)
+                        if item.slot == modification.slot
+                    ),
+                    None,
+                )
+                existing = (
+                    items[existing_index]
+                    if existing_index is not None
+                    else None
+                )
+                details = modification.safe_dict()
+                details["known_slot"] = existing is not None
+                if modification.operation == InventoryModification.ADD:
+                    if modification.item is None:
+                        raise PacketShapeError(
+                            "inventory add observation has no parsed item"
+                        )
+                    added = InventoryItemEntity.from_initial(modification.item)
+                    details["replaced_existing_slot"] = existing is not None
+                    if existing_index is None:
+                        items.append(added)
+                    else:
+                        items[existing_index] = added
+                    applied_modifications += 1
+                elif (
+                    modification.operation
+                    == InventoryModification.UPDATE_QUANTITY
+                ):
+                    if existing_index is None or existing is None:
+                        self.state.inventory_unknown_slot_modifications += 1
+                        self.warnings.append(
+                            f"inventory quantity update referenced unknown "
+                            f"{inventory_name} slot {modification.slot}"
+                        )
+                    else:
+                        details["item_id"] = existing.item_id
+                        details["previous_quantity"] = existing.quantity
+                        items[existing_index] = replace(
+                            existing, quantity=modification.quantity
+                        )
+                        applied_modifications += 1
+                else:
+                    if existing_index is None or existing is None:
+                        self.state.inventory_unknown_slot_modifications += 1
+                        self.warnings.append(
+                            f"inventory remove referenced unknown "
+                            f"{inventory_name} slot {modification.slot}"
+                        )
+                    else:
+                        details["removed_item_id"] = existing.item_id
+                        details["removed_quantity"] = existing.quantity
+                        items.pop(existing_index)
+                        applied_modifications += 1
+                self.state.inventory_items[inventory_name] = tuple(
+                    sorted(items, key=lambda item: item.slot)
+                )
+                modification_details.append(details)
+            details = {
+                "update_flag": change_set.update_flag,
+                "modification_count": len(change_set.modifications),
+                "applied_modifications": applied_modifications,
+                "modifications": modification_details,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "inventory_change_set_received", details=details)
+            return self._observation(
+                frame,
+                kind="inventory_change_set",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=change_set,
+                details=details,
+                issues=(
+                    "inventory update flag and extended item metadata roles "
+                    "remain neutral",
+                ),
+            )
         if opcode == 41:
             update = CharacterStatUpdate.parse(payload)
             changes: dict[str, dict[str, int | None]] = {}
@@ -1231,7 +1411,11 @@ class GameplayStateFold:
                     inventory.opaque_remainder
                 )
                 self.state.inventory_items = {
-                    group.name: group.items for group in inventory.groups
+                    group.name: tuple(
+                        InventoryItemEntity.from_initial(item)
+                        for item in group.items
+                    )
+                    for group in inventory.groups
                 }
                 self.state.skill_levels = dict(progression.skill_levels)
                 self.state.string_property_code_units = {
@@ -2081,6 +2265,61 @@ def plan_current_hp_stat_update(
     )
 
 
+def plan_inventory_quantity_update(
+    transcript: Transcript,
+    inventory: str,
+    slot: int,
+    quantity: int,
+) -> InventoryQuantityUpdateReplayPlan:
+    """Generate one typed stack-quantity update for an existing item."""
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    inventory_types = {"use": 2, "setup": 3, "etc": 4}
+    inventory_type = inventory_types.get(inventory)
+    if inventory_type is None:
+        raise ValueError("inventory quantity update requires use, setup, or etc")
+    if not 1 <= slot <= 0x7FFF:
+        raise ValueError("inventory slot must be between 1 and 32767")
+    if not 1 <= quantity <= 0xFFFF:
+        raise ValueError("inventory quantity must be between 1 and 65535")
+    item = next(
+        (
+            item
+            for item in analysis.state.inventory_items.get(inventory, ())
+            if item.slot == slot
+        ),
+        None,
+    )
+    if item is None:
+        raise ValueError(f"modeled {inventory} inventory has no slot {slot}")
+    if item.quantity is None:
+        raise ValueError(f"modeled {inventory} slot {slot} is not stackable")
+    update = InventoryChangeSet(
+        update_flag=0,
+        modifications=(
+            InventoryModification(
+                operation=InventoryModification.UPDATE_QUANTITY,
+                inventory_type=inventory_type,
+                slot=slot,
+                quantity=quantity,
+            ),
+        ),
+    )
+    plaintext = update.to_bytes()
+    if InventoryChangeSet.parse(plaintext) != update:
+        raise ValueError("generated inventory quantity update failed round-trip")
+    return InventoryQuantityUpdateReplayPlan(
+        update=update,
+        inventory=inventory,
+        slot=slot,
+        item_id=item.item_id,
+        original_quantity=item.quantity,
+        emitted_quantity=quantity,
+        field_epoch=analysis.state.field_epoch,
+    )
+
+
 def plan_final_field_npc_state_replay(
     transcript: Transcript,
 ) -> NpcStateReplayPlan:
@@ -2159,6 +2398,9 @@ def render_gameplay_analysis(
         },
         sort_keys=True,
     )
+    inventory_modification_operations = json.dumps(
+        dict(sorted(state.inventory_modifications_by_operation.items()))
+    )
     lines = [
         f"source={analysis.source}",
         f"valid={analysis.valid}",
@@ -2200,7 +2442,12 @@ def render_gameplay_analysis(
             "inventory="
             f"counts:{inventory_item_counts} "
             f"region_bytes:{state.inventory_region_bytes} "
-            f"progression_region_bytes:{state.progression_region_bytes}"
+            f"progression_region_bytes:{state.progression_region_bytes} "
+            f"change_packets:{state.inventory_change_packets} "
+            f"modifications:{state.inventory_modifications} "
+            f"operations:{inventory_modification_operations} "
+            f"empty_packets:{state.inventory_empty_change_packets} "
+            f"unknown_slots:{state.inventory_unknown_slot_modifications}"
         ),
         (
             f"progression=skills:{len(state.skill_levels)} "

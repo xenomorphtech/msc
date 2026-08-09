@@ -430,6 +430,50 @@ The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server
 clock without replacing the initial player-stat model.
 
+## Inventory change sets (`server 39`)
+
+The capture-validated packet grammar is:
+
+```text
+uint16 opcode = 39
+uint8  update_flag                    # observed 0; role remains neutral
+uint8  modification_count
+repeat modification_count:
+    uint8 operation
+    uint8 inventory_type              # 2 use, 3 setup, 4 etc, 5 cash
+    int16 slot
+    if operation == 0: complete item_record
+    if operation == 1: uint16 quantity
+    if operation == 3: no operation-specific body
+```
+
+Operation `0` is add, `1` is stack-quantity replacement, and `3` is remove.
+The captured add records reuse the initial-inventory grammar: types `2/3/4`
+carry a stack item record with template, cash flag/optional cash id, expiration,
+quantity, owner string, bounded metadata, sentinel timestamp, and tail; type
+`5` carries the complete cash-item variant. Reports retain only non-sensitive
+common item fields and record length while re-encoding the entire record.
+Unobserved operation `2` and equipment add records are rejected instead of
+being guessed.
+
+Stream `92` contains 69 packets and 71 modifications: `add:16`,
+`update_quantity:40`, and `remove:15`, all under update flag zero. Thirteen
+packets have an empty change list. Inventory types are `use:20`, `etc:21`, and
+`cash:30`. Fifteen cash remove/add pairs refresh slot `4`; the remaining add
+creates Etc slot `18`, item template `4010003`, quantity `1`. Every packet
+round-trips byte-for-byte, all quantity/removal operations resolve an existing
+slot, and the fold ends with Use slot `15` at `27`, 24 Use items, 18 Etc, two
+Setup, and one Cash item. Stream `114` independently validates one empty packet
+and one cash refresh pair with no unknown slots.
+
+The state-driven quantity emitter requires an existing stack item and sends a
+single operation-`1` change. A real stream-`114` client accepted generated
+plaintext `2700000101020f000100`, changing Use slot `15`, item template
+`2000000`, from `27` to `1`. The inventory UI displayed quantity `1`; the
+recorded transcript emitted the same previous/current event, preserved all
+item counts and player state, remained active, and matched all 18 generated
+heartbeats. The neutral update flag is deliberately not assigned a role.
+
 ## Character stat deltas (`server 41`)
 
 The capture-validated prefix and conditional-value grammar is:

@@ -26,6 +26,7 @@ from .gameplay import (
     plan_current_hp_stat_update,
     plan_final_field_npc_state_replay,
     plan_initial_player_hp_rewrite,
+    plan_inventory_quantity_update,
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
@@ -362,6 +363,7 @@ async def replay_connection(
     world_heartbeat_interval_seconds: float | None = None,
     npc_state_replay_plaintext: bytes | None = None,
     player_stat_update_plaintext: bytes | None = None,
+    inventory_quantity_update_plaintext: bytes | None = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
     ) = None,
@@ -425,6 +427,15 @@ async def replay_connection(
         raise ValueError(
             "player_stat_update_plaintext must be a post-transcript server frame"
         )
+    if (
+        inventory_quantity_update_plaintext is not None
+        and inventory_quantity_update_plaintext
+        not in post_transcript_server_frames
+    ):
+        raise ValueError(
+            "inventory_quantity_update_plaintext must be a post-transcript "
+            "server frame"
+        )
     previous_timestamp_ns: int | None = None
     patched_server_events = iter(
         patch_server_event_data(
@@ -467,6 +478,17 @@ async def replay_connection(
     ):
         raise TypeError(
             "runtime player_stat_update telemetry must be a dictionary"
+        )
+    inventory_quantity_update_metrics = (
+        runtime_protocol.get("inventory_quantity_update")
+        if runtime_protocol is not None
+        else None
+    )
+    if inventory_quantity_update_metrics is not None and not isinstance(
+        inventory_quantity_update_metrics, dict
+    ):
+        raise TypeError(
+            "runtime inventory_quantity_update telemetry must be a dictionary"
         )
     mob_acknowledgement_metrics = (
         runtime_protocol.get("mob_movement_acknowledgements")
@@ -534,6 +556,9 @@ async def replay_connection(
                 ),
                 "emit_current_hp_update": (
                     player_stat_update_plaintext is not None
+                ),
+                "emit_inventory_quantity_update": (
+                    inventory_quantity_update_plaintext is not None
                 ),
                 "reactive_mob_movement_acknowledgements": (
                     mob_movement_acknowledgement_policy is not None
@@ -699,6 +724,19 @@ async def replay_connection(
             ):
                 player_stat_update_metrics["packets_sent"] = (
                     int(player_stat_update_metrics.get("packets_sent", 0)) + 1
+                )
+            if (
+                inventory_quantity_update_plaintext is not None
+                and plaintext == inventory_quantity_update_plaintext
+                and inventory_quantity_update_metrics is not None
+            ):
+                inventory_quantity_update_metrics["packets_sent"] = (
+                    int(
+                        inventory_quantity_update_metrics.get(
+                            "packets_sent", 0
+                        )
+                    )
+                    + 1
                 )
 
         for plaintext in post_transcript_replies:
@@ -1110,6 +1148,32 @@ def parse_non_negative_int(specification: str) -> int:
     if value < 0:
         raise argparse.ArgumentTypeError("value cannot be negative")
     return value
+
+
+def parse_inventory_quantity_update(
+    specification: str,
+) -> tuple[str, int, int]:
+    parts = specification.split(":")
+    if len(parts) != 3 or parts[0] not in {"use", "setup", "etc"}:
+        raise argparse.ArgumentTypeError(
+            "expected INVENTORY:SLOT:QUANTITY with inventory use, setup, or etc"
+        )
+    try:
+        slot = int(parts[1], 0)
+        quantity = int(parts[2], 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "inventory slot and quantity must be integers"
+        ) from error
+    if not 1 <= slot <= 0x7FFF:
+        raise argparse.ArgumentTypeError(
+            "inventory slot must be between 1 and 32767"
+        )
+    if not 1 <= quantity <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "inventory quantity must be between 1 and 65535"
+        )
+    return parts[0], slot, quantity
 
 
 @functools.lru_cache(maxsize=8)
@@ -1646,6 +1710,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "generate one typed opcode-41 current-HP stat update after replay; "
             "requires --keep-world-open and the validated stat-update model"
+        ),
+    )
+    replay.add_argument(
+        "--emit-inventory-quantity-update",
+        type=parse_inventory_quantity_update,
+        metavar="INVENTORY:SLOT:QUANTITY",
+        help=(
+            "generate one typed opcode-39 stack-quantity update after replay; "
+            "inventory must be use, setup, or etc; requires --keep-world-open"
         ),
     )
     replay.add_argument(
@@ -2189,6 +2262,27 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "packets_planned": 1,
                 "packets_sent": 0,
             }
+        inventory_quantity_update_plan = None
+        if arguments.emit_inventory_quantity_update is not None:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--emit-inventory-quantity-update requires "
+                    "--keep-world-open"
+                )
+            inventory, slot, quantity = (
+                arguments.emit_inventory_quantity_update
+            )
+            inventory_quantity_update_plan = plan_inventory_quantity_update(
+                transcript,
+                inventory,
+                slot,
+                quantity,
+            )
+            runtime_protocol["inventory_quantity_update"] = {
+                **inventory_quantity_update_plan.safe_dict(),
+                "packets_planned": 1,
+                "packets_sent": 0,
+            }
         mob_movement_acknowledgement_policy = None
         if arguments.reactive_mob_movement_acknowledgements:
             if not arguments.keep_world_open:
@@ -2313,6 +2407,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 current_hp_stat_update_plan.update.to_bytes()
             )
             post_transcript_server_frames += (player_stat_update_plaintext,)
+        inventory_quantity_update_plaintext = None
+        if inventory_quantity_update_plan is not None:
+            inventory_quantity_update_plaintext = (
+                inventory_quantity_update_plan.update.to_bytes()
+            )
+            post_transcript_server_frames += (
+                inventory_quantity_update_plaintext,
+            )
         handler = functools.partial(
             replay_connection,
             transcript=transcript,
@@ -2346,6 +2448,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             npc_state_replay_plaintext=npc_state_replay_plaintext,
             player_stat_update_plaintext=player_stat_update_plaintext,
+            inventory_quantity_update_plaintext=(
+                inventory_quantity_update_plaintext
+            ),
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
             ),
@@ -2368,6 +2473,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 arguments.rewrite_initial_current_hp
             ),
             "emit_current_hp_update": arguments.emit_current_hp_update,
+            "emit_inventory_quantity_update": (
+                arguments.emit_inventory_quantity_update
+            ),
             "reactive_mob_movement_acknowledgements": (
                 arguments.reactive_mob_movement_acknowledgements
             ),
