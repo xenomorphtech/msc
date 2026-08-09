@@ -26,6 +26,7 @@ from maple_server.gameplay import (  # noqa: E402
 )
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
+    ClientOpcode217RecordSet,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -441,6 +442,7 @@ def fixture_gameplay_transcript(
     initial_snapshot: bool = False,
     player_movement: bool = False,
     opcode_13_messages: bool = False,
+    opcode_217_records: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
     item_use: bool = False,
@@ -893,6 +895,31 @@ def fixture_gameplay_transcript(
                 opaque_payload=b"variable-six",
             ).to_bytes(),
         )
+    if opcode_217_records:
+        append(
+            "client_to_server",
+            ClientOpcode217RecordSet(
+                opaque_prefix=b"short!",
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientOpcode217RecordSet(
+                opaque_prefix=b"prefix-000",
+                record_format=0,
+                records=(b"a" * 14, b"b" * 14),
+                opaque_trailer=b"trailer!",
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientOpcode217RecordSet(
+                opaque_prefix=b"prefix-002",
+                record_format=2,
+                records=(b"c" * 11, b"d" * 11),
+                opaque_trailer=b"trailer?",
+            ).to_bytes(),
+        )
         append(
             "client_to_server",
             Opcode13Envelope(
@@ -1277,9 +1304,43 @@ class GameplayPacketShapeTest(unittest.TestCase):
             parameter=3,
             opaque_tail=b"capture-backed-tail",
         )
+        compact_records = ClientOpcode217RecordSet(
+            opaque_prefix=b"short!",
+        )
+        format_zero_records = ClientOpcode217RecordSet(
+            opaque_prefix=b"prefix-000",
+            record_format=0,
+            records=(b"a" * 14, b"b" * 14),
+            opaque_trailer=b"trailer!",
+        )
+        format_two_records = ClientOpcode217RecordSet(
+            opaque_prefix=b"prefix-002",
+            record_format=2,
+            records=(b"c" * 11, b"d" * 11),
+            opaque_trailer=b"trailer?",
+        )
 
         self.assertEqual(FieldLoadStage.parse(stage.to_bytes()), stage)
         self.assertEqual(NpcStateUpdate.parse(update.to_bytes()), update)
+        for record_set in (
+            compact_records,
+            format_zero_records,
+            format_two_records,
+        ):
+            self.assertEqual(
+                ClientOpcode217RecordSet.parse(record_set.to_bytes()),
+                record_set,
+            )
+        self.assertEqual(len(compact_records.to_bytes()), 8)
+        self.assertEqual(len(format_zero_records.to_bytes()), 50)
+        self.assertEqual(len(format_two_records.to_bytes()), 44)
+        with self.assertRaisesRegex(PacketShapeError, "needs 14 bytes"):
+            ClientOpcode217RecordSet(
+                opaque_prefix=b"prefix-000",
+                record_format=0,
+                records=(b"short",),
+                opaque_trailer=b"trailer!",
+            ).to_bytes()
         captured_stage = bytes.fromhex(
             "9e0000000000010000002a00000001e8030000"
         )
@@ -2369,6 +2430,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             fixture_gameplay_transcript(
                 player_movement=True,
                 opcode_13_messages=True,
+                opcode_217_records=True,
             )
         )
 
@@ -2411,6 +2473,28 @@ class GameplayStateFoldTest(unittest.TestCase):
             "opcode=13 kind=client_opcode_13_message coverage=partial",
             report,
         )
+        self.assertEqual(analysis.state.client_opcode_217_packets, 3)
+        self.assertEqual(analysis.state.client_opcode_217_compact_packets, 1)
+        self.assertEqual(analysis.state.client_opcode_217_record_sets, 2)
+        self.assertEqual(analysis.state.client_opcode_217_records, 4)
+        self.assertEqual(
+            analysis.state.client_opcode_217_records_by_format,
+            {0: 2, 2: 2},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_217_record_counts,
+            {2: 2},
+        )
+        self.assertIn(
+            'client_opcode_217=packets:3 compact:1 record_sets:2 records:4 '
+            'records_by_format:{"0": 2, "2": 2} record_counts:{"2": 2}',
+            report,
+        )
+        self.assertIn(
+            "opcode=217 kind=client_opcode_217_record_set coverage=partial",
+            report,
+        )
+        self.assertNotIn("prefix-002", report)
         self.assertNotIn("variable-thirteen", report)
         self.assertNotIn("123456", report)
         self.assertIn(

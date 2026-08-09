@@ -2942,6 +2942,127 @@ class FieldDropRemoval:
 
 
 @dataclass(frozen=True)
+class ClientOpcode217RecordSet:
+    opaque_prefix: bytes
+    record_format: int | None = None
+    records: tuple[bytes, ...] = ()
+    opaque_trailer: bytes = b""
+    opcode: int = 217
+
+    _RECORD_LENGTHS = {0: 14, 2: 11}
+
+    @property
+    def variant(self) -> str:
+        return "compact" if self.record_format is None else "record_set"
+
+    @property
+    def record_count(self) -> int:
+        return len(self.records)
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode217RecordSet":
+        reader = PacketReader(payload, packet_name="client_opcode_217")
+        _expect_opcode(reader, 217)
+        if reader.remaining == 6:
+            opaque_prefix = reader.bytes(6, "opaque_compact_body")
+            reader.finish()
+            return cls(opaque_prefix=opaque_prefix)
+
+        opaque_prefix = reader.bytes(10, "opaque_prefix")
+        record_count = reader.u8("record_count")
+        if record_count == 0:
+            raise PacketShapeError(
+                "client_opcode_217.record_count is zero, expected 1..255"
+            )
+        record_format = reader.u8("record_format")
+        record_length = cls._RECORD_LENGTHS.get(record_format)
+        if record_length is None:
+            expected = ", ".join(str(value) for value in cls._RECORD_LENGTHS)
+            raise PacketShapeError(
+                f"client_opcode_217.record_format is {record_format}, "
+                f"expected one of {expected}"
+            )
+        records = tuple(
+            reader.bytes(record_length, f"records[{index}]")
+            for index in range(record_count)
+        )
+        opaque_trailer = reader.bytes(8, "opaque_trailer")
+        reader.finish()
+        return cls(
+            opaque_prefix=opaque_prefix,
+            record_format=record_format,
+            records=records,
+            opaque_trailer=opaque_trailer,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        details: dict[str, object] = {
+            "variant": self.variant,
+            "opaque_prefix_bytes": len(self.opaque_prefix),
+        }
+        if self.record_format is not None:
+            details.update(
+                {
+                    "record_count": self.record_count,
+                    "record_format": self.record_format,
+                    "record_bytes": self._RECORD_LENGTHS[self.record_format],
+                    "opaque_trailer_bytes": len(self.opaque_trailer),
+                }
+            )
+        return details
+
+    def to_bytes(self) -> bytes:
+        if self.record_format is None:
+            if len(self.opaque_prefix) != 6:
+                raise PacketShapeError(
+                    "client opcode-217 compact variant needs 6 opaque bytes"
+                )
+            if self.records or self.opaque_trailer:
+                raise PacketShapeError(
+                    "client opcode-217 compact variant cannot contain records "
+                    "or a trailer"
+                )
+            return struct.pack("<H", self.opcode) + self.opaque_prefix
+
+        if len(self.opaque_prefix) != 10:
+            raise PacketShapeError(
+                "client opcode-217 record-set prefix needs 10 opaque bytes"
+            )
+        if not self.records:
+            raise PacketShapeError(
+                "client opcode-217 record set must contain a record"
+            )
+        if len(self.records) > 255:
+            raise PacketShapeError(
+                "client opcode-217 record set cannot exceed 255 records"
+            )
+        record_length = self._RECORD_LENGTHS.get(self.record_format)
+        if record_length is None:
+            expected = ", ".join(str(value) for value in self._RECORD_LENGTHS)
+            raise PacketShapeError(
+                f"client opcode-217 record format is {self.record_format}, "
+                f"expected one of {expected}"
+            )
+        for index, record in enumerate(self.records):
+            if len(record) != record_length:
+                raise PacketShapeError(
+                    f"client opcode-217 format {self.record_format} record "
+                    f"{index} needs {record_length} bytes, got {len(record)}"
+                )
+        if len(self.opaque_trailer) != 8:
+            raise PacketShapeError(
+                "client opcode-217 record-set trailer needs 8 opaque bytes"
+            )
+        return (
+            struct.pack("<H", self.opcode)
+            + self.opaque_prefix
+            + bytes((len(self.records), self.record_format))
+            + b"".join(self.records)
+            + self.opaque_trailer
+        )
+
+
+@dataclass(frozen=True)
 class LifeMovementCommand:
     command_type: int
     opaque_payload: bytes

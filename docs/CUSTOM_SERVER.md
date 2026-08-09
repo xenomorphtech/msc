@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 24,999 observations are full, 41,929 partial, 4,172
+`--fail-on-invalid`: 24,999 observations are full, 42,866 partial, 3,235
 unknown-but-lossless, and none invalid. The 12 remaining warnings are state
 correlations, not shape failures. The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
@@ -102,7 +102,15 @@ length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
 counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
 packets across all three observed variants, all with exact round trips.
 Together, these latest modeled families leave the long-corpus totals at 24,999
-full, 41,929 partial, 4,172 unknown-but-lossless, and zero invalid.
+full, 42,866 partial, 3,235 unknown-but-lossless, and zero invalid.
+
+Client opcode `217` is modeled separately from server opcode `217`. Its 345
+compact packets are exactly eight bytes. The other 592 packets contain a
+ten-byte opaque prefix, count/format bytes, fixed records (14 bytes for format
+`0`, 11 for format `2`), and an eight-byte opaque trailer. All 937 stream-`126`
+instances round-trip and fold into safe count/format distributions. No active
+mob-id or sub-second server opcode-`219` correlation was found, so the server
+does not synthesize or replay this still-neutral client family.
 
 ## Replay the login capture locally
 
@@ -626,6 +634,9 @@ project's own `README.md` for all options.
   validates all 2,932 packets from stream `126` without a shape failure.
 - World-session opcode `13` now uses the neutral fixed/length-prefixed envelope
   decoder, accounting for all 970 long-corpus packets without exposing bodies.
+- Client opcode `217` now has bounded compact and counted-record envelopes,
+  accounting for all 937 long-corpus packets while deliberately remaining out
+  of replay until its effect semantics are established.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

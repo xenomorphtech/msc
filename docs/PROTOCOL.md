@@ -902,6 +902,44 @@ change coordinates. It emits redacted submission/broadcast events and tracks
 command, tail-type, and tail-marker distributions. The shape is exact, but the
 command fields and control/tail roles remain semantically partial.
 
+## Client opcode `217` neutral record envelope
+
+The client-to-server opcode is a separate family from the server-to-client
+life-movement opcode `217` above. It has two capture-bounded variants:
+
+```text
+compact:
+  uint16 opcode = 217
+  byte[6] opaque_body
+
+record set:
+  uint16 opcode = 217
+  byte[10] opaque_prefix
+  uint8 record_count                 # 1..255
+  uint8 record_format                # observed 0 or 2
+  repeat record_count:
+    byte[14] record                  # format 0
+    byte[11] record                  # format 2
+  byte[8] opaque_trailer
+```
+
+Stream `126` contains 937 instances. Of these, 345 are compact and 592 are
+record sets. Format `0` contributes 535 sets and 1,539 records; format `2`
+contributes 57 sets and 114 records. Observed record counts per packet are:
+
+```text
+count:    1   2  3  4  5  6  7  8  9 10 11 12 13 14
+packets: 332  71 21 18 37 40 27 22 11  1  4  5  1  2
+```
+
+Every packet parses to its exact end and re-encodes byte-for-byte. The fold
+reports compact/set totals plus format and count distributions without
+exposing opaque contents. No record-aligned little-endian 32-bit value matched
+an active mob object id, and the next server opcode `219` was always more than
+one second later. Those negative correlations are insufficient to identify an
+attack or any other effect. The custom server therefore validates this family
+but does not generate or replay it.
+
 ## `58880` exchange
 
 The client sent a stable HTTP/1.1 request:
@@ -957,7 +995,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 24,999
-full, 41,929 partial, 4,172 unknown-but-lossless, and zero invalid packet
+full, 42,866 partial, 3,235 unknown-but-lossless, and zero invalid packet
 observations. The fold reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 

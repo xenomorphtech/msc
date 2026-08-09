@@ -284,7 +284,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 24,999 full,
-41,929 partial, 4,172 unknown, and zero invalid packet observations. PCAP
+42,866 partial, 3,235 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata.
@@ -323,6 +323,9 @@ The gameplay fold currently models these capture-backed boundaries:
   neutral flag/tail values,
 - client opcode `13`: neutral fixed type-`1` and length-prefixed type-`6`/`13`
   envelopes whose bodies remain opaque and are omitted from safe reports,
+- client opcode `217`: neutral compact and counted record-set envelopes with
+  capture-bounded format-`0`/`2` record widths; opaque bytes remain redacted,
+  and no effect or replay behavior is inferred,
 - client opcode `47`: structurally exact life-movement relay with local object
   index, redacted client token, neutral control value, fixed-width command
   stream, capture-bounded tail variant, marker, and start/end coordinates,
@@ -462,6 +465,17 @@ bytes. Stream `92` has 446 type-`1`, 104 type-`6`, and five type-`13` packets;
 stream `126` has 970 type-`1` packets. Every envelope round-trips exactly. The
 fold records type/body-size distributions and emits redacted events without
 assigning a security meaning to the body.
+
+Client opcode `217` is distinct from the server-to-client life-movement opcode
+with the same number. In stream `126`, 345 packets use an exact eight-byte
+compact envelope. Another 592 carry a ten-byte opaque prefix, one-byte record
+count, one-byte format, counted fixed-width records, and an eight-byte opaque
+trailer. Format `0` uses 14-byte records (1,539 records in 535 packets), while
+format `2` uses 11-byte records (114 records in 57 packets). All 937 packets
+consume exactly and round-trip; the fold emits only variant/count/format
+distributions. No record-aligned 32-bit value matched an active mob id, and no
+following server opcode `219` occurred within one second, so this family is
+not named as an attack and is not generated or replayed.
 
 Server opcode `41` now folds stat deltas instead of remaining an unknown
 packet. The stable prefix is a one-byte request flag and 32-bit mask. Observed
@@ -864,3 +878,6 @@ It intentionally cannot launch an authenticated official session.
 29. Reuse the neutral opcode-`13` family on world sessions, add its fixed
     type-`1` envelope, and validate all 970 long-corpus instances plus the
     type-`1`/`6`/`13` variants in stream `92` without exposing their bodies.
+30. Bound both client opcode-`217` variants and their format-`0`/`2` counted
+    records, fold only safe structural distributions, and keep the family out
+    of replay until an effect correlation establishes its semantics.

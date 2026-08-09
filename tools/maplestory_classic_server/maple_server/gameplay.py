@@ -14,6 +14,7 @@ from .gamestate import (
 )
 from .packets import (
     CharacterStatUpdate,
+    ClientOpcode217RecordSet,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -365,6 +366,16 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_13_opaque_bytes: int = 0
+    client_opcode_217_packets: int = 0
+    client_opcode_217_compact_packets: int = 0
+    client_opcode_217_record_sets: int = 0
+    client_opcode_217_records: int = 0
+    client_opcode_217_records_by_format: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_217_record_counts: Counter[int] = field(
+        default_factory=Counter
+    )
     bootstrap_acknowledgements: int = 0
     pending_movements: int = 0
     termination_received: bool = False
@@ -1548,6 +1559,24 @@ class GameplayAnalysis:
                 "client_opcode_13_opaque_bytes": (
                     self.state.client_opcode_13_opaque_bytes
                 ),
+                "client_opcode_217_packets": (
+                    self.state.client_opcode_217_packets
+                ),
+                "client_opcode_217_compact_packets": (
+                    self.state.client_opcode_217_compact_packets
+                ),
+                "client_opcode_217_record_sets": (
+                    self.state.client_opcode_217_record_sets
+                ),
+                "client_opcode_217_records": (
+                    self.state.client_opcode_217_records
+                ),
+                "client_opcode_217_records_by_format": dict(
+                    self.state.client_opcode_217_records_by_format
+                ),
+                "client_opcode_217_record_counts": dict(
+                    self.state.client_opcode_217_record_counts
+                ),
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
                 ),
@@ -2212,6 +2241,40 @@ class GameplayStateFold:
                 parsed=message,
                 details=details,
                 issues=("client opcode-13 payload remains opaque",),
+            )
+        if opcode == 217:
+            record_set = ClientOpcode217RecordSet.parse(payload)
+            self.state.client_opcode_217_packets += 1
+            if record_set.record_format is None:
+                self.state.client_opcode_217_compact_packets += 1
+            else:
+                self.state.client_opcode_217_record_sets += 1
+                self.state.client_opcode_217_records += record_set.record_count
+                self.state.client_opcode_217_records_by_format[
+                    record_set.record_format
+                ] += record_set.record_count
+                self.state.client_opcode_217_record_counts[
+                    record_set.record_count
+                ] += 1
+            details = {
+                **record_set.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_217_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_217_record_set",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record_set,
+                details=details,
+                issues=(
+                    "client opcode-217 prefix, records, trailer, and effect "
+                    "semantics remain opaque",
+                ),
             )
         return self._observation(
             frame,
@@ -4378,6 +4441,12 @@ def render_gameplay_analysis(
     client_opcode_13_message_types = json.dumps(
         dict(sorted(state.client_opcode_13_messages_by_type.items()))
     )
+    client_opcode_217_record_formats = json.dumps(
+        dict(sorted(state.client_opcode_217_records_by_format.items()))
+    )
+    client_opcode_217_record_counts = json.dumps(
+        dict(sorted(state.client_opcode_217_record_counts.items()))
+    )
     player_stat_masks = json.dumps(
         {
             f"0x{mask:08x}": count
@@ -4596,6 +4665,14 @@ def render_gameplay_analysis(
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "
             f"message_types:{client_opcode_13_message_types} "
             f"opaque_bytes:{state.client_opcode_13_opaque_bytes}"
+        ),
+        (
+            f"client_opcode_217=packets:{state.client_opcode_217_packets} "
+            f"compact:{state.client_opcode_217_compact_packets} "
+            f"record_sets:{state.client_opcode_217_record_sets} "
+            f"records:{state.client_opcode_217_records} "
+            f"records_by_format:{client_opcode_217_record_formats} "
+            f"record_counts:{client_opcode_217_record_counts}"
         ),
         f"packet_shapes={json.dumps(dict(sorted(packet_counts.items())))}",
         f"events={json.dumps(dict(sorted(event_counts.items())))}",
