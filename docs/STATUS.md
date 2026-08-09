@@ -372,6 +372,15 @@ template-`100100` snail from `(785,-2677)` to the predicted `(833,-2677)` on
 foothold `635`. Its frozen transcript folds validly with one known broadcast,
 five type-`0` commands, final stance `2`, and 9/9 matched heartbeats.
 
+The caller no longer has to identify that frame. The new
+`--emit-mob-movement-auto-path X:Y:FOOTHOLD` mode filters path evidence by the
+active template and requested current-to-target displacement, then requires
+one distinct relative position/velocity/stance/duration shape. Stream `92` has
+exactly one candidate and one shape for template `100100` displacement
+`(48,0)`, so the selector chose frame `18818` automatically. A second live run
+rendered the predicted `(833,-2677)` endpoint; its independent fold has one
+five-command broadcast, no unknown mob, and 13/13 matched heartbeats.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -386,9 +395,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Generalize the proven explicit opcode-`282` path replay into a conservative
-   state-driven path selector, retaining foothold continuity and validating
-   each chosen endpoint against the independent fold.
+4. Build conservative short-path composition from the proven unique captured
+   displacement selector, validating every intermediate/final state against
+   foothold continuity and the independent real-client fold.
 
 ## Useful proof artifacts
 

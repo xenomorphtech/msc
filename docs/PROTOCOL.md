@@ -988,6 +988,21 @@ validly with one known broadcast, five type-`0` commands, final stance `2`, and
 9/9 matched heartbeats. This validates replay of a specific captured path and
 its predicted state effect; it is not yet an autonomous path-selection policy.
 
+The next layer removes the frame choice while retaining a strict capture
+boundary. Given the active template, current position, requested endpoint, and
+foothold, the server catalogs captured multi-command absolute paths with the
+dominant control prefix. It keeps only paths whose endpoint-minus-reference
+equals the requested displacement, then requires exactly one distinct relative
+position/velocity/stance/duration shape. Repeated evidence for that same shape
+is allowed; different matching shapes are an explicit ambiguity error.
+
+For template `100100` and displacement `(48,0)`, stream `92` contains exactly
+one matching path and one shape: server-direction frame `18818`. The automatic
+mode therefore generated the same predicted packet without a frame hint. The
+real client again rendered the snail at `(833,-2677)`, and the new observed
+transcript folds validly with one five-command broadcast, no unknown mob, and
+13/13 matched heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

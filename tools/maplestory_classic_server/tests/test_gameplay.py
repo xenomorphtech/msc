@@ -3640,6 +3640,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(plan.template_id, 210_100)
         self.assertEqual((plan.previous_x, plan.previous_y), (100, -200))
         self.assertEqual(plan.exact_stationary_shape_evidence, 1)
+        self.assertEqual(plan.mode, "stationary")
+        self.assertEqual(plan.matching_displacement_path_evidence, 0)
+        self.assertEqual(plan.matching_displacement_shape_evidence, 0)
         broadcast = MobMovementBroadcast.parse(plan.broadcast.to_bytes())
         self.assertEqual(
             (broadcast.reference_x, broadcast.reference_y),
@@ -3750,6 +3753,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(plan.mode, "translated_captured_path")
         self.assertEqual(plan.source_server_frame_index, source_frame)
         self.assertEqual(plan.exact_relative_motion_shape_evidence, 1)
+        self.assertEqual(plan.matching_displacement_path_evidence, 1)
+        self.assertEqual(plan.matching_displacement_shape_evidence, 1)
         self.assertEqual((plan.previous_x, plan.previous_y), (200, -200))
         broadcast = MobMovementBroadcast.parse(plan.broadcast.to_bytes())
         self.assertEqual(
@@ -3788,6 +3793,79 @@ class GameplayStateFoldTest(unittest.TestCase):
             (250, -200),
         )
         self.assertEqual(folded.state.mobs[MOB_OBJECT_ID].foothold_id, 8)
+
+        automatic_plan = plan_mob_movement_broadcast(
+            fixture_gameplay_transcript(compact_transition=True),
+            post_transcript_server_frames=(post_spawn,),
+            evidence_transcript=evidence,
+            target_x=250,
+            target_y=-200,
+            foothold_id=8,
+            auto_select_captured_path=True,
+        )
+        self.assertEqual(
+            automatic_plan.mode,
+            "auto_selected_captured_path",
+        )
+        self.assertEqual(
+            automatic_plan.source_server_frame_index,
+            source_frame,
+        )
+        self.assertEqual(
+            automatic_plan.broadcast.to_bytes(),
+            plan.broadcast.to_bytes(),
+        )
+
+        alternate_path = MobMovementBroadcast(
+            object_id=MOB_OBJECT_ID,
+            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            reference_x=100,
+            reference_y=-200,
+            commands=(
+                MobMovementCommand.absolute(
+                    position_x=125,
+                    position_y=-200,
+                    velocity_x=25,
+                    velocity_y=0,
+                    foothold_id=7,
+                    stance=2,
+                    duration_ms=600,
+                ),
+                MobMovementCommand.absolute(
+                    position_x=150,
+                    position_y=-200,
+                    velocity_x=25,
+                    velocity_y=0,
+                    foothold_id=7,
+                    stance=2,
+                    duration_ms=480,
+                ),
+            ),
+        ).to_bytes()
+        ambiguous_evidence = fixture_gameplay_transcript(
+            extra_server_plaintexts=(source_path, alternate_path)
+        )
+        with self.assertRaisesRegex(ValueError, "ambiguous relative motion"):
+            plan_mob_movement_broadcast(
+                fixture_gameplay_transcript(compact_transition=True),
+                post_transcript_server_frames=(post_spawn,),
+                evidence_transcript=ambiguous_evidence,
+                target_x=250,
+                target_y=-200,
+                foothold_id=8,
+                auto_select_captured_path=True,
+            )
+
+        with self.assertRaisesRegex(ValueError, "no multi-command path"):
+            plan_mob_movement_broadcast(
+                fixture_gameplay_transcript(compact_transition=True),
+                post_transcript_server_frames=(post_spawn,),
+                evidence_transcript=evidence,
+                target_x=251,
+                target_y=-200,
+                foothold_id=8,
+                auto_select_captured_path=True,
+            )
 
         with self.assertRaisesRegex(ValueError, "translated path reference"):
             plan_mob_movement_broadcast(

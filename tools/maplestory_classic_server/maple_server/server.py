@@ -1554,6 +1554,28 @@ def parse_mob_movement_path_target(
     return evidence_frame, position_x, position_y, foothold_id
 
 
+def parse_mob_movement_auto_path_target(
+    specification: str,
+) -> tuple[int, int, int]:
+    parts = specification.split(":")
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError(
+            "automatic mob movement path must use X:Y:FOOTHOLD"
+        )
+    position_x, position_y = parse_i16_position(":".join(parts[:2]))
+    try:
+        foothold_id = int(parts[2], 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must be an integer"
+        ) from error
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must fit in uint16"
+        )
+    return position_x, position_y, foothold_id
+
+
 def parse_inventory_quantity_update(
     specification: str,
 ) -> tuple[str, int, int]:
@@ -2344,6 +2366,16 @@ def build_parser() -> argparse.ArgumentParser:
             "--keep-world-open"
         ),
     )
+    mob_movement_emission.add_argument(
+        "--emit-mob-movement-auto-path",
+        type=parse_mob_movement_auto_path_target,
+        metavar="X:Y:FOOTHOLD",
+        help=(
+            "select the unique captured multi-command opcode-282 relative "
+            "motion shape for the active mob template/current displacement; "
+            "requires --keep-world-open"
+        ),
+    )
     replay.add_argument(
         "--reactive-mob-health-responses",
         action="store_true",
@@ -2920,6 +2952,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             arguments.reactive_mob_movement_acknowledgements
             or arguments.emit_mob_movement_broadcast is not None
             or arguments.emit_mob_movement_path is not None
+            or arguments.emit_mob_movement_auto_path is not None
         ):
             raise ValueError(
                 "mob-movement evidence options require "
@@ -3164,6 +3197,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
         if (
             arguments.emit_mob_movement_broadcast is not None
             or arguments.emit_mob_movement_path is not None
+            or arguments.emit_mob_movement_auto_path is not None
         ):
             if not arguments.keep_world_open:
                 raise ValueError(
@@ -3174,7 +3208,8 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     arguments.emit_mob_movement_broadcast
                 )
                 path_evidence_server_frame_index = None
-            else:
+                auto_select_captured_path = False
+            elif arguments.emit_mob_movement_path is not None:
                 (
                     path_evidence_server_frame_index,
                     target_x,
@@ -3182,6 +3217,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     foothold_id,
                 ) = arguments.emit_mob_movement_path
                 stance = 4
+                auto_select_captured_path = False
+            else:
+                target_x, target_y, foothold_id = (
+                    arguments.emit_mob_movement_auto_path
+                )
+                stance = 4
+                path_evidence_server_frame_index = None
+                auto_select_captured_path = True
             mob_movement_broadcast_plan = plan_mob_movement_broadcast(
                 transcript,
                 post_transcript_server_frames=(
@@ -3195,6 +3238,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 path_evidence_server_frame_index=(
                     path_evidence_server_frame_index
                 ),
+                auto_select_captured_path=auto_select_captured_path,
             )
             mob_movement_broadcast_plaintext = (
                 mob_movement_broadcast_plan.broadcast.to_bytes()
@@ -3317,6 +3361,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 arguments.emit_mob_movement_broadcast
             ),
             "emit_mob_movement_path": arguments.emit_mob_movement_path,
+            "emit_mob_movement_auto_path": (
+                arguments.emit_mob_movement_auto_path
+            ),
             "reactive_mob_health_responses": (
                 arguments.reactive_mob_health_responses
             ),

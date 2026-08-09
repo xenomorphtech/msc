@@ -758,6 +758,33 @@ one known broadcast, five type-`0` commands, and 9/9 matched heartbeats. This
 proves one selected captured path and its endpoint effect, not autonomous path
 selection.
 
+For state-driven selection, use
+`--emit-mob-movement-auto-path X:Y:FOOTHOLD`. The planner filters the evidence
+by active template, dominant prefix, multiple absolute commands, and the exact
+requested endpoint displacement. It groups candidates by relative
+position/velocity/stance/duration shape and proceeds only when one distinct
+shape remains. Thus repeated identical observations increase support, while
+two different ways to produce the same displacement are rejected as
+ambiguous. This option is mutually exclusive with both explicit movement
+emission options.
+
+The live automatic run used the same command above except for:
+
+```text
+--emit-mob-movement-auto-path '833:-2677:635'
+--transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_auto_path_visual_20260809
+```
+
+Runtime API `protocol.mob_movement_broadcast` reported mode
+`auto_selected_captured_path`, source server frame `18818`, one matching
+displacement path, one matching relative motion shape, one exact selected
+shape observation, and one planned/sent packet. The real client rendered the
+same predicted endpoint without receiving a frame selection from the caller.
+Transcript
+`generated_mob_auto_path_visual_20260809/1786290456741921955_replay_12857.jsonl`
+folds validly to `(833,-2677)`/foothold `635`/stance `2`, one known broadcast,
+five type-`0` commands, and 13/13 matched heartbeats.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client

@@ -692,6 +692,15 @@ transcript folded validly with five type-`0` commands and 9/9 matched
 heartbeats. This proves explicit replay of a captured path, not autonomous path
 selection.
 
+`--emit-mob-movement-auto-path X:Y:FOOTHOLD` removes the evidence-frame input.
+It filters the capture catalog by active template and exact
+endpoint-minus-current displacement, groups candidates by relative
+position/velocity/stance/duration shape, and refuses zero or multiple distinct
+shapes. Stream `92` has one path and one shape for template `100100` movement
+`(48,0)`, so the live selector chose frame `18818`, produced the same endpoint,
+and rendered the snail at `(833,-2677)`. The new transcript folds validly with
+five type-`0` commands and 13/13 matched heartbeats.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold
@@ -933,6 +942,8 @@ rejection. A planned placement or captured path appears under
 `protocol.mob_movement_broadcast`, including the aliased entity/template,
 previous and predicted position/foothold/stance, typed packet fields, evidence
 counts, `mode`, optional source server-frame index, and planned/sent counters.
+Automatic plans also report the number of matching displacement paths and
+distinct relative motion shapes, making the uniqueness decision inspectable.
 When reactive mob-health responses are
 enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,
