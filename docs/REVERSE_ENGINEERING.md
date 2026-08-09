@@ -214,6 +214,14 @@ and extended-property collections plus a fixed trailer. The complete initial
 packet is now structurally bounded; semantic identification of neutral fields
 is the next boundary.
 
+Client opcode `80` no longer needs a debugger trace for its primitive shape.
+All 17 stream-`92` instances are exactly `u16 opcode, u32 tick, i16 Use slot,
+u32 item template` and round-trip. Their typed state correlations establish
+same-slot quantity `-1`, red-potion HP `+50`, and blue-potion MP `+80` with
+maximum capping. The live reactive test reproduced the predicted red-potion
+`2 -> 1` and HP `50 -> 100` effects. Keep the tick role and last-item
+remove-versus-zero behavior unnamed until independent evidence resolves them.
+
 ## Next debugger work
 
 1. Locate the inner character-record parser reached from the 170-byte server
@@ -221,9 +229,10 @@ is the next boundary.
 2. Trace the two opcode-`402` branches only if the capture-faithful 2.5-second
    sequence still fails to produce client opcode `5`.
 3. Trace the bounded five-byte player-movement type-`3` command only if a
-   controlled effect requires its semantics; the opcode-`41` stat-delta
-   grammar and opcode-`39` inventory-effect grammar are complete, so prioritize
-   isolated client request handlers for consumable use and item pickup.
+   controlled effect requires its semantics; the opcode-`41` stat-delta,
+   opcode-`39` inventory-effect, and opcode-`80` consumable-use grammars are
+   complete at their evidenced boundaries, so prioritize isolated item-pickup
+   and equipment request handlers.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory

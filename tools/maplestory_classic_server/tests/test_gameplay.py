@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     analyze_gameplay_transcript,
+    derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
     plan_current_hp_stat_update,
     plan_inventory_quantity_update,
@@ -35,6 +36,7 @@ from maple_server.packets import (  # noqa: E402
     InitialProgressionSnapshot,
     InventoryChangeSet,
     InventoryModification,
+    ItemUseRequest,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -352,6 +354,7 @@ def fixture_gameplay_transcript(
     player_movement: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
+    item_use: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -490,6 +493,37 @@ def fixture_gameplay_transcript(
                 ),
             ).to_bytes(),
         )
+    if item_use:
+        append(
+            "client_to_server",
+            ItemUseRequest(
+                client_tick=102_034,
+                slot=1,
+                item_id=2_000_000,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.UPDATE_QUANTITY,
+                        inventory_type=2,
+                        slot=1,
+                        quantity=2,
+                    ),
+                ),
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            CharacterStatUpdate(
+                request_flag=1,
+                stat_mask=CharacterStatUpdate.CURRENT_HP,
+                current_hp=120,
+            ).to_bytes(),
+        )
     if player_movement:
         append(
             "client_to_server",
@@ -565,6 +599,22 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_item_use_request_round_trip(self) -> None:
+        request = ItemUseRequest(
+            client_tick=102_034,
+            slot=21,
+            item_id=2_000_014,
+        )
+
+        self.assertEqual(request.to_bytes().hex(), "5000928e010015008e841e00")
+        self.assertEqual(ItemUseRequest.parse(request.to_bytes()), request)
+        self.assertEqual(
+            request.safe_dict(),
+            {"client_tick": 102_034, "slot": 21, "item_id": 2_000_014},
+        )
+        with self.assertRaisesRegex(PacketShapeError, "between 1 and 32767"):
+            ItemUseRequest(client_tick=0, slot=0, item_id=2_000_014).to_bytes()
+
     def test_inventory_change_set_round_trip(self) -> None:
         cash_item = fixture_cash_inventory_item(slot=4)
         changes = InventoryChangeSet(
@@ -1191,6 +1241,58 @@ class GameplayStateFoldTest(unittest.TestCase):
         report = analysis.safe_dict()
         self.assertEqual(report["state"]["inventory"]["item_counts"]["etc"], 1)
         self.assertEqual(report["state"]["inventory_modifications"], 2)
+
+    def test_correlates_item_use_request_inventory_and_stat_effects(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            item_use=True,
+        )
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.item_use_requests, 1)
+        self.assertEqual(
+            analysis.state.item_use_requests_by_item, {2_000_000: 1}
+        )
+        self.assertEqual(analysis.state.item_use_inventory_matches, 1)
+        self.assertEqual(analysis.state.item_use_effect_matches, 1)
+        self.assertEqual(analysis.state.item_use_inventory_mismatches, 0)
+        self.assertEqual(analysis.state.item_use_effect_mismatches, 0)
+        self.assertEqual(analysis.state.pending_item_uses, 0)
+        self.assertEqual(analysis.state.inventory_items["use"][0].quantity, 2)
+        self.assertEqual(analysis.state.current_hp, 120)
+        request_event = next(
+            event for event in analysis.events if event.kind == "item_use_requested"
+        )
+        self.assertEqual(request_event.details["predicted_quantity"], 2)
+        self.assertEqual(request_event.details["predicted_effect_value"], 120)
+        stat_event = next(
+            event for event in analysis.events if event.kind == "player_stats_updated"
+        )
+        self.assertTrue(stat_event.details["item_use_effect"]["matches"])
+
+        policy = derive_item_use_response_policy(transcript)
+        response = policy.respond(
+            ItemUseRequest(client_tick=102_100, slot=1, item_id=2_000_000)
+        )
+        self.assertEqual(response.quantity_before, 2)
+        self.assertEqual(response.quantity_after, 1)
+        self.assertEqual(response.effect_before, 120)
+        self.assertEqual(response.effect_after, 170)
+        self.assertEqual(
+            InventoryChangeSet.parse(response.plaintexts[0]).modifications[0].quantity,
+            1,
+        )
+        self.assertEqual(
+            CharacterStatUpdate.parse(response.plaintexts[1]).current_hp, 170
+        )
+        self.assertEqual(policy.use_items[1].quantity, 1)
+        self.assertEqual(policy.current_hp, 170)
+        with self.assertRaisesRegex(ValueError, "last-item removal"):
+            policy.respond(
+                ItemUseRequest(client_tick=102_101, slot=1, item_id=2_000_000)
+            )
 
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())

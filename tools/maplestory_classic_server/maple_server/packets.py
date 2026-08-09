@@ -2181,6 +2181,46 @@ class InventoryChangeSet:
 
 
 @dataclass(frozen=True)
+class ItemUseRequest:
+    """Client request to consume one stack item from a Use-inventory slot."""
+
+    client_tick: int
+    slot: int
+    item_id: int
+    opcode: int = 80
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ItemUseRequest":
+        reader = PacketReader(payload, packet_name="item_use_request")
+        _expect_opcode(reader, 80)
+        client_tick = reader.u32("client_tick")
+        slot = reader.i16("slot")
+        item_id = reader.u32("item_id")
+        reader.finish()
+        return cls(client_tick=client_tick, slot=slot, item_id=item_id)
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "client_tick": self.client_tick,
+            "slot": self.slot,
+            "item_id": self.item_id,
+        }
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.client_tick <= 0xFFFF_FFFF:
+            raise PacketShapeError("item-use client tick must fit in u32")
+        if not 1 <= self.slot <= 0x7FFF:
+            raise PacketShapeError(
+                "item-use inventory slot must be between 1 and 32767"
+            )
+        if not 0 <= self.item_id <= 0xFFFF_FFFF:
+            raise PacketShapeError("item-use template id must fit in u32")
+        return struct.pack(
+            "<HIhI", self.opcode, self.client_tick, self.slot, self.item_id
+        )
+
+
+@dataclass(frozen=True)
 class PlayerMovementCommand:
     command_type: int
     opaque_payload: bytes

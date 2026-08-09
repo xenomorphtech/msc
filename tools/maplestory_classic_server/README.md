@@ -181,6 +181,29 @@ python -m maple_server replay \
   --hold-open-seconds 300
 ```
 
+`--reactive-item-use-responses` handles capture-validated potion requests
+during the world hold-open period. Client opcode `80` is checked against the
+current typed Use slot and template. For the two captured potion templates,
+the server emits a typed opcode-`39` quantity decrement followed by the
+captured opcode-`41` HP/MP effect, capped at the modeled maximum. The final-item
+case is rejected until its remove-versus-zero-quantity shape is captured. The
+option requires `--keep-world-open` and a positive hold duration:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --emit-inventory-quantity-update use:15:2 \
+  --post-transcript-start-delay-seconds 15 \
+  --reactive-item-use-responses \
+  --world-heartbeat-interval-seconds 10 \
+  --hold-open-seconds 300
+```
+
 Validate a login capture and fold it into typed game state without printing
 account or character identifiers:
 
@@ -225,6 +248,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence,
 - server opcode `39`: inventory change sets with empty, add, stack-quantity,
   and remove operations plus lossless stack/cash item records,
+- client opcode `80`: a 12-byte Use-item request containing client tick, signed
+  slot, and item template; the fold correlates it with the following opcode-`39`
+  quantity change and captured opcode-`41` potion effect,
 - server opcode `41`: masked player-stat deltas for the capture-observed INT,
   LUK, HP, MP, AP, EXP, and 64-bit mesos fields, plus bounded neutral flag/tail
   values,
@@ -367,6 +393,18 @@ that slot. The recorded exchange independently folded the same
 previous/current quantity event, retained the item count and all player state,
 remained `active`, and matched all 18 generated heartbeat responses. Runtime
 telemetry reported exactly one planned and one sent opcode-`39` packet.
+
+Client opcode `80` now connects the inventory and stat models into one
+request/effect chain. Stream `92` contains 17 exact 12-byte requests: 13 blue
+potions (`2000014`, Use slot `21`) and four red potions (`2000000`, Use slot
+`15`). Every request names the modeled slot template, is followed by an exact
+quantity decrement, and is followed by the captured stat effect: blue restores
+80 MP with max-MP capping, while red restores 50 HP. A live stream-`114` run
+first changed red-potion quantity `27 -> 2`; one real double-click then produced
+opcode `80`, and the reactive server emitted opcodes `39,41`. The UI and the
+independently folded transcript both showed quantity `2 -> 1` and HP
+`50/222 -> 100/222`, with one inventory match, one effect match, no pending or
+mismatched request, and all 20 heartbeat pairs matched.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
@@ -530,6 +568,10 @@ When a typed stack quantity is emitted,
 `protocol.inventory_quantity_update` reports inventory, slot, item template,
 original/emitted quantity, opcode/flag, field epoch, predicted unchanged state,
 and planned versus sent packet counts.
+When reactive item-use responses are enabled, `protocol.item_use_responses`
+reports modeled potion slots and stats, observed/served/rejected request
+counts, response packet count, last response, and the current predicted
+inventory/stat state.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
 planned/sent packet counts, and the predicted fold delta. When reactive mob
@@ -653,3 +695,6 @@ It intentionally cannot launch an authenticated official session.
 23. Decode server opcode `39` inventory change sets, fold all 71 captured
     modifications, generate a guarded Use-slot quantity update, and confirm
     `27 -> 1` in the real inventory UI, runtime telemetry, and observed fold.
+24. Decode client opcode `80`, correlate all 17 captured potion requests with
+    exact quantity/stat effects, serve the request reactively, and confirm the
+    predicted live red-potion quantity `2 -> 1` and HP `50 -> 100` effects.

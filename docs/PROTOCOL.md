@@ -474,6 +474,45 @@ recorded transcript emitted the same previous/current event, preserved all
 item counts and player state, remained active, and matched all 18 generated
 heartbeats. The neutral update flag is deliberately not assigned a role.
 
+## Consumable use (`client 80` -> `server 39`, `server 41`)
+
+The capture-validated request is exactly 12 bytes:
+
+```text
+uint16 opcode = 80
+uint32 client_tick                    # role beyond ordering remains neutral
+int16  use_slot
+uint32 item_template_id
+```
+
+Stream `92` contains 17 requests and every packet round-trips byte-for-byte.
+Thirteen name Use slot `21`, blue potion template `2000014`; four name Use slot
+`15`, red potion template `2000000`. Each request agrees with the current typed
+inventory slot/template. Each is followed by an opcode-`39` quantity update for
+the same slot and template, and all 17 quantities decrease by exactly one.
+
+Each request is also followed by the captured potion stat effect in opcode
+`41`: red potion increases current HP by 50, while blue potion increases current
+MP by 80 with max-MP capping (one observed delta is 79 because MP reaches its
+modeled maximum `342`). All 17 quantity correlations and all 17 stat-effect
+correlations match, with no unknown slots, template mismatches, or pending
+requests at capture end. Effects for other item templates and the semantic role
+of `client_tick` remain intentionally unknown.
+
+The reactive policy derives mutable inventory and HP/MP state from a validated
+world transcript. It accepts only the two evidenced potion templates, checks
+slot/template/quantity and maximum-stat bounds, and sends opcode `39` before
+opcode `41`. It conservatively rejects consuming the final item because the
+capture does not establish whether that boundary uses quantity zero or an
+operation-`3` remove.
+
+A real stream-`114` client first accepted a typed red-potion update from
+quantity `27` to `2`, then emitted opcode `80` for Use slot `15`. The generated
+responses changed the visible inventory from `2` to `1` and the HUD from HP
+`50/222` to `100/222`. The completed transcript independently folded one
+request, one matching inventory response, one matching stat effect, zero
+mismatches/pending requests, and 20 matched heartbeat pairs.
+
 ## Character stat deltas (`server 41`)
 
 The capture-validated prefix and conditional-value grammar is:

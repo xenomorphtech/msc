@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 110 tests.
+The last run passed all 114 tests.
 
 ## Inspect and compare captures
 
@@ -326,6 +326,51 @@ quantity `1` in that slot. The completed observed transcript folded validly to
 count and player state, resolved every slot, and matched all 18 generated
 heartbeat pairs.
 
+## Reactive consumable-use validation
+
+Client opcode `80` is the capture-validated Use-item request. The typed policy
+checks its signed slot and item template against current inventory state, then
+emits the observed two-packet response: opcode `39` decrements the stack and
+opcode `41` applies the captured HP/MP effect with maximum-stat capping. Only
+red potion `2000000` (`+50 HP`) and blue potion `2000014` (`+80 MP`) are enabled;
+unknown templates, mismatched/empty slots, capped stats, and the still-unknown
+last-item removal shape are rejected.
+
+The live red-potion experiment used:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --emit-inventory-quantity-update use:15:2 \
+  --post-transcript-start-delay-seconds 15 \
+  --reactive-item-use-responses \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_item_use_red \
+  --timing-scale 1 \
+  --hold-open-seconds 300
+```
+
+Stream `92` supplies 17 independent request/effect examples: 13 blue potions
+and four red potions. All 17 requests are exact 12-byte shapes, match the
+modeled Use slot/template, decrement quantity by one, and match the following
+stat effect. In the live run, the initial typed update visibly changed red
+potions `27 -> 2`; using one produced client opcode `80`. Runtime telemetry
+reported one observed/served request, zero rejections, and two response
+packets. The client displayed quantity `1` and HP `100/222`, exactly matching
+the `2 -> 1` and `50 -> 100` prediction. The completed transcript folded with
+one inventory match, one stat-effect match, zero mismatches/pending requests,
+and 20/20 matched heartbeat pairs.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
@@ -478,6 +523,10 @@ project's own `README.md` for all options.
 - All 69 stream-`92` opcode-`39` packets now round-trip and fold 71 inventory
   modifications. A generated Use-slot quantity update produced the predicted
   live `27 -> 1` inventory UI and event-state effect without losing liveness.
+- All 17 stream-`92` opcode-`80` requests now round-trip and correlate with
+  exact stack decrements plus potion stat effects. A reactive live request
+  produced the predicted red-potion `2 -> 1` and HP `50 -> 100` effects, with
+  zero mismatches and continued heartbeats.
 
 ## Next server milestone
 
@@ -485,8 +534,8 @@ Replace the remaining opaque replay portions with stateful handling:
 
 1. Decode the inner 167 bytes of each character-list response record and emit
    it from typed player state.
-2. Correlate the completed server inventory effects with short, isolated
-   client request opcodes, beginning with consumable use and item pickup.
+2. Continue client-request correlation with isolated item pickup, equipment,
+   and interaction captures; consumable use is now modeled end to end.
 3. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
 4. Obtain a short final-field capture with a known mob and validate the typed

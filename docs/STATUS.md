@@ -1,4 +1,4 @@
-# Status as of 2026-08-08
+# Status as of 2026-08-09
 
 ## Working
 
@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 110 tests.
+- The custom-server suite currently passes all 114 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -88,6 +88,15 @@
   `1`; the real inventory UI and independently folded event showed `1`, all
   counts/player state remained unchanged, and all 18 heartbeat pairs matched.
   Runtime status reported one planned and one sent opcode-`39` packet.
+- Client opcode `80` is now a typed 12-byte Use-item request and is correlated
+  with server opcode-`39` quantity and opcode-`41` potion-stat effects. All 17
+  stream-`92` requests match their modeled slot/template, quantity decrement,
+  and effect: four red potions restore 50 HP and 13 blue potions restore 80 MP
+  with max-MP capping. A reactive live request changed the visible red-potion
+  stack `2 -> 1` and HUD HP `50/222 -> 100/222`; the recorded fold reported one
+  inventory match, one effect match, zero mismatches/pending requests, and all
+  20 heartbeat pairs matched. Runtime status reported one observed/served
+  request, zero rejections, and two response packets.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -204,8 +213,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 1. Decode the captured opcode-`4` character-list inner records and generate the
    list from typed player state rather than replay bytes.
-2. Correlate the completed movement, stat, and inventory effects with isolated
-   client requests, beginning with consumable use and item pickup.
+2. Continue correlating typed effects with isolated item-pickup, equipment,
+   and interaction requests; consumable use is now modeled end to end.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.

@@ -23,6 +23,7 @@ from .packets import (
     InitialInventoryItem,
     InventoryChangeSet,
     InventoryModification,
+    ItemUseRequest,
     MobControllerChange,
     MobEnterField,
     MobLeaveField,
@@ -97,6 +98,23 @@ class InventoryItemEntity:
             expires_at_ticks=item.expires_at_ticks,
             quantity=item.quantity,
         )
+
+
+CAPTURED_ITEM_USE_EFFECTS: dict[int, tuple[str, str, int]] = {
+    2_000_000: ("current_hp", "max_hp", 50),
+    2_000_014: ("current_mp", "max_mp", 80),
+}
+
+
+@dataclass
+class PendingItemUse:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: ItemUseRequest
+    expected_quantity: int
+    effect_field: str | None
+    expected_effect_value: int | None
+    inventory_confirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -218,6 +236,15 @@ class GameplayGameState:
     inventory_update_flags: Counter[int] = field(default_factory=Counter)
     inventory_empty_change_packets: int = 0
     inventory_unknown_slot_modifications: int = 0
+    item_use_requests: int = 0
+    item_use_requests_by_item: Counter[int] = field(default_factory=Counter)
+    item_use_unknown_slots: int = 0
+    item_use_item_mismatches: int = 0
+    item_use_inventory_matches: int = 0
+    item_use_inventory_mismatches: int = 0
+    item_use_effect_matches: int = 0
+    item_use_effect_mismatches: int = 0
+    pending_item_uses: int = 0
     movement_submissions: int = 0
     movement_submissions_for_unknown_mobs: int = 0
     movement_submissions_with_unknown_template: int = 0
@@ -364,6 +391,194 @@ class InventoryQuantityUpdateReplayPlan:
                 "phase": "unchanged",
             },
         }
+
+
+@dataclass(frozen=True)
+class ItemUseResponsePlan:
+    request: ItemUseRequest
+    inventory_update: InventoryChangeSet = field(repr=False)
+    stat_update: CharacterStatUpdate = field(repr=False)
+    quantity_before: int
+    quantity_after: int
+    effect_field: str
+    effect_before: int
+    effect_after: int
+    maximum_effect_value: int
+
+    @property
+    def plaintexts(self) -> tuple[bytes, bytes]:
+        return self.inventory_update.to_bytes(), self.stat_update.to_bytes()
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "quantity_before": self.quantity_before,
+            "quantity_after": self.quantity_after,
+            "effect_field": self.effect_field,
+            "effect_before": self.effect_before,
+            "effect_after": self.effect_after,
+            "maximum_effect_value": self.maximum_effect_value,
+            "server_opcodes": [
+                self.inventory_update.opcode,
+                self.stat_update.opcode,
+            ],
+        }
+
+
+@dataclass
+class ItemUseResponsePolicy:
+    use_items: dict[int, InventoryItemEntity] = field(repr=False)
+    current_hp: int
+    max_hp: int
+    current_mp: int
+    max_mp: int
+    field_epoch: int
+    source_item_use_requests: int = 0
+    source_inventory_matches: int = 0
+    source_effect_matches: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "modeled_items": [
+                {
+                    "item_id": item.item_id,
+                    "slot": item.slot,
+                    "quantity": item.quantity,
+                    "effect_field": CAPTURED_ITEM_USE_EFFECTS.get(
+                        item.item_id, (None, None, None)
+                    )[0],
+                    "effect_amount": CAPTURED_ITEM_USE_EFFECTS.get(
+                        item.item_id, (None, None, None)
+                    )[2],
+                }
+                for item in sorted(
+                    self.use_items.values(), key=lambda candidate: candidate.slot
+                )
+                if item.item_id in CAPTURED_ITEM_USE_EFFECTS
+            ],
+            "current_hp": self.current_hp,
+            "max_hp": self.max_hp,
+            "current_mp": self.current_mp,
+            "max_mp": self.max_mp,
+            "source_evidence": {
+                "requests": self.source_item_use_requests,
+                "inventory_matches": self.source_inventory_matches,
+                "effect_matches": self.source_effect_matches,
+            },
+            "prediction": {
+                "inventory_quantity_delta": -1,
+                "server_opcodes": [39, 41],
+                "stat_effect": "captured_item_template_with_maximum_cap",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 39:
+            change_set = InventoryChangeSet.parse(plaintext)
+            for modification in change_set.modifications:
+                if modification.inventory_type != 2:
+                    continue
+                if modification.operation == InventoryModification.ADD:
+                    if modification.item is None:
+                        raise PacketShapeError(
+                            "item-use policy saw add without an item"
+                        )
+                    self.use_items[modification.slot] = (
+                        InventoryItemEntity.from_initial(modification.item)
+                    )
+                elif (
+                    modification.operation
+                    == InventoryModification.UPDATE_QUANTITY
+                ):
+                    item = self.use_items.get(modification.slot)
+                    if item is None:
+                        raise ValueError(
+                            f"item-use policy has no Use slot "
+                            f"{modification.slot}"
+                        )
+                    self.use_items[modification.slot] = replace(
+                        item, quantity=modification.quantity
+                    )
+                else:
+                    self.use_items.pop(modification.slot, None)
+        elif opcode == 41:
+            update = CharacterStatUpdate.parse(plaintext)
+            for field_name, value in update.values.items():
+                if field_name in {"current_hp", "current_mp"}:
+                    setattr(self, field_name, value)
+
+    def respond(self, request: ItemUseRequest) -> ItemUseResponsePlan:
+        item = self.use_items.get(request.slot)
+        if item is None:
+            raise ValueError(
+                f"item-use request references unknown Use slot {request.slot}"
+            )
+        if item.item_id != request.item_id:
+            raise ValueError(
+                f"item-use request template {request.item_id} does not match "
+                f"Use slot {request.slot} template {item.item_id}"
+            )
+        if item.quantity is None or item.quantity <= 0:
+            raise ValueError(
+                f"item-use request references empty Use slot {request.slot}"
+            )
+        if item.quantity == 1:
+            raise ValueError(
+                "item-use last-item removal response shape is not validated"
+            )
+        effect = CAPTURED_ITEM_USE_EFFECTS.get(request.item_id)
+        if effect is None:
+            raise ValueError(
+                f"item-use template {request.item_id} has no validated effect"
+            )
+        effect_field, maximum_field, amount = effect
+        effect_before = getattr(self, effect_field)
+        maximum_value = getattr(self, maximum_field)
+        if effect_before >= maximum_value:
+            raise ValueError(
+                f"item-use request cannot increase capped {effect_field}"
+            )
+        effect_after = min(maximum_value, effect_before + amount)
+        quantity_after = item.quantity - 1
+        inventory_update = InventoryChangeSet(
+            update_flag=0,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.UPDATE_QUANTITY,
+                    inventory_type=2,
+                    slot=request.slot,
+                    quantity=quantity_after,
+                ),
+            ),
+        )
+        stat_mask = (
+            CharacterStatUpdate.CURRENT_HP
+            if effect_field == "current_hp"
+            else CharacterStatUpdate.CURRENT_MP
+        )
+        stat_update = CharacterStatUpdate(
+            request_flag=1,
+            stat_mask=stat_mask,
+            **{effect_field: effect_after},
+        )
+        plan = ItemUseResponsePlan(
+            request=request,
+            inventory_update=inventory_update,
+            stat_update=stat_update,
+            quantity_before=item.quantity,
+            quantity_after=quantity_after,
+            effect_field=effect_field,
+            effect_before=effect_before,
+            effect_after=effect_after,
+            maximum_effect_value=maximum_value,
+        )
+        for plaintext in plan.plaintexts:
+            self.apply_server_packet(plaintext)
+        return plan
 
 
 @dataclass(frozen=True)
@@ -675,6 +890,28 @@ class GameplayAnalysis:
                 "inventory_unknown_slot_modifications": (
                     self.state.inventory_unknown_slot_modifications
                 ),
+                "item_use_requests": self.state.item_use_requests,
+                "item_use_requests_by_item": {
+                    str(item_id): count
+                    for item_id, count in sorted(
+                        self.state.item_use_requests_by_item.items()
+                    )
+                },
+                "item_use_unknown_slots": self.state.item_use_unknown_slots,
+                "item_use_item_mismatches": (
+                    self.state.item_use_item_mismatches
+                ),
+                "item_use_inventory_matches": (
+                    self.state.item_use_inventory_matches
+                ),
+                "item_use_inventory_mismatches": (
+                    self.state.item_use_inventory_mismatches
+                ),
+                "item_use_effect_matches": self.state.item_use_effect_matches,
+                "item_use_effect_mismatches": (
+                    self.state.item_use_effect_mismatches
+                ),
+                "pending_item_uses": self.state.pending_item_uses,
                 "movement_submissions": self.state.movement_submissions,
                 "movement_submissions_for_unknown_mobs": (
                     self.state.movement_submissions_for_unknown_mobs
@@ -817,6 +1054,7 @@ class GameplayStateFold:
             tuple[int, int], deque[PendingMobMovement]
         ] = {}
         self._pending_heartbeat_probes: deque[int] = deque()
+        self._pending_item_uses: deque[PendingItemUse] = deque()
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
 
@@ -1019,6 +1257,87 @@ class GameplayStateFold:
                     "field_epoch": self.state.field_epoch,
                     "stage": stage.stage,
                 },
+            )
+        if opcode == 80:
+            request = ItemUseRequest.parse(payload)
+            self.state.item_use_requests += 1
+            self.state.item_use_requests_by_item[request.item_id] += 1
+            item = next(
+                (
+                    item
+                    for item in self.state.inventory_items.get("use", ())
+                    if item.slot == request.slot
+                ),
+                None,
+            )
+            known_slot = item is not None
+            item_matches = item is not None and item.item_id == request.item_id
+            details: dict[str, object] = {
+                **request.safe_dict(),
+                "known_slot": known_slot,
+                "item_matches_slot": item_matches,
+                "field_epoch": self.state.field_epoch,
+            }
+            if item is None:
+                self.state.item_use_unknown_slots += 1
+                self.warnings.append(
+                    f"item-use request referenced unknown Use slot {request.slot}"
+                )
+            elif not item_matches:
+                self.state.item_use_item_mismatches += 1
+                self.warnings.append(
+                    f"item-use request template {request.item_id} did not match "
+                    f"Use slot {request.slot} template {item.item_id}"
+                )
+            elif item.quantity is None or item.quantity <= 0:
+                self.state.item_use_inventory_mismatches += 1
+                self.warnings.append(
+                    f"item-use request referenced non-consumable or empty "
+                    f"Use slot {request.slot}"
+                )
+            else:
+                expected_quantity = item.quantity - 1
+                details["quantity_before"] = item.quantity
+                details["predicted_quantity"] = expected_quantity
+                effect = CAPTURED_ITEM_USE_EFFECTS.get(request.item_id)
+                effect_field = None
+                expected_effect_value = None
+                if effect is not None:
+                    effect_field, maximum_field, amount = effect
+                    current_value = getattr(self.state, effect_field)
+                    maximum_value = getattr(self.state, maximum_field)
+                    details["predicted_effect_field"] = effect_field
+                    details["predicted_effect_amount"] = amount
+                    if current_value is not None and maximum_value is not None:
+                        expected_effect_value = min(
+                            maximum_value, current_value + amount
+                        )
+                        details["effect_before"] = current_value
+                        details["predicted_effect_value"] = (
+                            expected_effect_value
+                        )
+                self._pending_item_uses.append(
+                    PendingItemUse(
+                        request_frame_index=frame.index,
+                        request_timestamp_ns=frame.timestamp_ns,
+                        request=request,
+                        expected_quantity=expected_quantity,
+                        effect_field=effect_field,
+                        expected_effect_value=expected_effect_value,
+                    )
+                )
+                self.state.pending_item_uses += 1
+            self._event(frame, "item_use_requested", details=details)
+            return self._observation(
+                frame,
+                kind="item_use_request",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=request,
+                details=details,
+                issues=(
+                    "client tick semantics and item effects beyond the two "
+                    "captured potion templates remain neutral",
+                ),
             )
         if opcode == 182:
             movement = PlayerMovementSubmission.parse(payload)
@@ -1236,6 +1555,52 @@ class GameplayStateFold:
                     else:
                         details["item_id"] = existing.item_id
                         details["previous_quantity"] = existing.quantity
+                        pending_item_use = next(
+                            (
+                                pending
+                                for pending in self._pending_item_uses
+                                if not pending.inventory_confirmed
+                                and pending.request.slot == modification.slot
+                                and pending.request.item_id == existing.item_id
+                            ),
+                            None,
+                        )
+                        if pending_item_use is not None:
+                            quantity_matches = (
+                                modification.quantity
+                                == pending_item_use.expected_quantity
+                            )
+                            details["item_use_request_frame"] = (
+                                pending_item_use.request_frame_index
+                            )
+                            details["item_use_response_ms"] = round(
+                                (
+                                    frame.timestamp_ns
+                                    - pending_item_use.request_timestamp_ns
+                                )
+                                / 1e6,
+                                3,
+                            )
+                            details["item_use_quantity_matches"] = (
+                                quantity_matches
+                            )
+                            if quantity_matches:
+                                self.state.item_use_inventory_matches += 1
+                            else:
+                                self.state.item_use_inventory_mismatches += 1
+                                self.warnings.append(
+                                    f"item-use response for Use slot "
+                                    f"{modification.slot} set quantity "
+                                    f"{modification.quantity}, expected "
+                                    f"{pending_item_use.expected_quantity}"
+                                )
+                            pending_item_use.inventory_confirmed = True
+                            if (
+                                pending_item_use.effect_field is None
+                                or pending_item_use.expected_effect_value is None
+                            ):
+                                self._pending_item_uses.remove(pending_item_use)
+                                self.state.pending_item_uses -= 1
                         items[existing_index] = replace(
                             existing, quantity=modification.quantity
                         )
@@ -1286,6 +1651,55 @@ class GameplayStateFold:
                     "current": current_value,
                 }
                 self.state.player_stat_fields_updated[field_name] += 1
+            item_use_effect: dict[str, object] | None = None
+            pending_item_use = next(
+                (
+                    pending
+                    for pending in self._pending_item_uses
+                    if pending.inventory_confirmed
+                    and pending.effect_field in update.values
+                ),
+                None,
+            )
+            if pending_item_use is not None:
+                effect_field = pending_item_use.effect_field
+                if effect_field is None:
+                    raise PacketShapeError(
+                        "confirmed item-use effect has no modeled stat field"
+                    )
+                actual_value = update.values[effect_field]
+                effect_matches = (
+                    actual_value == pending_item_use.expected_effect_value
+                )
+                item_use_effect = {
+                    "request_frame": pending_item_use.request_frame_index,
+                    "item_id": pending_item_use.request.item_id,
+                    "slot": pending_item_use.request.slot,
+                    "field": effect_field,
+                    "expected": pending_item_use.expected_effect_value,
+                    "actual": actual_value,
+                    "matches": effect_matches,
+                    "response_ms": round(
+                        (
+                            frame.timestamp_ns
+                            - pending_item_use.request_timestamp_ns
+                        )
+                        / 1e6,
+                        3,
+                    ),
+                }
+                if effect_matches:
+                    self.state.item_use_effect_matches += 1
+                else:
+                    self.state.item_use_effect_mismatches += 1
+                    self.warnings.append(
+                        f"item-use response for template "
+                        f"{pending_item_use.request.item_id} set "
+                        f"{effect_field} to {actual_value}, expected "
+                        f"{pending_item_use.expected_effect_value}"
+                    )
+                self._pending_item_uses.remove(pending_item_use)
+                self.state.pending_item_uses -= 1
             self.state.player_stat_updates += 1
             self.state.player_stat_updates_by_mask[update.stat_mask] += 1
             self.state.player_stat_request_flags[update.request_flag] += 1
@@ -1303,6 +1717,8 @@ class GameplayStateFold:
                 ),
                 "field_epoch": self.state.field_epoch,
             }
+            if item_use_effect is not None:
+                details["item_use_effect"] = item_use_effect
             self._event(frame, "player_stats_updated", details=details)
             issues = [
                 "stat update request flag and final marker semantics remain neutral"
@@ -1365,6 +1781,8 @@ class GameplayStateFold:
             self.state.player_y = None
             self._pending_movements.clear()
             self.state.pending_movements = 0
+            self._pending_item_uses.clear()
+            self.state.pending_item_uses = 0
             details = {
                 "field_epoch": self.state.field_epoch,
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
@@ -2048,6 +2466,11 @@ class GameplayStateFold:
                 f"{self.state.pending_heartbeat_probes} server heartbeat "
                 "probes had no captured client response"
             )
+        if self.state.pending_item_uses:
+            self.warnings.append(
+                f"{self.state.pending_item_uses} item-use requests had no "
+                "complete captured inventory/effect response"
+            )
         if last_frame is not None and transport_closed:
             self._event(
                 last_frame,
@@ -2061,6 +2484,7 @@ class GameplayStateFold:
                     "pending_heartbeat_probes": (
                         self.state.pending_heartbeat_probes
                     ),
+                    "pending_item_uses": self.state.pending_item_uses,
                 },
             )
 
@@ -2112,6 +2536,57 @@ def analyze_gameplay_transcript(transcript: Transcript) -> GameplayAnalysis:
         transport_closed=transport_closed,
         issues=tuple(fold.issues),
         warnings=tuple(fold.warnings),
+    )
+
+
+def derive_item_use_response_policy(
+    transcript: Transcript,
+) -> ItemUseResponsePolicy:
+    """Build mutable potion-response state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if (
+        state.item_use_inventory_mismatches
+        or state.item_use_effect_mismatches
+        or state.item_use_unknown_slots
+        or state.item_use_item_mismatches
+        or state.pending_item_uses
+    ):
+        raise ValueError(
+            "world transcript has unresolved item-use request correlations"
+        )
+    stats = (state.current_hp, state.max_hp, state.current_mp, state.max_mp)
+    if any(value is None for value in stats):
+        raise ValueError("world transcript has incomplete HP/MP state")
+    use_items = {
+        item.slot: item
+        for item in state.inventory_items.get("use", ())
+    }
+    if not any(
+        item.item_id in CAPTURED_ITEM_USE_EFFECTS
+        for item in use_items.values()
+    ):
+        raise ValueError(
+            "world transcript has no Use item with a validated potion effect"
+        )
+    current_hp, max_hp, current_mp, max_mp = stats
+    assert current_hp is not None
+    assert max_hp is not None
+    assert current_mp is not None
+    assert max_mp is not None
+    return ItemUseResponsePolicy(
+        use_items=use_items,
+        current_hp=current_hp,
+        max_hp=max_hp,
+        current_mp=current_mp,
+        max_mp=max_mp,
+        field_epoch=state.field_epoch,
+        source_item_use_requests=state.item_use_requests,
+        source_inventory_matches=state.item_use_inventory_matches,
+        source_effect_matches=state.item_use_effect_matches,
     )
 
 
@@ -2448,6 +2923,16 @@ def render_gameplay_analysis(
             f"operations:{inventory_modification_operations} "
             f"empty_packets:{state.inventory_empty_change_packets} "
             f"unknown_slots:{state.inventory_unknown_slot_modifications}"
+        ),
+        (
+            f"item_use=requests:{state.item_use_requests} "
+            f"inventory_matches:{state.item_use_inventory_matches} "
+            f"inventory_mismatches:{state.item_use_inventory_mismatches} "
+            f"effect_matches:{state.item_use_effect_matches} "
+            f"effect_mismatches:{state.item_use_effect_mismatches} "
+            f"unknown_slots:{state.item_use_unknown_slots} "
+            f"item_mismatches:{state.item_use_item_mismatches} "
+            f"pending:{state.pending_item_uses}"
         ),
         (
             f"progression=skills:{len(state.skill_levels)} "
