@@ -833,7 +833,7 @@ The runtime object keeps the immutable plan/evidence fields and adds:
 protocol.mob_movement_broadcast.packets_planned
 protocol.mob_movement_broadcast.packets_sent
 protocol.mob_movement_broadcast.packets_remaining
-protocol.mob_movement_broadcast.state.phase               # planned/in_progress/complete
+protocol.mob_movement_broadcast.state.phase               # planned/planning/in_progress/complete
 protocol.mob_movement_broadcast.state.current             # x/y/foothold/stance
 protocol.mob_movement_broadcast.state.target
 protocol.mob_movement_broadcast.state.last_sent_step
@@ -853,6 +853,47 @@ broadcasts, ten type-`0` commands, final foothold `635`/stance `2`, and 10/10
 matched heartbeats. This validates both client effect and transmission-paced
 state advancement; `drain()` confirms the local write, not a client-level
 movement acknowledgement.
+
+A startup-bounded follow-up queue can now make a second movement decision from
+the transmitted state without exposing a mutation API. Repeat
+`--queue-mob-movement-composed-path MAX_STEPS:X:Y:FOOTHOLD` at most eight
+times after any initial movement-emission option. Each target remains
+unplanned until the preceding decision is complete. The connection then calls
+the existing composed-path planner with exactly the original baseline plus all
+confirmed opcode-`282` packets. Capture analysis runs in a worker thread, so
+the listener, client connection, and read-only HTTP status endpoint remain
+responsive while the next decision is being computed.
+
+The live queue proof used a one-packet automatic decision followed by a
+two-packet composed decision:
+
+```text
+--emit-mob-movement-auto-path '833:-2677:635'
+--queue-mob-movement-composed-path '2:929:-2677:635'
+--mob-movement-step-delay-seconds 10
+--transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_decision_queue_async_visual_20260809
+```
+
+After the first drained write, the API remained available in `planning` at
+`(833,-2677)`: one known packet was planned/sent, no known packet remained,
+decision 1 was complete, and `planning_decision_index` was `2`. Once the
+capture-backed worker returned, status changed to three total planned packets
+with decision 2 active and two packets remaining. It then exposed
+`in_progress (881,-2677, 2/3)` and `complete (929,-2677, 3/3)`. The queue state
+adds its eight-decision bound, total/planned/completed/remaining decision
+counts, active/planning decision indices, and the still-unplanned safe target
+list under
+`protocol.mob_movement_broadcast.state.decision_queue`.
+
+Transcript
+`generated_mob_decision_queue_async_visual_20260809/1786296459661295020_replay_12857.jsonl`
+folds validly with exact continuity
+`785 -> 833 -> 881 -> 929`, three known broadcasts, fifteen type-`0` commands,
+final foothold `635`/stance `2`, and 8/8 matched heartbeats. The first-to-second
+movement gap is 42.500916 seconds because it includes the capture fold and the
+configured ten-second pace; the second-to-third gap is 10.001710 seconds. The
+HTTP service answered throughout the planning portion. This is a fixed
+startup queue, not autonomous AI and not an HTTP command surface.
 
 ## Historical synthetic staging experiment
 

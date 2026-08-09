@@ -402,6 +402,19 @@ frame counts. The frozen transcript folds validly with the two events
 `2`, and 10/10 matched heartbeats. The scheduler retains only the confirmed
 movement prefix for a later in-process planning fold.
 
+That follow-up fold is now live. A per-connection decision queue accepts at
+most eight startup-configured composed targets and never plans one until the
+previous schedule's final packet drains. The real client first received one
+automatic path `(785,-2677) -> (833,-2677)`; only afterward did the queue plan
+the composed continuation `(833,-2677) -> (881,-2677) -> (929,-2677)` from
+the baseline-plus-confirmed prefix. Because a fresh evidence fold takes about
+32.5 seconds, it runs off the asyncio loop. The read-only API remained
+responsive throughout with `phase=planning`, one sent packet, zero currently
+planned packets remaining, and `planning_decision_index=2`; it then exposed
+three total packets and finished at `3/3`. The frozen transcript is valid with
+three broadcasts, fifteen type-`0` commands, exact continuity, and 8/8 matched
+heartbeats. The real client rendered the predicted final endpoint.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -416,10 +429,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Add a bounded in-process follow-up movement queue that invokes the existing
-   planner with the scheduler's baseline-plus-confirmed frame prefix, then
-   validate a second decision made after the first packet. Keep HTTP read-only
-   until a separate authenticated mutation design exists.
+4. Cache the immutable capture-derived movement evidence catalog so follow-up
+   planning does not repeat the observed 32.5-second fold, then drive a queued
+   target from a bounded gameplay policy rather than only startup arguments.
+   Keep HTTP read-only until a separate authenticated mutation design exists.
 
 ## Useful proof artifacts
 

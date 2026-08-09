@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     GameplayStateFold,
+    MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     MobHealthResponsePolicy,
+    MobMovementBroadcastDecisionQueue,
     MobMovementBroadcastScheduler,
     analyze_gameplay_transcript,
     derive_item_pickup_response_policy,
@@ -3926,6 +3928,123 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(complete["state"]["phase"], "complete")
         self.assertEqual(complete["state"]["next_step"], None)
         self.assertNotIn("object_id", str(complete))
+
+        decision_queue = MobMovementBroadcastDecisionQueue(
+            fixture_gameplay_transcript(compact_transition=True),
+            (automatic_plan,),
+            follow_up_targets=((2, 350, -200, 8),),
+            evidence_transcript=evidence,
+            baseline_server_frames=(post_spawn,),
+        )
+        queued = decision_queue.telemetry_dict()
+        self.assertEqual(queued["packets_planned"], 1)
+        self.assertEqual(queued["packets_sent"], 0)
+        self.assertEqual(
+            queued["state"]["decision_queue"],
+            {
+                "max_follow_up_decisions": 8,
+                "decisions_total": 2,
+                "decisions_planned": 1,
+                "decisions_completed": 0,
+                "decisions_remaining": 2,
+                "active_decision_index": 1,
+                "planning_decision_index": None,
+                "pending_targets": [
+                    {
+                        "decision_index": 2,
+                        "max_steps": 2,
+                        "x": 350,
+                        "y": -200,
+                        "foothold_id": 8,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(
+            decision_queue.next_plaintext,
+            automatic_plan.broadcast.to_bytes(),
+        )
+
+        decision_queue.confirm_sent(decision_queue.next_plaintext)
+        planning = decision_queue.telemetry_dict()
+        self.assertEqual(planning["packets_planned"], 1)
+        self.assertEqual(planning["packets_sent"], 1)
+        self.assertEqual(planning["packets_remaining"], 0)
+        self.assertEqual(planning["state"]["phase"], "planning")
+        self.assertEqual(planning["state"]["next_step"], None)
+        self.assertEqual(
+            planning["state"]["decision_queue"][
+                "planning_decision_index"
+            ],
+            2,
+        )
+        self.assertEqual(
+            decision_queue.planning_server_frames,
+            (
+                post_spawn,
+                automatic_plan.broadcast.to_bytes(),
+            ),
+        )
+
+        decision_queue.plan_next_decision()
+        replanned = decision_queue.telemetry_dict()
+        self.assertEqual(replanned["packets_planned"], 3)
+        self.assertEqual(replanned["packets_sent"], 1)
+        self.assertEqual(replanned["packets_remaining"], 2)
+        self.assertEqual(replanned["state"]["phase"], "in_progress")
+        self.assertEqual(
+            replanned["state"]["current"],
+            {
+                "x": 250,
+                "y": -200,
+                "foothold_id": 8,
+                "stance": automatic_plan.stance,
+            },
+        )
+        self.assertEqual(
+            replanned["state"]["next_step"]["decision_index"], 2
+        )
+        self.assertEqual(
+            replanned["state"]["next_step"]["predicted"]["x"], 300
+        )
+        self.assertEqual(
+            replanned["state"]["last_sent_step"]["decision_index"], 1
+        )
+        self.assertEqual(
+            (
+                decision_queue.active_schedule.steps[0].previous_x,
+                decision_queue.active_schedule.steps[0].target_x,
+            ),
+            (250, 300),
+        )
+
+        while decision_queue.next_plaintext is not None:
+            decision_queue.confirm_sent(decision_queue.next_plaintext)
+        queue_complete = decision_queue.telemetry_dict()
+        self.assertEqual(queue_complete["packets_sent"], 3)
+        self.assertEqual(queue_complete["packets_remaining"], 0)
+        self.assertEqual(queue_complete["state"]["phase"], "complete")
+        self.assertEqual(queue_complete["state"]["next_step"], None)
+        self.assertEqual(
+            queue_complete["state"]["decision_queue"][
+                "decisions_completed"
+            ],
+            2,
+        )
+        self.assertEqual(
+            queue_complete["state"]["current"]["x"], 350
+        )
+        with self.assertRaisesRegex(ValueError, "exceeds its limit"):
+            MobMovementBroadcastDecisionQueue(
+                fixture_gameplay_transcript(compact_transition=True),
+                (automatic_plan,),
+                follow_up_targets=(
+                    ((2, 350, -200, 8),)
+                    * (MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS + 1)
+                ),
+                evidence_transcript=evidence,
+                baseline_server_frames=(post_spawn,),
+            )
         sequence_fold = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
                 extra_server_plaintexts=(

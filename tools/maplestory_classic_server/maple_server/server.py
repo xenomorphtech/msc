@@ -20,10 +20,12 @@ from .gamestate import (
     render_login_analysis,
 )
 from .gameplay import (
+    MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
     MobMovementAcknowledgementPolicy,
+    MobMovementBroadcastDecisionQueue,
     MobMovementBroadcastPlan,
     MobMovementBroadcastScheduler,
     analyze_gameplay_transcript,
@@ -385,6 +387,10 @@ async def replay_connection(
     mob_movement_broadcast_plans: tuple[MobMovementBroadcastPlan, ...] = (),
     mob_movement_baseline_server_frames: tuple[bytes, ...] = (),
     mob_movement_step_delay_seconds: float | None = None,
+    mob_movement_follow_up_targets: tuple[
+        tuple[int, int, int, int], ...
+    ] = (),
+    mob_movement_evidence_transcript: Transcript | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
     item_use_response_policy: ItemUseResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
@@ -444,6 +450,14 @@ async def replay_connection(
     ):
         raise ValueError(
             "mob movement step delay requires a movement schedule"
+        )
+    if (
+        mob_movement_follow_up_targets
+        and not mob_movement_broadcast_plans
+    ):
+        raise ValueError(
+            "mob movement follow-up decisions require an initial movement "
+            "schedule"
         )
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
@@ -506,7 +520,15 @@ async def replay_connection(
             "server frame"
         )
     movement_schedule = (
-        MobMovementBroadcastScheduler(
+        MobMovementBroadcastDecisionQueue(
+            transcript,
+            mob_movement_broadcast_plans,
+            follow_up_targets=mob_movement_follow_up_targets,
+            evidence_transcript=mob_movement_evidence_transcript,
+            baseline_server_frames=mob_movement_baseline_server_frames,
+        )
+        if mob_movement_follow_up_targets
+        else MobMovementBroadcastScheduler(
             mob_movement_broadcast_plans,
             baseline_server_frames=mob_movement_baseline_server_frames,
         )
@@ -717,6 +739,20 @@ async def replay_connection(
                 "mob_movement_step_delay_seconds": (
                     mob_movement_step_delay_seconds
                 ),
+                "mob_movement_follow_up_targets": [
+                    {
+                        "max_steps": max_steps,
+                        "x": target_x,
+                        "y": target_y,
+                        "foothold_id": foothold_id,
+                    }
+                    for (
+                        max_steps,
+                        target_x,
+                        target_y,
+                        foothold_id,
+                    ) in mob_movement_follow_up_targets
+                ],
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
                 ),
@@ -859,37 +895,9 @@ async def replay_connection(
             server_iv = shuffle_iv(server_iv)
             return outgoing
 
-        post_transcript_plaintexts = (
-            tuple(pending_opcode_replies) + post_transcript_server_frames
-        )
-        movement_plaintext_start = (
-            len(pending_opcode_replies) + movement_post_transcript_start
-            if movement_post_transcript_start is not None
-            else None
-        )
-        if post_transcript_plaintexts and post_transcript_start_delay_seconds > 0:
-            await asyncio.sleep(post_transcript_start_delay_seconds)
-        for index, plaintext in enumerate(post_transcript_plaintexts):
-            if index > 0:
-                gap_index = index - 1
-                gap_delay_seconds = (
-                    post_transcript_gap_delays_seconds[gap_index]
-                    if gap_index < len(post_transcript_gap_delays_seconds)
-                    else (
-                        mob_movement_step_delay_seconds
-                        if (
-                            mob_movement_step_delay_seconds is not None
-                            and movement_plaintext_start is not None
-                            and movement_plaintext_start < index
-                            < movement_plaintext_start
-                            + len(movement_plaintexts)
-                        )
-                        else post_transcript_frame_delay_seconds
-                    )
-                )
-                if gap_delay_seconds > 0:
-                    await asyncio.sleep(gap_delay_seconds)
-            await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+        def apply_emitted_server_plaintext(
+            plaintext: bytes, *, confirm_movement: bool = False
+        ) -> None:
             if item_pickup_response_policy is not None:
                 item_pickup_response_policy.apply_server_packet(plaintext)
                 if item_pickup_metrics is not None:
@@ -916,12 +924,11 @@ async def replay_connection(
                     mob_acknowledgement_metrics["state"] = (
                         mob_movement_acknowledgement_policy.safe_dict()
                     )
-            if (
-                movement_schedule is not None
-                and movement_plaintext_start is not None
-                and movement_plaintext_start <= index
-                < movement_plaintext_start + len(movement_plaintexts)
-            ):
+            if confirm_movement:
+                if movement_schedule is None:
+                    raise RuntimeError(
+                        "cannot confirm movement without a schedule"
+                    )
                 movement_schedule.confirm_sent(plaintext)
                 if movement_broadcast_metrics is not None:
                     movement_broadcast_metrics.update(
@@ -956,6 +963,86 @@ async def replay_connection(
                     )
                     + 1
                 )
+
+        async def send_movement_follow_up_decisions() -> None:
+            if not isinstance(
+                movement_schedule, MobMovementBroadcastDecisionQueue
+            ):
+                return
+            if movement_schedule.decisions_completed == 0:
+                return
+            while not movement_schedule.complete:
+                if movement_schedule.has_unplanned_decision:
+                    await asyncio.to_thread(
+                        movement_schedule.plan_next_decision
+                    )
+                    if movement_broadcast_metrics is not None:
+                        movement_broadcast_metrics.update(
+                            movement_schedule.telemetry_dict()
+                        )
+                    continue
+                delay_seconds = (
+                    mob_movement_step_delay_seconds
+                    if mob_movement_step_delay_seconds is not None
+                    else post_transcript_frame_delay_seconds
+                )
+                if delay_seconds > 0:
+                    await asyncio.sleep(delay_seconds)
+                plaintext = movement_schedule.next_plaintext
+                if plaintext is None:
+                    raise RuntimeError(
+                        "incomplete movement decision queue has no next packet"
+                    )
+                await send_encrypted_frame(
+                    encrypt_next_server_frame(plaintext)
+                )
+                apply_emitted_server_plaintext(
+                    plaintext, confirm_movement=True
+                )
+
+        post_transcript_plaintexts = (
+            tuple(pending_opcode_replies) + post_transcript_server_frames
+        )
+        movement_plaintext_start = (
+            len(pending_opcode_replies) + movement_post_transcript_start
+            if movement_post_transcript_start is not None
+            else None
+        )
+        if post_transcript_plaintexts and post_transcript_start_delay_seconds > 0:
+            await asyncio.sleep(post_transcript_start_delay_seconds)
+        for index, plaintext in enumerate(post_transcript_plaintexts):
+            if index > 0:
+                gap_index = index - 1
+                gap_delay_seconds = (
+                    post_transcript_gap_delays_seconds[gap_index]
+                    if gap_index < len(post_transcript_gap_delays_seconds)
+                    else (
+                        mob_movement_step_delay_seconds
+                        if (
+                            mob_movement_step_delay_seconds is not None
+                            and movement_plaintext_start is not None
+                            and movement_plaintext_start < index
+                            < movement_plaintext_start
+                            + len(movement_plaintexts)
+                        )
+                        else post_transcript_frame_delay_seconds
+                    )
+                )
+                if gap_delay_seconds > 0:
+                    await asyncio.sleep(gap_delay_seconds)
+            await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+            is_movement_plaintext = (
+                movement_schedule is not None
+                and movement_plaintext_start is not None
+                and movement_plaintext_start <= index
+                < movement_plaintext_start + len(movement_plaintexts)
+            )
+            apply_emitted_server_plaintext(
+                plaintext,
+                confirm_movement=is_movement_plaintext,
+            )
+            if is_movement_plaintext:
+                await send_movement_follow_up_decisions()
 
         for plaintext in post_transcript_replies:
             if remaining_opcode_replies:
@@ -2490,6 +2577,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--queue-mob-movement-composed-path",
+        action="append",
+        default=[],
+        type=parse_mob_movement_composed_path_target,
+        metavar="MAX_STEPS:X:Y:FOOTHOLD",
+        help=(
+            "queue a composed follow-up decision after the preceding "
+            "movement schedule is transmitted; may be repeated up to "
+            f"{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS} times and requires "
+            "an initial mob-movement emission option"
+        ),
+    )
+    replay.add_argument(
         "--reactive-mob-health-responses",
         action="store_true",
         help=(
@@ -3320,6 +3420,28 @@ async def async_main(arguments: argparse.Namespace) -> None:
         mob_movement_broadcast_plans: tuple[
             MobMovementBroadcastPlan, ...
         ] = ()
+        mob_movement_follow_up_targets = tuple(
+            arguments.queue_mob_movement_composed_path
+        )
+        if (
+            mob_movement_follow_up_targets
+            and arguments.emit_mob_movement_broadcast is None
+            and arguments.emit_mob_movement_path is None
+            and arguments.emit_mob_movement_auto_path is None
+            and arguments.emit_mob_movement_composed_path is None
+        ):
+            raise ValueError(
+                "--queue-mob-movement-composed-path requires "
+                "an initial mob-movement emission option"
+            )
+        if (
+            len(mob_movement_follow_up_targets)
+            > MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS
+        ):
+            raise ValueError(
+                "--queue-mob-movement-composed-path may be repeated at "
+                f"most {MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS} times"
+            )
         mob_movement_baseline_server_frames = (
             post_transcript_server_frames
         )
@@ -3349,12 +3471,31 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     max_steps=max_steps,
                 )
                 mob_movement_broadcast_plans = sequence_plan.steps
-                movement_schedule_preview = MobMovementBroadcastScheduler(
-                    mob_movement_broadcast_plans,
-                    baseline_server_frames=(
-                        mob_movement_baseline_server_frames
-                    ),
-                )
+                if mob_movement_follow_up_targets:
+                    movement_schedule_preview = (
+                        MobMovementBroadcastDecisionQueue(
+                            transcript,
+                            mob_movement_broadcast_plans,
+                            follow_up_targets=(
+                                mob_movement_follow_up_targets
+                            ),
+                            evidence_transcript=(
+                                movement_evidence_transcript
+                            ),
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
+                else:
+                    movement_schedule_preview = (
+                        MobMovementBroadcastScheduler(
+                            mob_movement_broadcast_plans,
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
                 runtime_protocol["mob_movement_broadcast"] = {
                     **sequence_plan.safe_dict(),
                     **movement_schedule_preview.telemetry_dict(),
@@ -3400,12 +3541,31 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 mob_movement_broadcast_plans = (
                     mob_movement_broadcast_plan,
                 )
-                movement_schedule_preview = MobMovementBroadcastScheduler(
-                    mob_movement_broadcast_plans,
-                    baseline_server_frames=(
-                        mob_movement_baseline_server_frames
-                    ),
-                )
+                if mob_movement_follow_up_targets:
+                    movement_schedule_preview = (
+                        MobMovementBroadcastDecisionQueue(
+                            transcript,
+                            mob_movement_broadcast_plans,
+                            follow_up_targets=(
+                                mob_movement_follow_up_targets
+                            ),
+                            evidence_transcript=(
+                                movement_evidence_transcript
+                            ),
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
+                else:
+                    movement_schedule_preview = (
+                        MobMovementBroadcastScheduler(
+                            mob_movement_broadcast_plans,
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
                 runtime_protocol["mob_movement_broadcast"] = {
                     **mob_movement_broadcast_plan.safe_dict(),
                     **movement_schedule_preview.telemetry_dict(),
@@ -3487,6 +3647,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
             mob_movement_step_delay_seconds=(
                 arguments.mob_movement_step_delay_seconds
             ),
+            mob_movement_follow_up_targets=(
+                mob_movement_follow_up_targets
+            ),
+            mob_movement_evidence_transcript=(
+                movement_evidence_transcript
+            ),
             item_pickup_response_policy=item_pickup_response_policy,
             item_use_response_policy=item_use_response_policy,
             mob_movement_acknowledgement_policy=(
@@ -3545,6 +3711,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "emit_mob_movement_composed_path": (
                 arguments.emit_mob_movement_composed_path
+            ),
+            "queue_mob_movement_composed_path": list(
+                mob_movement_follow_up_targets
             ),
             "mob_movement_step_delay_seconds": (
                 arguments.mob_movement_step_delay_seconds

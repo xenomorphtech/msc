@@ -7,6 +7,7 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -49,6 +50,7 @@ from maple_server.gameplay import (  # noqa: E402
     MobHealthResponsePolicy,
     MobMovementAcknowledgementPolicy,
     MobMovementBroadcastPlan,
+    MobMovementBroadcastSequencePlan,
     ReactiveMobHealth,
     analyze_gameplay_transcript,
 )
@@ -649,6 +651,10 @@ class TranscriptTest(unittest.TestCase):
                 "4:881:-2677:635",
                 "--mob-movement-step-delay-seconds",
                 "0.25",
+                "--queue-mob-movement-composed-path",
+                "2:929:-2677:635",
+                "--queue-mob-movement-composed-path",
+                "2:1025:-2677:635",
             ]
         )
 
@@ -657,6 +663,10 @@ class TranscriptTest(unittest.TestCase):
             (4, 881, -2677, 635),
         )
         self.assertEqual(arguments.mob_movement_step_delay_seconds, 0.25)
+        self.assertEqual(
+            arguments.queue_mob_movement_composed_path,
+            [(2, 929, -2677, 635), (2, 1025, -2677, 635)],
+        )
         self.assertEqual(
             parse_mob_movement_composed_path_target("2:300:-200:8"),
             (2, 300, -200, 8),
@@ -2065,7 +2075,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 movement_policy.known_mob_templates[object_id], 210_100
             )
 
-    async def test_replay_paces_mob_schedule_and_advances_sent_state(
+    async def test_replay_paces_and_replans_queued_mob_decision(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2141,6 +2151,21 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             runtime_protocol = {"mob_movement_broadcast": {}}
             tasks: set[asyncio.Task[None]] = set()
+            follow_up_plan = MobMovementBroadcastSequencePlan(
+                steps=(second_plan,),
+                max_steps=2,
+                usable_displacements=1,
+                ambiguous_displacements=0,
+                shortest_sequence_count=1,
+            )
+            planner_started = threading.Event()
+            release_planner = threading.Event()
+
+            def delayed_follow_up_plan(*args, **kwargs):
+                planner_started.set()
+                if not release_planner.wait(timeout=1):
+                    raise TimeoutError("test did not release follow-up planner")
+                return follow_up_plan
 
             def accept(reader, writer) -> None:
                 tasks.add(
@@ -2152,77 +2177,123 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             strict=False,
                             post_transcript_server_frames=(
                                 first_broadcast.to_bytes(),
-                                second_broadcast.to_bytes(),
                             ),
                             mob_movement_broadcast_plans=(
                                 first_plan,
-                                second_plan,
                             ),
+                            mob_movement_follow_up_targets=(
+                                (2, 200, -200, 7),
+                            ),
+                            mob_movement_evidence_transcript=source,
                             mob_movement_step_delay_seconds=0.08,
                             runtime_protocol=runtime_protocol,
                         )
                     )
                 )
 
-            server = await asyncio.start_server(accept, "127.0.0.1", 0)
-            port = server.sockets[0].getsockname()[1]
-            reader, writer = await asyncio.open_connection("127.0.0.1", port)
-            self.assertEqual(
-                await reader.readexactly(len(greeting + captured_frame)),
-                greeting + captured_frame,
-            )
-            started = asyncio.get_running_loop().time()
-            first_wire = await reader.readexactly(
-                len(first_broadcast.to_bytes()) + 4
-            )
-            first_iv = shuffle_iv(server_iv)
-            self.assertEqual(
-                MobMovementBroadcast.parse(
-                    crypt_payload(first_wire[4:], first_iv)
-                ),
-                first_broadcast,
-            )
-            for _ in range(10):
-                if runtime_protocol["mob_movement_broadcast"].get(
-                    "packets_sent"
-                ) == 1:
-                    break
-                await asyncio.sleep(0.005)
-            in_progress = runtime_protocol["mob_movement_broadcast"]
-            self.assertEqual(in_progress["packets_sent"], 1)
-            self.assertEqual(in_progress["packets_remaining"], 1)
-            self.assertEqual(in_progress["state"]["phase"], "in_progress")
-            self.assertEqual(
-                in_progress["state"]["current"],
-                {
-                    "x": 150,
-                    "y": -200,
-                    "foothold_id": 7,
-                    "stance": 2,
-                },
-            )
-            self.assertEqual(
-                in_progress["state"]["next_step"]["step_index"], 2
-            )
+            with patch(
+                "maple_server.gameplay.plan_composed_mob_movement_broadcasts",
+                side_effect=delayed_follow_up_plan,
+            ) as planner:
+                server = await asyncio.start_server(
+                    accept, "127.0.0.1", 0
+                )
+                port = server.sockets[0].getsockname()[1]
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1", port
+                )
+                self.assertEqual(
+                    await reader.readexactly(len(greeting + captured_frame)),
+                    greeting + captured_frame,
+                )
+                started = asyncio.get_running_loop().time()
+                first_wire = await reader.readexactly(
+                    len(first_broadcast.to_bytes()) + 4
+                )
+                first_iv = shuffle_iv(server_iv)
+                self.assertEqual(
+                    MobMovementBroadcast.parse(
+                        crypt_payload(first_wire[4:], first_iv)
+                    ),
+                    first_broadcast,
+                )
+                self.assertTrue(
+                    await asyncio.to_thread(planner_started.wait, 0.5)
+                )
+                await asyncio.sleep(0.01)
+                planning = runtime_protocol["mob_movement_broadcast"]
+                self.assertEqual(planning["packets_sent"], 1)
+                self.assertEqual(planning["packets_remaining"], 0)
+                self.assertEqual(planning["state"]["phase"], "planning")
+                self.assertEqual(
+                    planning["state"]["decision_queue"][
+                        "planning_decision_index"
+                    ],
+                    2,
+                )
+                release_planner.set()
+                for _ in range(10):
+                    movement_runtime = runtime_protocol[
+                        "mob_movement_broadcast"
+                    ]
+                    if movement_runtime.get("packets_planned") == 2:
+                        break
+                    await asyncio.sleep(0.005)
+                in_progress = runtime_protocol["mob_movement_broadcast"]
+                self.assertEqual(in_progress["packets_planned"], 2)
+                self.assertEqual(in_progress["packets_sent"], 1)
+                self.assertEqual(in_progress["packets_remaining"], 1)
+                self.assertEqual(
+                    in_progress["state"]["phase"], "in_progress"
+                )
+                self.assertEqual(
+                    in_progress["state"]["current"],
+                    {
+                        "x": 150,
+                        "y": -200,
+                        "foothold_id": 7,
+                        "stance": 2,
+                    },
+                )
+                self.assertEqual(
+                    in_progress["state"]["next_step"]["step_index"], 2
+                )
+                self.assertEqual(
+                    in_progress["state"]["next_step"]["decision_index"],
+                    2,
+                )
+                self.assertEqual(
+                    in_progress["state"]["decision_queue"][
+                        "decisions_planned"
+                    ],
+                    2,
+                )
+                planner.assert_called_once()
+                self.assertEqual(
+                    planner.call_args.kwargs[
+                        "post_transcript_server_frames"
+                    ],
+                    (first_broadcast.to_bytes(),),
+                )
 
-            second_wire = await reader.readexactly(
-                len(second_broadcast.to_bytes()) + 4
-            )
-            self.assertGreaterEqual(
-                asyncio.get_running_loop().time() - started,
-                0.055,
-            )
-            self.assertEqual(
-                MobMovementBroadcast.parse(
-                    crypt_payload(second_wire[4:], shuffle_iv(first_iv))
-                ),
-                second_broadcast,
-            )
-            writer.close()
-            await writer.wait_closed()
-            await asyncio.gather(*tasks)
-            server.close()
-            await server.wait_closed()
+                second_wire = await reader.readexactly(
+                    len(second_broadcast.to_bytes()) + 4
+                )
+                self.assertGreaterEqual(
+                    asyncio.get_running_loop().time() - started,
+                    0.055,
+                )
+                self.assertEqual(
+                    MobMovementBroadcast.parse(
+                        crypt_payload(second_wire[4:], shuffle_iv(first_iv))
+                    ),
+                    second_broadcast,
+                )
+                writer.close()
+                await writer.wait_closed()
+                await asyncio.gather(*tasks)
+                server.close()
+                await server.wait_closed()
             complete = runtime_protocol["mob_movement_broadcast"]
             self.assertEqual(complete["packets_sent"], 2)
             self.assertEqual(complete["packets_remaining"], 0)

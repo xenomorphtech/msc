@@ -722,6 +722,19 @@ The real-client proof observed `planned (785) -> in_progress (833) -> complete
 (881)` at `0/2`, `1/2`, and `2/2` packets. The folded movement events were
 10.002838 seconds apart, with ten type-`0` commands and 10/10 heartbeats.
 
+`--queue-mob-movement-composed-path MAX_STEPS:X:Y:FOOTHOLD` adds up to eight
+startup-configured follow-up decisions after any initial movement emission.
+A target is not planned until the preceding schedule's final write drains;
+the planner receives only the original baseline plus confirmed movement
+frames. Its capture fold runs through `asyncio.to_thread`, keeping the client
+and status API responsive in the explicit `planning` phase. HTTP remains
+read-only. The live proof sent an automatic path to `833`, planned a two-step
+follow-up only afterward, then sent `881` and `929`. Status progressed through
+`planning (833, 1/1 known)`, `in_progress (881, 2/3)`, and `complete (929,
+3/3)`. The independent transcript is valid with three broadcasts, fifteen
+type-`0` commands, exact position/foothold/stance continuity, and 8/8
+heartbeats.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold
@@ -968,11 +981,15 @@ distinct relative motion shapes, making the uniqueness decision inspectable.
 Composed plans additionally report their step bound, selected source-frame
 sequence, intermediate step plans, usable/ambiguous displacement counts, and
 shortest-sequence count. The parent reports planned/sent/remaining packet
-counts. Its mutable `state` reports `planned`/`in_progress`/`complete`, current
-and target position/foothold/stance, last sent and next safe step, confirmed
-movement-frame count, and the baseline-plus-confirmed frame count available to
-later planning. State changes after the socket write drains; it is not a
-client acknowledgement.
+counts. Its mutable `state` reports `planned`/`planning`/`in_progress`/
+`complete`, current and target position/foothold/stance, last sent and next
+safe step, confirmed movement-frame count, and the baseline-plus-confirmed
+frame count available to later planning. Queued runs also expose the bounded
+decision totals, planned/completed/remaining counts, active or planning
+decision index, and pending safe targets under `state.decision_queue`.
+`packets_remaining` counts only packets already planned; it is zero during a
+worker-backed `planning` phase even though an unplanned target remains. State
+changes after the socket write drains; it is not a client acknowledgement.
 When reactive mob-health responses are
 enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,

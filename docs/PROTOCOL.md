@@ -1040,6 +1040,30 @@ events are 10.002838 seconds apart and retain exact continuity:
 (881,-2677, stance 2)` on foothold `635`. The transcript remains valid with
 two broadcasts, ten type-`0` commands, and 10/10 heartbeats.
 
+The next runtime boundary is a bounded decision queue, not a new packet shape.
+Up to eight follow-up `MAX_STEPS:X:Y:FOOTHOLD` targets are fixed at startup.
+After the current schedule's last opcode `282` write drains, the queue exposes
+`planning` and invokes the same composition algorithm with the scheduler's
+original baseline plus its confirmed broadcast prefix. No untransmitted
+prediction enters that fold. The capture analysis is dispatched off the
+asyncio event loop; `GET /api/v1/status` remains responsive and no HTTP
+mutation route exists. During `planning`, the sent count includes the drained
+prefix, `packets_remaining` is zero because the next packet count is not yet
+known, and `decision_queue.planning_decision_index` identifies the pending
+decision.
+
+The real-client proof began with one automatically selected `(48,0)` packet,
+then queued a two-step composed target. Runtime state progressed
+`planned (785, 0/1) -> planning (833, 1/1 known) -> in_progress (833, 1/3) ->
+in_progress (881, 2/3) -> complete (929, 3/3)`. The independent transcript is
+valid and preserves exact foothold-`635`/stance-`2` continuity across all
+three five-command broadcasts. Its movement events occur at 14.644652,
+57.145568, and 67.147278 seconds: the 42.500916-second first gap includes
+worker-backed evidence analysis plus the ten-second movement pace, while the
+next gap is 10.001710 seconds. The final fold reports fifteen type-`0` commands
+and 8/8 matched heartbeats, and the real client rendered the snail at the
+predicted final endpoint `(929,-2677)`.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

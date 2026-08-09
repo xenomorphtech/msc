@@ -1538,6 +1538,275 @@ class MobMovementBroadcastScheduler:
         }
 
 
+MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS = 8
+
+
+@dataclass
+class MobMovementBroadcastDecisionQueue:
+    """Plan bounded follow-up decisions from transmission-confirmed state."""
+
+    transcript: Transcript = field(repr=False)
+    initial_steps: tuple[MobMovementBroadcastPlan, ...] = field(repr=False)
+    follow_up_targets: tuple[tuple[int, int, int, int], ...] = field(
+        default=(), repr=False
+    )
+    evidence_transcript: Transcript | None = field(default=None, repr=False)
+    baseline_server_frames: tuple[bytes, ...] = field(
+        default=(), repr=False
+    )
+    max_follow_up_decisions: int = MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS
+    _active_schedule: MobMovementBroadcastScheduler = field(
+        init=False, repr=False
+    )
+    _planned_follow_ups: list[MobMovementBroadcastSequencePlan] = field(
+        default_factory=list, init=False, repr=False
+    )
+    _next_follow_up_index: int = field(default=0, init=False, repr=False)
+    _decisions_completed: int = field(default=0, init=False, repr=False)
+    _packets_sent: int = field(default=0, init=False, repr=False)
+    _last_sent_step: MobMovementBroadcastPlan | None = field(
+        default=None, init=False, repr=False
+    )
+    _last_sent_decision_index: int | None = field(
+        default=None, init=False, repr=False
+    )
+    _last_sent_step_in_decision: int | None = field(
+        default=None, init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        if self.max_follow_up_decisions < 0:
+            raise ValueError(
+                "mob movement follow-up decision limit cannot be negative"
+            )
+        if len(self.follow_up_targets) > self.max_follow_up_decisions:
+            raise ValueError(
+                "mob movement follow-up decision queue exceeds its "
+                f"limit of {self.max_follow_up_decisions}"
+            )
+        for decision_index, target in enumerate(self.follow_up_targets, 2):
+            max_steps, _, _, _ = target
+            if max_steps not in range(2, 9):
+                raise ValueError(
+                    f"mob movement decision {decision_index} max_steps "
+                    "must be in 2..8"
+                )
+        self._active_schedule = MobMovementBroadcastScheduler(
+            self.initial_steps,
+            baseline_server_frames=self.baseline_server_frames,
+        )
+
+    @property
+    def plaintexts(self) -> tuple[bytes, ...]:
+        """Return only the startup-planned packet sequence."""
+
+        return self._active_schedule.plaintexts
+
+    @property
+    def next_plaintext(self) -> bytes | None:
+        if self._active_schedule.packets_remaining == 0:
+            return None
+        return self._active_schedule.steps[
+            self._active_schedule.packets_sent
+        ].broadcast.to_bytes()
+
+    @property
+    def decisions_total(self) -> int:
+        return 1 + len(self.follow_up_targets)
+
+    @property
+    def decisions_planned(self) -> int:
+        return 1 + len(self._planned_follow_ups)
+
+    @property
+    def decisions_completed(self) -> int:
+        return self._decisions_completed
+
+    @property
+    def packets_planned(self) -> int:
+        return len(self.initial_steps) + sum(
+            len(plan.steps) for plan in self._planned_follow_ups
+        )
+
+    @property
+    def packets_sent(self) -> int:
+        return self._packets_sent
+
+    @property
+    def packets_remaining(self) -> int:
+        """Return planned packets not yet sent; future decisions stay unplanned."""
+
+        return self.packets_planned - self.packets_sent
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self._decisions_completed == self.decisions_total
+            and self._active_schedule.packets_remaining == 0
+        )
+
+    @property
+    def has_unplanned_decision(self) -> bool:
+        return (
+            self._active_schedule.packets_remaining == 0
+            and self._next_follow_up_index < len(self.follow_up_targets)
+        )
+
+    @property
+    def planning_server_frames(self) -> tuple[bytes, ...]:
+        return self._active_schedule.planning_server_frames
+
+    @property
+    def confirmed_server_frames(self) -> tuple[bytes, ...]:
+        return self.planning_server_frames[len(self.baseline_server_frames) :]
+
+    @property
+    def active_schedule(self) -> MobMovementBroadcastScheduler:
+        return self._active_schedule
+
+    @staticmethod
+    def _target_safe_dict(
+        decision_index: int, target: tuple[int, int, int, int]
+    ) -> dict[str, int]:
+        max_steps, target_x, target_y, foothold_id = target
+        return {
+            "decision_index": decision_index,
+            "max_steps": max_steps,
+            "x": target_x,
+            "y": target_y,
+            "foothold_id": foothold_id,
+        }
+
+    def confirm_sent(self, plaintext: bytes) -> MobMovementBroadcastPlan:
+        """Advance one drained write without planning future decisions."""
+
+        decision_index = self.decisions_planned
+        step_in_decision = self._active_schedule.packets_sent + 1
+        step = self._active_schedule.confirm_sent(plaintext)
+        self._packets_sent += 1
+        self._last_sent_step = step
+        self._last_sent_decision_index = decision_index
+        self._last_sent_step_in_decision = step_in_decision
+        if self._active_schedule.packets_remaining:
+            return step
+
+        self._decisions_completed += 1
+        return step
+
+    def plan_next_decision(self) -> MobMovementBroadcastSequencePlan:
+        """Synchronously plan the next target from the confirmed prefix."""
+
+        if not self.has_unplanned_decision:
+            raise ValueError(
+                "mob movement decision queue has no decision ready to plan"
+            )
+
+        planning_server_frames = self._active_schedule.planning_server_frames
+        target = self.follow_up_targets[self._next_follow_up_index]
+        max_steps, target_x, target_y, foothold_id = target
+        next_plan = plan_composed_mob_movement_broadcasts(
+            self.transcript,
+            post_transcript_server_frames=planning_server_frames,
+            evidence_transcript=self.evidence_transcript,
+            target_x=target_x,
+            target_y=target_y,
+            foothold_id=foothold_id,
+            max_steps=max_steps,
+        )
+        self._active_schedule = MobMovementBroadcastScheduler(
+            next_plan.steps,
+            baseline_server_frames=planning_server_frames,
+        )
+        self._planned_follow_ups.append(next_plan)
+        self._next_follow_up_index += 1
+        return next_plan
+
+    def safe_dict(self) -> dict[str, object]:
+        state = self._active_schedule.safe_dict()
+        if self._packets_sent == 0:
+            phase = "planned"
+        elif self.complete:
+            phase = "complete"
+        elif self.has_unplanned_decision:
+            phase = "planning"
+        else:
+            phase = "in_progress"
+        last_sent_step = None
+        if self._last_sent_step is not None:
+            last_sent_step = {
+                **MobMovementBroadcastScheduler._step_safe_dict(
+                    self._packets_sent,
+                    self._last_sent_step,
+                ),
+                "decision_index": self._last_sent_decision_index,
+                "step_in_decision": self._last_sent_step_in_decision,
+            }
+        next_step = None
+        if self._active_schedule.packets_remaining:
+            next_plan_step = self._active_schedule.steps[
+                self._active_schedule.packets_sent
+            ]
+            next_step = {
+                **MobMovementBroadcastScheduler._step_safe_dict(
+                    self._packets_sent + 1,
+                    next_plan_step,
+                ),
+                "decision_index": self.decisions_planned,
+                "step_in_decision": (
+                    self._active_schedule.packets_sent + 1
+                ),
+            }
+        pending_targets = [
+            self._target_safe_dict(decision_index, target)
+            for decision_index, target in enumerate(
+                self.follow_up_targets[self._next_follow_up_index :],
+                self.decisions_planned + 1,
+            )
+        ]
+        state.update(
+            {
+                "phase": phase,
+                "last_sent_step": last_sent_step,
+                "next_step": next_step,
+                "confirmed_server_frame_count": self._packets_sent,
+                "planning_server_frame_count": len(
+                    self.planning_server_frames
+                ),
+                "decision_queue": {
+                    "max_follow_up_decisions": (
+                        self.max_follow_up_decisions
+                    ),
+                    "decisions_total": self.decisions_total,
+                    "decisions_planned": self.decisions_planned,
+                    "decisions_completed": self.decisions_completed,
+                    "decisions_remaining": (
+                        self.decisions_total - self.decisions_completed
+                    ),
+                    "active_decision_index": (
+                        self.decisions_planned
+                        if self._active_schedule.packets_remaining
+                        else None
+                    ),
+                    "planning_decision_index": (
+                        self.decisions_planned + 1
+                        if self.has_unplanned_decision
+                        else None
+                    ),
+                    "pending_targets": pending_targets,
+                },
+            }
+        )
+        return state
+
+    def telemetry_dict(self) -> dict[str, object]:
+        return {
+            "packets_planned": self.packets_planned,
+            "packets_sent": self.packets_sent,
+            "packets_remaining": self.packets_remaining,
+            "state": self.safe_dict(),
+        }
+
+
 @dataclass(frozen=True)
 class MobMovementAcknowledgementPolicy:
     status_values_by_template: dict[int, int]
