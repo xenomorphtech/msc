@@ -807,9 +807,10 @@ on the separate opcode-`280` leave packet.
 When targeted client opcode `50`/`52` damage is pending for the same mob, each
 nonzero damage word is one pending hit. One opcode-`293` packet consumes one
 hit in order and adds the request frame, hit index/count, selected damage word,
-complete damage array, and response time to the event. Zero-damage words do not
-need an update. This accounts for all 399 stream-`126` health packets and all
-208 stream-`92` packets; lifecycle removal clears 21 and 11 terminal hits,
+complete damage array, response time, and count of modeled relay hits observed
+for that mob since submission to the event. Zero-damage words do not need an
+update. This accounts for all 399 stream-`126` health packets and all 208
+stream-`92` packets; lifecycle removal clears 21 and 11 terminal hits,
 respectively, and both folds finish with no pending effects.
 
 For the 11 templates actually attacked in the two references, the model uses
@@ -839,6 +840,10 @@ also explains seven cases that ceil/nearest quantization cannot represent.
 Stream `126` matches 203/209 exactly. The six outliers are each exactly one HP
 from the predicted interval and have response delays of `0.389..0.460`
 seconds, so they are reported as semantic warnings instead of invalid shapes.
+Subtracting the observed post-update HP bounds from the previous bounds yields
+an inferred authoritative-damage interval on every testable event. All six
+outliers have exact authoritative-minus-submitted deltas: five `+1`, one `-1`.
+None has an intervening modeled opcode-`218`/`219` hit for the target.
 
 ## Player movement (`client 182`, `server 202`)
 
@@ -1262,7 +1267,9 @@ observations. Stream `92` independently reaches 12,976 full, 21,604 partial,
 reaches level `10` and reports no unknown inventory-slot
 modifications; its 13 remaining warnings are cross-packet state correlations:
 12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed
-combat predictions that differ by one HP.
+combat predictions that differ by one HP. That warning also records the
+`{-1: 1, +1: 5}` inferred damage-delta histogram and that all six lack an
+intervening modeled relay hit.
 
 Primary captures live in:
 

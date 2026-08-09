@@ -147,10 +147,12 @@ actor's prior movement state. All 42 opcode-`218` relays expose the common
 metadata fields, with 37 full mastery/auxiliary forms and five strictly checked
 short all-zero target placeholders. Official-client max HP for the 11 attacked
 templates allows exact floor-percentage prediction for 364/370 testable hits;
-the other six differ by exactly one HP after delayed responses. Relay tag/
-unknown/auxiliary roles, damage high bit, client target prefix/tail fields, and
-those delayed differences are still not established well enough for the custom
-server to generate or replay combat.
+the other six differ by exactly one HP after delayed responses. All six have no
+intervening modeled relay hit and infer authoritative-minus-submitted damage
+`+1` five times and `-1` once. Relay tag/unknown/auxiliary roles, damage high
+bit, client target prefix/tail fields, and those delayed differences are still
+not established well enough for the custom server to generate or replay
+combat.
 
 ## Replay the login capture locally
 
@@ -692,8 +694,9 @@ project's own `README.md` for all options.
   suffixes add 646 typed damage words and 607 per-hit health matches with no
   pending effects after lifecycle cleanup. Official-client max HP predicts
   364/370 testable health transitions exactly and bounds the other six to a
-  one-HP difference. Unresolved semantic roles and the delayed differences
-  remain out of generation and replay.
+  one-HP difference; none of those six has an intervening modeled relay, and
+  their inferred damage deltas are `{-1: 1, +1: 5}`. Unresolved semantic roles
+  and the delayed differences remain out of generation and replay.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

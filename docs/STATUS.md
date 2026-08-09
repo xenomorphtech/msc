@@ -119,6 +119,8 @@
   bounded next-percentage prediction per correlated hit. Stream `92` matches
   161/161 predictions exactly; stream `126` matches 203/209, with all six
   differences exactly one HP after `0.389..0.460`-second response delays.
+  Consecutive HP bounds infer authoritative-minus-submitted damage `+1` for
+  five and `-1` for one; none has an intervening modeled attack-relay hit.
 - Server opcodes `218`/`219` now have capture-bounded attack-relay envelopes:
   opcode, aliased player object id, a packed target-count/hit-count nibble, and
   repeated mob-id/hit-action/damage arrays. Stream `126` adds 41/99 relays,

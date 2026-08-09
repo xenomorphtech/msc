@@ -223,6 +223,7 @@ class PendingClientAttackHit:
     hit_index: int
     damage_values: tuple[int, ...]
     high_bit_markers: tuple[bool, ...]
+    attack_relay_hits_at_submission: int
 
 
 @dataclass(frozen=True)
@@ -468,6 +469,11 @@ class GameplayGameState:
     client_attack_health_prediction_matches: int = 0
     client_attack_health_prediction_mismatches: int = 0
     client_attack_health_one_hp_differences: int = 0
+    client_attack_predictions_with_relay_hits: int = 0
+    client_attack_mismatches_without_relays: int = 0
+    client_attack_health_mismatch_damage_deltas: Counter[int] = field(
+        default_factory=Counter
+    )
     client_attack_health_predictions_by_template: Counter[int] = field(
         default_factory=Counter
     )
@@ -1853,6 +1859,17 @@ class GameplayAnalysis:
                 "client_attack_health_prediction_one_hp_differences": (
                     self.state.client_attack_health_one_hp_differences
                 ),
+                "client_attack_health_predictions_with_relay_hits": (
+                    self.state.client_attack_predictions_with_relay_hits
+                ),
+                "client_attack_health_mismatches_without_relay_hits": (
+                    self.state.client_attack_mismatches_without_relays
+                ),
+                "client_attack_health_mismatch_damage_deltas": dict(
+                    sorted(
+                        self.state.client_attack_health_mismatch_damage_deltas.items()
+                    )
+                ),
                 "client_attack_health_predictions_by_template": dict(
                     self.state.client_attack_health_predictions_by_template
                 ),
@@ -2231,6 +2248,7 @@ class GameplayStateFold:
             else:
                 self.state.client_attack_targets_for_unknown_mobs += 1
             zero_damage_entries = 0
+            target_entity = self.state.mobs.get(target_object_id)
             if isinstance(action, ClientAttackAction):
                 self.state.client_attack_damage_actions += 1
                 pending = self._pending_client_attacks.setdefault(
@@ -2243,6 +2261,11 @@ class GameplayStateFold:
                         hit_index=hit_index,
                         damage_values=damage_values,
                         high_bit_markers=high_bit_markers,
+                        attack_relay_hits_at_submission=(
+                            target_entity.attack_relay_hits
+                            if target_entity is not None
+                            else 0
+                        ),
                     )
                     for hit_index, damage in enumerate(damage_values)
                     if damage != 0
@@ -2253,7 +2276,6 @@ class GameplayStateFold:
                     zero_damage_entries
                 )
                 self.state.pending_client_attack_effects += len(pending_hits)
-                target_entity = self.state.mobs.get(target_object_id)
                 if target_entity is not None:
                     target_entity.client_attack_submitted_hits += len(
                         damage_values
@@ -4719,6 +4741,15 @@ class GameplayStateFold:
                 submitted_high_bit_marker = pending_hit.high_bit_markers[
                     pending_hit.hit_index
                 ]
+                intervening_relay_hits = (
+                    max(
+                        0,
+                        entity.attack_relay_hits
+                        - pending_hit.attack_relay_hits_at_submission,
+                    )
+                    if entity is not None
+                    else None
+                )
                 correlation_details.update(
                     {
                         "client_attack_frame": (
@@ -4745,6 +4776,9 @@ class GameplayStateFold:
                         "remaining_health_effects_for_target": len(
                             pending_queue or ()
                         ),
+                        "intervening_attack_relay_hits": (
+                            intervening_relay_hits
+                        ),
                     }
                 )
                 if (
@@ -4770,6 +4804,20 @@ class GameplayStateFold:
                     predicted_max_hp = max(
                         0, previous_max_hp - submitted_damage
                     )
+                    assert entity.health_hp_min is not None
+                    assert entity.health_hp_max is not None
+                    inferred_damage_min = max(
+                        0, previous_min_hp - entity.health_hp_max
+                    )
+                    inferred_damage_max = max(
+                        0, previous_max_hp - entity.health_hp_min
+                    )
+                    inferred_delta_min = (
+                        inferred_damage_min - submitted_damage
+                    )
+                    inferred_delta_max = (
+                        inferred_damage_max - submitted_damage
+                    )
                     prediction_matches = (
                         expected_min
                         <= update.health_percentage
@@ -4785,6 +4833,8 @@ class GameplayStateFold:
                         hp_delta = 0
                     combat_state = self.state
                     combat_state.client_attack_health_predictions += 1
+                    if intervening_relay_hits:
+                        combat_state.client_attack_predictions_with_relay_hits += 1
                     combat_state.client_attack_health_predictions_by_template[
                         entity.spawn.template_id
                     ] += 1
@@ -4792,8 +4842,14 @@ class GameplayStateFold:
                         combat_state.client_attack_health_prediction_matches += 1
                     else:
                         combat_state.client_attack_health_prediction_mismatches += 1
+                        if intervening_relay_hits == 0:
+                            combat_state.client_attack_mismatches_without_relays += 1
                         if hp_delta is not None and abs(hp_delta) == 1:
                             combat_state.client_attack_health_one_hp_differences += 1
+                        if inferred_delta_min == inferred_delta_max:
+                            combat_state.client_attack_health_mismatch_damage_deltas[
+                                inferred_delta_min
+                            ] += 1
                     correlation_details.update(
                         {
                             "mob_max_hp": entity.max_hp,
@@ -4803,6 +4859,18 @@ class GameplayStateFold:
                             "predicted_health_percentage_max": expected_max,
                             "health_prediction_matches": prediction_matches,
                             "health_prediction_hp_delta": hp_delta,
+                            "inferred_authoritative_damage_min": (
+                                inferred_damage_min
+                            ),
+                            "inferred_authoritative_damage_max": (
+                                inferred_damage_max
+                            ),
+                            "authoritative_minus_submitted_damage_min": (
+                                inferred_delta_min
+                            ),
+                            "authoritative_minus_submitted_damage_max": (
+                                inferred_delta_max
+                            ),
                         }
                     )
             details = {
@@ -4904,11 +4972,22 @@ class GameplayStateFold:
             one_hp_differences = (
                 self.state.client_attack_health_one_hp_differences
             )
+            without_relay_hits = (
+                self.state.client_attack_mismatches_without_relays
+            )
+            damage_deltas = dict(
+                sorted(
+                    self.state.client_attack_health_mismatch_damage_deltas.items()
+                )
+            )
             self.warnings.append(
                 f"{self.state.client_attack_health_prediction_mismatches} "
                 "client attack hit/HP-percentage correlations disagreed with "
                 "the reference mob max-HP model; "
-                f"{one_hp_differences} differed by exactly one HP"
+                f"{one_hp_differences} differed by exactly one HP, "
+                f"{without_relay_hits} had no intervening modeled relay hit, "
+                "and exact inferred authoritative-minus-submitted damage "
+                f"deltas were {damage_deltas}"
             )
         if self.state.unmatched_movement_acknowledgements:
             self.warnings.append(
@@ -5585,6 +5664,13 @@ def render_gameplay_analysis(
     client_attack_shapes = json.dumps(
         dict(sorted(state.client_attack_shapes.items()))
     )
+    client_attack_mismatch_damage_deltas = json.dumps(
+        dict(
+            sorted(
+                state.client_attack_health_mismatch_damage_deltas.items()
+            )
+        )
+    )
     server_attack_opcodes = json.dumps(
         dict(sorted(state.server_attack_relays_by_opcode.items()))
     )
@@ -5890,6 +5976,12 @@ def render_gameplay_analysis(
             f"{state.client_attack_health_prediction_mismatches} "
             "client_health_prediction_one_hp_differences:"
             f"{state.client_attack_health_one_hp_differences} "
+            "client_health_predictions_with_relay_hits:"
+            f"{state.client_attack_predictions_with_relay_hits} "
+            "client_health_mismatches_without_relay_hits:"
+            f"{state.client_attack_mismatches_without_relays} "
+            "client_health_mismatch_damage_deltas:"
+            f"{client_attack_mismatch_damage_deltas} "
             "cleared_client_effects:"
             f"{state.client_attack_effects_cleared} "
             "pending_client_effects:"

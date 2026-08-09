@@ -709,7 +709,9 @@ corresponding integer-HP interval, and predicts the next interval after each
 correlated hit. Stream `92` validates all 161 transitions with a prior health
 sample exactly. Stream `126` validates 203 of 209 exactly; the other six differ
 by one HP, all with response delays of `0.389..0.460` seconds. These remain
-explicit semantic warnings rather than packet-shape failures.
+explicit semantic warnings rather than packet-shape failures. No mismatch has
+an intervening modeled attack-relay hit. Integer HP bounds infer authoritative-
+minus-submitted damage of `+1` for five and `-1` for one.
 
 Server opcodes `218` and `219` form the corresponding capture-bounded attack
 relay family. Their prefix is opcode, player object id, and one packed byte;
@@ -1027,3 +1029,7 @@ It intentionally cannot launch an authenticated official session.
     referenced mob max-HP values from the official WZJS bundle, and validate
     364/370 bounded next-percentage predictions exactly with the six remaining
     observations differing by one HP.
+40. Infer an authoritative damage range from consecutive integer-HP bounds and
+    record attack-relay hits between submission and response. All six long-
+    stream mismatches have no intervening modeled relay and exact authoritative-
+    minus-submitted damage deltas `{-1: 1, +1: 5}`.

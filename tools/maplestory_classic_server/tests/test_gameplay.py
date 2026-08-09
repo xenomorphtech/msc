@@ -2150,7 +2150,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         ).to_bytes()
         first_health_payload = MobHealthPercentageUpdate(
             object_id=MOB_OBJECT_ID,
-            health_percentage=20,
+            health_percentage=18,
         ).to_bytes()
         second_health_payload = MobHealthPercentageUpdate(
             object_id=MOB_OBJECT_ID,
@@ -2217,10 +2217,23 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(fold.state.client_attack_health_matches, 2)
         self.assertEqual(fold.state.client_attack_health_predictions, 2)
         self.assertEqual(
-            fold.state.client_attack_health_prediction_matches, 2
+            fold.state.client_attack_health_prediction_matches, 1
         )
         self.assertEqual(
-            fold.state.client_attack_health_prediction_mismatches, 0
+            fold.state.client_attack_health_prediction_mismatches, 1
+        )
+        self.assertEqual(
+            fold.state.client_attack_health_one_hp_differences, 1
+        )
+        self.assertEqual(
+            fold.state.client_attack_predictions_with_relay_hits, 0
+        )
+        self.assertEqual(
+            fold.state.client_attack_mismatches_without_relays, 1
+        )
+        self.assertEqual(
+            fold.state.client_attack_health_mismatch_damage_deltas,
+            {1: 1},
         )
         self.assertEqual(
             fold.state.client_attack_health_predictions_by_template,
@@ -2246,10 +2259,32 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             first_health_details["predicted_health_percentage_max"], 20
         )
-        self.assertTrue(first_health_details["health_prediction_matches"])
+        self.assertFalse(first_health_details["health_prediction_matches"])
         self.assertEqual(first_health_details["predicted_hp_min"], 10)
         self.assertEqual(first_health_details["predicted_hp_max"], 10)
-        self.assertEqual(first_health_details["health_prediction_hp_delta"], 0)
+        self.assertEqual(first_health_details["health_prediction_hp_delta"], -1)
+        self.assertEqual(first_health_details["health_hp_min"], 9)
+        self.assertEqual(
+            first_health_details["inferred_authoritative_damage_min"], 41
+        )
+        self.assertEqual(
+            first_health_details["inferred_authoritative_damage_max"], 41
+        )
+        self.assertEqual(
+            first_health_details[
+                "authoritative_minus_submitted_damage_min"
+            ],
+            1,
+        )
+        self.assertEqual(
+            first_health_details[
+                "authoritative_minus_submitted_damage_max"
+            ],
+            1,
+        )
+        self.assertEqual(
+            first_health_details["intervening_attack_relay_hits"], 0
+        )
         self.assertEqual(second_health_details["submitted_hit_index"], 1)
         self.assertEqual(second_health_details["submitted_damage"], 41)
         self.assertEqual(
@@ -3326,6 +3361,9 @@ class GameplayStateFoldTest(unittest.TestCase):
             "client_health_prediction_matches:0 "
             "client_health_prediction_mismatches:0 "
             "client_health_prediction_one_hp_differences:0 "
+            "client_health_predictions_with_relay_hits:0 "
+            "client_health_mismatches_without_relay_hits:0 "
+            "client_health_mismatch_damage_deltas:{} "
             "cleared_client_effects:0 pending_client_effects:3",
             report,
         )
