@@ -628,15 +628,21 @@ packet is 448 bytes: its 89 selectors have counts
 `0:45, 1:2, 2:3, 4:26, 5:6, 6:7`; the signed values range from `0` to
 `2001005` with 43 distinct values. The captured 21-byte opcode-`156` expanded
 packet has one text code unit, a false flag, and values `(2001004, 0, 0)`.
-These are structural observations only; selector, text, flag, and value roles
-remain neutral and no security meaning is inferred.
+The opcode-`385` tuple index is a keyboard key code: index `29` is the Linux
+evdev Left Ctrl code. Selector `1` is a skill binding and its value is the
+skill id. The capture binds key `29` to learned skill `2001005` and key `71`
+to learned skill `2001002`. Other selector meanings, and all opcode-`156`
+field meanings, remain neutral; no security meaning is inferred.
 
 All four forms now have full shape coverage and exact typed round trips. The
 fold records opcode/variant counts, 89 selector/value entries per expanded
 opcode `385`, three typed int32 values per expanded opcode `156`, zero opaque
 bytes, field epoch, and `variable_server_record_received` events. Safe output
-retains only text length, flag, value/entry counts, and never the text or raw
-values.
+retains only text length, flag, value/entry counts, and never the opcode-`156`
+text or raw values. Expanded opcode `385` additionally updates the current
+keyboard selector distribution and skill-binding map, validates bound skill ids
+against initial progression, exposes the proven Left Ctrl binding, and emits a
+`keyboard_bindings_loaded` event.
 
 `--generate-variable-server-records` re-emits every bounded observation at its
 original frame index after length/reparse/uniqueness/conflict validation.
@@ -652,6 +658,17 @@ client remained active on map `101000000` with HP `50/222`, MP `97/342`, and
 variable events, 178 typed entries, six typed int32 values, and zero opaque
 bytes. This establishes exact generation and post-bootstrap replay acceptance,
 not the higher-level purpose of either packet.
+
+A fresh browser-free A/B/A run established the keyboard meaning. Physical
+evdev Left Ctrl (`29`) under the captured value `2001005` emitted a targeted
+opcode-`52` variant-`18` two-hit action with damage `[27,32]`. One typed packet
+changed only that entry's value to another learned skill, `2001004`; the next
+Left Ctrl emitted variant `17`, one hit, damage `[65]`. Restoring the original
+packet restored variant `18`, two hits, damage `[29,25]`. The immutable fold is
+valid and warning-free, ends active on map `101000000` at HP `50`, records the
+binding sequence `2001005 -> 2001004 -> 2001005`, and matches 91/91 heartbeats
+with no pending or unmatched response. This proves the key/value relationship
+without assigning meanings to the other selector families.
 
 ## Inventory change sets (`server 39`)
 

@@ -164,9 +164,30 @@ initial snapshot and NPC emitters.
 
 `--generate-variable-server-records` handles the capture-bounded opcode-`156`
 and `385` variants. Both begin with a one-byte discriminator. The level-1
-variants end there; the stream-`114` variants retain exact opaque tails of 18
-and 445 bytes respectively. The emitter round-trips and replaces the complete
-records without exposing those bytes or assigning them security semantics.
+variants end there. Expanded opcode `156` contains a packet UTF-16 string,
+bool, and three int32 values; expanded opcode `385` contains 89 keyboard
+bindings whose tuple index is the key code. Selector `1` binds a skill id, and
+key code `29` is the validated evdev Left Ctrl binding. The emitter round-trips
+and replaces the complete records; other selector meanings and opcode-`156`
+field meanings remain neutral.
+
+Use `?keyboard-skill=KEY_CODE:SKILL_ID` on an expanded opcode-`385` PCAP
+reference to replace only the value of an existing selector-`1` binding. For
+example, `111.pcapng@114:9?keyboard-skill=29:2001004` preserves all other 88
+entries and the captured selector. A live A/B/A changed physical Left Ctrl from
+skill `2001005`'s two-hit opcode-`52` variant `18`, to skill `2001004`'s one-hit
+variant `17`, and back to variant `18`; the client stayed active and matched
+91/91 heartbeats.
+
+For controlled live experiments, replay mode also accepts
+`--enable-http-packet-injection` together with `--http-api-port`. It enables
+loopback-only `POST /api/v1/server-packets` with exact JSON
+`{"plaintext_hex":"..."}`. The endpoint is disabled by default, requires exactly
+one active replay connection, caps packets at 64 KiB and bodies at 128 KiB,
+serializes encryption/writes with generated traffic, records successful sends
+in the transcript, and exposes only safe counters through
+`GET /api/v1/status`. It has no application authentication and therefore
+assumes every caller inside the local namespace/OS boundary is trusted.
 
 `--generate-field-npc-spawns` applies the same boundary to every fully typed
 opcode-`300` observation. It validates the complete fold, reconstructs each

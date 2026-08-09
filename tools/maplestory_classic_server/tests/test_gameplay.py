@@ -199,6 +199,16 @@ def fixture_fixed_server_records() -> tuple[object, ...]:
 
 
 def fixture_variable_server_records() -> tuple[VariableServerRecord, ...]:
+    keyboard_bindings = [
+        VariableServerEntry(selector=0, value=0) for _ in range(89)
+    ]
+    keyboard_bindings[2] = VariableServerEntry(selector=4, value=10)
+    keyboard_bindings[29] = VariableServerEntry(
+        selector=1, value=2_001_005
+    )
+    keyboard_bindings[71] = VariableServerEntry(
+        selector=1, value=2_001_002
+    )
     return (
         VariableServerRecord(opcode=156, variant=0, opaque_tail=b""),
         VariableServerRecord(
@@ -211,10 +221,7 @@ def fixture_variable_server_records() -> tuple[VariableServerRecord, ...]:
         VariableServerRecord(
             opcode=385,
             variant=0,
-            entries=tuple(
-                VariableServerEntry(selector=index, value=index - 44)
-                for index in range(89)
-            ),
+            entries=tuple(keyboard_bindings),
         ),
         VariableServerRecord(opcode=385, variant=1, opaque_tail=b""),
     )
@@ -1660,6 +1667,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(records[2], entries=()).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "exactly 3"):
             replace(records[1], values=(1, 2)).to_bytes()
+        self.assertEqual(
+            records[2].keyboard_skill_bindings,
+            {29: 2_001_005, 71: 2_001_002},
+        )
+        self.assertEqual(records[2].left_ctrl_skill_id, 2_001_005)
+        self.assertEqual(records[2].nonzero_keyboard_selector_count, 3)
+        self.assertEqual(records[3].keyboard_skill_bindings, {})
 
     def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
         stage = FieldLoadStage(
@@ -2992,6 +3006,18 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.variable_server_typed_entries, 89)
         self.assertEqual(analysis.state.variable_server_typed_values, 3)
         self.assertEqual(analysis.state.variable_server_opaque_bytes, 0)
+        self.assertEqual(analysis.state.keyboard_binding_snapshots, 1)
+        self.assertEqual(
+            analysis.state.keyboard_binding_selector_counts,
+            {0: 86, 1: 2, 4: 1},
+        )
+        self.assertEqual(
+            analysis.state.keyboard_skill_bindings,
+            {29: 2_001_005, 71: 2_001_002},
+        )
+        self.assertEqual(analysis.state.keyboard_known_skill_bindings, 2)
+        self.assertEqual(analysis.state.left_ctrl_skill_id, 2_001_005)
+        self.assertTrue(analysis.state.left_ctrl_skill_known)
         self.assertEqual([frame.record for frame in plan.frames], list(records))
         safe = plan.safe_dict()
         self.assertEqual(safe["emitter"], "typed_variable_server_record")
@@ -3016,8 +3042,66 @@ class GameplayStateFoldTest(unittest.TestCase):
             [0, 3, 0, 0],
         )
         self.assertEqual(safe["prediction"]["typed_value_count"], 3)
+        self.assertEqual(safe["prediction"]["keyboard_binding_snapshots"], 1)
+        self.assertEqual(
+            safe["prediction"]["final_left_ctrl_skill_id"], 2_001_005
+        )
+        self.assertEqual(safe["frames"][2]["skill_binding_count"], 2)
+        self.assertEqual(
+            safe["frames"][2]["left_ctrl_skill_id"], 2_001_005
+        )
+        keyboard_state = analysis.safe_dict()["state"]["keyboard_bindings"]
+        self.assertEqual(keyboard_state["key_code_space"], "linux_evdev")
+        self.assertEqual(
+            keyboard_state["validated_key_codes"], {"left_ctrl": 29}
+        )
+        self.assertEqual(
+            keyboard_state["skill_bindings"],
+            {29: 2_001_005, 71: 2_001_002},
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "keyboard_bindings_loaded"
+                for event in analysis.events
+            ),
+            1,
+        )
         self.assertNotIn("11111111", repr(safe))
         self.assertNotIn("22222222", repr(safe))
+
+    def test_folds_keyboard_skill_binding_reload_sequence(self) -> None:
+        original = fixture_variable_server_records()[2]
+        entries = list(original.entries)
+        entries[29] = replace(entries[29], value=2_001_004)
+        rebound = replace(original, entries=tuple(entries))
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                original.to_bytes(),
+                rebound.to_bytes(),
+                original.to_bytes(),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        loaded = [
+            event
+            for event in analysis.events
+            if event.kind == "keyboard_bindings_loaded"
+        ]
+        self.assertEqual(
+            [event.details["left_ctrl_skill_id"] for event in loaded],
+            [2_001_005, 2_001_004, 2_001_005],
+        )
+        self.assertEqual(
+            [event.details["left_ctrl_skill_known"] for event in loaded],
+            [True, False, True],
+        )
+        self.assertEqual(analysis.state.keyboard_binding_snapshots, 3)
+        self.assertEqual(analysis.state.left_ctrl_skill_id, 2_001_005)
+        self.assertTrue(analysis.state.left_ctrl_skill_known)
 
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(

@@ -619,6 +619,16 @@ class GameplayGameState:
     variable_server_typed_entries: int = 0
     variable_server_typed_values: int = 0
     variable_server_opaque_bytes: int = 0
+    keyboard_binding_snapshots: int = 0
+    keyboard_binding_selector_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    keyboard_skill_bindings: dict[int, int] = field(
+        default_factory=dict, repr=False
+    )
+    keyboard_known_skill_bindings: int = 0
+    left_ctrl_skill_id: int | None = None
+    left_ctrl_skill_known: bool = False
     pending_movements: int = 0
     termination_received: bool = False
 
@@ -752,6 +762,13 @@ class VariableServerReplayFrame:
             ),
             "flag": self.record.flag,
             "value_count": len(self.record.values),
+            "nonzero_keyboard_selector_count": (
+                self.record.nonzero_keyboard_selector_count
+            ),
+            "skill_binding_count": len(
+                self.record.keyboard_skill_bindings
+            ),
+            "left_ctrl_skill_id": self.record.left_ctrl_skill_id,
             "compact": (
                 bool(self.record.variant)
                 if self.record.opcode == 385
@@ -777,6 +794,19 @@ class VariableServerReplayPlan:
                 ),
                 "typed_value_count": sum(
                     len(frame.record.values) for frame in self.frames
+                ),
+                "keyboard_binding_snapshots": sum(
+                    frame.record.opcode == 385 and not frame.record.variant
+                    for frame in self.frames
+                ),
+                "final_left_ctrl_skill_id": next(
+                    (
+                        frame.record.left_ctrl_skill_id
+                        for frame in reversed(self.frames)
+                        if frame.record.opcode == 385
+                        and not frame.record.variant
+                    ),
+                    None,
                 ),
                 "opaque_byte_count": sum(
                     len(frame.record.opaque_tail) for frame in self.frames
@@ -3256,6 +3286,26 @@ class GameplayAnalysis:
                 "variable_server_opaque_bytes": (
                     self.state.variable_server_opaque_bytes
                 ),
+                "keyboard_bindings": {
+                    "snapshot_count": self.state.keyboard_binding_snapshots,
+                    "key_code_space": "linux_evdev",
+                    "validated_key_codes": {
+                        "left_ctrl": VariableServerRecord.LEFT_CTRL_KEY_CODE,
+                    },
+                    "selector_counts": dict(
+                        self.state.keyboard_binding_selector_counts
+                    ),
+                    "skill_bindings": dict(
+                        self.state.keyboard_skill_bindings
+                    ),
+                    "known_skill_binding_count": (
+                        self.state.keyboard_known_skill_bindings
+                    ),
+                    "left_ctrl_skill_id": self.state.left_ctrl_skill_id,
+                    "left_ctrl_skill_known": (
+                        self.state.left_ctrl_skill_known
+                    ),
+                },
                 "termination_received": self.state.termination_received,
                 "transport_closed": self.transport_closed,
             },
@@ -5308,6 +5358,26 @@ class GameplayStateFold:
             self.state.variable_server_opaque_bytes += len(
                 variable_record.opaque_tail
             )
+            if opcode == 385 and not variable_record.variant:
+                self.state.keyboard_binding_snapshots += 1
+                self.state.keyboard_binding_selector_counts = Counter(
+                    entry.selector for entry in variable_record.entries
+                )
+                self.state.keyboard_skill_bindings = (
+                    variable_record.keyboard_skill_bindings
+                )
+                self.state.keyboard_known_skill_bindings = sum(
+                    skill_id in self.state.skill_levels
+                    for skill_id in self.state.keyboard_skill_bindings.values()
+                )
+                self.state.left_ctrl_skill_id = (
+                    variable_record.left_ctrl_skill_id
+                )
+                self.state.left_ctrl_skill_known = (
+                    self.state.left_ctrl_skill_id in self.state.skill_levels
+                    if self.state.left_ctrl_skill_id is not None
+                    else False
+                )
             details = {
                 "opcode": opcode,
                 "variant": variable_record.variant,
@@ -5320,6 +5390,23 @@ class GameplayStateFold:
                 ),
                 "flag": variable_record.flag,
                 "value_count": len(variable_record.values),
+                "nonzero_keyboard_selector_count": (
+                    variable_record.nonzero_keyboard_selector_count
+                ),
+                "skill_binding_count": len(
+                    variable_record.keyboard_skill_bindings
+                ),
+                "known_skill_binding_count": (
+                    self.state.keyboard_known_skill_bindings
+                    if opcode == 385 and not variable_record.variant
+                    else 0
+                ),
+                "left_ctrl_skill_id": variable_record.left_ctrl_skill_id,
+                "left_ctrl_skill_known": (
+                    self.state.left_ctrl_skill_known
+                    if opcode == 385 and not variable_record.variant
+                    else False
+                ),
                 "field_epoch": self.state.field_epoch,
             }
             if opcode == 385:
@@ -5329,6 +5416,12 @@ class GameplayStateFold:
                 "variable_server_record_received",
                 details=details,
             )
+            if opcode == 385 and not variable_record.variant:
+                self._event(
+                    frame,
+                    "keyboard_bindings_loaded",
+                    details=details,
+                )
             return self._observation(
                 frame,
                 kind="variable_server_record",
@@ -8408,6 +8501,13 @@ def render_gameplay_analysis(
             f"typed_entries:{state.variable_server_typed_entries} "
             f"typed_values:{state.variable_server_typed_values} "
             f"opaque_bytes:{state.variable_server_opaque_bytes}"
+        ),
+        (
+            f"keyboard_bindings=snapshots:{state.keyboard_binding_snapshots} "
+            f"selectors:{dict(state.keyboard_binding_selector_counts)} "
+            f"skills:{dict(state.keyboard_skill_bindings)} "
+            f"known_skills:{state.keyboard_known_skill_bindings} "
+            f"left_ctrl_skill:{state.left_ctrl_skill_id}"
         ),
         (
             f"frames=client:{state.packets_by_direction['client_to_server']} "

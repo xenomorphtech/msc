@@ -70,6 +70,7 @@ from .packets import (
     MobMovementSubmission,
     PlayerMovementSubmission,
     PacketShapeError,
+    VariableServerRecord,
     WorldHandoff,
     WorldSelection,
 )
@@ -2423,6 +2424,46 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
                 "character-list response"
             ) from error
         return character_list.to_bytes()
+    if transform.startswith("keyboard-skill="):
+        fields = transform.removeprefix("keyboard-skill=").split(":")
+        if len(fields) != 2:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill transform must use KEY_CODE:SKILL_ID"
+            )
+        try:
+            key_code, skill_id = (int(value, 0) for value in fields)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill key code and skill id must be integers"
+            ) from error
+        if not 0 <= key_code < VariableServerRecord.KEYBOARD_BINDING_COUNT:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill key code must be between 0 and 88"
+            )
+        if not 0 <= skill_id <= 0x7FFFFFFF:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill skill id must fit a non-negative int32"
+            )
+        try:
+            record = VariableServerRecord.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill transform requires an expanded opcode-385 "
+                "keyboard-binding packet"
+            ) from error
+        if record.opcode != 385 or record.variant:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill transform requires an expanded opcode-385 "
+                "keyboard-binding packet"
+            )
+        original = record.entries[key_code]
+        if original.selector != VariableServerRecord.SKILL_BINDING_SELECTOR:
+            raise argparse.ArgumentTypeError(
+                f"keyboard key code {key_code} is not a captured skill binding"
+            )
+        entries = list(record.entries)
+        entries[key_code] = replace(original, value=skill_id)
+        return replace(record, entries=tuple(entries)).to_bytes()
     if transform.startswith("mob-spawn="):
         fields = transform.removeprefix("mob-spawn=").split(":")
         if len(fields) not in {2, 4}:
@@ -2485,7 +2526,8 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
         return replace(controller, spawn=rewritten_spawn).to_bytes()
     raise argparse.ArgumentTypeError(
         "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
-        "character-list, or mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
+        "character-list, keyboard-skill=KEY_CODE:SKILL_ID, or "
+        "mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
     )
 
 

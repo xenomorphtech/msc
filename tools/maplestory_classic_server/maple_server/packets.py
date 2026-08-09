@@ -5471,7 +5471,29 @@ class VariableServerRecord:
     flag: bool | None = None
     values: tuple[int, ...] = ()
 
-    OPCODE_385_EXPANDED_ENTRY_COUNT = 89
+    KEYBOARD_BINDING_COUNT = 89
+    SKILL_BINDING_SELECTOR = 1
+    LEFT_CTRL_KEY_CODE = 29
+
+    @property
+    def keyboard_skill_bindings(self) -> dict[int, int]:
+        if self.opcode != 385 or self.variant:
+            return {}
+        return {
+            key_code: entry.value
+            for key_code, entry in enumerate(self.entries)
+            if entry.selector == self.SKILL_BINDING_SELECTOR
+        }
+
+    @property
+    def left_ctrl_skill_id(self) -> int | None:
+        return self.keyboard_skill_bindings.get(self.LEFT_CTRL_KEY_CODE)
+
+    @property
+    def nonzero_keyboard_selector_count(self) -> int:
+        if self.opcode != 385 or self.variant:
+            return 0
+        return sum(entry.selector != 0 for entry in self.entries)
 
     @classmethod
     def parse(cls, payload: bytes) -> "VariableServerRecord":
@@ -5498,7 +5520,7 @@ class VariableServerRecord:
                 )
         elif opcode == 385 and variant in {0, 1}:
             entry_count = (
-                0 if variant else cls.OPCODE_385_EXPANDED_ENTRY_COUNT
+                0 if variant else cls.KEYBOARD_BINDING_COUNT
             )
             entries = tuple(
                 VariableServerEntry(
@@ -5562,7 +5584,7 @@ class VariableServerRecord:
             expected_entry_count = (
                 0
                 if self.variant
-                else self.OPCODE_385_EXPANDED_ENTRY_COUNT
+                else self.KEYBOARD_BINDING_COUNT
             )
             if self.text is not None or self.flag is not None or self.values:
                 raise PacketShapeError(

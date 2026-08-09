@@ -83,7 +83,9 @@
   have `156:1` as packet UTF-16 text, bool, and three int32 values, plus
   `385:0` as exactly 89 `uint8 selector, int32 value` entries. Short live GDB
   traces and exact capture round trips close both former opaque tails without
-  assigning security or gameplay semantics.
+  assigning security semantics. A controlled A/B/A further proves opcode-`385`
+  tuple indices are keyboard key codes, selector `1` is a skill binding, and
+  index `29` is evdev Left Ctrl.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -99,6 +101,14 @@
   client active on map `101000000` at HP `50/222`, MP `97/342`, with 110/110
   heartbeats; the transcript folds to four variable events, 178 entries, six
   typed values, zero opaque bytes, and two injection events.
+- `?keyboard-skill=KEY_CODE:SKILL_ID` now performs a typed single-value change
+  to an existing opcode-`385` selector-`1` binding. On a fresh client, Left Ctrl
+  under `2001005` emitted opcode-`52` variant `18` with two hits `[27,32]`;
+  rebinding only its value to learned skill `2001004` emitted variant `17` with
+  one hit `[65]`; restoring `2001005` restored variant `18` with two hits
+  `[29,25]`. The warning-free fold records keyboard snapshots
+  `2001005 -> 2001004 -> 2001005`, remains active on map `101000000` at HP
+  `50`, and matches 91/91 heartbeats.
 - `--generate-field-npc-spawns` now reconstructs every fully typed opcode-`300`
   frame from the folded aliased entity model. It validates exact 22-byte
   re-encoding, reparsing, frame uniqueness, and patch conflicts; runtime status
@@ -605,10 +615,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 1. Use the owner/proximity negative controls to isolate the remaining
    client-side drop eligibility condition; serve a reactive pickup only after
    observing an authentic opcode-`185` request.
-2. On fresh client processes, vary one neutrally named opcode-`156`/`385`
-   field at a time through the opt-in injection endpoint and compare the
-   observed client/fold/heartbeat effect with the modeled unchanged-state
-   prediction, restarting rather than compounding a stalled-client result.
+2. Test the second captured selector-`1` binding at key code `71` with direct
+   evdev input, then use one-field controls to determine whether selector `0`
+   is an empty binding without assigning meanings to selectors `2/4/5/6`.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Add a bounded per-trigger event budget so repeated valid gameplay events

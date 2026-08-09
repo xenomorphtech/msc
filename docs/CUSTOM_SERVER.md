@@ -398,13 +398,16 @@ streams, opcode `156` variant `1` carries a packet UTF-16 string, a boolean,
 and three int32 values; opcode `385` variant `0` carries exactly 89 repeated
 `uint8 selector, int32 value` entries. All four branches are fully consumed and
 round-trip exactly. The field names remain neutral; no security or gameplay
-role is assigned from shape alone.
+role is assigned from shape alone. A later controlled A/B/A establishes that
+opcode-`385` entry indices are keyboard key codes and selector `1` carries a
+skill id. Index `29` is the evdev Left Ctrl key.
 
 The option performs the same valid-fold, exact-length, reparse, unique-index,
 and patch-conflict checks as the fixed emitter. Runtime status exposes only
 opcode, variant, text length, flag, value/entry counts, field epoch, and frame
-index under `protocol.variable_server_record_emitter`; text and raw values are
-not included.
+index under `protocol.variable_server_record_emitter`. Opcode-`156` text/raw
+values and unproven opcode-`385` selector values are not included; the proven
+skill-binding count and Left Ctrl skill id are included.
 
 The 2026-08-09 browser-free live run regenerated expanded server frames `9`
 and `11` together with one initial snapshot, 11 fixed records, and nine NPC
@@ -412,6 +415,16 @@ spawns. The client entered and rendered map `101000000`. Transcript
 `downloads/maple_custom_server_observed/variable_server_emitter_live_20260809/world/1786314493694015926_replay_12857.jsonl`
 folds validly to `active`, variants `385:0` and `156:1`, 89 typed entries,
 three typed values, zero opaque bytes, nine NPCs, and paired heartbeat traffic.
+
+The typed PCAP transform
+`?keyboard-skill=KEY_CODE:SKILL_ID` changes only the value of an existing
+selector-`1` binding. It requires expanded opcode `385`, key code `0..88`, a
+captured skill-binding selector at that key, and a non-negative int32 skill id;
+it preserves the selector and all other bindings. For example:
+
+```text
+111.pcapng@114:9?keyboard-skill=29:2001004
+```
 
 ## Opt-in live server-packet injection
 
@@ -463,6 +476,18 @@ were answered. Transcript
 folds validly to four variable records, 178 typed selector/value entries, six
 typed int32 values, zero opaque bytes, and two injection events, matching the
 predicted unchanged player/phase state.
+
+The follow-up keyboard experiment used one typed mob and physical evdev input.
+With the captured Left Ctrl binding `29 -> 2001005`, Ctrl emitted opcode-`52`
+variant `18`, two hits, damage `[27,32]`. Injecting
+`111.pcapng@114:9?keyboard-skill=29:2001004` changed only the binding value; Ctrl
+then emitted variant `17`, one hit, damage `[65]`. Injecting the unmodified
+frame restored variant `18`, two hits, damage `[29,25]`. The frozen transcript
+`downloads/maple_custom_server_observed/key_binding_value_live_20260809/world/1786318178544471777_replay_12857.jsonl`
+folds validly with no issues/warnings, three `keyboard_bindings_loaded` events,
+two injection events, final Left Ctrl skill `2001005`, active map `101000000`,
+HP `50`, and 91/91 matched heartbeats. This is a causal key-binding result;
+the other selector families remain unnamed.
 
 ## Typed NPC-spawn generation
 

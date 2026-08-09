@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import functools
 from ipaddress import IPv4Address
@@ -93,6 +94,7 @@ from maple_server.packets import (  # noqa: E402
     PickupGainNotice,
     WorldHandoff,
     WorldSelection,
+    VariableServerEntry,
     VariableServerRecord,
 )
 from maple_server.transcript import (  # noqa: E402
@@ -962,6 +964,45 @@ class TranscriptTest(unittest.TestCase):
             )
 
         self.assertEqual(payload, original)
+
+    def test_pcap_plaintext_reference_can_rebind_one_keyboard_skill(
+        self,
+    ) -> None:
+        bindings = [
+            VariableServerEntry(selector=0, value=0) for _ in range(89)
+        ]
+        bindings[29] = VariableServerEntry(selector=1, value=2_001_005)
+        original = VariableServerRecord(
+            opcode=385,
+            variant=0,
+            entries=tuple(bindings),
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@114:0?"
+                "keyboard-skill=29:2001004"
+            )
+
+        parsed = VariableServerRecord.parse(payload)
+        self.assertEqual(parsed.left_ctrl_skill_id, 2_001_004)
+        self.assertEqual(parsed.entries[29].selector, 1)
+        self.assertEqual(parsed.entries[:29], tuple(bindings[:29]))
+        self.assertEqual(parsed.entries[30:], tuple(bindings[30:]))
+
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            with self.assertRaisesRegex(
+                argparse.ArgumentTypeError, "not a captured skill binding"
+            ):
+                parse_pcap_plaintext_reference(
+                    "/private/reference.pcapng@114:0?"
+                    "keyboard-skill=28:2001004"
+                )
 
     def test_pcap_plaintext_reference_can_rewrite_typed_mob_spawn(self) -> None:
         original = MobEnterField(
