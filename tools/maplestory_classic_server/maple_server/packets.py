@@ -1626,7 +1626,7 @@ class NpcSpawn:
     template_id: int
     x: int
     cy: int
-    faces_left: bool
+    facing_value: int
     foothold_id: int
     range_left: int
     range_right: int
@@ -1641,11 +1641,7 @@ class NpcSpawn:
         template_id = reader.u32("template_id")
         x = reader.i16("x")
         cy = reader.i16("cy")
-        faces_left_raw = reader.u8("faces_left")
-        if faces_left_raw not in {0, 1}:
-            raise PacketShapeError(
-                f"npc_spawn.faces_left is {faces_left_raw}, expected boolean 0 or 1"
-            )
+        facing_value = reader.u8("facing_value")
         foothold_id = reader.u16("foothold_id")
         range_left = reader.i16("range_left")
         range_right = reader.i16("range_right")
@@ -1664,7 +1660,7 @@ class NpcSpawn:
             template_id=template_id,
             x=x,
             cy=cy,
-            faces_left=bool(faces_left_raw),
+            facing_value=facing_value,
             foothold_id=foothold_id,
             range_left=range_left,
             range_right=range_right,
@@ -1672,6 +1668,10 @@ class NpcSpawn:
         )
 
     def to_bytes(self) -> bytes:
+        if not 0 <= self.facing_value <= 0xFF:
+            raise PacketShapeError("NPC spawn facing value must fit in one byte")
+        if not isinstance(self.hidden, bool):
+            raise PacketShapeError("NPC spawn hidden value must be boolean")
         if self.range_left > self.range_right:
             raise PacketShapeError(
                 f"npc spawn range is reversed: {self.range_left} > {self.range_right}"
@@ -1683,7 +1683,7 @@ class NpcSpawn:
             self.template_id,
             self.x,
             self.cy,
-            int(self.faces_left),
+            self.facing_value,
             self.foothold_id,
             self.range_left,
             self.range_right,
@@ -1844,29 +1844,50 @@ class MobLeaveField:
 class CharacterStatUpdate:
     request_flag: int
     stat_mask: int
+    character_level: int | None = None
+    job_id: int | None = None
+    strength: int | None = None
+    dexterity: int | None = None
     intelligence: int | None = None
     luck: int | None = None
     current_hp: int | None = None
+    max_hp: int | None = None
     current_mp: int | None = None
+    max_mp: int | None = None
     ability_points: int | None = None
+    skill_points: int | None = None
     experience: int | None = None
     mesos: int | None = None
     opaque_tail: bytes = b"\x00"
     opcode: int = 41
 
+    CHARACTER_LEVEL = 0x0000_0010
+    JOB_ID = 0x0000_0020
+    STRENGTH = 0x0000_0040
+    DEXTERITY = 0x0000_0080
     INTELLIGENCE = 0x0000_0100
     LUCK = 0x0000_0200
     CURRENT_HP = 0x0000_0400
+    MAX_HP = 0x0000_0800
     CURRENT_MP = 0x0000_1000
+    MAX_MP = 0x0000_2000
     ABILITY_POINTS = 0x0000_4000
+    SKILL_POINTS = 0x0000_8000
     EXPERIENCE = 0x0001_0000
     MESOS = 0x0004_0000
     _FIELD_SPECS = (
+        (CHARACTER_LEVEL, "character_level", "<B", 1),
+        (JOB_ID, "job_id", "<H", 2),
+        (STRENGTH, "strength", "<H", 2),
+        (DEXTERITY, "dexterity", "<H", 2),
         (INTELLIGENCE, "intelligence", "<H", 2),
         (LUCK, "luck", "<H", 2),
         (CURRENT_HP, "current_hp", "<H", 2),
+        (MAX_HP, "max_hp", "<H", 2),
         (CURRENT_MP, "current_mp", "<H", 2),
+        (MAX_MP, "max_mp", "<H", 2),
         (ABILITY_POINTS, "ability_points", "<H", 2),
+        (SKILL_POINTS, "skill_points", "<H", 2),
         (EXPERIENCE, "experience", "<I", 4),
         (MESOS, "mesos", "<Q", 8),
     )
@@ -1906,9 +1927,12 @@ class CharacterStatUpdate:
                 raise PacketShapeError(
                     "character stat update with values must end in one zero byte"
                 )
-        elif opaque_tail not in {b"\x00", b"\x01\x01"}:
+        elif not (
+            opaque_tail == b"\x00"
+            or (len(opaque_tail) == 2 and opaque_tail[0] == 1)
+        ):
             raise PacketShapeError(
-                "zero-mask character stat update tail must be 00 or 0101"
+                "zero-mask character stat update tail must be 00 or 01xx"
             )
         return cls(
             request_flag=request_flag,
@@ -1940,9 +1964,12 @@ class CharacterStatUpdate:
                 raise PacketShapeError(
                     "character stat update with values must end in one zero byte"
                 )
-        elif self.opaque_tail not in {b"\x00", b"\x01\x01"}:
+        elif not (
+            self.opaque_tail == b"\x00"
+            or (len(self.opaque_tail) == 2 and self.opaque_tail[0] == 1)
+        ):
             raise PacketShapeError(
-                "zero-mask character stat update tail must be 00 or 0101"
+                "zero-mask character stat update tail must be 00 or 01xx"
             )
         return (
             struct.pack("<HBI", self.opcode, self.request_flag, self.stat_mask)
@@ -1958,9 +1985,12 @@ class InventoryModification:
     slot: int
     quantity: int | None = None
     item: InitialInventoryItem | None = None
+    destination_slot: int | None = None
+    move_flag: int | None = None
 
     ADD = 0
     UPDATE_QUANTITY = 1
+    MOVE = 2
     REMOVE = 3
     INVENTORY_NAMES = {
         1: "equip",
@@ -1972,6 +2002,7 @@ class InventoryModification:
     OPERATION_NAMES = {
         ADD: "add",
         UPDATE_QUANTITY: "update_quantity",
+        MOVE: "move",
         REMOVE: "remove",
     }
 
@@ -1984,18 +2015,22 @@ class InventoryModification:
         slot: int,
         field_prefix: str,
     ) -> InitialInventoryItem:
-        if inventory_type not in {2, 3, 4, 5}:
+        if inventory_type not in {1, 2, 3, 4, 5}:
             raise PacketShapeError(
                 "inventory add record supports captured inventory types "
-                "two through five"
+                "one through five"
             )
         record_start = reader.offset
-        expected_record_type = 3 if inventory_type == 5 else 2
         record_type = reader.u8(f"{field_prefix}.item.record_type")
-        if record_type != expected_record_type:
+        allowed_record_types = (
+            {1}
+            if inventory_type == 1
+            else ({2, 3} if inventory_type == 5 else {2})
+        )
+        if record_type not in allowed_record_types:
             raise PacketShapeError(
                 f"inventory type {inventory_type} add record type is "
-                f"{record_type}, expected {expected_record_type}"
+                f"{record_type}, expected one of {sorted(allowed_record_types)}"
             )
         item_id = reader.u32(f"{field_prefix}.item.item_id")
         cash_flag = reader.u8(f"{field_prefix}.item.cash_flag")
@@ -2009,7 +2044,46 @@ class InventoryModification:
             f"{field_prefix}.item.expires_at_ticks"
         )
         quantity: int | None = None
-        if inventory_type in {2, 3, 4}:
+        if record_type == 1:
+            sentinel_bytes = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
+                8, "little", signed=True
+            )
+            first_sentinel = reader.payload.find(sentinel_bytes, reader.offset)
+            if first_sentinel < 0:
+                raise PacketShapeError(
+                    "inventory equipment item lacks its first sentinel"
+                )
+            second_sentinel = reader.payload.find(
+                sentinel_bytes, first_sentinel + len(sentinel_bytes)
+            )
+            if second_sentinel < 0:
+                raise PacketShapeError(
+                    "inventory equipment item lacks its second sentinel"
+                )
+            record_end = second_sentinel + len(sentinel_bytes) + 4
+            if record_end > len(reader.payload):
+                raise PacketShapeError(
+                    "inventory equipment item tail is truncated"
+                )
+            if (
+                reader.payload[first_sentinel + 8 : first_sentinel + 12]
+                != b"\xff" * 4
+            ):
+                raise PacketShapeError(
+                    "inventory equipment first sentinel tail is not -1"
+                )
+            if (
+                reader.payload[second_sentinel + 8 : record_end]
+                != b"\x00" * 4
+            ):
+                raise PacketShapeError(
+                    "inventory equipment second sentinel tail is not zero"
+                )
+            reader.bytes(
+                record_end - reader.offset,
+                f"{field_prefix}.item.equipment_metadata",
+            )
+        elif record_type == 2:
             quantity = reader.u16(f"{field_prefix}.item.quantity")
             reader.utf16_string(
                 f"{field_prefix}.item.owner", trailing_byte=True
@@ -2072,6 +2146,8 @@ class InventoryModification:
         slot = reader.i16(f"{field}.slot")
         quantity = None
         item = None
+        destination_slot = None
+        move_flag = None
         if operation == cls.UPDATE_QUANTITY:
             if inventory_type not in {2, 3, 4}:
                 raise PacketShapeError(
@@ -2085,12 +2161,17 @@ class InventoryModification:
                 slot=slot,
                 field_prefix=field,
             )
+        elif operation == cls.MOVE:
+            destination_slot = reader.i16(f"{field}.destination_slot")
+            move_flag = reader.u8(f"{field}.move_flag")
         return cls(
             operation=operation,
             inventory_type=inventory_type,
             slot=slot,
             quantity=quantity,
             item=item,
+            destination_slot=destination_slot,
+            move_flag=move_flag,
         )
 
     def safe_dict(self) -> dict[str, object]:
@@ -2112,6 +2193,9 @@ class InventoryModification:
                 "quantity": self.item.quantity,
                 "record_bytes": len(self.item.raw_record),
             }
+        if self.destination_slot is not None:
+            details["destination_slot"] = self.destination_slot
+            details["move_flag"] = self.move_flag
         return details
 
     def to_bytes(self) -> bytes:
@@ -2144,7 +2228,12 @@ class InventoryModification:
                 )
             return body + struct.pack("<H", self.quantity)
         if self.operation == self.ADD:
-            if self.quantity is not None or self.item is None:
+            if (
+                self.quantity is not None
+                or self.item is None
+                or self.destination_slot is not None
+                or self.move_flag is not None
+            ):
                 raise PacketShapeError(
                     "inventory add requires an item and no separate quantity"
                 )
@@ -2152,18 +2241,45 @@ class InventoryModification:
                 raise PacketShapeError(
                     "inventory add slot does not match the item slot"
                 )
-            expected_record_type = 3 if self.inventory_type == 5 else 2
-            if self.inventory_type not in {2, 3, 4, 5}:
+            allowed_record_types = (
+                {1}
+                if self.inventory_type == 1
+                else ({2, 3} if self.inventory_type == 5 else {2})
+            )
+            if self.inventory_type not in {1, 2, 3, 4, 5}:
                 raise PacketShapeError(
                     "inventory add record supports captured inventory types "
-                    "two through five"
+                    "one through five"
                 )
-            if self.item.record_type != expected_record_type:
+            if self.item.record_type not in allowed_record_types:
                 raise PacketShapeError(
                     "inventory add item record type does not match inventory"
                 )
             return body + self.item.to_bytes()[1:]
-        if self.quantity is not None or self.item is not None:
+        if self.operation == self.MOVE:
+            if self.quantity is not None or self.item is not None:
+                raise PacketShapeError(
+                    "inventory move cannot carry quantity or item data"
+                )
+            if self.destination_slot is None or self.move_flag is None:
+                raise PacketShapeError(
+                    "inventory move requires destination slot and move flag"
+                )
+            if not -0x8000 <= self.destination_slot <= 0x7FFF:
+                raise PacketShapeError(
+                    "inventory destination slot must fit in a signed short"
+                )
+            if not 0 <= self.move_flag <= 0xFF:
+                raise PacketShapeError("inventory move flag must fit in one byte")
+            return body + struct.pack(
+                "<hB", self.destination_slot, self.move_flag
+            )
+        if (
+            self.quantity is not None
+            or self.item is not None
+            or self.destination_slot is not None
+            or self.move_flag is not None
+        ):
             raise PacketShapeError("inventory remove has no quantity or item")
         return body
 

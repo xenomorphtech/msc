@@ -283,10 +283,11 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; omit `--fail-on-invalid` for that corpus while its
-remaining 49 capture variants are being modeled. PCAP normalization locates
-the Maple greeting after its 14-byte server and 28-byte client transport
-preludes and records the trimmed byte counts in transcript metadata.
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 24,600 full,
+38,027 partial, 8,473 unknown, and zero invalid packet observations. PCAP
+normalization locates the Maple greeting after its 14-byte server and 28-byte
+client transport preludes and records the trimmed byte counts in transcript
+metadata.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -301,7 +302,8 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence plus a
   stage-`0` variant with neutral word `1` and a bounded nine-byte opaque tail,
 - server opcode `39`: inventory change sets with empty, add, stack-quantity,
-  and remove operations plus lossless stack/cash item records,
+  equip-slot move, and remove operations plus lossless equipment, stack, and
+  cash item records; cash-tab adds accept both captured stack and cash records,
 - client opcode `80`: a 12-byte Use-item request containing client tick, signed
   slot, and item template; the fold correlates it with the following opcode-`39`
   quantity change and captured opcode-`41` potion effect,
@@ -316,15 +318,16 @@ The gameplay fold currently models these capture-backed boundaries:
   amount, and a still-neutral special value,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
   to local pickup requests by the exact aliased drop id,
-- server opcode `41`: masked player-stat deltas for the capture-observed INT,
-  LUK, HP, MP, AP, EXP, and 64-bit mesos fields, plus bounded neutral flag/tail
-  values,
+- server opcode `41`: masked player-stat deltas for level, job, STR, DEX, INT,
+  LUK, current/max HP and MP, AP, SP, EXP, and 64-bit mesos, plus bounded
+  neutral flag/tail values,
 - client opcode `182`: local-player movement with a neutral 32-bit control
   value, signed reference position, typed command stream, and zero-marked
   start/end-position trailer,
 - server opcode `202`: remote-player movement with an aliased object id, the
   same control value and command stream, and no client-only trailer,
-- server opcode `300`: complete 22-byte NPC spawn records,
+- server opcode `300`: complete 22-byte NPC spawn records whose facing field is
+  preserved as the observed byte value rather than narrowed to a boolean,
 - server opcode `303`: an 8-byte typed NPC state prefix plus a losslessly
   preserved optional opaque tail,
 - server opcode `279`: mob-entry envelope with object id, template id,
@@ -428,13 +431,19 @@ remote-player aliases.
 
 Server opcode `41` now folds stat deltas instead of remaining an unknown
 packet. The stable prefix is a one-byte request flag and 32-bit mask. Observed
-values follow in ascending mask-bit order: INT/LUK/HP/MP/AP are 16-bit, EXP is
-32-bit, and mesos is 64-bit. A nonzero mask ends in one zero byte. All 333
-stream-`92` packets and 324 emitted field values round-trip, including combined
-HP+EXP and INT+LUK+AP masks. Fourteen zero-mask packets are bounded as either a
-single zero or the repeated `01 01` variant; their semantics and the request
-flag remain neutral. The final fold reports HP `50`, MP `97`, EXP `1464`, and
-mesos `4567`.
+values follow in ascending mask-bit order. The level is one byte; job, STR,
+DEX, INT, LUK, current/max HP and MP, AP, and SP are 16-bit; EXP is 32-bit;
+mesos is 64-bit. A nonzero mask ends in one zero byte. All 333 stream-`92`
+packets and 324 emitted field values round-trip, including combined HP+EXP and
+INT+LUK+AP masks. Fourteen zero-mask packets are bounded as either a single
+zero or a two-byte `01 xx` variant; their semantics and the request flag remain
+neutral. The final fold reports HP `50`, MP `97`, EXP `1464`, and mesos `4567`.
+
+The level-1-to-10 stream adds the remaining stat-mask variants. All 841 stat
+updates now round-trip and fold, including nine level changes, the job change
+to `200`, STR/DEX/INT/LUK changes, max-HP/max-MP changes, AP/SP changes, EXP,
+and mesos. Its final player state is level `10`, job `200`, HP `114/194`, MP
+`158/285`, STR `4`, DEX `4`, INT `49`, LUK `13`, EXP `980`, and mesos `1472`.
 
 A live stream-`114` replay then generated one typed current-HP update from
 `50 -> 1`. The real HUD showed `HP 1/222` while MP stayed `97/342` and EXP
@@ -447,12 +456,14 @@ Server opcode `39` now mutates the typed inventory instead of remaining
 unknown. Its stable prefix is a neutral byte followed by a modification count.
 Each modification has an operation, inventory type, and signed 16-bit slot.
 Observed operation `0` adds a complete item record, `1` replaces a stack's
-16-bit quantity, and `3` removes a slot. Stream `92` contains 69 packets and 71
-modifications: 40 quantity updates, 16 adds, and 15 removes; 13 packets are
-empty. The adds comprise one etc stack plus 15 cash remove/add refreshes. All
-69 packets round-trip, every mutation applies to a known slot where required,
-and the final inventory matches stream `114` with 24 Use, 18 Etc, two Setup,
-and one Cash item.
+16-bit quantity, `2` moves or swaps a slot, and `3` removes a slot. Stream `92`
+contains 69 packets and 71 modifications: 40 quantity updates, 16 adds, and 15
+removes; 13 packets are empty. The adds comprise one etc stack plus 15 cash
+remove/add refreshes. All 69 packets round-trip, every mutation applies to a
+known slot where required, and the final inventory matches stream `114` with
+24 Use, 18 Etc, two Setup, and one Cash item. The level-1-to-10 stream expands
+coverage to 256 packets and 232 modifications: 93 adds, 79 quantity updates,
+two equip moves, and 58 removes, with zero unknown-slot mutations.
 
 A typed stream-`114` replay changed existing Use slot `15`, item template
 `2000000`, from quantity `27 -> 1`. The real inventory window displayed `1` in

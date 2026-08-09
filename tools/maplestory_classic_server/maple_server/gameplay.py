@@ -629,6 +629,22 @@ class ItemUseResponsePolicy:
                     self.use_items[modification.slot] = replace(
                         item, quantity=modification.quantity
                     )
+                elif modification.operation == InventoryModification.MOVE:
+                    item = self.use_items.pop(modification.slot, None)
+                    if (
+                        item is not None
+                        and modification.destination_slot is not None
+                    ):
+                        destination_item = self.use_items.pop(
+                            modification.destination_slot, None
+                        )
+                        self.use_items[modification.destination_slot] = replace(
+                            item, slot=modification.destination_slot
+                        )
+                        if destination_item is not None:
+                            self.use_items[modification.slot] = replace(
+                                destination_item, slot=modification.slot
+                            )
                 else:
                     self.use_items.pop(modification.slot, None)
         elif opcode == 41:
@@ -856,6 +872,22 @@ class ItemPickupResponsePolicy:
                 items[modification.slot] = replace(
                     item, quantity=modification.quantity
                 )
+            elif modification.operation == InventoryModification.MOVE:
+                item = items.pop(modification.slot, None)
+                if (
+                    item is not None
+                    and modification.destination_slot is not None
+                ):
+                    destination_item = items.pop(
+                        modification.destination_slot, None
+                    )
+                    items[modification.destination_slot] = replace(
+                        item, slot=modification.destination_slot
+                    )
+                    if destination_item is not None:
+                        items[modification.slot] = replace(
+                            destination_item, slot=modification.slot
+                        )
             else:
                 items.pop(modification.slot, None)
 
@@ -1019,7 +1051,7 @@ class GameplayAnalysis:
                 "template_id": spawn.template_id,
                 "x": spawn.x,
                 "cy": spawn.cy,
-                "faces_left": spawn.faces_left,
+                "facing_value": spawn.facing_value,
                 "foothold_id": spawn.foothold_id,
                 "range_left": spawn.range_left,
                 "range_right": spawn.range_right,
@@ -2191,6 +2223,46 @@ class GameplayStateFold:
                             existing, quantity=modification.quantity
                         )
                         applied_modifications += 1
+                elif modification.operation == InventoryModification.MOVE:
+                    destination_slot = modification.destination_slot
+                    if (
+                        existing is None
+                        or existing_index is None
+                        or destination_slot is None
+                    ):
+                        self.state.inventory_unknown_slot_modifications += 1
+                        self.warnings.append(
+                            f"inventory move referenced unknown "
+                            f"{inventory_name} slot {modification.slot}"
+                        )
+                    else:
+                        destination_existing = next(
+                            (
+                                item
+                                for item in items
+                                if item.slot == destination_slot
+                            ),
+                            None,
+                        )
+                        details["item_id"] = existing.item_id
+                        details["destination_known"] = (
+                            destination_existing is not None
+                        )
+                        items = [
+                            item
+                            for item in items
+                            if item.slot
+                            not in {modification.slot, destination_slot}
+                        ]
+                        items.append(replace(existing, slot=destination_slot))
+                        if destination_existing is not None:
+                            items.append(
+                                replace(
+                                    destination_existing,
+                                    slot=modification.slot,
+                                )
+                            )
+                        applied_modifications += 1
                 else:
                     if existing_index is None or existing is None:
                         self.state.inventory_unknown_slot_modifications += 1
@@ -3016,7 +3088,7 @@ class GameplayStateFold:
                 "template_id": spawn.template_id,
                 "x": spawn.x,
                 "cy": spawn.cy,
-                "faces_left": spawn.faces_left,
+                "facing_value": spawn.facing_value,
                 "foothold_id": spawn.foothold_id,
                 "range_left": spawn.range_left,
                 "range_right": spawn.range_right,

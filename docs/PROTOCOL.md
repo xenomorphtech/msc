@@ -465,21 +465,25 @@ uint8  update_flag                    # observed 0; role remains neutral
 uint8  modification_count
 repeat modification_count:
     uint8 operation
-    uint8 inventory_type              # 2 use, 3 setup, 4 etc, 5 cash
+    uint8 inventory_type              # 1 equip, 2 use, 3 setup, 4 etc, 5 cash
     int16 slot
     if operation == 0: complete item_record
     if operation == 1: uint16 quantity
+    if operation == 2: int16 destination_slot; uint8 move_flag
     if operation == 3: no operation-specific body
 ```
 
-Operation `0` is add, `1` is stack-quantity replacement, and `3` is remove.
-The captured add records reuse the initial-inventory grammar: types `2/3/4`
-carry a stack item record with template, cash flag/optional cash id, expiration,
-quantity, owner string, bounded metadata, sentinel timestamp, and tail; type
-`5` carries the complete cash-item variant. Reports retain only non-sensitive
-common item fields and record length while re-encoding the entire record.
-Unobserved operation `2` and equipment add records are rejected instead of
-being guessed.
+Operation `0` is add, `1` is stack-quantity replacement, `2` is a slot
+move/swap, and `3` is remove. The captured add records reuse the
+initial-inventory grammar: type `1` carries the equipment record bounded by
+its two sentinel timestamps; types `2/3/4` carry a stack item record with
+template, cash flag/optional cash id, expiration, quantity, owner string,
+bounded metadata, sentinel timestamp, and tail; type `5` carries either the
+same stack shape or the complete cash-item variant. Reports retain only
+non-sensitive common fields and record length while re-encoding the entire
+record. The observed operation-`2` records move equipped items from positive
+bag slots to negative equipped slots with move flag `2`; the fold swaps an
+occupied destination and otherwise moves the source item.
 
 Stream `92` contains 69 packets and 71 modifications: `add:16`,
 `update_quantity:40`, and `remove:15`, all under update flag zero. Thirteen
@@ -490,6 +494,11 @@ round-trips byte-for-byte, all quantity/removal operations resolve an existing
 slot, and the fold ends with Use slot `15` at `27`, 24 Use items, 18 Etc, two
 Setup, and one Cash item. Stream `114` independently validates one empty packet
 and one cash refresh pair with no unknown slots.
+
+Stream `126` expands the grammar to 256 packets and 232 modifications:
+`add:93`, `update_quantity:79`, `move:2`, and `remove:58`. It contains four
+equipment adds, two cash-inventory stack adds, and two equip moves. Every
+change set round-trips and the fold reports zero unknown-slot modifications.
 
 The state-driven quantity emitter requires an existing stack item and sends a
 single operation-`1` change. A real stream-`114` client accepted generated
@@ -699,11 +708,18 @@ The capture-validated prefix and conditional-value grammar is:
 uint16 opcode = 41
 uint8  request_flag                  # observed 0 or 1; role remains neutral
 uint32 stat_mask
+if stat_mask & 0x00000010: uint8  character_level
+if stat_mask & 0x00000020: uint16 job_id
+if stat_mask & 0x00000040: uint16 strength
+if stat_mask & 0x00000080: uint16 dexterity
 if stat_mask & 0x00000100: uint16 intelligence
 if stat_mask & 0x00000200: uint16 luck
 if stat_mask & 0x00000400: uint16 current_hp
+if stat_mask & 0x00000800: uint16 max_hp
 if stat_mask & 0x00001000: uint16 current_mp
+if stat_mask & 0x00002000: uint16 max_mp
 if stat_mask & 0x00004000: uint16 ability_points
+if stat_mask & 0x00008000: uint16 skill_points
 if stat_mask & 0x00010000: uint32 experience
 if stat_mask & 0x00040000: uint64 mesos
 byte[] bounded_tail
@@ -711,8 +727,8 @@ byte[] bounded_tail
 
 Conditional values occur in ascending mask-bit order. Every nonzero-mask
 packet ends with one zero byte. A zero mask has either a single-zero tail (one
-packet) or `01 01` (13 packets); these variants remain semantic unknowns rather
-than being assigned a guessed result meaning.
+packet) or a two-byte `01 xx` tail; these variants remain semantic unknowns
+rather than being assigned a guessed result meaning.
 
 Stream `92` contains 333 packets. Their masks/counts are `0x0:14`,
 `0x400:35`, `0x1000:207`, `0x4300:1`, `0x10000:44`, `0x10400:3`, and
@@ -723,6 +739,12 @@ and EXP. The fold applies each field independently, records previous/current
 values in `player_stats_updated` events, and ends with HP `50`, MP `97`, EXP
 `1464`, and mesos `4567` after all field resets and deltas.
 
+Stream `126` contains 841 packets and exercises every field listed above. It
+adds nine character-level updates, the job change to `200`, primary-stat and
+max-HP/max-MP updates, ten SP updates, AP updates, EXP, and mesos. All packets
+round-trip; the final fold reaches level `10`, HP `114/194`, MP `158/285`,
+STR `4`, DEX `4`, INT `49`, LUK `13`, EXP `980`, and mesos `1472`.
+
 The state-driven replay emitter uses request flag `0`, current-HP mask
 `0x00000400`, a bounded HP value, and the one-zero tail. A real stream-`114`
 client accepted generated plaintext `29000000040000010000`: its HUD changed
@@ -730,6 +752,28 @@ from `50/222` to `1/222`, the observed transcript folded the event as
 `previous:50 -> current:1`, MP/EXP/map/inventory/progression stayed unchanged,
 and heartbeat responses continued. This validates the predicted effect without
 assigning semantics to the flag or tail marker.
+
+## NPC spawn (`server 300`)
+
+The complete spawn packet is 22 bytes:
+
+```text
+uint16 opcode = 300
+uint32 object_id
+uint32 template_id
+int16  x
+int16  cy
+uint8  facing_value
+uint16 foothold_id
+int16  range_left
+int16  range_right
+uint8  hidden                       # boolean 0/1
+```
+
+The facing field is not boolean. Streams `92`, `114`, and `126` preserve the
+observed values `0`, `1`, `2`, `4`, and `5`; all 78 stream-`126` spawns parse
+and round-trip. The fold exposes the neutral byte as `facing_value` and keeps
+the hidden field separately boolean.
 
 ## Player movement (`client 182`, `server 202`)
 
@@ -820,8 +864,8 @@ bytes before the ordinary 33-byte Maple greeting; PCAP normalization locates
 the greeting, discards only those preludes, and records both byte counts in
 transcript metadata. The resulting session contains 71,100 decrypted frames
 (31,345 client and 39,755 server), one marker-`26` initial snapshot, 35 later
-field snapshots, 808 stat updates, 248 inventory change sets, 436 drop-spawn
-packets, and 197 pickup requests.
+field snapshots, 841 stat updates, 256 inventory change sets, 78 NPC spawns,
+436 drop-spawn packets, and 197 pickup requests.
 
 All 197 pickup requests resolve to a known active drop, match their field
 epoch after the marker-`26` initial snapshot is folded, and target a final
@@ -829,9 +873,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. The remaining strict shape failures are bounded to 33 stat-delta
-variants, eight inventory-change variants, and eight NPC-spawn facing-value
-variants.
+coverage. Strict validation succeeds across all 71,100 frames with 24,600
+full, 38,027 partial, 8,473 unknown-but-lossless, and zero invalid packet
+observations. The fold reaches level `10` and reports no unknown inventory-slot
+modifications; its 12 remaining warnings are cross-packet state correlations.
 
 Primary captures live in:
 

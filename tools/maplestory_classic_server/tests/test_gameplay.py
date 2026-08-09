@@ -91,7 +91,7 @@ def fixture_npc() -> NpcSpawn:
         template_id=1_032_000,
         x=-120,
         cy=45,
-        faces_left=True,
+        facing_value=1,
         foothold_id=7,
         range_left=-300,
         range_right=200,
@@ -189,6 +189,32 @@ def fixture_stack_inventory_item(
         cash_item=False,
         expires_at_ticks=expires_at_ticks,
         quantity=quantity,
+        raw_record=raw_record,
+    )
+
+
+def fixture_equipment_inventory_item(
+    *, slot: int, item_id: int
+) -> InitialInventoryItem:
+    expires_at_ticks = 150_842_304_000_000_000
+    item_sentinel_ticks = 94_354_848_000_000_000
+    raw_record = b"".join(
+        (
+            struct.pack("<BIBq", 1, item_id, 0, expires_at_ticks),
+            b"\x00" * 12,
+            struct.pack("<q", item_sentinel_ticks),
+            b"\xff" * 4,
+            b"\x00" * 8,
+            struct.pack("<qI", item_sentinel_ticks, 0),
+        )
+    )
+    return InitialInventoryItem(
+        slot=slot,
+        record_type=1,
+        item_id=item_id,
+        cash_item=False,
+        expires_at_ticks=expires_at_ticks,
+        quantity=None,
         raw_record=raw_record,
     )
 
@@ -534,6 +560,22 @@ def fixture_gameplay_transcript(
                             item_id=4_010_003,
                             quantity=1,
                         ),
+                    ),
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=1,
+                        slot=2,
+                        item=fixture_equipment_inventory_item(
+                            slot=2,
+                            item_id=1_000_002,
+                        ),
+                    ),
+                    InventoryModification(
+                        operation=InventoryModification.MOVE,
+                        inventory_type=1,
+                        slot=2,
+                        destination_slot=-11,
+                        move_flag=2,
                     ),
                 ),
             ).to_bytes(),
@@ -940,6 +982,12 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
     def test_inventory_change_set_round_trip(self) -> None:
         cash_item = fixture_cash_inventory_item(slot=4)
+        equipment_item = fixture_equipment_inventory_item(
+            slot=2, item_id=1_000_002
+        )
+        cash_stack_item = fixture_stack_inventory_item(
+            slot=5, item_id=2_000_002, quantity=3
+        )
         changes = InventoryChangeSet(
             update_flag=0,
             modifications=(
@@ -960,6 +1008,25 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     slot=4,
                     item=cash_item,
                 ),
+                InventoryModification(
+                    operation=InventoryModification.ADD,
+                    inventory_type=1,
+                    slot=2,
+                    item=equipment_item,
+                ),
+                InventoryModification(
+                    operation=InventoryModification.ADD,
+                    inventory_type=5,
+                    slot=5,
+                    item=cash_stack_item,
+                ),
+                InventoryModification(
+                    operation=InventoryModification.MOVE,
+                    inventory_type=1,
+                    slot=2,
+                    destination_slot=-11,
+                    move_flag=2,
+                ),
             ),
         )
         empty = InventoryChangeSet(update_flag=0, modifications=())
@@ -967,6 +1034,18 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(InventoryChangeSet.parse(changes.to_bytes()), changes)
         self.assertEqual(InventoryChangeSet.parse(empty.to_bytes()), empty)
         self.assertEqual(len(cash_item.raw_record), 58)
+        self.assertEqual(changes.modifications[3].item, equipment_item)
+        self.assertEqual(changes.modifications[4].item, cash_stack_item)
+        self.assertEqual(
+            changes.modifications[5].safe_dict(),
+            {
+                "operation": "move",
+                "inventory": "equip",
+                "slot": 2,
+                "destination_slot": -11,
+                "move_flag": 2,
+            },
+        )
         self.assertEqual(
             changes.modifications[0].safe_dict(),
             {
@@ -976,9 +1055,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "quantity": 27,
             },
         )
-        with self.assertRaisesRegex(PacketShapeError, "expected one of"):
+        with self.assertRaisesRegex(PacketShapeError, "requires destination"):
             InventoryModification(
-                operation=2,
+                operation=InventoryModification.MOVE,
                 inventory_type=2,
                 slot=1,
             ).to_bytes()
@@ -1029,6 +1108,29 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         self.assertEqual(
             CharacterStatUpdate.parse(zero_mask.to_bytes()), zero_mask
+        )
+        level_up_payload = bytes.fromhex(
+            "290000d03c0100071c000b009000b10060007b004101000000"
+        )
+        level_up = CharacterStatUpdate.parse(level_up_payload)
+        self.assertEqual(level_up.to_bytes(), level_up_payload)
+        self.assertEqual(
+            level_up.values,
+            {
+                "character_level": 7,
+                "strength": 28,
+                "dexterity": 11,
+                "current_hp": 144,
+                "max_hp": 177,
+                "current_mp": 96,
+                "max_mp": 123,
+                "experience": 321,
+            },
+        )
+        extended_zero_mask = bytes.fromhex("2900000000000001aa")
+        self.assertEqual(
+            CharacterStatUpdate.parse(extended_zero_mask).to_bytes(),
+            extended_zero_mask,
         )
         self.assertEqual(
             combined.values,
@@ -1146,11 +1248,12 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(spawn.to_bytes()), 22)
         self.assertEqual(NpcSpawn.parse(spawn.to_bytes()), spawn)
 
-    def test_npc_spawn_rejects_boolean_and_reversed_range(self) -> None:
-        malformed_boolean = bytearray(fixture_npc().to_bytes())
-        malformed_boolean[14] = 2
-        with self.assertRaisesRegex(PacketShapeError, "faces_left"):
-            NpcSpawn.parse(bytes(malformed_boolean))
+    def test_npc_spawn_preserves_facing_value_and_rejects_range(self) -> None:
+        variant = replace(fixture_npc(), facing_value=5)
+        self.assertEqual(NpcSpawn.parse(variant.to_bytes()), variant)
+
+        with self.assertRaisesRegex(PacketShapeError, "facing value"):
+            replace(fixture_npc(), facing_value=0x100).to_bytes()
 
         with self.assertRaisesRegex(PacketShapeError, "reversed"):
             NpcSpawn(
@@ -1158,7 +1261,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 template_id=2,
                 x=0,
                 cy=0,
-                faces_left=False,
+                facing_value=0,
                 foothold_id=0,
                 range_left=10,
                 range_right=-10,
@@ -1770,10 +1873,10 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(analysis.valid)
         self.assertEqual(analysis.warnings, ())
         self.assertEqual(analysis.state.inventory_change_packets, 1)
-        self.assertEqual(analysis.state.inventory_modifications, 2)
+        self.assertEqual(analysis.state.inventory_modifications, 4)
         self.assertEqual(
             analysis.state.inventory_modifications_by_operation,
-            {"update_quantity": 1, "add": 1},
+            {"update_quantity": 1, "add": 2, "move": 1},
         )
         self.assertEqual(analysis.state.inventory_update_flags, {0: 1})
         self.assertEqual(analysis.state.inventory_unknown_slot_modifications, 0)
@@ -1782,18 +1885,20 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.inventory_items["etc"][0].item_id, 4_010_003
         )
+        self.assertEqual(len(analysis.state.inventory_items["equip"]), 1)
+        self.assertEqual(analysis.state.inventory_items["equip"][0].slot, -11)
         event = next(
             event
             for event in analysis.events
             if event.kind == "inventory_change_set_received"
         )
-        self.assertEqual(event.details["applied_modifications"], 2)
+        self.assertEqual(event.details["applied_modifications"], 4)
         self.assertEqual(
             event.details["modifications"][0]["previous_quantity"], 3
         )
         report = analysis.safe_dict()
         self.assertEqual(report["state"]["inventory"]["item_counts"]["etc"], 1)
-        self.assertEqual(report["state"]["inventory_modifications"], 2)
+        self.assertEqual(report["state"]["inventory_modifications"], 4)
 
     def test_correlates_item_use_request_inventory_and_stat_effects(self) -> None:
         transcript = fixture_gameplay_transcript(

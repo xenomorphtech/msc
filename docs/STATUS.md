@@ -51,8 +51,17 @@
   marker-`26` level-1 character/inventory snapshot, 36 total field epochs, 436
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
-  bounded as partial; 49 strict-invalid variants remain across stat updates,
-  inventory changes, and NPC-spawn facing values.
+  bounded as partial. Strict decoding now succeeds across all 71,100 frames:
+  24,600 full, 38,027 partial, 8,473 unknown-but-lossless, and zero invalid
+  packet observations. Twelve state-correlation warnings remain.
+- The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
+  primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
+  packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,
+  MP `158/285`, EXP `980`, and mesos `1472`.
+- The same corpus expands opcode-`39` to equipment adds, cash-tab stack adds,
+  and operation-`2` equip moves. All 256 change sets and 232 modifications
+  decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
+  spawns also validate after preserving the facing byte values `0/1/2/4/5`.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups
