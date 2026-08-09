@@ -875,6 +875,20 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(parsed.port, 12857)
         self.assertEqual(parsed.character_id, 1234)
 
+    def test_pcap_plaintext_reference_can_reencode_typed_character_list(
+        self,
+    ) -> None:
+        original = bytes.fromhex("040000000000000000000000000103000000")
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@116:0?character-list"
+            )
+
+        self.assertEqual(payload, original)
+
     def test_pcap_plaintext_reference_can_rewrite_typed_mob_spawn(self) -> None:
         original = MobEnterField(
             object_id=20_001,

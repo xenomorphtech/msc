@@ -168,7 +168,7 @@ frame 3       opcode 0, 63-byte successful account result
 frames 5-9   opcode 2, five 2,183-byte world records
 frame 10     opcode 2, signed world-id -1 sentinel
 frames 15-16 opcode 402, 12-byte then 8-byte transition results
-frame 17     opcode 4, 170-byte character-list response
+frame 17     opcode 4, 170-byte typed character-list response
 frame 18     opcode 134, 10-byte server time
 frame 19     opcode 13, type-7 envelope with 27 opaque bytes
 frame 20     opcode 5, 19-byte world handoff
@@ -179,6 +179,52 @@ visible/online flag `1`; world `5` uses flag `2`. Each has 60 channels,
 event EXP/drop values `100`, channel unknown value `200`, and no balloons.
 This explains why flag-`0` test worlds were retained in memory but rendered
 with blank labels.
+
+### Character-list success shape
+
+Two independent login captures bound successful server opcode `4`: stream
+`83` in `111.pcapng` has one character and a total length of 170 bytes, while
+stream `116` in `1-10FS.pcapng` has zero characters and a total length of 18
+bytes. Both parse and re-emit byte-for-byte as:
+
+```text
+uint16 opcode = 4
+int8   result = 0
+uint32 reserved_1
+uint32 reserved_2
+uint8  character_count
+repeat character_count:
+  character stat snapshot
+  uint8 gender
+  uint8 skin
+  uint32 face_id
+  repeated uint8 slot + uint32 item_id, terminated by slot 0xff
+  repeated masked slot + item_id, terminated by slot 0xff
+  uint32 cash_weapon_id
+  uint32 opaque_style_values[7]
+  uint8 entry_code
+  bool ranking_present
+  if ranking_present: int32 ranking_values[4]
+uint8  trailer_1
+uint8  trailer_2
+uint32 trailer_3
+```
+
+The stat snapshot reuses the typed world-entry prefix: character id, data
+flags, UTF-16 name, gender/skin/face/hair, companion id, level/job, four base
+stats, HP/MP, AP/SP, EXP, fame, map/portal, and two neutral state fields. The
+record validates that its repeated appearance identity matches the stat
+snapshot. Slot `0` in the first appearance list carries the hair template in
+both the parser and emitter. The seven style values and final trailer retain
+neutral names because only their widths and positions are independently
+established.
+
+The login JSON state reports character count plus level/job/stats, HP/MP,
+map, equipment counts, and ranking presence. Character id and name are
+`"present"` unless `--show-identifiers` is explicitly enabled. A subsequent
+client opcode `7` is invalid if its character id was not advertised by this
+list. Replay references can append `?character-list` to require a full typed
+parse and state-driven re-encode before encryption.
 
 The client selects a world with six-byte opcode `4`, then a channel with
 nine-byte opcode `5`, and finally a character with six-byte opcode `7`. The
@@ -1689,8 +1735,10 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.
-- The character-list opcode/result envelope is validated, but its inner 167
-  bytes remain intentionally opaque/partial.
+- Successful character-list records are typed and losslessly re-emitted. The
+  seven appearance-style values, entry code, six-byte trailer roles, ranked
+  branch semantics, and non-success response bodies remain neutrally named or
+  opaque pending independent variants.
 - The 19-byte handoff and large initial world snapshot are structurally
   validated; equipment-specific metadata, keyed-property roles, parts of the
   fixed trailer, the marker-`26` 172-byte progression region, and several

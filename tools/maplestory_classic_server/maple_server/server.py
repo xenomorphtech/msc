@@ -52,6 +52,7 @@ from .gameplay import (
 from .http_api import ServerRuntime, start_runtime_http_api
 from .packets import (
     ChannelTransitionResponse,
+    CharacterListEnvelope,
     ClientAttackAction,
     FieldDropSpawn,
     HeartbeatProbe,
@@ -2386,6 +2387,15 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
             trailing=original.trailing,
             opcode=original.opcode,
         ).to_bytes()
+    if transform == "character-list":
+        try:
+            character_list = CharacterListEnvelope.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap character-list transform requires a validated opcode-4 "
+                "character-list response"
+            ) from error
+        return character_list.to_bytes()
     if transform.startswith("mob-spawn="):
         fields = transform.removeprefix("mob-spawn=").split(":")
         if len(fields) not in {2, 4}:
@@ -2448,7 +2458,7 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
         return replace(controller, spawn=rewritten_spawn).to_bytes()
     raise argparse.ArgumentTypeError(
         "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
-        "or mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
+        "character-list, or mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
     )
 
 

@@ -612,9 +612,243 @@ class ChannelSelection:
 
 
 @dataclass(frozen=True)
+class CharacterLookEntry:
+    """One slot/template pair in a character-select appearance list."""
+
+    slot: int
+    item_id: int
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.slot < 0xFF:
+            raise PacketShapeError(
+                f"character look slot is out of range: {self.slot}"
+            )
+        if not 1 <= self.item_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                f"character look item id is out of range: {self.item_id}"
+            )
+        return struct.pack("<BI", self.slot, self.item_id)
+
+
+@dataclass(frozen=True)
+class CharacterListAppearance:
+    """Lossless typed appearance suffix used by a character-list record."""
+
+    gender: int
+    skin: int
+    face_id: int
+    visible_entries: tuple[CharacterLookEntry, ...]
+    masked_entries: tuple[CharacterLookEntry, ...]
+    cash_weapon_id: int
+    opaque_style_values: tuple[int, int, int, int, int, int, int]
+
+    @staticmethod
+    def _parse_entries(
+        reader: PacketReader, *, field: str
+    ) -> tuple[CharacterLookEntry, ...]:
+        entries: list[CharacterLookEntry] = []
+        seen_slots: set[int] = set()
+        while True:
+            slot = reader.u8(f"{field}.slot")
+            if slot == 0xFF:
+                break
+            if slot in seen_slots:
+                raise PacketShapeError(
+                    f"character_list.{field} repeats slot {slot}"
+                )
+            seen_slots.add(slot)
+            item_id = reader.u32(f"{field}.item_id")
+            if item_id == 0:
+                raise PacketShapeError(
+                    f"character_list.{field} slot {slot} has a zero item id"
+                )
+            entries.append(CharacterLookEntry(slot=slot, item_id=item_id))
+        return tuple(entries)
+
+    @classmethod
+    def parse_from(cls, reader: PacketReader) -> "CharacterListAppearance":
+        appearance = cls(
+            gender=reader.u8("appearance.gender"),
+            skin=reader.u8("appearance.skin"),
+            face_id=reader.u32("appearance.face_id"),
+            visible_entries=cls._parse_entries(
+                reader, field="appearance.visible_entries"
+            ),
+            masked_entries=cls._parse_entries(
+                reader, field="appearance.masked_entries"
+            ),
+            cash_weapon_id=reader.u32("appearance.cash_weapon_id"),
+            opaque_style_values=tuple(
+                reader.u32(f"appearance.opaque_style_values[{index}]")
+                for index in range(7)
+            ),
+        )
+        appearance._validate()
+        return appearance
+
+    @property
+    def hair_id(self) -> int | None:
+        return next(
+            (entry.item_id for entry in self.visible_entries if entry.slot == 0),
+            None,
+        )
+
+    def _validate(self) -> None:
+        if self.gender not in (0, 1):
+            raise PacketShapeError(
+                f"character list appearance gender is {self.gender}, "
+                "expected 0 or 1"
+            )
+        if not 0 <= self.skin <= 0xFF:
+            raise PacketShapeError(
+                f"character list appearance skin is out of range: {self.skin}"
+            )
+        if not 1 <= self.face_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                f"character list face id is out of range: {self.face_id}"
+            )
+        if len(self.opaque_style_values) != 7:
+            raise PacketShapeError(
+                "character list appearance must contain seven style values"
+            )
+        for field, entries in (
+            ("visible", self.visible_entries),
+            ("masked", self.masked_entries),
+        ):
+            slots = [entry.slot for entry in entries]
+            if len(slots) != len(set(slots)):
+                raise PacketShapeError(
+                    f"character list {field} appearance slots repeat"
+                )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return b"".join(
+                (
+                    struct.pack("<BBI", self.gender, self.skin, self.face_id),
+                    *(entry.to_bytes() for entry in self.visible_entries),
+                    b"\xff",
+                    *(entry.to_bytes() for entry in self.masked_entries),
+                    b"\xff",
+                    struct.pack("<I", self.cash_weapon_id),
+                    struct.pack("<7I", *self.opaque_style_values),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"character list appearance field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class CharacterListRanking:
+    """Four signed ranking values conditionally attached to one entry."""
+
+    values: tuple[int, int, int, int]
+
+    @classmethod
+    def parse_from(cls, reader: PacketReader) -> "CharacterListRanking":
+        return cls(
+            values=tuple(
+                reader.i32(f"ranking.values[{index}]") for index in range(4)
+            )
+        )
+
+    def to_bytes(self) -> bytes:
+        if len(self.values) != 4:
+            raise PacketShapeError(
+                "character list ranking must contain four signed values"
+            )
+        try:
+            return struct.pack("<4i", *self.values)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"character list ranking value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class CharacterListRecord:
+    """Character stats, appearance, and optional ranking in login opcode 4."""
+
+    snapshot: InitialCharacterSnapshot
+    appearance: CharacterListAppearance
+    entry_code: int
+    ranking: CharacterListRanking | None = None
+
+    @classmethod
+    def parse_from(cls, reader: PacketReader) -> "CharacterListRecord":
+        snapshot = InitialCharacterSnapshot.parse_from(reader)
+        appearance = CharacterListAppearance.parse_from(reader)
+        entry_code = reader.u8("record.entry_code")
+        ranking_present = reader.u8("record.ranking_present")
+        if ranking_present not in (0, 1):
+            raise PacketShapeError(
+                "character_list.record.ranking_present is "
+                f"{ranking_present}, expected 0 or 1"
+            )
+        ranking = (
+            CharacterListRanking.parse_from(reader)
+            if ranking_present
+            else None
+        )
+        record = cls(
+            snapshot=snapshot,
+            appearance=appearance,
+            entry_code=entry_code,
+            ranking=ranking,
+        )
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        expected = (
+            self.snapshot.gender,
+            self.snapshot.skin,
+            self.snapshot.face_id,
+            self.snapshot.hair_id,
+        )
+        actual = (
+            self.appearance.gender,
+            self.appearance.skin,
+            self.appearance.face_id,
+            self.appearance.hair_id,
+        )
+        if actual != expected:
+            raise PacketShapeError(
+                "character list appearance identity does not match its stat "
+                "snapshot"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        if not 0 <= self.entry_code <= 0xFF:
+            raise PacketShapeError(
+                f"character list entry code is out of range: {self.entry_code}"
+            )
+        return b"".join(
+            (
+                self.snapshot.to_bytes(),
+                self.appearance.to_bytes(),
+                bytes((self.entry_code, int(self.ranking is not None))),
+                self.ranking.to_bytes() if self.ranking is not None else b"",
+            )
+        )
+
+
+@dataclass(frozen=True)
 class CharacterListEnvelope:
+    """Typed success response with a lossless fallback for error variants."""
+
     result: int
-    opaque_payload: bytes
+    reserved_u32_1: int = 0
+    reserved_u32_2: int = 0
+    records: tuple[CharacterListRecord, ...] = ()
+    trailer_u8_1: int = 0
+    trailer_u8_2: int = 1
+    trailer_u32: int = 3
+    failure_payload: bytes = b""
     opcode: int = 4
 
     @classmethod
@@ -622,12 +856,76 @@ class CharacterListEnvelope:
         reader = PacketReader(payload, packet_name="character_list")
         _expect_opcode(reader, 4)
         result = reader.i8("result")
-        opaque_payload = reader.bytes(reader.remaining, "opaque_payload")
+        if result != 0:
+            failure_payload = reader.bytes(
+                reader.remaining, "failure_payload"
+            )
+            reader.finish()
+            return cls(result=result, failure_payload=failure_payload)
+        reserved_u32_1 = reader.u32("reserved_u32_1")
+        reserved_u32_2 = reader.u32("reserved_u32_2")
+        record_count = reader.u8("record_count")
+        records = tuple(
+            CharacterListRecord.parse_from(reader)
+            for _ in range(record_count)
+        )
+        trailer_u8_1 = reader.u8("trailer_u8_1")
+        trailer_u8_2 = reader.u8("trailer_u8_2")
+        trailer_u32 = reader.u32("trailer_u32")
         reader.finish()
-        return cls(result=result, opaque_payload=opaque_payload)
+        return cls(
+            result=result,
+            reserved_u32_1=reserved_u32_1,
+            reserved_u32_2=reserved_u32_2,
+            records=records,
+            trailer_u8_1=trailer_u8_1,
+            trailer_u8_2=trailer_u8_2,
+            trailer_u32=trailer_u32,
+        )
 
     def to_bytes(self) -> bytes:
-        return struct.pack("<Hb", self.opcode, self.result) + self.opaque_payload
+        if not -0x80 <= self.result <= 0x7F:
+            raise PacketShapeError(
+                f"character list result is out of range: {self.result}"
+            )
+        prefix = struct.pack("<Hb", self.opcode, self.result)
+        if self.result != 0:
+            if self.records:
+                raise PacketShapeError(
+                    "failed character list response cannot contain records"
+                )
+            return prefix + self.failure_payload
+        if self.failure_payload:
+            raise PacketShapeError(
+                "successful character list response cannot have a failure payload"
+            )
+        if len(self.records) > 0xFF:
+            raise PacketShapeError(
+                "character list cannot contain more than 255 records"
+            )
+        try:
+            return b"".join(
+                (
+                    prefix,
+                    struct.pack(
+                        "<IIB",
+                        self.reserved_u32_1,
+                        self.reserved_u32_2,
+                        len(self.records),
+                    ),
+                    *(record.to_bytes() for record in self.records),
+                    struct.pack(
+                        "<BBI",
+                        self.trailer_u8_1,
+                        self.trailer_u8_2,
+                        self.trailer_u32,
+                    ),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"character list envelope field is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)

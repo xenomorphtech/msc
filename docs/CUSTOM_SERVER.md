@@ -200,8 +200,9 @@ or committed fixtures. The working login composition is:
    world frames `5` through `9`, and sentinel frame `10`;
 4. on client opcode `4`, send frames `15` and `16` with delays `0,2.5`, and
    rewrite frame `16`'s stage-1 world id from the live selection;
-5. on client opcode `5`, send character frames `17`, `18`, and `19` with
-   delays `0,0,1.0`;
+5. on client opcode `5`, parse/re-emit typed character frame `17` with the
+   `?character-list` transform, then send frames `18` and `19` with delays
+   `0,0,1.0`;
 6. on client opcode `7`, send handoff frame `20` after transforming only its
    endpoint to `127.0.0.1:12857`.
 
@@ -211,6 +212,7 @@ ordered response sequence. Configure the capture-faithful waits with:
 ```text
 --drop-server-frame 4
 --reply-on-client-opcode-from-pcap 6=/home/sdancer/ms/111.pcapng@83:13
+--reply-on-client-opcode-from-pcap '5=/home/sdancer/ms/111.pcapng@83:17?character-list'
 --client-opcode-reply-delays 4=0,2.5
 --client-opcode-reply-delays 5=0,0,1.0
 --rewrite-channel-transition-world
@@ -1323,6 +1325,13 @@ project's own `README.md` for all options.
   the predicted `[293,280]` response and `8 -> 0` lifecycle, folded validly,
   and kept the client/heartbeat exchange active. Official ±1 HP authority
   adjustments and attack-relay synthesis remain outside that exact policy.
+- Login opcode `4` now parses and re-emits typed character stats, appearance
+  slot maps, optional rankings, and the fixed trailer. The one-record
+  `111.pcapng` and empty `1-10FS.pcapng` variants both round-trip exactly. A
+  browser-free live replay using `?character-list` rendered the predicted
+  level/job/stats, reached character selection without a stall, handed off on
+  opcode `7`, and entered the local gameplay replay; its strict login fold has
+  full character-list coverage and no issues or warnings.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.
@@ -1331,14 +1340,15 @@ project's own `README.md` for all options.
 
 Replace the remaining opaque replay portions with stateful handling:
 
-1. Decode the inner 167 bytes of each character-list response record and emit
-   it from typed player state.
-2. Isolate the additional client-side drop eligibility condition using the
+1. Isolate the additional client-side drop eligibility condition using the
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
-3. Expand the proven typed opcode-`157` mutation into a generated initial field
+2. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
-4. Reuse the proven typed final-field mob injection to validate the existing
+3. Reuse the proven typed final-field mob injection to validate the existing
    movement-acknowledgement policy through the real client.
-5. Name the remaining neutral account, equipment, progression, and trailer
-   fields only when independent captures or controlled effects support them.
+4. Capture a ranked or multi-character account to validate the conditional
+   four-`int32` character ranking branch and record-count loop independently.
+5. Name the remaining neutral account, character-list style/trailer,
+   equipment, progression, and field-trailer fields only when independent
+   captures or controlled effects support them.

@@ -152,6 +152,41 @@ class LoginAnalysis:
                     else "present"
                 ),
             }
+        characters: list[dict[str, object]] = []
+        if self.state.character_list is not None:
+            characters = [
+                {
+                    "character_id": (
+                        record.snapshot.character_id
+                        if show_identifiers
+                        else "present"
+                    ),
+                    "name": (
+                        record.snapshot.name
+                        if show_identifiers
+                        else "present"
+                    ),
+                    "level": record.snapshot.level,
+                    "job_id": record.snapshot.job_id,
+                    "strength": record.snapshot.strength,
+                    "dexterity": record.snapshot.dexterity,
+                    "intelligence": record.snapshot.intelligence,
+                    "luck": record.snapshot.luck,
+                    "current_hp": record.snapshot.current_hp,
+                    "max_hp": record.snapshot.max_hp,
+                    "current_mp": record.snapshot.current_mp,
+                    "max_mp": record.snapshot.max_mp,
+                    "map_id": record.snapshot.map_id,
+                    "visible_equipment_count": len(
+                        record.appearance.visible_entries
+                    ),
+                    "masked_equipment_count": len(
+                        record.appearance.masked_entries
+                    ),
+                    "ranking_present": record.ranking is not None,
+                }
+                for record in self.state.character_list.records
+            ]
         return {
             "source": self.source,
             "valid": self.valid,
@@ -189,6 +224,8 @@ class LoginAnalysis:
                 "selected_channel_id": self.state.selected_channel_id,
                 "client_address": self.state.client_address,
                 "character_list_received": self.state.character_list is not None,
+                "character_count": len(characters),
+                "characters": characters,
                 "selected_character_id": character_id,
                 "handoff": handoff,
             },
@@ -600,19 +637,45 @@ class LoginStateFold:
             self.state.character_list = character_list
             if character_list.result == 0:
                 self.state.phase = LoginPhase.CHARACTER_SELECTION
+            details: dict[str, object] = {
+                "result": character_list.result,
+                "character_count": len(character_list.records),
+            }
+            issues: tuple[str, ...] = ()
+            coverage = ShapeCoverage.FULL
+            if character_list.result != 0 and character_list.failure_payload:
+                coverage = ShapeCoverage.PARTIAL
+                details["failure_payload_bytes"] = len(
+                    character_list.failure_payload
+                )
+                issues = (
+                    "the non-success character-list payload remains opaque",
+                )
+            elif character_list.result == 0:
+                details["characters"] = [
+                    {
+                        "character_id_present": True,
+                        "name_present": bool(record.snapshot.name),
+                        "level": record.snapshot.level,
+                        "job_id": record.snapshot.job_id,
+                        "map_id": record.snapshot.map_id,
+                        "visible_equipment_count": len(
+                            record.appearance.visible_entries
+                        ),
+                        "masked_equipment_count": len(
+                            record.appearance.masked_entries
+                        ),
+                        "ranking_present": record.ranking is not None,
+                    }
+                    for record in character_list.records
+                ]
             return self._observation(
                 frame,
                 kind="character_list",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=coverage,
                 parsed=character_list,
-                details={
-                    "result": character_list.result,
-                    "opaque_bytes": len(character_list.opaque_payload),
-                },
-                issues=(
-                    "only the opcode/result envelope is interpreted; the "
-                    "character records remain opaque",
-                ),
+                details=details,
+                issues=issues,
             )
         if opcode == 5 and len(payload) == 19:
             handoff = WorldHandoff.parse(payload)
@@ -728,6 +791,22 @@ class LoginStateFold:
             )
         if opcode == 7:
             selection = CharacterSelection.parse(payload)
+            character_list = self.state.character_list
+            if character_list is None:
+                self.issues.append(
+                    "client selected a character before receiving a character list"
+                )
+            elif character_list.result != 0:
+                self.issues.append(
+                    "client selected a character after a failed character list"
+                )
+            elif selection.character_id not in {
+                record.snapshot.character_id
+                for record in character_list.records
+            }:
+                self.issues.append(
+                    "client selected a character not advertised by the server"
+                )
             self.state.selected_character_id = selection.character_id
             self.state.phase = LoginPhase.CHARACTER_SELECTED
             return self._observation(

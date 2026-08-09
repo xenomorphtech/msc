@@ -20,9 +20,13 @@ from maple_server.packets import (  # noqa: E402
     ChannelRecord,
     ChannelSelection,
     ChannelTransitionResponse,
+    CharacterListAppearance,
     CharacterListEnvelope,
+    CharacterListRecord,
+    CharacterLookEntry,
     CharacterSelection,
     ClientStatusMessage,
+    InitialCharacterSnapshot,
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
@@ -91,8 +95,66 @@ def fixture_world() -> WorldRecord:
     )
 
 
+def fixture_character_list() -> CharacterListEnvelope:
+    snapshot = InitialCharacterSnapshot(
+        character_id=300_001,
+        data_flags=4,
+        name="FixtureHero",
+        gender=0,
+        skin=1,
+        face_id=20_000,
+        hair_id=30_000,
+        companion_id=0,
+        level=12,
+        job_id=200,
+        strength=4,
+        dexterity=4,
+        intelligence=53,
+        luck=14,
+        current_hp=70,
+        max_hp=222,
+        current_mp=136,
+        max_mp=342,
+        ability_points=5,
+        skill_points=0,
+        experience=1_567,
+        fame=0,
+        map_id=101_000_000,
+        portal_index=1,
+        opaque_state_flag=0,
+        opaque_state_u64=0,
+    )
+    return CharacterListEnvelope(
+        result=0,
+        records=(
+            CharacterListRecord(
+                snapshot=snapshot,
+                appearance=CharacterListAppearance(
+                    gender=snapshot.gender,
+                    skin=snapshot.skin,
+                    face_id=snapshot.face_id,
+                    visible_entries=(
+                        CharacterLookEntry(slot=0, item_id=snapshot.hair_id),
+                        CharacterLookEntry(slot=5, item_id=1_041_006),
+                    ),
+                    masked_entries=(),
+                    cash_weapon_id=0,
+                    opaque_style_values=(5_000_046, 0, 0, 0, 0, 0, 0),
+                ),
+                entry_code=0,
+            ),
+        ),
+        trailer_u8_1=2,
+        trailer_u8_2=1,
+        trailer_u32=3,
+    )
+
+
 def fixture_login_transcript(
-    *, selected_channel: int = 23, transition_world: int = 4
+    *,
+    selected_channel: int = 23,
+    transition_world: int = 4,
+    selected_character: int = 300_001,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -156,10 +218,11 @@ def fixture_login_transcript(
     )
     append(
         "server_to_client",
-        CharacterListEnvelope(result=0, opaque_payload=b"fixture").to_bytes(),
+        fixture_character_list().to_bytes(),
     )
     append(
-        "client_to_server", CharacterSelection(character_id=300_001).to_bytes()
+        "client_to_server",
+        CharacterSelection(character_id=selected_character).to_bytes(),
     )
     append(
         "server_to_client",
@@ -224,6 +287,46 @@ class PacketShapeTest(unittest.TestCase):
             ChannelTransitionResponse.parse(stage_one.to_bytes()), stage_one
         )
 
+    def test_character_list_records_round_trip_from_typed_state(self) -> None:
+        character_list = fixture_character_list()
+
+        parsed = CharacterListEnvelope.parse(character_list.to_bytes())
+
+        self.assertEqual(parsed, character_list)
+        self.assertEqual(len(parsed.records), 1)
+        self.assertEqual(parsed.records[0].snapshot.character_id, 300_001)
+        self.assertEqual(parsed.records[0].snapshot.name, "FixtureHero")
+        self.assertEqual(parsed.records[0].appearance.hair_id, 30_000)
+
+    def test_observed_empty_character_list_shape_round_trips(self) -> None:
+        payload = bytes.fromhex("040000000000000000000000000103000000")
+
+        parsed = CharacterListEnvelope.parse(payload)
+
+        self.assertEqual(parsed.result, 0)
+        self.assertEqual(parsed.records, ())
+        self.assertEqual(parsed.to_bytes(), payload)
+
+    def test_character_list_rejects_mismatched_appearance_identity(self) -> None:
+        character_list = fixture_character_list()
+        record = character_list.records[0]
+        malformed = CharacterListRecord(
+            snapshot=record.snapshot,
+            appearance=CharacterListAppearance(
+                gender=record.appearance.gender,
+                skin=record.appearance.skin,
+                face_id=record.appearance.face_id + 1,
+                visible_entries=record.appearance.visible_entries,
+                masked_entries=record.appearance.masked_entries,
+                cash_weapon_id=record.appearance.cash_weapon_id,
+                opaque_style_values=record.appearance.opaque_style_values,
+            ),
+            entry_code=record.entry_code,
+        )
+
+        with self.assertRaisesRegex(PacketShapeError, "does not match"):
+            malformed.to_bytes()
+
     def test_opcode_13_envelopes_round_trip_and_validate_length(self) -> None:
         acknowledgment = Opcode13Ack(result=0)
         message = Opcode13Envelope(message_type=7, opaque_payload=b"message")
@@ -262,7 +365,21 @@ class GameStateFoldTest(unittest.TestCase):
             for observation in analysis.observations
             if observation.coverage == ShapeCoverage.PARTIAL
         ]
-        self.assertEqual([observation.kind for observation in partial], ["character_list"])
+        self.assertEqual(partial, [])
+        self.assertEqual(len(analysis.state.character_list.records), 1)
+        self.assertEqual(
+            analysis.state.character_list.records[0].snapshot.character_id,
+            300_001,
+        )
+
+    def test_rejects_character_selection_not_in_advertised_list(self) -> None:
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(selected_character=300_002)
+        )
+        self.assertIn(
+            "client selected a character not advertised by the server",
+            analysis.issues,
+        )
 
     def test_rejects_semantically_unadvertised_channel(self) -> None:
         analysis = analyze_login_transcript(

@@ -138,6 +138,17 @@ server opcode `402` performs a two-packet timed transition, client opcode `5`
 selects a channel, server opcode `4` carries the character list, client opcode
 `7` selects a character, and server opcode `5` performs the handoff.
 
+The opcode-`4` handler's indirect character-data constructor matches the
+world-entry stat prefix followed by its appearance parser. Capture evidence
+then fixes the remaining control flow: two reserved `uint32` values and a byte
+count precede the records; each record has two sentinel-terminated appearance
+slot maps, seven neutral `uint32` style values, an entry byte, a ranking flag,
+and optionally four signed ranking values; a six-byte trailer follows the
+record loop. This consumes both the one-record 170-byte stream-`83` response
+and the empty 18-byte `1-10FS.pcapng` stream-`116` response exactly. Neutral
+names are retained where the handler establishes width/control flow but not
+game meaning.
+
 Focused Cpp2IL output for the world parser is stored under:
 
 ```text

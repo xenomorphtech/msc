@@ -285,7 +285,7 @@ client 4    world selection (`uint32 world_id`)
 server 402 first 12-byte transition response
 server 402 second 8-byte response after about 2.5 seconds
 client 5    channel selection (world, channel, client IPv4)
-server 4    170-byte character list (inner records still partial)
+server 4    typed character list (170-byte one-record and 18-byte empty variants)
 client 7    character selection (`uint32 character_id`)
 server 5    19-byte IPv4/port/character handoff
 ```
@@ -513,20 +513,34 @@ cooldown values. Its packet and annotation fold is valid with no warnings at
 `(1025,-2677)`, five broadcasts/twenty-five commands, and 15/15 heartbeats.
 Writers cap annotations at 16,384 and surface any drops as analysis warnings.
 
+Login opcode `4` is no longer an opaque replay boundary. The one-character
+170-byte response in `111.pcapng` stream `83` and the empty 18-byte response in
+`1-10FS.pcapng` stream `116` both validate with full coverage and exact typed
+round trips. The fold exposes identifier-safe character stats/appearance
+counts, rejects a selection not present in the advertised list, and the replay
+path can force the captured response through the typed emitter with the
+`?character-list` frame transform. A browser-free real-client run used that
+transform, rendered the decoded level-12 mage and `4/4/53/14` base stats on
+character select, emitted opcode `7`, connected to the local world listener,
+and entered gameplay. Its closed login transcript is
+`typed_character_list_live_20260809/login/1786308465556022953_replay_12082.jsonl`;
+the strict fold is `handoff_ready`, character count `1`, full opcode-`4`
+coverage, and zero issues/warnings.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Decode the captured opcode-`4` character-list inner records and generate the
-   list from typed player state rather than replay bytes.
-2. Use the owner/proximity negative controls to isolate the remaining
+1. Use the owner/proximity negative controls to isolate the remaining
    client-side drop eligibility condition; serve a reactive pickup only after
    observing an authentic opcode-`185` request.
-3. Promote the complete initial opcode-`157` model from a safe one-field
+2. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
+3. Capture a ranked or multi-character login to exercise the typed
+   character-list count loop and optional four-ranking-value branch.
 4. Add a bounded per-trigger event budget so repeated valid gameplay events
    can be rate-limited independently of the shared cooldown while preserving
    the read-only HTTP boundary.

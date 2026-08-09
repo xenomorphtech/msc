@@ -120,6 +120,11 @@ per response, which is required for the observed 2.5-second gap between the
 two server opcode-`402` channel-transition packets.
 `--rewrite-channel-transition-world` binds the stage-1 world id to the live
 client opcode-`4` selection instead of replaying the captured world verbatim.
+Appending `?character-list` to a PCAP frame reference requires a valid typed
+opcode-`4` response and re-emits it from the decoded character-list state. Use
+it for the first opcode-`5` reply, for example
+`5=/path/to/reference.pcapng@83:17?character-list`; malformed records are
+rejected before replay encryption.
 
 `--rewrite-initial-current-hp HP` is the typed field-state mutation path. It
 requires exactly one valid large opcode-`157` snapshot, validates the complete
@@ -277,11 +282,14 @@ same packet records as machine-readable objects. The analyzer reports full,
 partial, unknown, and invalid interpretations.
 Account success, world records/sentinel, world/channel/character selections,
 the two-stage opcode-`402` transition, and handoff are fully validated. The
-character-list envelope is deliberately partial until its inner records are
-decoded. Opcode-`13` acknowledgments and client status messages are fully
-decoded; other length-prefixed type-`6`/type-`7` envelopes are structurally
-bounded and intentionally reported as opaque. They use neutral opcode-envelope
-names because adjacency in one capture does not establish security semantics.
+successful character-list shape is also fully decoded: two reserved `uint32`
+values, a byte record count, typed character-stat/appearance records with an
+optional four-value ranking block, and a six-byte trailer. Unknown appearance
+and trailer roles retain neutral names and round-trip losslessly. Opcode-`13`
+acknowledgments and client status messages are fully decoded; other
+length-prefixed type-`6`/type-`7` envelopes are structurally bounded and
+intentionally reported as opaque. They use neutral opcode-envelope names
+because adjacency in one capture does not establish security semantics.
 
 Validate a world capture, fold it into field state, and optionally emit the
 timestamped gameplay event stream:
@@ -1232,8 +1240,9 @@ preserve distinct Unity scan codes in this setup.
 5. Return server opcode `402` frames for client opcode `4` with delays
    `0,2.5`, and use `--rewrite-channel-transition-world`; the client otherwise
    stalls before emitting channel opcode `5` when the captured world differs.
-6. Return the partially decoded character list, server time, and captured
-   type-`7` envelope for opcode `5`.
+6. Parse and re-emit the typed character list with the `?character-list`
+   transform, then return server time and the captured type-`7` envelope for
+   opcode `5`.
 7. Rewrite the validated opcode-`5` handoff to the local stream-`92` replay
    listener only after opcode `7`. The ordered NGSX run produced opcode `7`, a
    valid `handoff_ready` fold, and a real connection to the local world replay.
@@ -1265,8 +1274,8 @@ preserve distinct Unity scan codes in this setup.
 18. Decode and fold the repeated compact opcode-`157` transition into sequence,
     map, portal, HP, bounded text/timestamps, and field reset state.
 19. Decode the large initial field snapshot through player, inventory, and
-    progression state while keeping the inner character-list records as the
-    remaining login-side boundary.
+    progression state, then reuse its stat prefix to decode and emit the login
+    character-list records without opaque record bytes.
 20. Generate a same-length initial field snapshot with typed HP `1`, validate
     the packet before encryption, and confirm the predicted value in both the
     real client HUD and the independently folded replay transcript.
