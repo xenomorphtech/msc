@@ -401,6 +401,7 @@ async def replay_connection(
     ) = None,
     mob_movement_policy_trigger: str = "immediate",
     mob_movement_proximity_radius: int | None = None,
+    mob_movement_policy_cooldown_seconds: float = 0.0,
     mob_movement_evidence_transcript: Transcript | None = None,
     mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
@@ -538,6 +539,17 @@ async def replay_connection(
     ):
         raise ValueError(
             "mob movement proximity radius requires player-proximity trigger"
+        )
+    if not 0 <= mob_movement_policy_cooldown_seconds <= 3600:
+        raise ValueError(
+            "mob movement policy cooldown must be in 0..3600 seconds"
+        )
+    if (
+        mob_movement_policy_cooldown_seconds > 0
+        and mob_movement_policy_trigger == "immediate"
+    ):
+        raise ValueError(
+            "mob movement policy cooldown requires an event-driven trigger"
         )
     player_proximity_predicate = (
         PlayerMobProximityPredicate(mob_movement_proximity_radius)
@@ -768,6 +780,17 @@ async def replay_connection(
         raise TypeError(
             "runtime movement policy trigger telemetry must be a dictionary"
         )
+    if movement_policy_trigger_metrics is not None:
+        movement_policy_trigger_metrics["cooldown_seconds"] = (
+            mob_movement_policy_cooldown_seconds
+        )
+        movement_policy_trigger_metrics.setdefault(
+            "events_rejected_by_cooldown", 0
+        )
+        movement_policy_trigger_metrics.setdefault("last_event_outcome", None)
+        movement_policy_trigger_metrics.setdefault(
+            "last_cooldown_remaining_seconds", 0.0
+        )
     if (
         movement_policy_trigger_metrics is not None
         and player_proximity_predicate is not None
@@ -870,6 +893,9 @@ async def replay_connection(
                 "mob_movement_policy_trigger": mob_movement_policy_trigger,
                 "mob_movement_proximity_radius": (
                     mob_movement_proximity_radius
+                ),
+                "mob_movement_policy_cooldown_seconds": (
+                    mob_movement_policy_cooldown_seconds
                 ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
@@ -1138,9 +1164,19 @@ async def replay_connection(
                 )
                 packets_sent_this_call += 1
 
+        movement_policy_cooldown_until = 0.0
+
         async def observe_movement_policy_trigger_event() -> None:
+            nonlocal movement_policy_cooldown_until
+            now = asyncio.get_running_loop().time()
+            cooldown_remaining = max(
+                0.0, movement_policy_cooldown_until - now
+            )
             if movement_policy_trigger_metrics is not None:
                 movement_policy_trigger_metrics["awaiting_event"] = False
+                movement_policy_trigger_metrics[
+                    "last_cooldown_remaining_seconds"
+                ] = round(cooldown_remaining, 6)
                 movement_policy_trigger_metrics[
                     "matched_events_observed"
                 ] = int(
@@ -1148,6 +1184,39 @@ async def replay_connection(
                         "matched_events_observed", 0
                     )
                 ) + 1
+            if not isinstance(
+                movement_schedule,
+                MobMovementBroadcastDecisionQueue,
+            ) or movement_schedule.complete:
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["awaiting_event"] = False
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "ignored_after_completion"
+                    movement_policy_trigger_metrics[
+                        "events_ignored_after_completion"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "events_ignored_after_completion", 0
+                        )
+                    ) + 1
+                return
+            if cooldown_remaining > 0:
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["awaiting_event"] = (
+                        movement_schedule.has_unplanned_decision
+                    )
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "rejected_by_cooldown"
+                    movement_policy_trigger_metrics[
+                        "events_rejected_by_cooldown"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "events_rejected_by_cooldown", 0
+                        )
+                    ) + 1
+                return
             if (
                 isinstance(
                     movement_schedule,
@@ -1184,15 +1253,13 @@ async def replay_connection(
                     movement_policy_trigger_metrics["awaiting_event"] = (
                         movement_schedule.has_unplanned_decision
                     )
-            elif movement_policy_trigger_metrics is not None:
-                movement_policy_trigger_metrics["awaiting_event"] = False
-                movement_policy_trigger_metrics[
-                    "events_ignored_after_completion"
-                ] = int(
-                    movement_policy_trigger_metrics.get(
-                        "events_ignored_after_completion", 0
-                    )
-                ) + 1
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "decision_completed"
+                movement_policy_cooldown_until = (
+                    asyncio.get_running_loop().time()
+                    + mob_movement_policy_cooldown_seconds
+                )
 
         post_transcript_plaintexts = (
             tuple(pending_opcode_replies) + post_transcript_server_frames
@@ -2893,6 +2960,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--mob-movement-policy-cooldown-seconds",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help=(
+            "reject otherwise qualifying movement-policy events for up to "
+            "3600 seconds after a decision completes"
+        ),
+    )
+    replay.add_argument(
         "--reactive-mob-health-responses",
         action="store_true",
         help=(
@@ -3735,6 +3812,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         mob_movement_proximity_radius = (
             arguments.mob_movement_proximity_radius
         )
+        mob_movement_policy_cooldown_seconds = (
+            arguments.mob_movement_policy_cooldown_seconds
+        )
         if (
             mob_movement_follow_up_targets
             and mob_movement_follow_up_policy is not None
@@ -3793,6 +3873,19 @@ async def async_main(arguments: argparse.Namespace) -> None:
             raise ValueError(
                 "--mob-movement-proximity-radius requires "
                 "--mob-movement-policy-trigger player-proximity"
+            )
+        if not 0 <= mob_movement_policy_cooldown_seconds <= 3600:
+            raise ValueError(
+                "--mob-movement-policy-cooldown-seconds must be in "
+                "0..3600"
+            )
+        if (
+            mob_movement_policy_cooldown_seconds > 0
+            and mob_movement_policy_trigger == "immediate"
+        ):
+            raise ValueError(
+                "--mob-movement-policy-cooldown-seconds requires an "
+                "event-driven --mob-movement-policy-trigger"
             )
         if (
             (
@@ -3982,6 +4075,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "decisions_started": 0,
                 "decisions_completed": 0,
                 "events_ignored_after_completion": 0,
+                "cooldown_seconds": (
+                    mob_movement_policy_cooldown_seconds
+                ),
+                "events_rejected_by_cooldown": 0,
+                "last_event_outcome": None,
+                "last_cooldown_remaining_seconds": 0.0,
                 "proximity": (
                     PlayerMobProximityPredicate(
                         mob_movement_proximity_radius
@@ -4075,6 +4174,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             mob_movement_policy_trigger=mob_movement_policy_trigger,
             mob_movement_proximity_radius=mob_movement_proximity_radius,
+            mob_movement_policy_cooldown_seconds=(
+                mob_movement_policy_cooldown_seconds
+            ),
             mob_movement_evidence_transcript=(
                 movement_evidence_transcript
             ),
@@ -4151,6 +4253,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "mob_movement_policy_trigger": mob_movement_policy_trigger,
             "mob_movement_proximity_radius": (
                 mob_movement_proximity_radius
+            ),
+            "mob_movement_policy_cooldown_seconds": (
+                mob_movement_policy_cooldown_seconds
             ),
             "mob_movement_step_delay_seconds": (
                 arguments.mob_movement_step_delay_seconds

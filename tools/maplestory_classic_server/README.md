@@ -775,6 +775,22 @@ type-`0` commands, and 21/21 matched heartbeats. Runtime finished two gated
 decisions and ignored one later matched event after completion; the HTTP API
 remains read-only.
 
+`--mob-movement-policy-cooldown-seconds SECONDS` applies the same bounded
+post-decision cooldown to any event-driven trigger. Values are limited to
+`0..3600`; a positive value conflicts with the immediate trigger. The timer is
+armed only after a complete decision drains. Qualifying events inside it are
+counted in `events_rejected_by_cooldown` but neither plan nor send movement;
+the first qualifying event after expiry can re-arm one pending decision. Safe
+API state also reports `cooldown_seconds`, `last_event_outcome`, and
+`last_cooldown_remaining_seconds`.
+
+In the browser-free five-second live proof, heartbeat response frame `78`
+authorized movement frames `79`/`80`; response frames `82`, `84`, and `86`
+were rejected during cooldown; response frame `88` re-armed movement frames
+`89`/`90`. Runtime completed two gated decisions with three cooldown
+rejections. The valid, warning-free transcript ends at `(1025,-2677)` with
+five broadcasts, twenty-five type-`0` commands, and 16/16 matched heartbeats.
+
 `--mob-movement-policy-trigger served-mob-movement` is the client-originated
 alternative. It requires `--reactive-mob-movement-acknowledgements`; one
 opcode-`207` submission starts one decision only after the modeled policy

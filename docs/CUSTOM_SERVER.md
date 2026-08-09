@@ -975,6 +975,35 @@ folds validly with no warnings through
 heartbeat response immediately preceding a new decision, while the roughly
 one-second gaps are the configured pace within each two-packet decision.
 
+All three event-driven triggers can share a deterministic post-decision
+cooldown:
+
+```text
+--mob-movement-policy-trigger matched-heartbeat
+--mob-movement-policy-cooldown-seconds 5
+```
+
+The bound is `0..3600` seconds and is rejected with the `immediate` trigger.
+It starts only after every packet in one authorized decision has drained.
+Otherwise-qualifying events inside the window are still counted but cannot
+plan or send another decision; the first qualifying event at or after expiry
+re-arms the pending policy. Safe trigger telemetry adds `cooldown_seconds`,
+`events_rejected_by_cooldown`, `last_event_outcome`, and
+`last_cooldown_remaining_seconds`.
+
+The browser-free live proof used two-second heartbeats, a five-second
+cooldown, and one-second intra-decision pacing. Response frame `78` authorized
+movement frames `79`/`80`; responses `82`, `84`, and `86` arrived about
+0.99, 2.99, and 4.99 seconds after completion and emitted no movement.
+Response `88` arrived after expiry and authorized frames `89`/`90`. At that
+point the API reported two decisions started/completed, three cooldown
+rejections, and one later event ignored after completion. Transcript
+`generated_mob_policy_cooldown_visual_20260809/1786303210604795485_replay_12857.jsonl`
+folds validly with no warnings through
+`785 -> 833 -> 881 -> 929 -> 977 -> 1025`, five broadcasts, twenty-five
+type-`0` commands, and 16/16 matched heartbeats. The live client remained
+connected throughout and kept answering probes.
+
 For a client-originated gameplay event instead of liveness, use:
 
 ```text

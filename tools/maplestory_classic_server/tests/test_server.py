@@ -694,6 +694,8 @@ class TranscriptTest(unittest.TestCase):
                 "10",
                 "--mob-movement-policy-trigger",
                 "matched-heartbeat",
+                "--mob-movement-policy-cooldown-seconds",
+                "5",
             ]
         )
 
@@ -710,6 +712,7 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(
             arguments.mob_movement_policy_trigger, "matched-heartbeat"
         )
+        self.assertEqual(arguments.mob_movement_policy_cooldown_seconds, 5)
         served_arguments = build_parser().parse_args(
             [
                 "replay",
@@ -2747,6 +2750,33 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 },
             }
             tasks: set[asyncio.Task[None]] = set()
+            third_broadcast = broadcast(200, 250, 2)
+            third_plan = fixture_mob_movement_broadcast_plan(
+                third_broadcast,
+                previous_x=200,
+                previous_y=-200,
+                previous_foothold_id=7,
+                previous_stance=4,
+                target_x=250,
+                target_y=-200,
+                target_foothold_id=7,
+                target_stance=2,
+                source_server_frame_index=12,
+            )
+            second_follow_up_plan = MobMovementBroadcastSequencePlan(
+                steps=(third_plan,),
+                max_steps=2,
+                usable_displacements=1,
+                ambiguous_displacements=0,
+                shortest_sequence_count=1,
+            )
+            relative_policy = MobMovementRelativeDecisionPolicy(
+                decision_count=2,
+                max_steps=2,
+                displacement_x=50,
+                displacement_y=0,
+                foothold_id=7,
+            )
 
             def accept(reader, writer) -> None:
                 tasks.add(
@@ -2766,11 +2796,12 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             mob_movement_policy_trigger=(
                                 "served_mob_movement"
                             ),
+                            mob_movement_policy_cooldown_seconds=0.05,
                             mob_movement_evidence_transcript=source,
                             mob_movement_acknowledgement_policy=(
                                 acknowledgement_policy
                             ),
-                            hold_open_seconds=0.2,
+                            hold_open_seconds=0.4,
                             runtime_protocol=runtime_protocol,
                         )
                     )
@@ -2778,7 +2809,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
 
             with patch(
                 "maple_server.gameplay.plan_composed_mob_movement_broadcasts",
-                return_value=follow_up_plan,
+                side_effect=(follow_up_plan, second_follow_up_plan),
             ) as planner:
                 server = await asyncio.start_server(
                     accept, "127.0.0.1", 0
@@ -2895,6 +2926,81 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     second_broadcast,
                 )
                 planner.assert_called_once()
+
+                cooldown_submission = MobMovementSubmission(
+                    object_id=object_id,
+                    sequence=43,
+                    opaque_movement=movement_path.to_bytes(),
+                ).to_bytes()
+                cooldown_client_iv = shuffle_iv(accepted_client_iv)
+                writer.write(
+                    encode_frame_header(
+                        len(cooldown_submission), cooldown_client_iv, 300
+                    )
+                    + crypt_payload(cooldown_submission, cooldown_client_iv)
+                )
+                await writer.drain()
+                cooldown_ack_wire = await reader.readexactly(17)
+                cooldown_ack_iv = shuffle_iv(follow_iv)
+                self.assertEqual(
+                    MobMovementAcknowledgement.parse(
+                        crypt_payload(
+                            cooldown_ack_wire[4:], cooldown_ack_iv
+                        )
+                    ).sequence,
+                    43,
+                )
+                with self.assertRaises(TimeoutError):
+                    await asyncio.wait_for(reader.read(1), timeout=0.02)
+                planner.assert_called_once()
+                trigger_metrics = runtime_protocol[
+                    "mob_movement_broadcast"
+                ]["policy_trigger"]
+                self.assertTrue(trigger_metrics["awaiting_event"])
+                self.assertEqual(
+                    trigger_metrics["events_rejected_by_cooldown"], 1
+                )
+                self.assertEqual(
+                    trigger_metrics["last_event_outcome"],
+                    "rejected_by_cooldown",
+                )
+                self.assertGreater(
+                    trigger_metrics["last_cooldown_remaining_seconds"], 0
+                )
+
+                await asyncio.sleep(0.06)
+                rearmed_submission = MobMovementSubmission(
+                    object_id=object_id,
+                    sequence=44,
+                    opaque_movement=movement_path.to_bytes(),
+                ).to_bytes()
+                rearmed_client_iv = shuffle_iv(cooldown_client_iv)
+                writer.write(
+                    encode_frame_header(
+                        len(rearmed_submission), rearmed_client_iv, 300
+                    )
+                    + crypt_payload(rearmed_submission, rearmed_client_iv)
+                )
+                await writer.drain()
+                rearmed_ack_wire = await reader.readexactly(17)
+                rearmed_ack_iv = shuffle_iv(cooldown_ack_iv)
+                self.assertEqual(
+                    MobMovementAcknowledgement.parse(
+                        crypt_payload(rearmed_ack_wire[4:], rearmed_ack_iv)
+                    ).sequence,
+                    44,
+                )
+                third_wire = await reader.readexactly(
+                    len(third_broadcast.to_bytes()) + 4
+                )
+                third_iv = shuffle_iv(rearmed_ack_iv)
+                self.assertEqual(
+                    MobMovementBroadcast.parse(
+                        crypt_payload(third_wire[4:], third_iv)
+                    ),
+                    third_broadcast,
+                )
+                self.assertEqual(planner.call_count, 2)
                 writer.close()
                 await writer.wait_closed()
                 await asyncio.gather(*tasks)
@@ -2905,20 +3011,28 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 "mob_movement_acknowledgements"
             ]
             self.assertEqual(
-                acknowledgement_metrics["submissions_observed"], 2
+                acknowledgement_metrics["submissions_observed"], 4
             )
-            self.assertEqual(acknowledgement_metrics["responses_sent"], 1)
+            self.assertEqual(acknowledgement_metrics["responses_sent"], 3)
             self.assertEqual(
                 acknowledgement_metrics["submissions_rejected"], 1
             )
             movement_metrics = runtime_protocol["mob_movement_broadcast"]
-            self.assertEqual(movement_metrics["packets_sent"], 2)
+            self.assertEqual(movement_metrics["packets_sent"], 3)
             self.assertEqual(movement_metrics["state"]["phase"], "complete")
             trigger_metrics = movement_metrics["policy_trigger"]
             self.assertFalse(trigger_metrics["awaiting_event"])
-            self.assertEqual(trigger_metrics["matched_events_observed"], 1)
-            self.assertEqual(trigger_metrics["decisions_started"], 1)
-            self.assertEqual(trigger_metrics["decisions_completed"], 1)
+            self.assertEqual(trigger_metrics["matched_events_observed"], 3)
+            self.assertEqual(trigger_metrics["decisions_started"], 2)
+            self.assertEqual(trigger_metrics["decisions_completed"], 2)
+            self.assertEqual(trigger_metrics["cooldown_seconds"], 0.05)
+            self.assertEqual(
+                trigger_metrics["events_rejected_by_cooldown"], 1
+            )
+            self.assertEqual(
+                trigger_metrics["last_event_outcome"],
+                "decision_completed",
+            )
             self.assertEqual(
                 trigger_metrics["events_ignored_after_completion"], 0
             )

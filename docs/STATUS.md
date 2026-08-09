@@ -471,6 +471,18 @@ entry, three broadcasts, fifteen type-`0` commands, and 11/11 separately
 matched heartbeats. Safe API telemetry records no identifiers and HTTP remains
 read-only.
 
+The three event-driven triggers now share a bounded post-decision cooldown.
+`--mob-movement-policy-cooldown-seconds` accepts `0..3600`, starts only after
+the authorized decision fully drains, rejects otherwise-qualifying events
+inside the window without planning movement, and re-arms on the first later
+qualifying event. A browser-free live run used two-second heartbeats and a
+five-second cooldown: one response authorized frames `79`/`80`, the next three
+responses emitted no movement, and the first response after expiry authorized
+frames `89`/`90`. Runtime recorded two completed decisions and three cooldown
+rejections. The frozen transcript is valid with no warnings, ends at the
+predicted `(1025,-2677)`, and contains five broadcasts/twenty-five type-`0`
+commands plus 16/16 matched heartbeats. HTTP remains read-only.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -485,8 +497,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Add an explicit deterministic cooldown/re-arm policy across the three
-   modeled movement triggers, preserving their read-only HTTP boundary.
+4. Add a bounded per-trigger event budget so repeated valid gameplay events
+   can be rate-limited independently of the shared cooldown while preserving
+   the read-only HTTP boundary.
 
 ## Useful proof artifacts
 

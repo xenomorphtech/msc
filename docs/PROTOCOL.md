@@ -1120,6 +1120,25 @@ decision's internal pace. The transcript remains valid with exact
 `785 -> 833 -> 881 -> 929 -> 977 -> 1025` continuity, five broadcasts,
 twenty-five type-`0` commands, and 21/21 matched heartbeats.
 
+Event-trigger scheduling also has an optional shared cooldown invariant. A
+configured `0..3600`-second window begins only when all opcode-`282` packets
+in one authorized decision have drained. A qualifying heartbeat, served mob
+submission, or proximity entry observed before expiry is counted and rejected
+without planning or emitting a decision; the first qualifying event after
+expiry may authorize exactly one. Cooldown configuration is invalid for the
+immediate trigger. The HTTP model exposes the configured duration, rejection
+count, last event outcome, and last observed remaining duration without adding
+any field to the wire protocol.
+
+In the five-second live proof, heartbeat response frame `78` authorized
+opcode-`282` frames `79`/`80`. Response frames `82`, `84`, and `86` arrived
+inside the window and have no intervening movement; frame `88` arrived after
+expiry and authorized frames `89`/`90`. The runtime completion sample recorded
+two started/completed decisions and three cooldown rejections. The independent
+fold is valid with no warnings, exact
+`785 -> 833 -> 881 -> 929 -> 977 -> 1025` continuity, five broadcasts,
+twenty-five type-`0` commands, and 16/16 matched heartbeats.
+
 A second event mode consumes the existing typed mob-controller protocol rather
 than the heartbeat. `served-mob-movement` accepts only an opcode `207`
 submission that the capture-derived acknowledgement policy validates for a
