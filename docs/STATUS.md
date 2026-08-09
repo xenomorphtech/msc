@@ -415,6 +415,17 @@ three total packets and finished at `3/3`. The frozen transcript is valid with
 three broadcasts, fifteen type-`0` commands, exact continuity, and 8/8 matched
 heartbeats. The real client rendered the predicted final endpoint.
 
+Repeated evidence folding is removed. A validated immutable movement-planning
+context is built once at listener startup and shared by initial and queued
+planners, while each connection still owns its mutable confirmed state. The
+stream-`92` context contains 35,207 frames and 5,284 parsed paths; its measured
+build time was 10.432799 seconds. Cached automatic planning took 0.000360
+seconds and the composed follow-up took 0.005125 seconds. A second live run
+retained the same `785 -> 833 -> 881 -> 929` result with 10.008720- and
+10.002057-second movement gaps, rather than the former 42.500916-second first
+gap. Its independent fold is valid with fifteen commands and 6/6 heartbeats.
+Safe cache counts are available through the read-only API.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -429,10 +440,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Cache the immutable capture-derived movement evidence catalog so follow-up
-   planning does not repeat the observed 32.5-second fold, then drive a queued
-   target from a bounded gameplay policy rather than only startup arguments.
-   Keep HTTP read-only until a separate authenticated mutation design exists.
+4. Drive a queued movement target from a bounded gameplay policy (for example,
+   a deterministic patrol over validated endpoints) rather than only startup
+   arguments. Keep HTTP read-only until a separate authenticated mutation
+   design exists.
 
 ## Useful proof artifacts
 

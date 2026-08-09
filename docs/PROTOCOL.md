@@ -1064,6 +1064,24 @@ next gap is 10.001710 seconds. The final fold reports fifteen type-`0` commands
 and 8/8 matched heartbeats, and the real client rendered the snail at the
 predicted final endpoint `(929,-2677)`.
 
+That first implementation rebuilt the same immutable evidence analysis inside
+the follow-up call. The planner now receives a validated
+`MobMovementPlanningContext` containing the replay analysis, evidence analysis,
+5,284 parsed captured paths/broadcasts, and stationary-shape counts. Only the
+connection-local confirmed prefix remains mutable. Building the stream-`92`
+context once took 10.432799 seconds; using it took 0.000360 seconds for the
+automatic first decision and 0.005125 seconds for the composed follow-up. The
+context's safe cache counts are visible in runtime status so reuse is
+inspectable.
+
+The cached real-client transcript places the three movement events at
+14.642526, 24.651246, and 34.653303 seconds. The resulting 10.008720- and
+10.002057-second gaps are the configured ten-second movement pace plus normal
+scheduling jitter; the prior 32.5-second repeated fold is absent. The fold is
+again valid with exact `785 -> 833 -> 881 -> 929` continuity, three broadcasts,
+fifteen type-`0` commands, final foothold `635`/stance `2`, and 6/6 matched
+heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

@@ -1551,6 +1551,9 @@ class MobMovementBroadcastDecisionQueue:
         default=(), repr=False
     )
     evidence_transcript: Transcript | None = field(default=None, repr=False)
+    planning_context: MobMovementPlanningContext | None = field(
+        default=None, repr=False
+    )
     baseline_server_frames: tuple[bytes, ...] = field(
         default=(), repr=False
     )
@@ -1712,6 +1715,7 @@ class MobMovementBroadcastDecisionQueue:
             target_y=target_y,
             foothold_id=foothold_id,
             max_steps=max_steps,
+            planning_context=self.planning_context,
         )
         self._active_schedule = MobMovementBroadcastScheduler(
             next_plan.steps,
@@ -6098,6 +6102,9 @@ class _CapturedMobMovementPath:
     displacement: tuple[int, int] | None
 
 
+MOB_MOVEMENT_CONTROL_PREFIX = bytes.fromhex("0000ff00000000")
+
+
 def _relative_mob_motion_shape(
     broadcast: MobMovementBroadcast,
 ) -> tuple[object, ...] | None:
@@ -6168,6 +6175,84 @@ def _captured_mob_movement_paths(
                 )
             )
     return tuple(paths)
+
+
+@dataclass(frozen=True)
+class MobMovementPlanningContext:
+    """Validated immutable replay/evidence inputs reused across decisions."""
+
+    analysis: GameplayAnalysis = field(repr=False)
+    evidence_analysis: GameplayAnalysis = field(repr=False)
+    captured_paths: tuple[_CapturedMobMovementPath, ...] = field(repr=False)
+    evidence_broadcasts: tuple[MobMovementBroadcast, ...] = field(
+        repr=False
+    )
+    stationary_shape_counts: tuple[tuple[int, int], ...]
+
+    def stationary_shape_count(self, stance: int) -> int:
+        return dict(self.stationary_shape_counts).get(stance, 0)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "replay_frame_count": len(self.analysis.decoded.frames),
+            "evidence_frame_count": len(
+                self.evidence_analysis.decoded.frames
+            ),
+            "evidence_broadcast_count": len(self.evidence_broadcasts),
+            "captured_path_count": len(self.captured_paths),
+            "stationary_shape_counts": {
+                str(stance): count
+                for stance, count in self.stationary_shape_counts
+            },
+        }
+
+
+def build_mob_movement_planning_context(
+    transcript: Transcript,
+    evidence_transcript: Transcript | None = None,
+) -> MobMovementPlanningContext:
+    """Fold replay and evidence transcripts once for repeated planning."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    evidence_analysis = (
+        analysis
+        if evidence_transcript is None
+        else analyze_gameplay_transcript(evidence_transcript)
+    )
+    if not evidence_analysis.valid:
+        raise ValueError(
+            "mob-movement broadcast evidence transcript failed packet/state "
+            "validation"
+        )
+    evidence_broadcasts = tuple(
+        observation.parsed
+        for observation in evidence_analysis.observations
+        if isinstance(observation.parsed, MobMovementBroadcast)
+    )
+    stationary_shape_counts: Counter[int] = Counter()
+    for broadcast in evidence_broadcasts:
+        if broadcast.opaque_control != MOB_MOVEMENT_CONTROL_PREFIX:
+            continue
+        if len(broadcast.commands) != 1:
+            continue
+        command = broadcast.commands[0]
+        if (
+            command.command_type == 0
+            and command.position
+            == (broadcast.reference_x, broadcast.reference_y)
+            and command.velocity == (0, 0)
+            and command.duration_ms == 1_080
+        ):
+            stationary_shape_counts[command.stance] += 1
+    return MobMovementPlanningContext(
+        analysis=analysis,
+        evidence_analysis=evidence_analysis,
+        captured_paths=_captured_mob_movement_paths(evidence_analysis),
+        evidence_broadcasts=evidence_broadcasts,
+        stationary_shape_counts=tuple(sorted(stationary_shape_counts.items())),
+    )
 
 
 def _active_mobs_after_server_frames(
@@ -6269,6 +6354,7 @@ def plan_mob_movement_broadcast(
     stance: int = 4,
     path_evidence_server_frame_index: int | None = None,
     auto_select_captured_path: bool = False,
+    planning_context: MobMovementPlanningContext | None = None,
 ) -> MobMovementBroadcastPlan:
     """Plan one captured stationary or translated path broadcast."""
 
@@ -6296,42 +6382,13 @@ def plan_mob_movement_broadcast(
         or path_evidence_server_frame_index is not None
     )
 
-    analysis = analyze_gameplay_transcript(transcript)
-    if not analysis.valid:
-        raise ValueError("world transcript failed packet/state validation")
-    evidence_analysis = (
-        analysis
-        if evidence_transcript is None
-        else analyze_gameplay_transcript(evidence_transcript)
+    context = planning_context or build_mob_movement_planning_context(
+        transcript, evidence_transcript
     )
-    if not evidence_analysis.valid:
-        raise ValueError(
-            "mob-movement broadcast evidence transcript failed packet/state "
-            "validation"
-        )
-
-    control_prefix = bytes.fromhex("0000ff00000000")
-    evidence_broadcasts = tuple(
-        observation.parsed
-        for observation in evidence_analysis.observations
-        if isinstance(observation.parsed, MobMovementBroadcast)
-    )
-    exact_stationary_shape_evidence = 0
-    for broadcast in evidence_broadcasts:
-        if broadcast.opaque_control != control_prefix:
-            continue
-        if len(broadcast.commands) != 1:
-            continue
-        command = broadcast.commands[0]
-        if (
-            command.command_type == 0
-            and command.position
-            == (broadcast.reference_x, broadcast.reference_y)
-            and command.velocity == (0, 0)
-            and command.stance == stance
-            and command.duration_ms == 1_080
-        ):
-            exact_stationary_shape_evidence += 1
+    analysis = context.analysis
+    control_prefix = MOB_MOVEMENT_CONTROL_PREFIX
+    evidence_broadcasts = context.evidence_broadcasts
+    exact_stationary_shape_evidence = context.stationary_shape_count(stance)
     if not path_requested and exact_stationary_shape_evidence == 0:
         raise ValueError(
             "movement evidence has no exact stationary opcode-282 shape for "
@@ -6379,19 +6436,7 @@ def plan_mob_movement_broadcast(
             ),
         )
     else:
-        path_evidence_candidates = _captured_mob_movement_paths(
-            evidence_analysis
-        )
-        selected_frame = next(
-            (
-                frame
-                for frame in evidence_analysis.decoded.frames
-                if frame.direction == "server_to_client"
-                and frame.direction_index
-                == path_evidence_server_frame_index
-            ),
-            None,
-        )
+        path_evidence_candidates = context.captured_paths
 
         desired_displacement = (
             target_x - previous_x,
@@ -6442,18 +6487,6 @@ def plan_mob_movement_broadcast(
             selected_path = matching_displacement_paths[0]
             mode = "auto_selected_captured_path"
         else:
-            if selected_frame is None:
-                raise ValueError(
-                    "mob movement path evidence server frame was not found"
-                )
-            selected_frame_opcode = int.from_bytes(
-                selected_frame.plaintext[:2], "little"
-            )
-            if selected_frame_opcode != 282:
-                raise ValueError(
-                    "mob movement path evidence server frame is opcode "
-                    f"{selected_frame_opcode}, expected 282"
-                )
             selected_candidates = tuple(
                 candidate
                 for candidate in path_evidence_candidates
@@ -6607,6 +6640,7 @@ def plan_composed_mob_movement_broadcasts(
     target_y: int,
     foothold_id: int,
     max_steps: int = 4,
+    planning_context: MobMovementPlanningContext | None = None,
 ) -> MobMovementBroadcastSequencePlan:
     """Compose a unique shortest sequence of captured movement paths."""
 
@@ -6617,19 +6651,10 @@ def plan_composed_mob_movement_broadcasts(
     if not 0 <= foothold_id <= 0xFFFF:
         raise ValueError("mob movement target foothold must fit in uint16")
 
-    analysis = analyze_gameplay_transcript(transcript)
-    if not analysis.valid:
-        raise ValueError("world transcript failed packet/state validation")
-    evidence_analysis = (
-        analysis
-        if evidence_transcript is None
-        else analyze_gameplay_transcript(evidence_transcript)
+    context = planning_context or build_mob_movement_planning_context(
+        transcript, evidence_transcript
     )
-    if not evidence_analysis.valid:
-        raise ValueError(
-            "mob-movement broadcast evidence transcript failed packet/state "
-            "validation"
-        )
+    analysis = context.analysis
     active_mobs = _active_mobs_after_server_frames(
         analysis, post_transcript_server_frames
     )
@@ -6658,12 +6683,12 @@ def plan_composed_mob_movement_broadcasts(
     if desired_displacement == (0, 0):
         raise ValueError("composed mob movement target equals current position")
 
-    control_prefix = bytes.fromhex("0000ff00000000")
+    control_prefix = MOB_MOVEMENT_CONTROL_PREFIX
     grouped_paths: dict[
         tuple[int, int],
         dict[tuple[object, ...], list[_CapturedMobMovementPath]],
     ] = {}
-    for path in _captured_mob_movement_paths(evidence_analysis):
+    for path in context.captured_paths:
         if (
             path.template_id != template_id
             or path.broadcast.opaque_control != control_prefix
@@ -6786,6 +6811,7 @@ def plan_composed_mob_movement_broadcasts(
             target_y=current_y,
             foothold_id=foothold_id,
             path_evidence_server_frame_index=source.server_frame_index,
+            planning_context=context,
         )
         steps.append(step)
         planned_frames.append(step.broadcast.to_bytes())

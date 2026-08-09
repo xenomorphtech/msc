@@ -895,6 +895,27 @@ configured ten-second pace; the second-to-third gap is 10.001710 seconds. The
 HTTP service answered throughout the planning portion. This is a fixed
 startup queue, not autonomous AI and not an HTTP command surface.
 
+The immutable evidence is now folded once when the listener starts and retained
+in a typed `MobMovementPlanningContext`. It owns the validated replay/evidence
+analyses, all parsed captured paths and broadcasts, and stationary-shape counts.
+Both the initial planner and every connection-local follow-up reuse it; mutable
+mob position still comes only from each scheduler's confirmed frame prefix.
+`protocol.mob_movement_broadcast.planning_cache` reports identifier-free cache
+counts. For the live corpus those are 76 replay frames, 35,207 evidence frames,
+5,284 captured paths/broadcasts, and stationary stance counts `2:17`, `4:1055`,
+`5:437`.
+
+A direct benchmark built the validated context in 10.432799 seconds, then
+planned the initial automatic packet in 0.000360 seconds and the two-packet
+follow-up in 0.005125 seconds. The cached real-client transcript
+`generated_mob_decision_queue_cached_visual_20260809/1786297725914120609_replay_12857.jsonl`
+again folds validly to `785 -> 833 -> 881 -> 929`, with three broadcasts,
+fifteen type-`0` commands, final foothold `635`/stance `2`, and 6/6 matched
+heartbeats. Its movement gaps are 10.008720 and 10.002057 seconds, so the former
+32.5-second replanning pause is gone and only the configured ten-second pace
+remains. The live API moved directly from the first confirmed state to three
+known planned packets between one-second polls.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client

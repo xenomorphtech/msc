@@ -28,7 +28,9 @@ from .gameplay import (
     MobMovementBroadcastDecisionQueue,
     MobMovementBroadcastPlan,
     MobMovementBroadcastScheduler,
+    MobMovementPlanningContext,
     analyze_gameplay_transcript,
+    build_mob_movement_planning_context,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_health_response_policy,
@@ -391,6 +393,7 @@ async def replay_connection(
         tuple[int, int, int, int], ...
     ] = (),
     mob_movement_evidence_transcript: Transcript | None = None,
+    mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
     item_use_response_policy: ItemUseResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
@@ -525,6 +528,7 @@ async def replay_connection(
             mob_movement_broadcast_plans,
             follow_up_targets=mob_movement_follow_up_targets,
             evidence_transcript=mob_movement_evidence_transcript,
+            planning_context=mob_movement_planning_context,
             baseline_server_frames=mob_movement_baseline_server_frames,
         )
         if mob_movement_follow_up_targets
@@ -3445,6 +3449,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         mob_movement_baseline_server_frames = (
             post_transcript_server_frames
         )
+        mob_movement_planning_context: (
+            MobMovementPlanningContext | None
+        ) = None
         if (
             arguments.emit_mob_movement_broadcast is not None
             or arguments.emit_mob_movement_path is not None
@@ -3455,6 +3462,11 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 raise ValueError(
                     "mob-movement emission requires --keep-world-open"
                 )
+            mob_movement_planning_context = (
+                build_mob_movement_planning_context(
+                    transcript, movement_evidence_transcript
+                )
+            )
             if arguments.emit_mob_movement_composed_path is not None:
                 max_steps, target_x, target_y, foothold_id = (
                     arguments.emit_mob_movement_composed_path
@@ -3469,6 +3481,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     target_y=target_y,
                     foothold_id=foothold_id,
                     max_steps=max_steps,
+                    planning_context=mob_movement_planning_context,
                 )
                 mob_movement_broadcast_plans = sequence_plan.steps
                 if mob_movement_follow_up_targets:
@@ -3481,6 +3494,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                             ),
                             evidence_transcript=(
                                 movement_evidence_transcript
+                            ),
+                            planning_context=(
+                                mob_movement_planning_context
                             ),
                             baseline_server_frames=(
                                 mob_movement_baseline_server_frames
@@ -3537,6 +3553,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                         path_evidence_server_frame_index
                     ),
                     auto_select_captured_path=auto_select_captured_path,
+                    planning_context=mob_movement_planning_context,
                 )
                 mob_movement_broadcast_plans = (
                     mob_movement_broadcast_plan,
@@ -3551,6 +3568,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                             ),
                             evidence_transcript=(
                                 movement_evidence_transcript
+                            ),
+                            planning_context=(
+                                mob_movement_planning_context
                             ),
                             baseline_server_frames=(
                                 mob_movement_baseline_server_frames
@@ -3570,6 +3590,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     **mob_movement_broadcast_plan.safe_dict(),
                     **movement_schedule_preview.telemetry_dict(),
                 }
+            runtime_protocol["mob_movement_broadcast"]["planning_cache"] = (
+                mob_movement_planning_context.safe_dict()
+            )
             post_transcript_server_frames += tuple(
                 plan.broadcast.to_bytes()
                 for plan in mob_movement_broadcast_plans
@@ -3652,6 +3675,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             mob_movement_evidence_transcript=(
                 movement_evidence_transcript
+            ),
+            mob_movement_planning_context=(
+                mob_movement_planning_context
             ),
             item_pickup_response_policy=item_pickup_response_policy,
             item_use_response_policy=item_use_response_policy,

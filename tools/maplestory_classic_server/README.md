@@ -735,6 +735,16 @@ follow-up only afterward, then sent `881` and `929`. Status progressed through
 type-`0` commands, exact position/foothold/stance continuity, and 8/8
 heartbeats.
 
+Movement evidence is folded into one immutable `MobMovementPlanningContext` at
+listener startup and reused by the initial and queued planners. The safe API
+`planning_cache` block reports replay/evidence frame, captured path/broadcast,
+and stationary-stance counts. On `111.pcapng`, building the context took
+10.432799 seconds; cached automatic and composed planning then took 0.000360
+and 0.005125 seconds. A second live run preserved the same three-packet result
+with movement gaps of 10.008720 and 10.002057 seconds, eliminating the prior
+32.5-second refold from the first gap. Its valid transcript contains fifteen
+type-`0` commands and 6/6 matched heartbeats.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold
@@ -990,6 +1000,8 @@ decision index, and pending safe targets under `state.decision_queue`.
 `packets_remaining` counts only packets already planned; it is zero during a
 worker-backed `planning` phase even though an unplanned target remains. State
 changes after the socket write drains; it is not a client acknowledgement.
+The sibling `planning_cache` object reports the immutable evidence material
+available to those decisions; it never contains raw object or character IDs.
 When reactive mob-health responses are
 enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,

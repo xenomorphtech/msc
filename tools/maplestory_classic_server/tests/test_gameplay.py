@@ -5,6 +5,7 @@ from pathlib import Path
 import struct
 import sys
 import unittest
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -17,6 +18,7 @@ from maple_server.gameplay import (  # noqa: E402
     MobMovementBroadcastDecisionQueue,
     MobMovementBroadcastScheduler,
     analyze_gameplay_transcript,
+    build_mob_movement_planning_context,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
@@ -3819,6 +3821,15 @@ class GameplayStateFoldTest(unittest.TestCase):
             automatic_plan.broadcast.to_bytes(),
             plan.broadcast.to_bytes(),
         )
+        planning_context = build_mob_movement_planning_context(
+            fixture_gameplay_transcript(compact_transition=True), evidence
+        )
+        self.assertGreater(
+            planning_context.safe_dict()["captured_path_count"], 0
+        )
+        self.assertGreater(
+            planning_context.safe_dict()["evidence_frame_count"], 0
+        )
 
         sequence_plan = plan_composed_mob_movement_broadcasts(
             fixture_gameplay_transcript(compact_transition=True),
@@ -3934,6 +3945,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             (automatic_plan,),
             follow_up_targets=((2, 350, -200, 8),),
             evidence_transcript=evidence,
+            planning_context=planning_context,
             baseline_server_frames=(post_spawn,),
         )
         queued = decision_queue.telemetry_dict()
@@ -3986,7 +3998,11 @@ class GameplayStateFoldTest(unittest.TestCase):
             ),
         )
 
-        decision_queue.plan_next_decision()
+        with patch(
+            "maple_server.gameplay.analyze_gameplay_transcript",
+            side_effect=AssertionError("cached planning refolded a transcript"),
+        ):
+            decision_queue.plan_next_decision()
         replanned = decision_queue.telemetry_dict()
         self.assertEqual(replanned["packets_planned"], 3)
         self.assertEqual(replanned["packets_sent"], 1)
