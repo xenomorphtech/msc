@@ -3683,6 +3683,128 @@ class GameplayStateFoldTest(unittest.TestCase):
                 foothold_id=8,
             )
 
+    def test_translates_captured_multi_command_mob_path(self) -> None:
+        source_path = MobMovementBroadcast(
+            object_id=MOB_OBJECT_ID,
+            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            reference_x=100,
+            reference_y=-200,
+            commands=(
+                MobMovementCommand.absolute(
+                    position_x=120,
+                    position_y=-200,
+                    velocity_x=20,
+                    velocity_y=0,
+                    foothold_id=7,
+                    stance=2,
+                    duration_ms=500,
+                ),
+                MobMovementCommand.absolute(
+                    position_x=140,
+                    position_y=-202,
+                    velocity_x=20,
+                    velocity_y=-5,
+                    foothold_id=8,
+                    stance=2,
+                    duration_ms=300,
+                ),
+                MobMovementCommand.absolute(
+                    position_x=150,
+                    position_y=-200,
+                    velocity_x=10,
+                    velocity_y=5,
+                    foothold_id=9,
+                    stance=4,
+                    duration_ms=280,
+                ),
+            ),
+        ).to_bytes()
+        evidence = fixture_gameplay_transcript(
+            extra_server_plaintexts=(source_path,)
+        )
+        source_frame = next(
+            frame.direction_index
+            for frame in analyze_gameplay_transcript(evidence).decoded.frames
+            if frame.direction == "server_to_client"
+            and frame.plaintext == source_path
+        )
+        translated_spawn = replace(
+            fixture_mob_spawn(),
+            x=200,
+            foothold_id=8,
+        )
+        post_spawn = MobEnterField(
+            object_id=MOB_OBJECT_ID,
+            spawn=translated_spawn,
+        ).to_bytes()
+        plan = plan_mob_movement_broadcast(
+            fixture_gameplay_transcript(compact_transition=True),
+            post_transcript_server_frames=(post_spawn,),
+            evidence_transcript=evidence,
+            target_x=250,
+            target_y=-200,
+            foothold_id=8,
+            path_evidence_server_frame_index=source_frame,
+        )
+
+        self.assertEqual(plan.mode, "translated_captured_path")
+        self.assertEqual(plan.source_server_frame_index, source_frame)
+        self.assertEqual(plan.exact_relative_motion_shape_evidence, 1)
+        self.assertEqual((plan.previous_x, plan.previous_y), (200, -200))
+        broadcast = MobMovementBroadcast.parse(plan.broadcast.to_bytes())
+        self.assertEqual(
+            (broadcast.reference_x, broadcast.reference_y),
+            (200, -200),
+        )
+        self.assertEqual(
+            tuple(command.position for command in broadcast.commands),
+            ((220, -200), (240, -202), (250, -200)),
+        )
+        self.assertEqual(
+            tuple(command.velocity for command in broadcast.commands),
+            ((20, 0), (20, -5), (10, 5)),
+        )
+        self.assertEqual(
+            tuple(command.duration_ms for command in broadcast.commands),
+            (500, 300, 280),
+        )
+        self.assertEqual(
+            tuple(command.foothold_id for command in broadcast.commands),
+            (8, 8, 8),
+        )
+        self.assertEqual(plan.stance, 4)
+
+        folded = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_server_plaintexts=(plan.broadcast.to_bytes(),)
+            )
+        )
+        self.assertTrue(folded.valid)
+        self.assertEqual(
+            (
+                folded.state.mobs[MOB_OBJECT_ID].x,
+                folded.state.mobs[MOB_OBJECT_ID].y,
+            ),
+            (250, -200),
+        )
+        self.assertEqual(folded.state.mobs[MOB_OBJECT_ID].foothold_id, 8)
+
+        with self.assertRaisesRegex(ValueError, "translated path reference"):
+            plan_mob_movement_broadcast(
+                fixture_gameplay_transcript(compact_transition=True),
+                post_transcript_server_frames=(
+                    MobEnterField(
+                        object_id=MOB_OBJECT_ID,
+                        spawn=fixture_mob_spawn(),
+                    ).to_bytes(),
+                ),
+                evidence_transcript=evidence,
+                target_x=250,
+                target_y=-200,
+                foothold_id=7,
+                path_evidence_server_frame_index=source_frame,
+            )
+
     def test_movement_acknowledgement_policy_rejects_unknown_field_mob(
         self,
     ) -> None:

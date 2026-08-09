@@ -362,6 +362,16 @@ one known broadcast/command and 11/11 matched heartbeats. HTTP status exposes
 the identifier-free plan/evidence and planned/sent count under
 `protocol.mob_movement_broadcast`.
 
+The same planner now supports one explicitly selected captured multi-command
+path. Stream-`92` server-direction frame `18818` supplies five absolute
+commands moving 48 pixels over 1,080 ms. The server validates the source
+template/control prefix, translates the reference and all positions, preserves
+motion fields, requires the live origin/foothold to match, and reports mode
+`translated_captured_path`. A browser-free real-client run moved the injected
+template-`100100` snail from `(785,-2677)` to the predicted `(833,-2677)` on
+foothold `635`. Its frozen transcript folds validly with one known broadcast,
+five type-`0` commands, final stance `2`, and 9/9 matched heartbeats.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -376,9 +386,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Extend the proven stationary opcode-`282` placement into captured-shape
-   multi-command paths, retaining foothold continuity and checking each
-   real-client endpoint against the independent fold.
+4. Generalize the proven explicit opcode-`282` path replay into a conservative
+   state-driven path selector, retaining foothold continuity and validating
+   each chosen endpoint against the independent fold.
 
 ## Useful proof artifacts
 

@@ -970,8 +970,23 @@ then generated one opcode-`282` stationary placement for `(833,-2677)`, the
 same foothold, and stance `4`. The real client rendered the snail at the
 predicted target. The independent observed fold is valid and ends with that
 exact mob position/stance, one known broadcast, one command, and 11/11 matched
-heartbeats. This validates the placement effect; it does not yet claim an
-autonomous multi-command movement policy.
+heartbeats. This validates the stationary placement effect.
+
+The multi-command proof selects stream-`92` server-direction frame `18818`,
+whose template-`100100` opcode `282` moves from reference `(249,2024)` through
+five absolute commands to `(297,2024)` in 1,080 ms. The command positions are
+`(277,2024)`, `(278,2024)`, `(285,2022)`, `(289,2022)`, and `(297,2024)`;
+their velocity, stance, and duration fields are preserved exactly. The planner
+translates every position relative to the reference, requires the active mob
+to be at that translated reference on the requested foothold, and rewrites
+each command foothold to that continuous live foothold.
+
+The real-client run translated this captured path to reference `(785,-2677)`
+and endpoint `(833,-2677)` for the injected snail on foothold `635`. The client
+rendered the snail at the predicted endpoint. The recorded transcript folds
+validly with one known broadcast, five type-`0` commands, final stance `2`, and
+9/9 matched heartbeats. This validates replay of a specific captured path and
+its predicted state effect; it is not yet an autonomous path-selection policy.
 
 ## Player movement (`client 182`, `server 202`)
 

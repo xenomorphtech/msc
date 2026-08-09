@@ -677,8 +677,20 @@ foothold `635`, generated one placement at `(833,-2677)`/stance `4`, and kept
 stream `114` open. The snail appeared at the predicted right-side location;
 runtime status reported one planned/sent packet. The independently observed
 transcript folded validly to the exact predicted mob position and stance with
-one broadcast/command and 11 matched heartbeats. This is a proven stationary
-placement primitive, not yet a generated autonomous movement path.
+one broadcast/command and 11 matched heartbeats.
+
+`--emit-mob-movement-path EVIDENCE_SERVER_FRAME:X:Y:FOOTHOLD` is mutually
+exclusive with the stationary option. It selects an exact evidence frame for
+the same active template, requires two or more absolute commands and the
+dominant control prefix, translates every captured position to the requested
+endpoint, preserves velocities/stances/durations, and rewrites footholds only
+when the live origin already has the requested foothold. Stream-`92`
+server-direction frame `18818` provides a five-command, 48-pixel, 1,080-ms
+path. A live run translated it from reference `(785,-2677)` to endpoint
+`(833,-2677)` for template `100100`; the client rendered that endpoint and the
+transcript folded validly with five type-`0` commands and 9/9 matched
+heartbeats. This proves explicit replay of a captured path, not autonomous path
+selection.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
@@ -917,10 +929,11 @@ movement acknowledgements are enabled,
 derived policy, evidence, final field epoch, and known/active counts. The parent
 object reports observed submissions, sent responses, rejections, the last safe
 response (template, sequence, flag/value/auxiliary fields), and the last safe
-rejection. A planned placement appears under
+rejection. A planned placement or captured path appears under
 `protocol.mob_movement_broadcast`, including the aliased entity/template,
 previous and predicted position/foothold/stance, typed packet fields, evidence
-counts, and planned/sent counters. When reactive mob-health responses are
+counts, `mode`, optional source server-frame index, and planned/sent counters.
+When reactive mob-health responses are
 enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,
 template/current/max HP, floor percentage, capture-evidence counters, and the

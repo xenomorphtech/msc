@@ -708,8 +708,55 @@ previous and predicted position/foothold/stance, exact command fields, evidence
 counts, and `packets_planned:1`/`packets_sent:1`. The final transcript
 `generated_mob_broadcast_visual_20260809/1786286736690024914_replay_12857.jsonl`
 folds validly to mob position `(833,-2677)`, stance `4`, one known broadcast,
-one command, and 11 matched heartbeats with none pending. This proves a
-stationary placement effect, not autonomous multi-command mob motion.
+one command, and 11 matched heartbeats with none pending.
+
+The mutually exclusive
+`--emit-mob-movement-path EVIDENCE_SERVER_FRAME:X:Y:FOOTHOLD` mode reuses one
+exact multi-command opcode-`282` shape from the movement evidence. It resolves
+the source frame's field-local template, requires that template and the
+dominant control prefix, accepts only two or more absolute commands, translates
+the reference and every command to the requested endpoint, preserves each
+velocity/stance/duration, and rewrites all command footholds only after
+checking continuity with the active mob. The validated run used:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --mob-movement-evidence-tcp-stream 92 \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=785:-2677:635:635' \
+  --emit-mob-movement-path '18818:833:-2677:635' \
+  --post-transcript-start-delay-seconds 2 \
+  --post-transcript-frame-delay-seconds 30 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_path_visual_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 180
+```
+
+Evidence server-direction frame `18818` has reference `(249,2024)`, endpoint
+`(297,2024)`, five absolute commands, and total duration 1,080 ms. The
+generated packet used reference `(785,-2677)` and command positions
+`(813,-2677)`, `(814,-2677)`, `(821,-2679)`, `(825,-2679)`, and
+`(833,-2677)`. Runtime status reported mode
+`translated_captured_path`, exact relative-motion-shape evidence `1`, one
+planned/sent packet, and the complete safe command list. The real client
+rendered the blue snail at the predicted endpoint. Transcript
+`generated_mob_path_visual_20260809/1786288852728632356_replay_12857.jsonl`
+folds validly with final position `(833,-2677)`, foothold `635`, stance `2`,
+one known broadcast, five type-`0` commands, and 9/9 matched heartbeats. This
+proves one selected captured path and its endpoint effect, not autonomous path
+selection.
 
 ## Historical synthetic staging experiment
 

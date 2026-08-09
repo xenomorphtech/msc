@@ -27,6 +27,7 @@ from maple_server.server import (  # noqa: E402
     parse_i16_position,
     parse_inventory_quantity_update,
     parse_mob_movement_broadcast_target,
+    parse_mob_movement_path_target,
     parse_server_opcode_byte_rewrite,
     parse_server_frame_patch,
     parse_plaintext_hex,
@@ -542,6 +543,31 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(
             parse_mob_movement_broadcast_target("733:-2677:635"),
             (733, -2677, 635, 4),
+        )
+
+    def test_replay_parser_accepts_captured_mob_movement_path(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--keep-world-open",
+                "--hold-open-seconds",
+                "600",
+                "--emit-mob-movement-path",
+                "18818:833:-2677:635",
+            ]
+        )
+
+        self.assertEqual(
+            arguments.emit_mob_movement_path,
+            (18_818, 833, -2677, 635),
+        )
+        self.assertEqual(
+            parse_mob_movement_path_target("0:150:-200:7"),
+            (0, 150, -200, 7),
         )
 
     def test_replay_parser_accepts_reactive_mob_health_responses(self) -> None:

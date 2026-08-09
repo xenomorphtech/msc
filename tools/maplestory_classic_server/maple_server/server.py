@@ -1527,6 +1527,33 @@ def parse_mob_movement_broadcast_target(
     return position_x, position_y, foothold_id, stance
 
 
+def parse_mob_movement_path_target(
+    specification: str,
+) -> tuple[int, int, int, int]:
+    parts = specification.split(":")
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError(
+            "mob movement path must use EVIDENCE_SERVER_FRAME:X:Y:FOOTHOLD"
+        )
+    try:
+        evidence_frame = int(parts[0], 0)
+        foothold_id = int(parts[3], 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "mob movement evidence frame and foothold must be integers"
+        ) from error
+    if evidence_frame < 0:
+        raise argparse.ArgumentTypeError(
+            "mob movement evidence frame cannot be negative"
+        )
+    position_x, position_y = parse_i16_position(":".join(parts[1:3]))
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must fit in uint16"
+        )
+    return evidence_frame, position_x, position_y, foothold_id
+
+
 def parse_inventory_quantity_update(
     specification: str,
 ) -> tuple[str, int, int]:
@@ -2296,13 +2323,25 @@ def build_parser() -> argparse.ArgumentParser:
             "another TCP stream in the replay --pcap"
         ),
     )
-    replay.add_argument(
+    mob_movement_emission = replay.add_mutually_exclusive_group()
+    mob_movement_emission.add_argument(
         "--emit-mob-movement-broadcast",
         type=parse_mob_movement_broadcast_target,
         metavar="X:Y:FOOTHOLD[:STANCE]",
         help=(
             "append one capture-proven stationary opcode-282 placement for "
             "the only active modeled mob; requires --keep-world-open"
+        ),
+    )
+    mob_movement_emission.add_argument(
+        "--emit-mob-movement-path",
+        type=parse_mob_movement_path_target,
+        metavar="EVIDENCE_SERVER_FRAME:X:Y:FOOTHOLD",
+        help=(
+            "translate one capture-derived, multi-command opcode-282 path "
+            "selected by server-direction frame index to the requested "
+            "endpoint for the only active modeled mob; requires "
+            "--keep-world-open"
         ),
     )
     replay.add_argument(
@@ -2880,11 +2919,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
         ) and not (
             arguments.reactive_mob_movement_acknowledgements
             or arguments.emit_mob_movement_broadcast is not None
+            or arguments.emit_mob_movement_path is not None
         ):
             raise ValueError(
                 "mob-movement evidence options require "
                 "--reactive-mob-movement-acknowledgements or "
-                "--emit-mob-movement-broadcast"
+                "a mob-movement emission option"
             )
         movement_evidence_transcript = None
         if arguments.mob_movement_evidence_transcript is not None:
@@ -3121,14 +3161,27 @@ async def async_main(arguments: argparse.Namespace) -> None:
             arguments.post_transcript_server_frames
         )
         mob_movement_broadcast_plaintext = None
-        if arguments.emit_mob_movement_broadcast is not None:
+        if (
+            arguments.emit_mob_movement_broadcast is not None
+            or arguments.emit_mob_movement_path is not None
+        ):
             if not arguments.keep_world_open:
                 raise ValueError(
-                    "--emit-mob-movement-broadcast requires --keep-world-open"
+                    "mob-movement emission requires --keep-world-open"
                 )
-            target_x, target_y, foothold_id, stance = (
-                arguments.emit_mob_movement_broadcast
-            )
+            if arguments.emit_mob_movement_broadcast is not None:
+                target_x, target_y, foothold_id, stance = (
+                    arguments.emit_mob_movement_broadcast
+                )
+                path_evidence_server_frame_index = None
+            else:
+                (
+                    path_evidence_server_frame_index,
+                    target_x,
+                    target_y,
+                    foothold_id,
+                ) = arguments.emit_mob_movement_path
+                stance = 4
             mob_movement_broadcast_plan = plan_mob_movement_broadcast(
                 transcript,
                 post_transcript_server_frames=(
@@ -3139,6 +3192,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 target_y=target_y,
                 foothold_id=foothold_id,
                 stance=stance,
+                path_evidence_server_frame_index=(
+                    path_evidence_server_frame_index
+                ),
             )
             mob_movement_broadcast_plaintext = (
                 mob_movement_broadcast_plan.broadcast.to_bytes()
@@ -3260,6 +3316,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "emit_mob_movement_broadcast": (
                 arguments.emit_mob_movement_broadcast
             ),
+            "emit_mob_movement_path": arguments.emit_mob_movement_path,
             "reactive_mob_health_responses": (
                 arguments.reactive_mob_health_responses
             ),

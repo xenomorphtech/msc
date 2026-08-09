@@ -1208,6 +1208,7 @@ class ItemPickupResponsePolicy:
 @dataclass(frozen=True)
 class MobMovementBroadcastPlan:
     broadcast: MobMovementBroadcast = field(repr=False)
+    mode: str
     entity: str
     template_id: int
     field_epoch: int
@@ -1220,9 +1221,12 @@ class MobMovementBroadcastPlan:
     stance: int
     broadcast_evidence: int
     exact_stationary_shape_evidence: int
+    source_server_frame_index: int | None
+    exact_relative_motion_shape_evidence: int
 
     def safe_dict(self) -> dict[str, object]:
         return {
+            "mode": self.mode,
             "entity": self.entity,
             "template_id": self.template_id,
             "field_epoch": self.field_epoch,
@@ -1252,6 +1256,12 @@ class MobMovementBroadcastPlan:
                 "broadcasts": self.broadcast_evidence,
                 "exact_stationary_shape": (
                     self.exact_stationary_shape_evidence
+                ),
+                "source_server_frame_index": (
+                    self.source_server_frame_index
+                ),
+                "exact_relative_motion_shape": (
+                    self.exact_relative_motion_shape_evidence
                 ),
             },
         }
@@ -5548,8 +5558,9 @@ def plan_mob_movement_broadcast(
     target_y: int,
     foothold_id: int,
     stance: int = 4,
+    path_evidence_server_frame_index: int | None = None,
 ) -> MobMovementBroadcastPlan:
-    """Plan one capture-proven stationary placement for one modeled mob."""
+    """Plan one captured stationary or translated path broadcast."""
 
     if not all(-0x8000 <= value <= 0x7FFF for value in (target_x, target_y)):
         raise ValueError("mob movement target coordinates must fit in int16")
@@ -5557,6 +5568,11 @@ def plan_mob_movement_broadcast(
         raise ValueError("mob movement target foothold must fit in uint16")
     if not 0 <= stance <= 0xFF:
         raise ValueError("mob movement target stance must fit in uint8")
+    if (
+        path_evidence_server_frame_index is not None
+        and path_evidence_server_frame_index < 0
+    ):
+        raise ValueError("mob movement path evidence frame cannot be negative")
 
     analysis = analyze_gameplay_transcript(transcript)
     if not analysis.valid:
@@ -5594,7 +5610,10 @@ def plan_mob_movement_broadcast(
             and command.duration_ms == 1_080
         ):
             exact_stationary_shape_evidence += 1
-    if exact_stationary_shape_evidence == 0:
+    if (
+        path_evidence_server_frame_index is None
+        and exact_stationary_shape_evidence == 0
+    ):
         raise ValueError(
             "movement evidence has no exact stationary opcode-282 shape for "
             f"stance {stance}"
@@ -5684,26 +5703,212 @@ def plan_mob_movement_broadcast(
         previous_y,
         previous_foothold_id,
     ) = next(iter(active_mobs.items()))
-    broadcast = MobMovementBroadcast(
-        object_id=object_id,
-        opaque_control=control_prefix,
-        reference_x=target_x,
-        reference_y=target_y,
-        commands=(
-            MobMovementCommand.absolute(
-                position_x=target_x,
-                position_y=target_y,
-                velocity_x=0,
-                velocity_y=0,
-                foothold_id=foothold_id,
-                stance=stance,
-                duration_ms=1_080,
+    mode = "stationary"
+    source_server_frame_index = None
+    exact_relative_motion_shape_evidence = 0
+    if path_evidence_server_frame_index is None:
+        broadcast = MobMovementBroadcast(
+            object_id=object_id,
+            opaque_control=control_prefix,
+            reference_x=target_x,
+            reference_y=target_y,
+            commands=(
+                MobMovementCommand.absolute(
+                    position_x=target_x,
+                    position_y=target_y,
+                    velocity_x=0,
+                    velocity_y=0,
+                    foothold_id=foothold_id,
+                    stance=stance,
+                    duration_ms=1_080,
+                ),
             ),
-        ),
-    )
+        )
+    else:
+        source_server_frame_index = path_evidence_server_frame_index
+        known_evidence_templates: dict[int, int] = {}
+        source_broadcast = None
+        source_template_id = None
+        for frame in evidence_analysis.decoded.frames:
+            if frame.direction != "server_to_client":
+                continue
+            if len(frame.plaintext) < 2:
+                continue
+            opcode = int.from_bytes(frame.plaintext[:2], "little")
+            if opcode == 157:
+                known_evidence_templates.clear()
+            elif opcode == 279:
+                entered = MobEnterField.parse(frame.plaintext)
+                known_evidence_templates[entered.object_id] = (
+                    entered.spawn.template_id
+                )
+            elif opcode == 281:
+                controller = MobControllerChange.parse(frame.plaintext)
+                if controller.spawn is not None:
+                    known_evidence_templates[controller.object_id] = (
+                        controller.spawn.template_id
+                    )
+            elif opcode == 280:
+                left = MobLeaveField.parse(frame.plaintext)
+                known_evidence_templates.pop(left.object_id, None)
+            if frame.direction_index != path_evidence_server_frame_index:
+                continue
+            if opcode != 282:
+                raise ValueError(
+                    "mob movement path evidence server frame is opcode "
+                    f"{opcode}, expected 282"
+                )
+            source_broadcast = MobMovementBroadcast.parse(frame.plaintext)
+            source_template_id = known_evidence_templates.get(
+                source_broadcast.object_id
+            )
+            break
+        if source_broadcast is None:
+            raise ValueError(
+                "mob movement path evidence server frame was not found"
+            )
+        if source_template_id != template_id:
+            raise ValueError(
+                "mob movement path evidence template does not match the "
+                f"active mob: {source_template_id} != {template_id}"
+            )
+        if source_broadcast.opaque_control != control_prefix:
+            raise ValueError(
+                "mob movement path evidence does not use the dominant "
+                "captured control prefix"
+            )
+        if len(source_broadcast.commands) < 2:
+            raise ValueError(
+                "mob movement path evidence must contain multiple commands"
+            )
+        if any(
+            command.command_type != 0
+            for command in source_broadcast.commands
+        ):
+            raise ValueError(
+                "mob movement path evidence must contain only absolute "
+                "commands"
+            )
+        source_endpoint = source_broadcast.commands[-1].position
+        if source_endpoint is None:
+            raise ValueError("mob movement path evidence has no endpoint")
+        translate_x = target_x - source_endpoint[0]
+        translate_y = target_y - source_endpoint[1]
+        reference_x = source_broadcast.reference_x + translate_x
+        reference_y = source_broadcast.reference_y + translate_y
+        if (previous_x, previous_y) != (reference_x, reference_y):
+            raise ValueError(
+                "active mob position does not match the translated path "
+                f"reference: {(previous_x, previous_y)} != "
+                f"{(reference_x, reference_y)}"
+            )
+        if previous_foothold_id != foothold_id:
+            raise ValueError(
+                "active mob foothold does not match the translated path "
+                f"foothold: {previous_foothold_id} != {foothold_id}"
+            )
+        translated_commands: list[MobMovementCommand] = []
+        for source_command in source_broadcast.commands:
+            source_position = source_command.position
+            if source_position is None:
+                raise ValueError(
+                    "mob movement path evidence contains a relative command"
+                )
+            position_x = source_position[0] + translate_x
+            position_y = source_position[1] + translate_y
+            if not all(
+                -0x8000 <= value <= 0x7FFF
+                for value in (position_x, position_y)
+            ):
+                raise ValueError(
+                    "translated mob movement command position exceeds int16"
+                )
+            velocity_x, velocity_y = source_command.velocity
+            translated_commands.append(
+                MobMovementCommand.absolute(
+                    position_x=position_x,
+                    position_y=position_y,
+                    velocity_x=velocity_x,
+                    velocity_y=velocity_y,
+                    foothold_id=foothold_id,
+                    stance=source_command.stance,
+                    duration_ms=source_command.duration_ms,
+                )
+            )
+        if not all(
+            -0x8000 <= value <= 0x7FFF
+            for value in (reference_x, reference_y)
+        ):
+            raise ValueError("translated mob movement reference exceeds int16")
+        source_relative_positions = tuple(
+            (
+                (command.position or (0, 0))[0]
+                - source_broadcast.reference_x,
+                (command.position or (0, 0))[1]
+                - source_broadcast.reference_y,
+            )
+            for command in source_broadcast.commands
+        )
+        source_motion = tuple(
+            (
+                command.command_type,
+                command.velocity,
+                command.stance,
+                command.duration_ms,
+            )
+            for command in source_broadcast.commands
+        )
+        for evidence_broadcast in evidence_broadcasts:
+            if (
+                evidence_broadcast.opaque_control != control_prefix
+                or len(evidence_broadcast.commands)
+                != len(source_broadcast.commands)
+                or any(
+                    command.position is None
+                    for command in evidence_broadcast.commands
+                )
+            ):
+                continue
+            relative_positions = tuple(
+                (
+                    (command.position or (0, 0))[0]
+                    - evidence_broadcast.reference_x,
+                    (command.position or (0, 0))[1]
+                    - evidence_broadcast.reference_y,
+                )
+                for command in evidence_broadcast.commands
+            )
+            motion = tuple(
+                (
+                    command.command_type,
+                    command.velocity,
+                    command.stance,
+                    command.duration_ms,
+                )
+                for command in evidence_broadcast.commands
+            )
+            if (
+                relative_positions == source_relative_positions
+                and motion == source_motion
+            ):
+                exact_relative_motion_shape_evidence += 1
+        if exact_relative_motion_shape_evidence == 0:
+            raise ValueError(
+                "mob movement relative motion shape has no exact evidence"
+            )
+        stance = translated_commands[-1].stance
+        mode = "translated_captured_path"
+        broadcast = MobMovementBroadcast(
+            object_id=object_id,
+            opaque_control=source_broadcast.opaque_control,
+            reference_x=reference_x,
+            reference_y=reference_y,
+            commands=tuple(translated_commands),
+        )
     broadcast.to_bytes()
     return MobMovementBroadcastPlan(
         broadcast=broadcast,
+        mode=mode,
         entity=entity,
         template_id=template_id,
         field_epoch=analysis.state.field_epoch,
@@ -5716,6 +5921,10 @@ def plan_mob_movement_broadcast(
         stance=stance,
         broadcast_evidence=len(evidence_broadcasts),
         exact_stationary_shape_evidence=exact_stationary_shape_evidence,
+        source_server_frame_index=source_server_frame_index,
+        exact_relative_motion_shape_evidence=(
+            exact_relative_motion_shape_evidence
+        ),
     )
 
 
