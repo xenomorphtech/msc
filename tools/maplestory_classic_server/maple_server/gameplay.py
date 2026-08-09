@@ -398,6 +398,30 @@ class GameplayGameState:
     server_attack_hit_counts: Counter[int] = field(default_factory=Counter)
     server_attack_relays_for_known_players: int = 0
     server_attack_relays_for_unknown_players: int = 0
+    server_melee_attack_relays: int = 0
+    server_melee_attack_short_zero_target_forms: int = 0
+    server_melee_attack_tags: Counter[int] = field(default_factory=Counter)
+    server_melee_attack_skill_levels: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_melee_attack_unknown_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_melee_attack_displays: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_melee_attack_facing_flags: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_melee_attack_speeds: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_melee_attack_mastery_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_melee_attack_auxiliary_values: Counter[int] = field(
+        default_factory=Counter
+    )
     server_ranged_attack_relays: int = 0
     server_ranged_attack_tags: Counter[int] = field(default_factory=Counter)
     server_ranged_attack_skill_levels: Counter[int] = field(
@@ -1709,6 +1733,36 @@ class GameplayAnalysis:
                 ),
                 "server_attack_relays_for_unknown_players": (
                     self.state.server_attack_relays_for_unknown_players
+                ),
+                "server_melee_attack_relays": (
+                    self.state.server_melee_attack_relays
+                ),
+                "server_melee_attack_short_zero_target_forms": (
+                    self.state.server_melee_attack_short_zero_target_forms
+                ),
+                "server_melee_attack_tags": dict(
+                    self.state.server_melee_attack_tags
+                ),
+                "server_melee_attack_skill_levels": dict(
+                    self.state.server_melee_attack_skill_levels
+                ),
+                "server_melee_attack_unknown_values": dict(
+                    self.state.server_melee_attack_unknown_values
+                ),
+                "server_melee_attack_displays": dict(
+                    self.state.server_melee_attack_displays
+                ),
+                "server_melee_attack_facing_flags": dict(
+                    self.state.server_melee_attack_facing_flags
+                ),
+                "server_melee_attack_speeds": dict(
+                    self.state.server_melee_attack_speeds
+                ),
+                "server_melee_attack_mastery_values": dict(
+                    self.state.server_melee_attack_mastery_values
+                ),
+                "server_melee_attack_auxiliary_values": dict(
+                    self.state.server_melee_attack_auxiliary_values
                 ),
                 "server_ranged_attack_relays": (
                     self.state.server_ranged_attack_relays
@@ -4141,6 +4195,37 @@ class GameplayStateFold:
                 self.state.server_attack_relays_for_known_players += 1
             else:
                 self.state.server_attack_relays_for_unknown_players += 1
+            melee_metadata = relay.melee_metadata
+            if melee_metadata is not None:
+                self.state.server_melee_attack_relays += 1
+                if melee_metadata.short_zero_target_form:
+                    self.state.server_melee_attack_short_zero_target_forms += 1
+                self.state.server_melee_attack_tags[
+                    melee_metadata.relay_tag
+                ] += 1
+                self.state.server_melee_attack_skill_levels[
+                    melee_metadata.skill_level
+                ] += 1
+                self.state.server_melee_attack_unknown_values[
+                    melee_metadata.unknown_value
+                ] += 1
+                self.state.server_melee_attack_displays[
+                    melee_metadata.display
+                ] += 1
+                self.state.server_melee_attack_facing_flags[
+                    melee_metadata.facing_flags
+                ] += 1
+                self.state.server_melee_attack_speeds[
+                    melee_metadata.attack_speed
+                ] += 1
+                if melee_metadata.mastery is not None:
+                    self.state.server_melee_attack_mastery_values[
+                        melee_metadata.mastery
+                    ] += 1
+                if melee_metadata.auxiliary_value is not None:
+                    self.state.server_melee_attack_auxiliary_values[
+                        melee_metadata.auxiliary_value
+                    ] += 1
             ranged_details: dict[str, object] = {}
             ranged_metadata = relay.ranged_metadata
             if ranged_metadata is not None:
@@ -4306,8 +4391,8 @@ class GameplayStateFold:
                         "roles remain uninterpreted"
                         if relay.opcode == 219
                         else "target/damage arrays are capture-bounded; "
-                        "melee relay prefix variants and damage high-bit "
-                        "marker remain uninterpreted"
+                        "melee relay tag/unknown/auxiliary roles and damage "
+                        "high-bit marker remain uninterpreted"
                     ),
                 ),
             )
@@ -5088,6 +5173,12 @@ def render_gameplay_analysis(
     server_attack_hit_actions = json.dumps(
         dict(sorted(state.server_attack_hit_actions.items()))
     )
+    server_melee_attack_tags = json.dumps(
+        dict(sorted(state.server_melee_attack_tags.items()))
+    )
+    server_melee_attack_displays = json.dumps(
+        dict(sorted(state.server_melee_attack_displays.items()))
+    )
     server_ranged_attack_skill_levels = json.dumps(
         dict(sorted(state.server_ranged_attack_skill_levels.items()))
     )
@@ -5361,6 +5452,11 @@ def render_gameplay_analysis(
             f"{state.server_attack_relays_for_known_players} "
             "unknown_player_relays:"
             f"{state.server_attack_relays_for_unknown_players} "
+            f"melee_relays:{state.server_melee_attack_relays} "
+            "melee_short_zero_targets:"
+            f"{state.server_melee_attack_short_zero_target_forms} "
+            f"melee_tags:{server_melee_attack_tags} "
+            f"melee_displays:{server_melee_attack_displays} "
             f"ranged_relays:{state.server_ranged_attack_relays} "
             f"ranged_skill_levels:{server_ranged_attack_skill_levels} "
             f"ranged_skill_ids:{server_ranged_attack_skill_ids} "

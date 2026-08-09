@@ -114,12 +114,15 @@
   stream `92` adds 1/42 relays, 71 known-mob records, and 88 damage words. Safe
   events expose aliases and low-31-bit damage magnitudes, and active mob state
   accumulates relay hit/damage totals without overriding opcode-`293` health.
+  All 42 opcode-`218` relays now type their common six-byte metadata prefix;
+  37 full forms append captured-zero mastery/auxiliary values, and five short
+  forms are accepted only with their exact all-zero target/damage placeholder.
   All 141 opcode-`219` prefixes now type the conditional skill id, display,
   facing flags, speed, mastery, and projectile id; their four-byte tails decode
   as signed attack positions and are compared with prior remote-player
-  positions in fold telemetry. The opcode-`218` prefix, opcode-`219` relay tag/
-  unknown-byte roles, damage high-bit marker, client suffixes, and mob maximum-
-  HP mapping remain neutral, so combat generation/replay stays disabled.
+  positions in fold telemetry. Relay-tag/unknown/auxiliary roles, the damage
+  high-bit marker, client suffixes, and mob maximum-HP mapping remain neutral,
+  so combat generation/replay stays disabled.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

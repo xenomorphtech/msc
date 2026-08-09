@@ -1061,19 +1061,22 @@ uint8  packed_counts
 target_count = packed_counts >> 4
 hit_count    = packed_counts & 0x0f
 
-if opcode == 218:
-  byte[prefix_length] opaque_prefix # 6 or 11 bytes
+uint8  relay_tag
+uint8  skill_level                  # zero in every captured opcode-218
+if opcode == 219 and skill_level != 0:
+  uint32 skill_id
+uint8  unknown_value                # zero in both sustained captures
+uint8  display
+uint8  facing_flags                 # captured 0 or 0x80
+uint8  attack_speed
+if opcode == 218 and this is the short form:
+  # metadata ends here; target must be the all-zero placeholder below
 else:
-  uint8  relay_tag                  # captured 14, 16, 30, or 33; role unknown
-  uint8  skill_level
-  if skill_level != 0:
-    uint32 skill_id
-  uint8  unknown_value              # zero in both sustained captures
-  uint8  display                    # captured 0x16, 0x18, 0x19, or 0x1a
-  uint8  facing_flags               # captured 0 or 0x80
-  uint8  attack_speed               # captured 3, 4, or 6
-  uint8  mastery                    # captured 0, 1, or 3
-  uint32 projectile_id
+  uint8  mastery
+  if opcode == 218:
+    uint32 auxiliary_value          # zero in every captured full form
+  else:
+    uint32 projectile_id
 repeat target_count:
   uint32 mob_object_id              # aliased; zero in five 218 placeholders
   uint8  hit_action                 # 6 for every nonzero captured target
@@ -1092,8 +1095,19 @@ contains 41 opcode-`218` and 99 opcode-`219` relays. Stream `92` contains one
 and 42. Every outer player object id is observed somewhere in the
 same capture. The nibble split is supported by the manifest's packed
 attack-count prefix and by body-length scaling. Given those counts, every body
-decomposes exactly into a 6/11-byte opcode-`218` prefix or the typed opcode-
-`219` fields, repeated target records, and the opcode-`219` signed position.
+decomposes exactly into the typed attack metadata, repeated target records, and
+the opcode-`219` signed position.
+
+All 42 close-range relays share the same typed six-byte metadata prefix. Stream
+`126` has 36 full forms and five short forms; stream `92` adds one full form.
+Every skill level and unknown byte is zero. Full forms append mastery `0` and
+auxiliary u32 `0`. Each short form has packed counts `0x11` and exactly one
+target record whose object id, hit action, and damage word are all zero. The
+decoder treats that as a distinct capture-backed placeholder shape and rejects
+a six-byte prefix paired with any nonzero or differently counted target. Stream
+`126` observes relay tags `8`/`16`, displays `5`, `6`, `7`, `9`, `11`, `16`,
+and `17`, facing flags `0`/`0x80`, and speeds `4`/`6`; stream `92` adds relay
+tag `14` with display `17`, facing `0x80`, and speed `6`.
 
 All 141 ranged relays obey the conditional skill-id rule: the prefix is 11
 bytes when `skill_level == 0` and 15 bytes otherwise. Stream `126` contains 51
@@ -1127,10 +1141,10 @@ magnitudes plus a neutral high-bit marker. Active mob entities accumulate the
 observed relay hit/damage totals without replacing the authoritative opcode-
 `293` health percentage. Raw ids and raw body bytes remain hidden. These
 captures validate action-to-health/leave correlations and damage array
-boundaries. The opcode-`218` prefix, opcode-`219` relay-tag/unknown-byte roles,
-damage high bit, client action suffixes, and mob maximum HP remain insufficient
-to predict the next percentage update. The custom server therefore does not
-yet generate or replay attacks.
+boundaries. Relay-tag/unknown/auxiliary roles, the damage high bit, client
+action suffixes, and mob maximum HP remain insufficient to predict the next
+percentage update. The custom server therefore does not yet generate or replay
+attacks.
 
 ## `58880` exchange
 

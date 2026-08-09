@@ -3154,6 +3154,32 @@ class ServerAttackRelayTarget:
 
 
 @dataclass(frozen=True)
+class ServerMeleeAttackRelayMetadata:
+    relay_tag: int
+    skill_level: int
+    unknown_value: int
+    display: int
+    facing_flags: int
+    attack_speed: int
+    mastery: int | None
+    auxiliary_value: int | None
+    short_zero_target_form: bool
+
+    def safe_dict(self) -> dict[str, int | bool | None]:
+        return {
+            "relay_tag": self.relay_tag,
+            "skill_level": self.skill_level,
+            "unknown_value": self.unknown_value,
+            "display": self.display,
+            "facing_flags": self.facing_flags,
+            "attack_speed": self.attack_speed,
+            "mastery": self.mastery,
+            "auxiliary_value": self.auxiliary_value,
+            "short_zero_target_form": self.short_zero_target_form,
+        }
+
+
+@dataclass(frozen=True)
 class ServerRangedAttackRelayMetadata:
     relay_tag: int
     skill_level: int
@@ -3266,6 +3292,58 @@ class ServerAttackRelay:
         return self._split_body()[2]
 
     @property
+    def melee_metadata(self) -> ServerMeleeAttackRelayMetadata | None:
+        if self.opcode != 218:
+            return None
+        opaque_prefix, targets, _ = self._split_body()
+        reader = PacketReader(
+            opaque_prefix, packet_name="server_melee_attack_relay_prefix"
+        )
+        relay_tag = reader.u8("relay_tag")
+        skill_level = reader.u8("skill_level")
+        if skill_level != 0:
+            raise PacketShapeError(
+                "server opcode-218 attack relay skill level is "
+                f"{skill_level}, expected captured value 0"
+            )
+        unknown_value = reader.u8("unknown_value")
+        display = reader.u8("display")
+        facing_flags = reader.u8("facing_flags")
+        attack_speed = reader.u8("attack_speed")
+        short_zero_target_form = len(opaque_prefix) == 6
+        mastery = None
+        auxiliary_value = None
+        if short_zero_target_form:
+            zero_target = targets[0] if len(targets) == 1 else None
+            if not (
+                self.target_count == 1
+                and self.hit_count == 1
+                and zero_target is not None
+                and zero_target.object_id == 0
+                and zero_target.hit_action == 0
+                and zero_target.raw_damage_values == (0,)
+            ):
+                raise PacketShapeError(
+                    "server opcode-218 short attack relay requires exactly "
+                    "one all-zero target with one zero damage value"
+                )
+        else:
+            mastery = reader.u8("mastery")
+            auxiliary_value = reader.u32("auxiliary_value")
+        reader.finish()
+        return ServerMeleeAttackRelayMetadata(
+            relay_tag=relay_tag,
+            skill_level=skill_level,
+            unknown_value=unknown_value,
+            display=display,
+            facing_flags=facing_flags,
+            attack_speed=attack_speed,
+            mastery=mastery,
+            auxiliary_value=auxiliary_value,
+            short_zero_target_form=short_zero_target_form,
+        )
+
+    @property
     def ranged_metadata(self) -> ServerRangedAttackRelayMetadata | None:
         if self.opcode != 219:
             return None
@@ -3333,6 +3411,7 @@ class ServerAttackRelay:
         )
         reader.finish()
         relay._split_body()
+        _ = relay.melee_metadata
         _ = relay.ranged_metadata
         return relay
 
@@ -3352,9 +3431,9 @@ class ServerAttackRelay:
             ),
             "opaque_tail_bytes": len(opaque_tail),
         }
-        ranged_metadata = self.ranged_metadata
-        if ranged_metadata is not None:
-            details.update(ranged_metadata.safe_dict())
+        attack_metadata = self.melee_metadata or self.ranged_metadata
+        if attack_metadata is not None:
+            details.update(attack_metadata.safe_dict())
         return details
 
     def to_bytes(self) -> bytes:
@@ -3381,6 +3460,7 @@ class ServerAttackRelay:
                     f"u{maximum.bit_length()}"
                 )
         self._split_body()
+        _ = self.melee_metadata
         _ = self.ranged_metadata
         return (
             struct.pack("<HIB", self.opcode, self.object_id, self.packed_counts)

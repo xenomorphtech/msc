@@ -114,7 +114,11 @@ def fixture_attack_relay_body(
         }
         body = bytearray(ranged_prefixes[prefix_length])
     else:
-        body = bytearray(prefix_length)
+        melee_prefixes = {
+            6: bytes.fromhex("080000050004"),
+            11: bytes.fromhex("0800000500040000000000"),
+        }
+        body = bytearray(melee_prefixes[prefix_length])
     for target_index in range(target_count):
         object_id = 0 if zero_targets else MOB_OBJECT_ID + target_index
         body.extend(object_id.to_bytes(4, "little"))
@@ -1961,6 +1965,24 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             two_hit_relay.targets[0].high_bit_markers, (True, False)
         )
+        full_melee_metadata = server_attack_relays[2].melee_metadata
+        self.assertIsNotNone(full_melee_metadata)
+        assert full_melee_metadata is not None
+        self.assertEqual(full_melee_metadata.relay_tag, 8)
+        self.assertEqual(full_melee_metadata.skill_level, 0)
+        self.assertEqual(full_melee_metadata.unknown_value, 0)
+        self.assertEqual(full_melee_metadata.display, 5)
+        self.assertEqual(full_melee_metadata.facing_flags, 0)
+        self.assertEqual(full_melee_metadata.attack_speed, 4)
+        self.assertEqual(full_melee_metadata.mastery, 0)
+        self.assertEqual(full_melee_metadata.auxiliary_value, 0)
+        self.assertFalse(full_melee_metadata.short_zero_target_form)
+        short_melee_metadata = server_attack_relays[1].melee_metadata
+        self.assertIsNotNone(short_melee_metadata)
+        assert short_melee_metadata is not None
+        self.assertTrue(short_melee_metadata.short_zero_target_form)
+        self.assertIsNone(short_melee_metadata.mastery)
+        self.assertIsNone(short_melee_metadata.auxiliary_value)
         ranged_metadata = two_hit_relay.ranged_metadata
         self.assertIsNotNone(ranged_metadata)
         assert ranged_metadata is not None
@@ -1982,6 +2004,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         assert basic_ranged_metadata is not None
         self.assertEqual(basic_ranged_metadata.skill_level, 0)
         self.assertIsNone(basic_ranged_metadata.skill_id)
+        self.assertIsNone(two_hit_relay.melee_metadata)
         self.assertIsNone(server_attack_relays[0].ranged_metadata)
         self.assertEqual(two_hit_relay.safe_dict()["skill_id"], 4_001_344)
         self.assertNotIn("object_id", two_hit_relay.safe_dict())
@@ -2002,6 +2025,22 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(
                 server_attack_relays[6],
                 opaque_body=bytes(invalid_skill_prefix),
+            ).to_bytes()
+        invalid_melee_skill = bytearray(server_attack_relays[2].opaque_body)
+        invalid_melee_skill[1] = 1
+        with self.assertRaisesRegex(
+            PacketShapeError, "expected captured value 0"
+        ):
+            replace(
+                server_attack_relays[2],
+                opaque_body=bytes(invalid_melee_skill),
+            ).to_bytes()
+        invalid_short_target = bytearray(server_attack_relays[1].opaque_body)
+        invalid_short_target[6] = 1
+        with self.assertRaisesRegex(PacketShapeError, "one all-zero target"):
+            replace(
+                server_attack_relays[1],
+                opaque_body=bytes(invalid_short_target),
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "flag_1 must fit"):
             ClientOpcode54AttackAction(
@@ -2892,6 +2931,32 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.server_attack_relays_for_unknown_players, 0
         )
+        self.assertEqual(analysis.state.server_melee_attack_relays, 1)
+        self.assertEqual(
+            analysis.state.server_melee_attack_short_zero_target_forms, 0
+        )
+        self.assertEqual(analysis.state.server_melee_attack_tags, {8: 1})
+        self.assertEqual(
+            analysis.state.server_melee_attack_skill_levels, {0: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_melee_attack_unknown_values, {0: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_melee_attack_displays, {5: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_melee_attack_facing_flags, {0: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_melee_attack_speeds, {4: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_melee_attack_mastery_values, {0: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_melee_attack_auxiliary_values, {0: 1}
+        )
         self.assertEqual(analysis.state.server_ranged_attack_relays, 1)
         self.assertEqual(analysis.state.server_ranged_attack_tags, {16: 1})
         self.assertEqual(
@@ -2989,6 +3054,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn("kind=client_attack_submitted", report)
         self.assertIn("kind=server_attack_relay_received", report)
+        self.assertIn(
+            'melee_relays:1 melee_short_zero_targets:0 '
+            'melee_tags:{"8": 1} melee_displays:{"5": 1}',
+            report,
+        )
         self.assertIn(
             'ranged_relays:1 ranged_skill_levels:{"8": 1} '
             'ranged_skill_ids:{"4001344": 1} '

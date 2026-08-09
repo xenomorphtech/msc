@@ -368,7 +368,8 @@ The gameplay fold currently models these capture-backed boundaries:
   object id, packed target/hit counts, and typed mob/hit-action/damage arrays;
   opcode `219` additionally exposes its conditional skill id, display/facing/
   speed/mastery bytes, projectile id, and signed attack position, while the
-  opcode-`218` prefix remains capture-bounded,
+  opcode-`218` branch types the same first six metadata bytes plus the full
+  form's mastery/auxiliary fields and validates its short zero-target form,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
@@ -696,7 +697,17 @@ contains 123 target records: 118 name known mobs and five are all-zero opcode-
 words (`1..366`, 20 high-bit markers). Every nonzero target uses hit action
 `6`. The fold aliases actors and targets and reports damage telemetry while
 accumulating hit/damage totals on each currently active mob. It retains the
-opcode-`218` prefix and damage high-bit meaning as opaque.
+damage high-bit meaning as opaque.
+
+All 42 opcode-`218` relays also have typed metadata. Their first six bytes are
+relay tag, captured-zero skill level, one still-unknown byte, display, facing
+flags, and attack speed. The 37 full forms append mastery `0` and auxiliary u32
+`0`. The five stream-`126` short forms stop after attack speed and each carries
+exactly one all-zero target/hit/damage placeholder; the decoder rejects that
+length for any other target shape. Stream `126` observes relay tags `8`/`16`,
+displays `5`, `6`, `7`, `9`, `11`, `16`, and `17`, facing flags `0`/`0x80`,
+and speeds `4`/`6`; the one stream-`92` relay independently uses tag `14`,
+display `17`, facing `0x80`, and speed `6`.
 
 All 141 opcode-`219` relays have a typed ranged prefix. It starts with a relay
 tag and skill level, inserts a little-endian skill id exactly when the level is
@@ -709,8 +720,8 @@ all 99 stream-`126` positions and 30 of 42 stream-`92` positions can be compared
 with a previously observed remote-player position; common vertical deltas are
 roughly 22-28 pixels, while larger deltas follow stale movement broadcasts.
 The fold emits both positions and their deltas as validation evidence. Relay-
-tag/unknown-byte roles, the damage high bit, client attack suffixes, and mob
-maximum-HP mapping still prevent safe combat generation or replay.
+tag/unknown/auxiliary roles, the damage high bit, client attack suffixes, and
+mob maximum-HP mapping still prevent safe combat generation or replay.
 
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
@@ -976,3 +987,6 @@ It intentionally cannot launch an authenticated official session.
     conditional skill ids plus projectile/display/facing/speed/mastery fields
     across both sustained captures, and correlate packet positions with the
     fold's previously observed remote-player positions.
+37. Type all 42 opcode-`218` metadata prefixes, distinguish 37 full forms from
+    five short all-zero target placeholders, and enforce that short-form target
+    invariant during parse and re-encoding.

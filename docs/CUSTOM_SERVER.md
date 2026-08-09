@@ -136,10 +136,11 @@ words across both captures, with aliased mobs and a neutral high-bit marker;
 active mobs also accumulate relay hit/damage telemetry. All 141 opcode-`219`
 relays now expose conditional skill id, display/facing/speed/mastery fields,
 projectile id, and a signed position; the fold compares that position with the
-actor's prior movement state. The opcode-`218` prefix, opcode-`219` relay tag/
-unknown byte, damage high bit, client suffixes, and mob maximum-HP mapping are
-still not established well enough for the custom server to generate or replay
-combat.
+actor's prior movement state. All 42 opcode-`218` relays expose the common
+metadata fields, with 37 full mastery/auxiliary forms and five strictly checked
+short all-zero target placeholders. Relay tag/unknown/auxiliary roles, damage
+high bit, client suffixes, and mob maximum-HP mapping are still not established
+well enough for the custom server to generate or replay combat.
 
 ## Replay the login capture locally
 
@@ -675,8 +676,9 @@ project's own `README.md` for all options.
   with aliased mob targets where present; server opcodes `218`/`219` fold 183
   attack relays with packed target/hit counts, 194 typed target records, and
   254 damage words. The 141 ranged relays additionally type skill/projectile/
-  animation metadata and signed positions, while opaque melee fields and HP
-  mapping remain out of generation and replay.
+  animation metadata and signed positions; all 42 close-range relays type their
+  common/full metadata and short placeholder distinction. Unresolved semantic
+  roles and HP mapping remain out of generation and replay.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.
