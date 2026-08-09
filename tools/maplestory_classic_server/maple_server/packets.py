@@ -4104,6 +4104,44 @@ class FieldLoadStage:
 
 
 @dataclass(frozen=True)
+class ClientOpcode309Acknowledgement:
+    """Exact empty acknowledgement sent after server opcode 426."""
+
+    opcode: int = 309
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode309Acknowledgement":
+        reader = PacketReader(
+            payload, packet_name="client_opcode_309_acknowledgement"
+        )
+        _expect_opcode(reader, 309)
+        reader.finish()
+        return cls()
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
+class ServerOpcode426Notification:
+    """Exact empty notification acknowledged by client opcode 309."""
+
+    opcode: int = 426
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode426Notification":
+        reader = PacketReader(
+            payload, packet_name="server_opcode_426_notification"
+        )
+        _expect_opcode(reader, 426)
+        reader.finish()
+        return cls()
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
 class HeartbeatResponse:
     """Client response to an opcode-10 server heartbeat probe."""
 

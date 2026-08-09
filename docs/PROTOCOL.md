@@ -940,6 +940,29 @@ one second later. Those negative correlations are insufficient to identify an
 attack or any other effect. The custom server therefore validates this family
 but does not generate or replay it.
 
+## Empty notification/acknowledgement (`server 426`, `client 309`)
+
+This family is exactly two opcode-only packets:
+
+```text
+server -> client: uint16 opcode = 426
+client -> server: uint16 opcode = 309
+```
+
+The temporal relationship is exact in every gameplay reference. Stream `126`
+has 299 pairs, stream `92` has 61, and stream `114` has one. In all 361 pairs,
+the server notification arrives first, the client acknowledgement consumes the
+only pending notification, and no unmatched packet remains at capture end.
+The long-stream delay is 0.2681-4,643.4658 ms (13.3547 ms median); stream `92`
+is 0.6815-83.8679 ms (28.0082 ms median), and stream `114` is 82.534 ms.
+
+Pinned IL2CPP handler code independently confirms direction: the handler
+registered for server opcode `426` constructs an outgoing opcode `309` packet,
+writes no body fields, and sends it. The fold therefore names only the proven
+notification/acknowledgement relationship, records matched/unmatched/pending
+counts and round-trip times, and keeps the higher-level purpose distinct from
+the separately modeled opcode-`10`/`23` heartbeat.
+
 ## `58880` exchange
 
 The client sent a stable HTTP/1.1 request:
@@ -994,8 +1017,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 24,999
-full, 42,866 partial, 3,235 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 25,597
+full, 42,866 partial, 2,637 unknown-but-lossless, and zero invalid packet
 observations. The fold reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 

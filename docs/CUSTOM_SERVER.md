@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 125 tests.
+The last run passed all 126 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 24,999 observations are full, 42,866 partial, 3,235
+`--fail-on-invalid`: 25,597 observations are full, 42,866 partial, 2,637
 unknown-but-lossless, and none invalid. The 12 remaining warnings are state
 correlations, not shape failures. The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
@@ -101,8 +101,8 @@ The analyzer now accepts the exact 11-byte type-`1` shape and the existing
 length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
 counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
 packets across all three observed variants, all with exact round trips.
-Together, these latest modeled families leave the long-corpus totals at 24,999
-full, 42,866 partial, 3,235 unknown-but-lossless, and zero invalid.
+Together, these latest modeled families leave the long-corpus totals at 25,597
+full, 42,866 partial, 2,637 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a
@@ -111,6 +111,14 @@ ten-byte opaque prefix, count/format bytes, fixed records (14 bytes for format
 instances round-trip and fold into safe count/format distributions. No active
 mob-id or sub-second server opcode-`219` correlation was found, so the server
 does not synthesize or replay this still-neutral client family.
+
+The analyzer separately matches exact empty server opcode `426` notifications
+to exact empty client opcode `309` acknowledgements. All 299 stream-`126`, 61
+stream-`92`, and one stream-`114` pairs are ordered and matched, with no pending
+or unsolicited member. Pinned client code confirms that handling `426`
+constructs and sends opcode `309` without a body. State and events expose pair
+counts and round-trip timing, while deliberately leaving the higher-level role
+neutral and distinct from the opcode-`10`/`23` heartbeat.
 
 ## Replay the login capture locally
 
@@ -637,6 +645,9 @@ project's own `README.md` for all options.
 - Client opcode `217` now has bounded compact and counted-record envelopes,
   accounting for all 937 long-corpus packets while deliberately remaining out
   of replay until its effect semantics are established.
+- Empty server opcode `426` and client opcode `309` now fold as a one-for-one
+  notification/acknowledgement pair across all three gameplay streams, with
+  full shape coverage and explicit unmatched/pending telemetry.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

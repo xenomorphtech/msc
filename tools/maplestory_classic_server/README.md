@@ -283,8 +283,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 24,999 full,
-42,866 partial, 3,235 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 25,597 full,
+42,866 partial, 2,637 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata.
@@ -358,6 +358,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
+- server opcode `426`: an exact empty notification followed one-for-one by the
+  exact empty client opcode-`309` acknowledgement; the fold tracks ordering and
+  round-trip time without assigning a broader gameplay role,
 - server opcode `9`: the exact nine-byte world-session termination envelope;
   its seven-byte reason body remains opaque.
 
@@ -636,6 +639,16 @@ in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 tracks matched, unmatched, and pending probes, so reversing this interpretation
 or losing a response is visible in state and warnings.
 
+Server opcode `426` and client opcode `309` form a second, payload-free pair;
+they are not conflated with the opcode-`10`/`23` heartbeat. Stream `126` has
+299 exact notification/acknowledgement pairs, stream `92` has 61, and stream
+`114` has one. Every server packet precedes its client packet, no capture has
+an unmatched or pending member, and the pending queue never exceeds one. The
+pinned client handler independently constructs and sends an opcode-only `309`
+packet when `426` arrives. The fold emits full-coverage events plus last/max
+round-trip telemetry, while the still-unknown higher-level purpose remains
+neutral.
+
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
 injected sessions both reached `active` with nine NPCs. The injected fold had
@@ -881,3 +894,6 @@ It intentionally cannot launch an authenticated official session.
 30. Bound both client opcode-`217` variants and their format-`0`/`2` counted
     records, fold only safe structural distributions, and keep the family out
     of replay until an effect correlation establishes its semantics.
+31. Type the empty server opcode-`426` notification and client opcode-`309`
+    acknowledgement, prove one-for-one temporal matching in every reference
+    world stream, and retain a neutral name for their higher-level purpose.

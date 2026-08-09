@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 125 tests.
+- The custom-server suite currently passes all 126 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  24,999 full, 42,866 partial, 3,235 unknown-but-lossless, and zero invalid
+  25,597 full, 42,866 partial, 2,637 unknown-but-lossless, and zero invalid
   packet observations. Twelve state-correlation warnings remain.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
@@ -86,6 +86,13 @@
   11-byte records. All 937 packets round-trip. The fold exposes only redacted
   structural distributions; absent mob-id and timely opcode-`219` correlations,
   the family is neither attack-named nor replayed.
+- Empty server opcode `426` and empty client opcode `309` are now a fully typed,
+  temporally correlated notification/acknowledgement pair. Stream `126` has
+  299 matches, stream `92` has 61, and stream `114` has one; all 361 server
+  packets precede their client acknowledgement with zero unmatched or pending.
+  Pinned handler code independently constructs opcode `309` in response to
+  `426`. The higher-level purpose remains neutral and distinct from heartbeat
+  opcodes `10`/`23`.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

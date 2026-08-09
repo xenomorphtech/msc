@@ -15,6 +15,7 @@ from .gamestate import (
 from .packets import (
     CharacterStatUpdate,
     ClientOpcode217RecordSet,
+    ClientOpcode309Acknowledgement,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -47,6 +48,7 @@ from .packets import (
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    ServerOpcode426Notification,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -361,6 +363,13 @@ class GameplayGameState:
     pending_heartbeat_probes: int = 0
     last_heartbeat_round_trip_ms: float | None = None
     max_heartbeat_round_trip_ms: float | None = None
+    opcode_426_notifications: int = 0
+    opcode_309_acknowledgements: int = 0
+    matched_opcode_309_acknowledgements: int = 0
+    unmatched_opcode_309_acknowledgements: int = 0
+    pending_opcode_426_notifications: int = 0
+    last_opcode_426_round_trip_ms: float | None = None
+    max_opcode_426_round_trip_ms: float | None = None
     client_opcode_13_messages: int = 0
     client_opcode_13_messages_by_type: Counter[int] = field(
         default_factory=Counter
@@ -1550,6 +1559,27 @@ class GameplayAnalysis:
                 "max_heartbeat_round_trip_ms": (
                     self.state.max_heartbeat_round_trip_ms
                 ),
+                "opcode_426_notifications": (
+                    self.state.opcode_426_notifications
+                ),
+                "opcode_309_acknowledgements": (
+                    self.state.opcode_309_acknowledgements
+                ),
+                "matched_opcode_309_acknowledgements": (
+                    self.state.matched_opcode_309_acknowledgements
+                ),
+                "unmatched_opcode_309_acknowledgements": (
+                    self.state.unmatched_opcode_309_acknowledgements
+                ),
+                "pending_opcode_426_notifications": (
+                    self.state.pending_opcode_426_notifications
+                ),
+                "last_opcode_426_round_trip_ms": (
+                    self.state.last_opcode_426_round_trip_ms
+                ),
+                "max_opcode_426_round_trip_ms": (
+                    self.state.max_opcode_426_round_trip_ms
+                ),
                 "client_opcode_13_messages": (
                     self.state.client_opcode_13_messages
                 ),
@@ -1630,6 +1660,7 @@ class GameplayStateFold:
             tuple[int, int], deque[PendingMobMovement]
         ] = {}
         self._pending_heartbeat_probes: deque[int] = deque()
+        self._pending_opcode_426_notifications: deque[int] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._unknown_npc_updates: set[tuple[int, int]] = set()
@@ -2171,6 +2202,50 @@ class GameplayStateFold:
                 issues=(
                     "movement control metadata after byte zero remains opaque",
                 ),
+            )
+        if opcode == 309:
+            acknowledgement = ClientOpcode309Acknowledgement.parse(payload)
+            matched_notification = bool(
+                self._pending_opcode_426_notifications
+            )
+            round_trip_ms: float | None = None
+            if matched_notification:
+                notification_timestamp_ns = (
+                    self._pending_opcode_426_notifications.popleft()
+                )
+                round_trip_ms = (
+                    frame.timestamp_ns - notification_timestamp_ns
+                ) / 1e6
+                self.state.pending_opcode_426_notifications -= 1
+                self.state.matched_opcode_309_acknowledgements += 1
+                self.state.last_opcode_426_round_trip_ms = round_trip_ms
+                self.state.max_opcode_426_round_trip_ms = max(
+                    self.state.max_opcode_426_round_trip_ms or 0.0,
+                    round_trip_ms,
+                )
+            else:
+                self.state.unmatched_opcode_309_acknowledgements += 1
+            self.state.opcode_309_acknowledgements += 1
+            details: dict[str, object] = {
+                "matched_notification": matched_notification,
+                "pending_notifications": (
+                    self.state.pending_opcode_426_notifications
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
+            self._event(
+                frame,
+                "opcode_309_acknowledgement_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="opcode_309_acknowledgement",
+                coverage=ShapeCoverage.FULL,
+                parsed=acknowledgement,
+                details=details,
             )
         if opcode == 23:
             response = HeartbeatResponse.parse(payload)
@@ -3762,6 +3837,29 @@ class GameplayStateFold:
                 parsed=update,
                 details=details,
             )
+        if opcode == 426:
+            notification = ServerOpcode426Notification.parse(payload)
+            self._pending_opcode_426_notifications.append(frame.timestamp_ns)
+            self.state.opcode_426_notifications += 1
+            self.state.pending_opcode_426_notifications += 1
+            details = {
+                "pending_notifications": (
+                    self.state.pending_opcode_426_notifications
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "opcode_426_notification_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="opcode_426_notification",
+                coverage=ShapeCoverage.FULL,
+                parsed=notification,
+                details=details,
+            )
         if opcode == 10:
             probe = HeartbeatProbe.parse(payload)
             self._pending_heartbeat_probes.append(frame.timestamp_ns)
@@ -3804,6 +3902,17 @@ class GameplayStateFold:
                 f"{self.state.pending_heartbeat_probes} server heartbeat "
                 "probes had no captured client response"
             )
+        if self.state.unmatched_opcode_309_acknowledgements:
+            self.warnings.append(
+                f"{self.state.unmatched_opcode_309_acknowledgements} opcode-309 "
+                "acknowledgements had no pending server opcode-426 notification"
+            )
+        if self.state.pending_opcode_426_notifications:
+            self.warnings.append(
+                f"{self.state.pending_opcode_426_notifications} server "
+                "opcode-426 notifications had no captured client "
+                "opcode-309 acknowledgement"
+            )
         if self.state.pending_item_uses:
             self.warnings.append(
                 f"{self.state.pending_item_uses} item-use requests had no "
@@ -3827,6 +3936,9 @@ class GameplayStateFold:
                     "pending_movements": self.state.pending_movements,
                     "pending_heartbeat_probes": (
                         self.state.pending_heartbeat_probes
+                    ),
+                    "pending_opcode_426_notifications": (
+                        self.state.pending_opcode_426_notifications
                     ),
                     "pending_item_uses": self.state.pending_item_uses,
                     "pending_item_pickups": self.state.pending_item_pickups,
@@ -4660,6 +4772,15 @@ def render_gameplay_analysis(
             f"pending:{state.pending_heartbeat_probes} "
             f"last_rtt_ms:{state.last_heartbeat_round_trip_ms} "
             f"max_rtt_ms:{state.max_heartbeat_round_trip_ms}"
+        ),
+        (
+            f"opcode_426_309=notified:{state.opcode_426_notifications} "
+            f"acknowledged:{state.opcode_309_acknowledgements} "
+            f"matched:{state.matched_opcode_309_acknowledgements} "
+            f"unmatched:{state.unmatched_opcode_309_acknowledgements} "
+            f"pending:{state.pending_opcode_426_notifications} "
+            f"last_rtt_ms:{state.last_opcode_426_round_trip_ms} "
+            f"max_rtt_ms:{state.max_opcode_426_round_trip_ms}"
         ),
         (
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "

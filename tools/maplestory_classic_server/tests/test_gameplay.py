@@ -27,6 +27,7 @@ from maple_server.gameplay import (  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientOpcode217RecordSet,
+    ClientOpcode309Acknowledgement,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -68,6 +69,7 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    ServerOpcode426Notification,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -443,6 +445,7 @@ def fixture_gameplay_transcript(
     player_movement: bool = False,
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
+    opcode_426_acknowledgement: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
     item_use: bool = False,
@@ -895,6 +898,13 @@ def fixture_gameplay_transcript(
                 opaque_payload=b"variable-six",
             ).to_bytes(),
         )
+        append(
+            "client_to_server",
+            Opcode13Envelope(
+                message_type=13,
+                opaque_payload=b"variable-thirteen",
+            ).to_bytes(),
+        )
     if opcode_217_records:
         append(
             "client_to_server",
@@ -920,12 +930,11 @@ def fixture_gameplay_transcript(
                 opaque_trailer=b"trailer?",
             ).to_bytes(),
         )
+    if opcode_426_acknowledgement:
+        append("server_to_client", ServerOpcode426Notification().to_bytes())
         append(
             "client_to_server",
-            Opcode13Envelope(
-                message_type=13,
-                opaque_payload=b"variable-thirteen",
-            ).to_bytes(),
+            ClientOpcode309Acknowledgement().to_bytes(),
         )
     append("server_to_client", HeartbeatProbe().to_bytes())
     append(
@@ -1681,6 +1690,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
     def test_transport_envelopes_and_heartbeat_round_trip(self) -> None:
         probe = HeartbeatProbe()
         response = HeartbeatResponse(opaque_token=b"response")
+        notification = ServerOpcode426Notification()
+        acknowledgement = ClientOpcode309Acknowledgement()
         fixed_envelope = Opcode13Type1Envelope(opaque_payload=b"fixed123")
         variable_envelope = Opcode13Envelope(
             message_type=6,
@@ -1691,6 +1702,20 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             HeartbeatResponse.parse(response.to_bytes()), response
         )
+        self.assertEqual(
+            ServerOpcode426Notification.parse(notification.to_bytes()),
+            notification,
+        )
+        self.assertEqual(
+            ClientOpcode309Acknowledgement.parse(
+                acknowledgement.to_bytes()
+            ),
+            acknowledgement,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
+            ServerOpcode426Notification.parse(
+                notification.to_bytes() + b"\x00"
+            )
         self.assertEqual(
             Opcode13Type1Envelope.parse(fixed_envelope.to_bytes()),
             fixed_envelope,
@@ -2431,6 +2456,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 player_movement=True,
                 opcode_13_messages=True,
                 opcode_217_records=True,
+                opcode_426_acknowledgement=True,
             )
         )
 
@@ -2495,6 +2521,28 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertNotIn("prefix-002", report)
+        self.assertEqual(analysis.state.opcode_426_notifications, 1)
+        self.assertEqual(analysis.state.opcode_309_acknowledgements, 1)
+        self.assertEqual(
+            analysis.state.matched_opcode_309_acknowledgements, 1
+        )
+        self.assertEqual(
+            analysis.state.unmatched_opcode_309_acknowledgements, 0
+        )
+        self.assertEqual(analysis.state.pending_opcode_426_notifications, 0)
+        self.assertIn(
+            "opcode_426_309=notified:1 acknowledged:1 matched:1 "
+            "unmatched:0 pending:0",
+            report,
+        )
+        self.assertIn(
+            "opcode=426 kind=opcode_426_notification coverage=full",
+            report,
+        )
+        self.assertIn(
+            "opcode=309 kind=opcode_309_acknowledgement coverage=full",
+            report,
+        )
         self.assertNotIn("variable-thirteen", report)
         self.assertNotIn("123456", report)
         self.assertIn(
@@ -2712,6 +2760,35 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.matched_heartbeat_responses, 0)
         self.assertEqual(analysis.state.unmatched_heartbeat_responses, 1)
         self.assertEqual(analysis.state.pending_heartbeat_probes, 1)
+        self.assertEqual(len(analysis.warnings), 2)
+
+    def test_opcode_426_correlation_rejects_reversed_order(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            opcode_426_acknowledgement=True
+        )
+        events = list(transcript.events)
+        notification_event = events[-5]
+        acknowledgement_event = events[-4]
+        events[-5] = replace(
+            acknowledgement_event,
+            timestamp_ns=notification_event.timestamp_ns,
+        )
+        events[-4] = replace(
+            notification_event,
+            timestamp_ns=acknowledgement_event.timestamp_ns,
+        )
+
+        analysis = analyze_gameplay_transcript(
+            Transcript(path=transcript.path, events=tuple(events))
+        )
+
+        self.assertEqual(
+            analysis.state.matched_opcode_309_acknowledgements, 0
+        )
+        self.assertEqual(
+            analysis.state.unmatched_opcode_309_acknowledgements, 1
+        )
+        self.assertEqual(analysis.state.pending_opcode_426_notifications, 1)
         self.assertEqual(len(analysis.warnings), 2)
 
 
