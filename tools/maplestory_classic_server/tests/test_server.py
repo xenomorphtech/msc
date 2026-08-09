@@ -2043,6 +2043,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.data("server_to_client", greeting + captured_frame)
             source_writer.close()
             source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
             object_id = 20_001
             policy = MobHealthResponsePolicy(
                 mobs={
@@ -2092,6 +2093,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             strict=False,
+                            transcript_directory=observed_directory,
                             hold_open_seconds=0.2,
                             mob_health_response_policy=policy,
                             mob_movement_acknowledgement_policy=movement_policy,
@@ -2197,6 +2199,37 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 movement_policy.known_mob_templates[object_id], 210_100
+            )
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid)
+            health_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("mob_health_")
+            ]
+            self.assertEqual(
+                [event.kind for event in health_events],
+                [
+                    "mob_health_request_observed",
+                    "mob_health_response_completed",
+                    "mob_health_request_observed",
+                    "mob_health_request_rejected",
+                ],
+            )
+            response_event = health_events[1]
+            self.assertEqual(response_event.direction, "runtime")
+            self.assertEqual(response_event.details["target"], "mob:1")
+            self.assertEqual(response_event.details["hp_after"], 0)
+            self.assertTrue(response_event.details["removed"])
+            self.assertEqual(
+                response_event.details["server_opcodes"], [293, 293, 280]
+            )
+            self.assertEqual(
+                health_events[-1].details["reason"],
+                "client attack has no modeled mob target",
             )
 
     async def test_replay_paces_and_replans_queued_mob_decision(

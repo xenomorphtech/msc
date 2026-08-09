@@ -882,6 +882,16 @@ because the first was terminal. The observed fold contains one attack, one
 zero-health update, one leave, zero active mobs, and zero pending effects while
 the connection and generated heartbeat exchange remained active.
 
+Recorded custom-server runs also emit identifier-free runtime policy events;
+these do not alter the packet protocol. The live targeted opcode-`52` at frame
+`85` records observed damage `[27,32]`. After generated opcode `293`/`280`
+frames drain, frame `87` records the completed `8 -> 0` transition,
+percentage `[0]`, removal, and one skipped terminal hit. A later untargeted
+opcode-`52` records observation and rejection together at frame `99` without a
+server response. The combined packet/policy fold is valid and warning-free
+with two attacks, 59 submitted damage, one matched health effect, no pending
+effect, and 17/17 matched heartbeats.
+
 ## Mob movement (`client 207`, `server 282/283`)
 
 The client submits a field-local mob object, a sequence number, and one typed

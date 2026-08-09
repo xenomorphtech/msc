@@ -147,7 +147,11 @@
   received real damage `[27,32]`; the server produced `[293,280]`, folded one
   matched zero-health effect and leave with no pending hits, and retained the
   active client/heartbeat exchange. The policy explicitly does not synthesize
-  attack relays or claim to reproduce the six official ±1 HP adjustments.
+  attack relays or claim to reproduce the six official ±1 HP adjustments. A
+  fresh run records the targeted request at frame `85`, completed removal at
+  `87`, and an untargeted rejection at `99` as bounded safe runtime events.
+  Its combined fold is valid with no warnings, two attacks/59 damage, one
+  matched health effect, no pending effects, and 17/17 heartbeats.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

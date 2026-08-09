@@ -578,6 +578,19 @@ This is a request/effect/lifecycle validation. It is not another next-
 percentage sample, because the injected spawn had no earlier opcode-`293`
 health observation.
 
+The replay now records the policy side of this chain as the same bounded,
+identifier-free runtime events used by movement scheduling. In the fresh
+browser-free proof, authentic targeted attack frame `85` emitted
+`mob_health_request_observed` with `[27,32]`; after opcode-`293` and
+opcode-`280`, frame `87` emitted `mob_health_response_completed` with
+`8 -> 0`, percentage `[0]`, removal, and one skipped terminal hit. A second
+physical Ctrl swing was untargeted: frame `99` records observation plus the
+safe rejection reason and has no response packet. Transcript
+`reactive_mob_health_policy_events_20260809/1786304902178638016_replay_12857.jsonl`
+folds validly with no warnings: two attacks/59 submitted damage, one matched
+health effect, one zero-health update and leave, no active mob or pending
+effect, and 17/17 matched heartbeats.
+
 Query the read-only API from the listener's namespace:
 
 ```sh

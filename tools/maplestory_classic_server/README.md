@@ -963,6 +963,15 @@ no pending hit effect. This validates the modeled request/effect/lifecycle;
 because the injected spawn had no preceding opcode-`293` sample, it is not an
 additional offline next-percentage prediction sample.
 
+With transcript recording enabled, reactive combat also emits bounded runtime
+events for request observation, response completion, and safe rejection. In a
+fresh browser-free run, targeted opcode-`52` frame `85` recorded damage
+`[27,32]`; completion frame `87` recorded `8 -> 0`, percentage `[0]`, emitted
+opcodes `[293,280]`, removal, and one skipped terminal hit. A second physical
+Ctrl swing produced an untargeted observation/rejection at frame `99` and no
+response. The valid, warning-free fold has two attacks/59 damage, one matched
+health effect, no active mob or pending effect, and 17/17 heartbeats.
+
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
 injected sessions both reached `active` with nine NPCs. The injected fold had

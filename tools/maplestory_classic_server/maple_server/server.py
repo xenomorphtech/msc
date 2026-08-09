@@ -1166,13 +1166,18 @@ async def replay_connection(
 
         movement_policy_cooldown_until = 0.0
 
+        def record_runtime_event(
+            kind: str,
+            details: dict[str, object],
+        ) -> None:
+            if observed is not None:
+                observed.runtime_event(kind, details)
+
         def record_movement_policy_runtime_event(
             kind: str,
             details: dict[str, object],
         ) -> None:
-            if observed is None:
-                return
-            observed.runtime_event(
+            record_runtime_event(
                 kind,
                 {
                     "trigger": mob_movement_policy_trigger,
@@ -1614,6 +1619,19 @@ async def replay_connection(
                             )
                             + 1
                         )
+                    record_runtime_event(
+                        "mob_health_request_observed",
+                        {
+                            "attack_opcode": attack.opcode,
+                            "target_present": (
+                                attack.target_object_id is not None
+                            ),
+                            "damage_values": list(attack.damage_values),
+                            "high_bit_damage_entries": sum(
+                                attack.high_bit_markers
+                            ),
+                        },
+                    )
                     try:
                         response_plan = mob_health_response_policy.respond(
                             attack
@@ -1632,6 +1650,13 @@ async def replay_connection(
                             mob_health_metrics["state"] = (
                                 mob_health_response_policy.safe_dict()
                             )
+                        record_runtime_event(
+                            "mob_health_request_rejected",
+                            {
+                                "attack_opcode": attack.opcode,
+                                "reason": str(error),
+                            },
+                        )
                         continue
                     for plaintext in response_plan.plaintexts:
                         await send_encrypted_frame(
@@ -1671,6 +1696,10 @@ async def replay_connection(
                         mob_health_metrics["state"] = (
                             mob_health_response_policy.safe_dict()
                         )
+                    record_runtime_event(
+                        "mob_health_response_completed",
+                        response_plan.safe_dict(),
+                    )
                 if (
                     opcode == 207
                     and mob_movement_acknowledgement_policy is not None
