@@ -341,6 +341,17 @@ the parent carries observed/served/rejected counts, response-packet count, and
 the last identifier-free response plan. The HTTP listener remains read-only
 and loopback-only, using namespace/OS access as its current security boundary.
 
+The same live path now validates the derived mob-movement policy. Stream `114`
+provided the held-open field, stream `92` provided 11,949 deterministic
+acknowledgement pairs, and typed opcodes `279`/`281` introduced and controlled
+a template-`100100` snail at the player. The client submitted 205 opcode-`207`
+movements; the server generated 205 opcode-`283` acknowledgements, and the
+observed fold matched all 205 with exact flag/value/auxiliary rules and no
+pending movement. Runtime status nests the safe policy under
+`protocol.mob_movement_acknowledgements.state` and reports counters plus the
+last response/rejection at the parent. Generated mob-death opcode `280` now
+updates both health and movement active state.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -355,8 +366,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Reuse the proven typed mob injection to exercise the derived opcode-`283`
-   movement acknowledgement policy through the real client.
+4. Generate opcode-`282` mob-movement broadcasts from owned mob state and
+   verify that the real client and offline fold agree on the resulting
+   position/lifecycle changes.
 
 ## Useful proof artifacts
 

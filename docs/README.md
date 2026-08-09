@@ -2,7 +2,7 @@
 
 These notes preserve the working context for the Taiwan/Hong Kong MapleStory
 Classic Unity client, its Wine environment, network capture setup, and the
-custom-server experiment as of 2026-08-07.
+custom-server experiment as of 2026-08-09.
 
 ## Start here
 

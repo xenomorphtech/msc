@@ -1210,7 +1210,6 @@ class MobMovementAcknowledgementPolicy:
     known_mob_templates: dict[int, int] = field(
         repr=False, compare=False
     )
-    active_known_mob_count: int
     field_epoch: int
     matched_pairs: int
     known_template_pairs: int
@@ -1218,6 +1217,36 @@ class MobMovementAcknowledgementPolicy:
     flag_rule_matches: int
     zero_auxiliary_pairs: int
     pending_submissions: int
+    active_mob_object_ids: set[int] = field(
+        default_factory=set, repr=False, compare=False
+    )
+
+    @property
+    def active_known_mob_count(self) -> int:
+        return sum(
+            object_id in self.known_mob_templates
+            for object_id in self.active_mob_object_ids
+        )
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        opcode = int.from_bytes(plaintext[:2], "little")
+        spawn: tuple[int, MobSpawnData] | None = None
+        if opcode == 279:
+            entered = MobEnterField.parse(plaintext)
+            spawn = (entered.object_id, entered.spawn)
+        elif opcode == 281:
+            controller = MobControllerChange.parse(plaintext)
+            if controller.spawn is not None:
+                spawn = (controller.object_id, controller.spawn)
+        elif opcode == 280:
+            left = MobLeaveField.parse(plaintext)
+            self.active_mob_object_ids.discard(left.object_id)
+        if spawn is not None:
+            object_id, spawn_data = spawn
+            self.known_mob_templates[object_id] = spawn_data.template_id
+            self.active_mob_object_ids.add(object_id)
 
     def acknowledge(
         self, submission: MobMovementSubmission
@@ -5428,27 +5457,40 @@ def derive_item_pickup_response_policy(
 
 def derive_mob_movement_acknowledgement_policy(
     transcript: Transcript,
+    *,
+    evidence_transcript: Transcript | None = None,
 ) -> MobMovementAcknowledgementPolicy:
     """Derive only acknowledgement behavior proven by a validated capture."""
 
     analysis = analyze_gameplay_transcript(transcript)
     if not analysis.valid:
         raise ValueError("world transcript failed packet/state validation")
-    state = analysis.state
-    if state.matched_movement_acknowledgements == 0:
+    evidence_analysis = (
+        analysis
+        if evidence_transcript is None
+        else analyze_gameplay_transcript(evidence_transcript)
+    )
+    if not evidence_analysis.valid:
         raise ValueError(
-            "world transcript has no correlated mob movement acknowledgements"
+            "movement-acknowledgement evidence transcript failed packet/state "
+            "validation"
+        )
+    state = analysis.state
+    evidence_state = evidence_analysis.state
+    if evidence_state.matched_movement_acknowledgements == 0:
+        raise ValueError(
+            "movement evidence has no correlated mob movement acknowledgements"
         )
     if (
-        state.movement_acknowledgement_flag_matches
-        != state.matched_movement_acknowledgements
+        evidence_state.movement_acknowledgement_flag_matches
+        != evidence_state.matched_movement_acknowledgements
     ):
         raise ValueError(
             "movement acknowledgement flag rule is not exact in this capture"
         )
     if (
-        state.movement_acknowledgement_zero_auxiliary_pairs
-        != state.matched_movement_acknowledgements
+        evidence_state.movement_acknowledgement_zero_auxiliary_pairs
+        != evidence_state.matched_movement_acknowledgements
     ):
         raise ValueError(
             "movement acknowledgement auxiliary bytes are not uniformly zero"
@@ -5456,7 +5498,7 @@ def derive_mob_movement_acknowledgement_policy(
     ambiguous_templates = {
         template_id: sorted(status_values)
         for template_id, status_values in (
-            state.movement_acknowledgement_values_by_template.items()
+            evidence_state.movement_acknowledgement_values_by_template.items()
         )
         if len(status_values) != 1
     }
@@ -5468,7 +5510,7 @@ def derive_mob_movement_acknowledgement_policy(
     status_values_by_template = {
         template_id: next(iter(status_values))
         for template_id, status_values in (
-            state.movement_acknowledgement_values_by_template.items()
+            evidence_state.movement_acknowledgement_values_by_template.items()
         )
     }
     if not status_values_by_template:
@@ -5479,25 +5521,25 @@ def derive_mob_movement_acknowledgement_policy(
     return MobMovementAcknowledgementPolicy(
         status_values_by_template=status_values_by_template,
         observations_by_template=dict(
-            state.movement_acknowledgements_by_template
+            evidence_state.movement_acknowledgements_by_template
         ),
         known_mob_templates=dict(state.mob_templates),
-        active_known_mob_count=sum(
-            object_id in state.mob_templates for object_id in state.mobs
-        ),
+        active_mob_object_ids=set(state.mobs),
         field_epoch=state.field_epoch,
-        matched_pairs=state.matched_movement_acknowledgements,
+        matched_pairs=evidence_state.matched_movement_acknowledgements,
         known_template_pairs=(
-            state.movement_acknowledgements_with_known_template
+            evidence_state.movement_acknowledgements_with_known_template
         ),
         unknown_template_pairs=(
-            state.movement_acknowledgements_with_unknown_template
+            evidence_state.movement_acknowledgements_with_unknown_template
         ),
-        flag_rule_matches=state.movement_acknowledgement_flag_matches,
+        flag_rule_matches=(
+            evidence_state.movement_acknowledgement_flag_matches
+        ),
         zero_auxiliary_pairs=(
-            state.movement_acknowledgement_zero_auxiliary_pairs
+            evidence_state.movement_acknowledgement_zero_auxiliary_pairs
         ),
-        pending_submissions=state.pending_movements,
+        pending_submissions=evidence_state.pending_movements,
     )
 
 

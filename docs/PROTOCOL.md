@@ -882,6 +882,67 @@ because the first was terminal. The observed fold contains one attack, one
 zero-health update, one leave, zero active mobs, and zero pending effects while
 the connection and generated heartbeat exchange remained active.
 
+## Mob movement (`client 207`, `server 283`)
+
+The client submits a field-local mob object, a sequence number, and one typed
+movement path:
+
+```text
+uint16 opcode = 207
+uint32 mob_object_id
+uint16 sequence
+byte[19] control_prefix
+int16  reference_x
+int16  reference_y
+uint8  command_count                 # nonzero
+repeat command_count: mob_movement_command
+uint8  trailer_marker = 0
+int16  path_start_x
+int16  path_start_y
+int16  path_end_x
+int16  path_end_y
+```
+
+The observed command tags are `0`, `1`, and `2`. Type `0` has signed position
+and velocity pairs, uint16 foothold, stance, and duration; types `1` and `2`
+have signed relative velocity, stance, and duration. All 12,100 stream-`92`
+submissions, 40,090 commands, and nine-byte trailers parse and re-encode
+exactly; stream `126` validates the same boundaries across another 22,855
+submissions. The 19 control bytes remain deliberately opaque.
+
+The complete acknowledgement is 13 plaintext bytes:
+
+```text
+uint16 opcode = 283
+uint32 mob_object_id
+uint16 sequence
+uint8  status_flag                    # boolean 0/1
+uint16 status_value
+uint8  status_auxiliary_1
+uint8  status_auxiliary_2
+```
+
+All 11,949 stream-`92` acknowledgements correlate with a prior submission.
+The flag is exactly whether control-prefix byte zero is nonzero, both auxiliary
+bytes are always zero, and the status value is deterministic for every
+field-local template: `100100 -> 0`, `130100 -> 30`, `210100 -> 35`,
+`1110100 -> 25`, `1130100 -> 30`, `2110200 -> 35`, `3210800 -> 100`, and
+`9999999 -> 0`. The behavioral name of the uint16 remains unknown.
+
+The custom server can derive this mapping from one validated evidence stream
+while using another transcript's final field. Typed later opcode-`279` entries
+and opcode-`281` controller assignments populate field-local template state;
+opcode `280` removes active membership but retains that identity until the next
+field epoch, matching official post-leave acknowledgements. Unknown objects or
+templates without deterministic evidence receive no guessed reply.
+
+The real-client proof replayed stream `114`, derived values from stream `92`,
+and injected matching typed entry/controller packets for template `100100` at
+the final player position. The client produced 205 opcode-`207` submissions;
+the server generated 205 opcode-`283` packets, and the independent transcript
+fold matched all 205 with flag/value/auxiliary rules exact and no pending
+movement. Heartbeats and the world connection remained active.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

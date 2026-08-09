@@ -46,6 +46,7 @@ from .packets import (
     HeartbeatProbe,
     ItemPickupRequest,
     ItemUseRequest,
+    MobControllerChange,
     MobEnterField,
     MobMovementSubmission,
     PacketShapeError,
@@ -817,6 +818,14 @@ async def replay_connection(
                     mob_health_metrics["state"] = (
                         mob_health_response_policy.safe_dict()
                     )
+            if mob_movement_acknowledgement_policy is not None:
+                mob_movement_acknowledgement_policy.apply_server_packet(
+                    plaintext
+                )
+                if mob_acknowledgement_metrics is not None:
+                    mob_acknowledgement_metrics["state"] = (
+                        mob_movement_acknowledgement_policy.safe_dict()
+                    )
             if (
                 npc_state_replay_plaintext is not None
                 and plaintext == npc_state_replay_plaintext
@@ -1079,6 +1088,17 @@ async def replay_connection(
                         await send_encrypted_frame(
                             encrypt_next_server_frame(plaintext)
                         )
+                        if (
+                            mob_movement_acknowledgement_policy
+                            is not None
+                        ):
+                            mob_movement_acknowledgement_policy.apply_server_packet(
+                                plaintext
+                            )
+                            if mob_acknowledgement_metrics is not None:
+                                mob_acknowledgement_metrics["state"] = (
+                                    mob_movement_acknowledgement_policy.safe_dict()
+                                )
                     if mob_health_metrics is not None:
                         mob_health_metrics["requests_served"] = (
                             int(
@@ -1122,7 +1142,7 @@ async def replay_connection(
                                 movement
                             )
                         )
-                    except ValueError:
+                    except ValueError as error:
                         if mob_acknowledgement_metrics is not None:
                             mob_acknowledgement_metrics[
                                 "submissions_rejected"
@@ -1134,7 +1154,13 @@ async def replay_connection(
                                 )
                                 + 1
                             )
-                        raise
+                            mob_acknowledgement_metrics[
+                                "last_rejection"
+                            ] = str(error)
+                            mob_acknowledgement_metrics["state"] = (
+                                mob_movement_acknowledgement_policy.safe_dict()
+                            )
+                        continue
                     await send_encrypted_frame(
                         encrypt_next_server_frame(
                             acknowledgement.to_bytes()
@@ -1148,6 +1174,24 @@ async def replay_connection(
                                 )
                             )
                             + 1
+                        )
+                        mob_acknowledgement_metrics["last_response"] = {
+                            "template_id": (
+                                mob_movement_acknowledgement_policy
+                                .known_mob_templates[movement.object_id]
+                            ),
+                            "sequence": acknowledgement.sequence,
+                            "status_flag": acknowledgement.status_flag,
+                            "status_value": acknowledgement.status_value,
+                            "status_auxiliary_1": (
+                                acknowledgement.status_auxiliary_1
+                            ),
+                            "status_auxiliary_2": (
+                                acknowledgement.status_auxiliary_2
+                            ),
+                        }
+                        mob_acknowledgement_metrics["state"] = (
+                            mob_movement_acknowledgement_policy.safe_dict()
                         )
                 if opcode in remaining_opcode_replies:
                     await send_reactive_plaintexts(
@@ -1539,14 +1583,29 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
                 "mob-spawn transform must use X:Y or X:Y:FOOTHOLD:ORIGIN"
             )
         position_x, position_y = parse_i16_position(":".join(fields[:2]))
+        entered = None
+        controller = None
         try:
-            original = MobEnterField.parse(payload)
+            opcode = int.from_bytes(payload[:2], "little")
+            if opcode == 279:
+                entered = MobEnterField.parse(payload)
+                original_spawn = entered.spawn
+            elif opcode == 281:
+                controller = MobControllerChange.parse(payload)
+                if controller.spawn is None:
+                    raise ValueError(
+                        "controller packet has no embedded mob spawn"
+                    )
+                original_spawn = controller.spawn
+            else:
+                raise ValueError("packet does not carry a typed mob spawn")
         except ValueError as error:
             raise argparse.ArgumentTypeError(
-                "pcap mob-spawn transform requires a validated mob-enter packet"
+                "pcap mob-spawn transform requires a validated mob-enter or "
+                "controller-with-spawn packet"
             ) from error
-        foothold_id = original.spawn.foothold_id
-        origin_foothold_id = original.spawn.origin_foothold_id
+        foothold_id = original_spawn.foothold_id
+        origin_foothold_id = original_spawn.origin_foothold_id
         if len(fields) == 4:
             try:
                 foothold_id, origin_foothold_id = (
@@ -1563,16 +1622,20 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
                 raise argparse.ArgumentTypeError(
                     "mob-spawn footholds must fit in uint16"
                 )
-        return MobEnterField(
-            object_id=original.object_id,
-            spawn=replace(
-                original.spawn,
-                x=position_x,
-                y=position_y,
-                foothold_id=foothold_id,
-                origin_foothold_id=origin_foothold_id,
-            ),
-        ).to_bytes()
+        rewritten_spawn = replace(
+            original_spawn,
+            x=position_x,
+            y=position_y,
+            foothold_id=foothold_id,
+            origin_foothold_id=origin_foothold_id,
+        )
+        if entered is not None:
+            return replace(entered, spawn=rewritten_spawn).to_bytes()
+        if controller is None:
+            raise argparse.ArgumentTypeError(
+                "pcap mob-spawn transform found no typed spawn packet"
+            )
+        return replace(controller, spawn=rewritten_spawn).to_bytes()
     raise argparse.ArgumentTypeError(
         "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
         "or mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
@@ -2166,6 +2229,24 @@ def build_parser() -> argparse.ArgumentParser:
             "with known templates; requires --keep-world-open"
         ),
     )
+    mob_movement_evidence = replay.add_mutually_exclusive_group()
+    mob_movement_evidence.add_argument(
+        "--mob-movement-evidence-transcript",
+        type=Path,
+        help=(
+            "derive opcode-283 acknowledgement values from a separate "
+            "validated world transcript"
+        ),
+    )
+    mob_movement_evidence.add_argument(
+        "--mob-movement-evidence-tcp-stream",
+        type=parse_non_negative_int,
+        metavar="STREAM",
+        help=(
+            "derive mob-movement acknowledgement evidence from another TCP "
+            "stream in the replay --pcap"
+        ),
+    )
     replay.add_argument(
         "--reactive-mob-health-responses",
         action="store_true",
@@ -2735,6 +2816,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "response_packets_sent": 0,
                 "last_response": None,
             }
+        if (
+            arguments.mob_movement_evidence_transcript is not None
+            or arguments.mob_movement_evidence_tcp_stream is not None
+        ) and not arguments.reactive_mob_movement_acknowledgements:
+            raise ValueError(
+                "mob-movement evidence options require "
+                "--reactive-mob-movement-acknowledgements"
+            )
         mob_movement_acknowledgement_policy = None
         if arguments.reactive_mob_movement_acknowledgements:
             if not arguments.keep_world_open:
@@ -2742,19 +2831,34 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     "--reactive-mob-movement-acknowledgements requires "
                     "--keep-world-open"
                 )
-            mob_movement_acknowledgement_policy = (
-                derive_mob_movement_acknowledgement_policy(transcript)
-            )
-            if not mob_movement_acknowledgement_policy.known_mob_templates:
-                raise ValueError(
-                    "world transcript final field has no explicit "
-                    "mob-template state for reactive acknowledgements"
+            movement_evidence_transcript = None
+            if arguments.mob_movement_evidence_transcript is not None:
+                movement_evidence_transcript = Transcript.load(
+                    arguments.mob_movement_evidence_transcript
                 )
+            elif arguments.mob_movement_evidence_tcp_stream is not None:
+                if arguments.pcap is None:
+                    raise ValueError(
+                        "--mob-movement-evidence-tcp-stream requires --pcap"
+                    )
+                movement_evidence_transcript = load_pcap_tcp_stream(
+                    arguments.pcap,
+                    arguments.mob_movement_evidence_tcp_stream,
+                    tshark=arguments.tshark,
+                )
+            mob_movement_acknowledgement_policy = (
+                derive_mob_movement_acknowledgement_policy(
+                    transcript,
+                    evidence_transcript=movement_evidence_transcript,
+                )
+            )
             runtime_protocol["mob_movement_acknowledgements"] = {
-                **mob_movement_acknowledgement_policy.safe_dict(),
+                "state": mob_movement_acknowledgement_policy.safe_dict(),
                 "submissions_observed": 0,
                 "responses_sent": 0,
                 "submissions_rejected": 0,
+                "last_response": None,
+                "last_rejection": None,
             }
         mob_health_response_policy = None
         if arguments.reactive_mob_health_responses:
@@ -2773,6 +2877,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "requests_rejected": 0,
                 "response_packets_sent": 0,
                 "last_response": None,
+                "last_rejection": None,
             }
         if arguments.validate_login_state or arguments.rewrite_handoff:
             analysis = analyze_login_transcript(transcript)

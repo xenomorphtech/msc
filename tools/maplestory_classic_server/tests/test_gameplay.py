@@ -3558,6 +3558,42 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(flagged.status_flag, 1)
 
+    def test_movement_policy_uses_separate_evidence_and_runtime_spawn(
+        self,
+    ) -> None:
+        policy = derive_mob_movement_acknowledgement_policy(
+            fixture_gameplay_transcript(compact_transition=True),
+            evidence_transcript=fixture_gameplay_transcript(),
+        )
+        self.assertEqual(policy.known_mob_templates, {})
+        self.assertEqual(policy.safe_dict()["active_known_mob_count"], 0)
+
+        policy.apply_server_packet(
+            MobControllerChange(
+                control_level=1,
+                object_id=MOB_OBJECT_ID,
+                spawn=fixture_mob_spawn(),
+            ).to_bytes()
+        )
+        acknowledgement = policy.acknowledge(
+            MobMovementSubmission(
+                object_id=MOB_OBJECT_ID,
+                sequence=12,
+                opaque_movement=fixture_movement_path().to_bytes(),
+            )
+        )
+
+        self.assertEqual(acknowledgement.status_value, 35)
+        self.assertEqual(policy.safe_dict()["field_known_mob_count"], 1)
+        self.assertEqual(policy.safe_dict()["active_known_mob_count"], 1)
+        policy.apply_server_packet(
+            MobLeaveField(object_id=MOB_OBJECT_ID, reason=1).to_bytes()
+        )
+        self.assertEqual(policy.safe_dict()["active_known_mob_count"], 0)
+        self.assertEqual(
+            policy.known_mob_templates[MOB_OBJECT_ID], 210_100
+        )
+
     def test_movement_acknowledgement_policy_rejects_unknown_field_mob(
         self,
     ) -> None:

@@ -66,6 +66,7 @@ from maple_server.packets import (  # noqa: E402
     InventoryModification,
     ItemPickupRequest,
     ItemUseRequest,
+    MobControllerChange,
     MobEnterField,
     MobHealthPercentageUpdate,
     MobLeaveField,
@@ -495,6 +496,27 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertTrue(arguments.reactive_mob_movement_acknowledgements)
 
+    def test_replay_parser_accepts_separate_mob_movement_evidence(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--pcap",
+                "world.pcapng",
+                "--tcp-stream",
+                "114",
+                "--keep-world-open",
+                "--hold-open-seconds",
+                "600",
+                "--reactive-mob-movement-acknowledgements",
+                "--mob-movement-evidence-tcp-stream",
+                "92",
+            ]
+        )
+
+        self.assertEqual(arguments.mob_movement_evidence_tcp_stream, 92)
+
     def test_replay_parser_accepts_reactive_mob_health_responses(self) -> None:
         arguments = build_parser().parse_args(
             [
@@ -603,6 +625,24 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual((parsed.spawn.x, parsed.spawn.y), (633, -2677))
         self.assertEqual(parsed.spawn.foothold_id, 0)
         self.assertEqual(parsed.spawn.origin_foothold_id, 0)
+
+        controlled = MobControllerChange(
+            control_level=1,
+            object_id=20_001,
+            spawn=MobEnterField.parse(original).spawn,
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(controlled,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@92:0?mob-spawn=600:-2600:7:8"
+            )
+        controller = MobControllerChange.parse(payload)
+        assert controller.spawn is not None
+        self.assertEqual((controller.spawn.x, controller.spawn.y), (600, -2600))
+        self.assertEqual(controller.spawn.foothold_id, 7)
+        self.assertEqual(controller.spawn.origin_foothold_id, 8)
 
     def test_parse_zero_filled_frame_with_selector(self) -> None:
         self.assertEqual(
@@ -1736,13 +1776,32 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 },
                 field_epoch=1,
             )
+            movement_policy = MobMovementAcknowledgementPolicy(
+                status_values_by_template={210_100: 35},
+                observations_by_template={210_100: 4_728},
+                known_mob_templates={object_id: 210_100},
+                field_epoch=1,
+                matched_pairs=11_949,
+                known_template_pairs=11_949,
+                unknown_template_pairs=0,
+                flag_rule_matches=11_949,
+                zero_auxiliary_pairs=11_949,
+                pending_submissions=0,
+                active_mob_object_ids={object_id},
+            )
             runtime_protocol = {
                 "mob_health_responses": {
                     "requests_observed": 0,
                     "requests_served": 0,
                     "requests_rejected": 0,
                     "response_packets_sent": 0,
-                }
+                },
+                "mob_movement_acknowledgements": {
+                    "submissions_observed": 0,
+                    "responses_sent": 0,
+                    "submissions_rejected": 0,
+                    "state": movement_policy.safe_dict(),
+                },
             }
             tasks: set[asyncio.Task[None]] = set()
 
@@ -1756,6 +1815,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             strict=False,
                             hold_open_seconds=0.2,
                             mob_health_response_policy=policy,
+                            mob_movement_acknowledgement_policy=movement_policy,
                             runtime_protocol=runtime_protocol,
                         )
                     )
@@ -1850,6 +1910,15 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(metrics["state"]["active_mobs"], [])
             self.assertNotIn(object_id, policy.mobs)
+            movement_metrics = runtime_protocol[
+                "mob_movement_acknowledgements"
+            ]
+            self.assertEqual(
+                movement_metrics["state"]["active_known_mob_count"], 0
+            )
+            self.assertEqual(
+                movement_policy.known_mob_templates[object_id], 210_100
+            )
 
     async def test_replay_generates_typed_mob_acknowledgement_during_hold_open(
         self,
@@ -1878,8 +1947,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             policy = MobMovementAcknowledgementPolicy(
                 status_values_by_template={210_100: 35},
                 observations_by_template={210_100: 4_728},
-                known_mob_templates={object_id: 210_100},
-                active_known_mob_count=1,
+                known_mob_templates={},
                 field_epoch=1,
                 matched_pairs=11_949,
                 known_template_pairs=11_949,
@@ -1888,6 +1956,22 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 zero_auxiliary_pairs=11_949,
                 pending_submissions=0,
             )
+            controller = MobControllerChange(
+                control_level=1,
+                object_id=object_id,
+                spawn=MobSpawnData(
+                    spawn_marker=1,
+                    template_id=210_100,
+                    opaque_status=b"\x00" * 22,
+                    x=100,
+                    y=-200,
+                    stance=3,
+                    foothold_id=7,
+                    origin_foothold_id=7,
+                    spawn_effect=-1,
+                    opaque_tail=b"\x00" * 4,
+                ),
+            ).to_bytes()
             runtime_protocol = {
                 "mob_movement_acknowledgements": {
                     "submissions_observed": 0,
@@ -1906,6 +1990,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             source,
                             strict=False,
                             hold_open_seconds=0.2,
+                            post_transcript_server_frames=(controller,),
                             mob_movement_acknowledgement_policy=policy,
                             runtime_protocol=runtime_protocol,
                         )
@@ -1918,6 +2003,14 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 await reader.readexactly(len(greeting + captured_frame)),
                 greeting + captured_frame,
+            )
+            controller_wire = await reader.readexactly(len(controller) + 4)
+            first_response_iv = shuffle_iv(server_iv)
+            self.assertEqual(
+                MobControllerChange.parse(
+                    crypt_payload(controller_wire[4:], first_response_iv)
+                ).object_id,
+                object_id,
             )
             movement_path = MobMovementPath(
                 opaque_control=b"\x01" + b"\x00" * 18,
@@ -1953,7 +2046,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             encrypted_acknowledgement = await reader.readexactly(17)
             acknowledgement = MobMovementAcknowledgement.parse(
                 crypt_payload(
-                    encrypted_acknowledgement[4:], shuffle_iv(server_iv)
+                    encrypted_acknowledgement[4:], shuffle_iv(first_response_iv)
                 )
             )
             self.assertEqual(acknowledgement.object_id, object_id)
@@ -1971,6 +2064,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(metrics["submissions_observed"], 1)
             self.assertEqual(metrics["responses_sent"], 1)
             self.assertEqual(metrics["submissions_rejected"], 0)
+            self.assertEqual(
+                metrics["last_response"]["template_id"], 210_100
+            )
+            self.assertEqual(metrics["state"]["active_known_mob_count"], 1)
 
     async def test_replay_preserves_delays_inside_reactive_reply_sequence(
         self,

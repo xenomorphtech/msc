@@ -628,29 +628,37 @@ different and now explicitly named lifecycle metric.
 
 `derive_mob_movement_acknowledgement_policy()` turns that evidence into a
 conservative generator. It validates every correlated flag and auxiliary
-field, refuses any template with more than one observed value, retains the
-final field's explicit field-local object-to-template knowledge, and emits
-opcode `283` with the submitted object id and sequence. Its safe report includes
-template ids, values, evidence counts, and separate known/active mob counts but
-no runtime object ids. Calling it for an object without field-local template
-state or a template without deterministic evidence raises instead of guessing.
-Stream `92` ends after a new field reset with zero known or active explicit
-mobs, so the policy proves the mapping but deliberately cannot generate a
-post-capture live response from that final state.
+field and refuses any template with more than one observed value. Replay state
+and evidence may come from different validated transcripts: the replay supplies
+the final field epoch while `--mob-movement-evidence-transcript` or
+`--mob-movement-evidence-tcp-stream` supplies the deterministic mapping. The
+policy then adopts typed opcode-`279` entries and opcode-`281` controller
+assignments sent after replay, retains field-local object-to-template knowledge
+after opcode `280`, and tracks active membership separately. Its safe report
+contains template ids, values, evidence counts, and separate known/active mob
+counts but no runtime object ids. Calling it for an object without field-local
+template state or a template without deterministic evidence raises instead of
+guessing.
 
 `--reactive-mob-movement-acknowledgements` wires the policy into hold-open
 replay. Each live opcode `207` is parsed, the submitted object and sequence are
 copied into a typed opcode `283`, the flag is derived from control byte zero,
 the deterministic template value is selected, and the two auxiliary fields are
 zeroed. The option requires `--keep-world-open`, refuses a simultaneous
-capture-sourced opcode-`207` rule, and rejects startup when the final field has
-no explicit field-local mob-template state. Runtime unit replay verifies the
-encrypted request/response path and telemetry. Neither reference stream is a
-valid live A/B target yet: short stream `114` contains no mob packets, while
-stream `92` resets all explicit mob-template state before its final hold-open
-point. A real-client effect test therefore remains gated on a short capture
-that ends with a known mob, or on generated field state after the field body is
-decoded.
+capture-sourced opcode-`207` rule, and leaves rejected unknown submissions
+unanswered without closing the held-open connection. Stream `114` can therefore
+provide the stable held-open field while stream `92` supplies evidence and
+typed post-transcript opcodes `279`/`281` establish one live snail.
+
+That arrangement is now real-client validated. The browser-free login reached
+map `101000000`; after the typed template-`100100` entry and controller grant,
+the client submitted 205 opcode-`207` movements and received 205 generated
+opcode-`283` acknowledgements. The final observed transcript folded all 205 as
+matched, with the predicted flag, value `0`, zero auxiliary bytes, no unknown
+template, and no pending movement while the connection and heartbeat exchange
+remained active. Generated opcode-`280` packets from the health responder also
+update the movement policy's active set, so the two state owners cannot diverge
+when a mob dies.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
@@ -885,9 +893,11 @@ When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
 planned/sent packet counts, and the predicted fold delta. When reactive mob
 movement acknowledgements are enabled,
-`protocol.mob_movement_acknowledgements` reports the identifier-free derived
-policy, its full-capture evidence, observed submissions, sent responses, and
-rejections. When reactive mob-health responses are enabled,
+`protocol.mob_movement_acknowledgements.state` reports the identifier-free
+derived policy, evidence, final field epoch, and known/active counts. The parent
+object reports observed submissions, sent responses, rejections, the last safe
+response (template, sequence, flag/value/auxiliary fields), and the last safe
+rejection. When reactive mob-health responses are enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,
 template/current/max HP, floor percentage, capture-evidence counters, and the
 exact response rules. The parent object reports observed/served/rejected

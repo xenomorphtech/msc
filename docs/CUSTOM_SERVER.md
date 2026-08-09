@@ -600,6 +600,65 @@ The exact responder does not claim to reproduce those, does not synthesize
 opcodes `218`/`219`, and rejects unknown/inactive targets, ambiguous HP,
 missing damage, and high-bit damage rather than guessing.
 
+## Reactive mob-movement acknowledgement validation
+
+Stream `92` contains the large acknowledgement corpus but ends after a field
+reset with no explicit mobs. Stream `114` provides a stable held-open gameplay
+field but no mob evidence. The replay now separates those roles and adopts
+typed post-transcript mob state:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --reactive-mob-movement-acknowledgements \
+  --mob-movement-evidence-tcp-stream 92 \
+  --reactive-mob-health-responses \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=633:-2677:635:635' \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:604?mob-spawn=633:-2677:635:635' \
+  --post-transcript-start-delay-seconds 2 \
+  --post-transcript-frame-delay-seconds 0.1 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_mob_movement_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 3600
+```
+
+The `mob-spawn` transform accepts either a typed opcode-`279` entry or an
+opcode-`281` controller assignment with embedded spawn data. It changes only
+position and optional footholds, preserving the object, template, controller,
+and remaining spawn fields. The policy learns field-local object/template
+state as those packets are sent.
+
+The direct browser-free login reached the held-open map and stayed active. The
+client submitted 205 opcode-`207` movements for the injected template-`100100`
+snail; 205 generated opcode-`283` acknowledgements copied each object/sequence,
+used status value `0`, derived the flag from control byte zero, and zeroed both
+auxiliary fields. The observed transcript
+`reactive_mob_movement_20260809/1786284358797500712_replay_12857.jsonl`
+folds validly with `submitted:205`, `acknowledged:205`, `matched:205`,
+`unmatched:0`, and `pending:0`. It also contains 69 matched generated
+heartbeats and remained in the active phase until the test listener was
+stopped cleanly.
+
+`protocol.mob_movement_acknowledgements.state` exposes the evidence mapping,
+field epoch, and identifier-free known/active mob counts. The parent reports
+submission/response/rejection counters, `last_response`, and `last_rejection`.
+Unknown live submissions are rejected without closing transport. A generated
+health-policy opcode-`280` is also applied to movement state so a dead mob is
+removed from both policies consistently.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
