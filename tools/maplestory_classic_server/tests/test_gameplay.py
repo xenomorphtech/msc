@@ -34,6 +34,7 @@ from maple_server.gameplay import (  # noqa: E402
     plan_inventory_quantity_update,
     plan_initial_field_snapshot_replay,
     plan_initial_player_hp_rewrite,
+    plan_variable_server_record_replay,
     plan_final_field_npc_state_replay,
     mob_hp_bounds_for_percentage,
     predict_mob_health_percentage_range,
@@ -70,6 +71,7 @@ from maple_server.packets import (  # noqa: E402
     InitialInventorySnapshot,
     InitialProgressionSnapshot,
     TypedInitialFieldSnapshot,
+    VariableServerRecord,
     InventoryChangeSet,
     InventoryModification,
     ItemPickupRequest,
@@ -192,6 +194,15 @@ def fixture_fixed_server_records() -> tuple[object, ...]:
         FixedServerU32Record(opcode=388, value=0xFDE04000),
         FixedServerU16Record(value=0x1800),
         FixedServerU8Record(opcode=58, value=1),
+    )
+
+
+def fixture_variable_server_records() -> tuple[VariableServerRecord, ...]:
+    return (
+        VariableServerRecord(opcode=156, variant=0, opaque_tail=b""),
+        VariableServerRecord(opcode=156, variant=1, opaque_tail=b"\x11" * 18),
+        VariableServerRecord(opcode=385, variant=0, opaque_tail=b"\x22" * 445),
+        VariableServerRecord(opcode=385, variant=1, opaque_tail=b""),
     )
 
 
@@ -1618,6 +1629,22 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "opcode must be 56"):
             replace(records[9], opcode=57).to_bytes()
 
+    def test_variable_server_records_round_trip(self) -> None:
+        records = fixture_variable_server_records()
+
+        for record in records:
+            encoded = record.to_bytes()
+            self.assertEqual(VariableServerRecord.parse(encoded), record)
+
+        with self.assertRaisesRegex(PacketShapeError, "unsupported"):
+            VariableServerRecord(
+                opcode=156,
+                variant=2,
+                opaque_tail=b"",
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "expected 445"):
+            replace(records[2], opaque_tail=b"").to_bytes()
+
     def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
         stage = FieldLoadStage(
             stage=0,
@@ -2923,6 +2950,39 @@ class GameplayStateFoldTest(unittest.TestCase):
             if frame["kind"] == "initial_character_context"
         )
         self.assertTrue(context["entry_character_match"])
+
+    def test_folds_and_plans_variable_server_record_emission(self) -> None:
+        records = fixture_variable_server_records()
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                record.to_bytes() for record in records
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+        plan = plan_variable_server_record_replay(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.variable_server_records, 4)
+        self.assertEqual(
+            analysis.state.variable_server_records_by_opcode,
+            {156: 2, 385: 2},
+        )
+        self.assertEqual(
+            analysis.state.variable_server_variants,
+            {"156:0": 1, "156:1": 1, "385:0": 1, "385:1": 1},
+        )
+        self.assertEqual(analysis.state.variable_server_opaque_bytes, 463)
+        self.assertEqual([frame.record for frame in plan.frames], list(records))
+        safe = plan.safe_dict()
+        self.assertEqual(safe["emitter"], "typed_variable_server_record")
+        self.assertEqual(
+            [frame["opaque_tail_length"] for frame in safe["frames"]],
+            [0, 18, 445, 0],
+        )
+        self.assertNotIn("11111111", repr(safe))
+        self.assertNotIn("22222222", repr(safe))
 
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(

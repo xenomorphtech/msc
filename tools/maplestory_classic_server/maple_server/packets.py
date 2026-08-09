@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from ipaddress import IPv4Address
 import struct
 
@@ -5445,6 +5445,54 @@ class InitialCharacterContextRecord:
             raise PacketShapeError(
                 f"initial character context field is out of range: {error}"
             ) from error
+
+
+@dataclass(frozen=True)
+class VariableServerRecord:
+    opcode: int
+    variant: int
+    opaque_tail: bytes = field(repr=False)
+
+    CAPTURED_TAIL_LENGTHS = {
+        (156, 0): 0,
+        (156, 1): 18,
+        (385, 0): 445,
+        (385, 1): 0,
+    }
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "VariableServerRecord":
+        reader = PacketReader(payload, packet_name="variable_server_record")
+        opcode = reader.u16("opcode")
+        variant = reader.u8("variant")
+        record = cls(
+            opcode=opcode,
+            variant=variant,
+            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        expected_tail_length = self.CAPTURED_TAIL_LENGTHS.get(
+            (self.opcode, self.variant)
+        )
+        if expected_tail_length is None:
+            raise PacketShapeError(
+                "unsupported variable-server opcode/variant "
+                f"{self.opcode}/{self.variant}"
+            )
+        if len(self.opaque_tail) != expected_tail_length:
+            raise PacketShapeError(
+                f"variable-server opcode {self.opcode} variant {self.variant} "
+                f"tail has {len(self.opaque_tail)} bytes, expected "
+                f"{expected_tail_length}"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack("<HB", self.opcode, self.variant) + self.opaque_tail
 
 
 @dataclass(frozen=True)

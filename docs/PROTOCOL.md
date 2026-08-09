@@ -574,8 +574,8 @@ character id equals the preceding world-entry character id in streams `92`,
 `114`, and `126`. Normal reports retain only the match boolean. The remaining
 values stay semantically neutral. In particular, stream `126` proves opcode
 `388` is not a reserved-zero record (`value=0xfde04000`). Variable-width
-opcodes `156` and `385` remain losslessly unknown and are not included in this
-family.
+opcodes `156` and `385` are bounded separately below and are not included in
+this family.
 
 The initial sequence contains one of each shape: 11 records total in short
 stream `114`. Streams `92` and `126` each contain a second opcode-`96` later in
@@ -595,6 +595,43 @@ all 11 generated records with the typed initial snapshot and nine generated
 NPC spawns. The client reached and rendered map `101000000`; its independent
 transcript folds validly to `active` with matching player state, all 11 record
 shapes, nine NPCs, and paired heartbeat traffic.
+
+## Variable server records (`156`, `385`)
+
+Both opcodes select between a compact and expanded capture variant with the
+first byte after the opcode:
+
+```text
+uint16 opcode
+uint8  variant
+byte[] opaque_tail
+
+opcode 156, variant 0: tail length 0
+opcode 156, variant 1: tail length 18
+opcode 385, variant 0: tail length 445
+opcode 385, variant 1: tail length 0
+```
+
+Streams `92` and `114` contain the expanded pair `385:0`/`156:1`, byte-for-byte
+identical between the two sessions. Stream `126` contains the compact pair
+`385:1`/`156:0`. No other variants or lengths occur. Compact forms therefore
+have full shape coverage; expanded forms have partial coverage because their
+tails remain opaque. The fold records opcode/variant counts, total opaque
+bytes, field epoch, and `variable_server_record_received` events without
+dumping tail contents.
+
+`--generate-variable-server-records` re-emits every bounded observation at its
+original frame index after length/reparse/uniqueness/conflict validation.
+`protocol.variable_server_record_emitter` exposes only frame index, opcode,
+variant, opaque-tail length, field epoch, patch count, and the predicted
+unchanged player/phase state.
+
+A browser-free stream-`114` proof regenerated frame `9` (`385:0`, 445-byte
+tail) and frame `11` (`156:1`, 18-byte tail), composed with the initial, fixed,
+and NPC emitters. The real client rendered map `101000000`; its independent
+transcript is valid and active with both variable events, 463 opaque bytes,
+nine NPCs, and paired heartbeats. This establishes lossless replay acceptance
+without treating the opaque data as decoded or security-related.
 
 ## Inventory change sets (`server 39`)
 

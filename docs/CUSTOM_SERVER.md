@@ -388,6 +388,28 @@ character context, nine active/spawned NPCs, and continuously paired
 heartbeats. This validates typed fixed-record serialization through the real
 encrypted client rather than only offline re-encoding.
 
+## Typed variable server-record generation
+
+Add `--generate-variable-server-records` for the opcode-`156` and `385`
+records adjacent to field entry. Each packet has a typed opcode and one-byte
+variant discriminator. In `1-10FS.pcapng`, opcode `156` variant `0` and opcode
+`385` variant `1` are complete three-byte packets. In both `111.pcapng` world
+streams, opcode `156` variant `1` carries an exact 18-byte opaque tail and
+opcode `385` variant `0` carries an exact 445-byte opaque tail. The expanded
+forms remain partial; no security or gameplay role is assigned to their tails.
+
+The option performs the same valid-fold, exact-length, reparse, unique-index,
+and patch-conflict checks as the fixed emitter. Runtime status exposes only
+opcode, variant, opaque-tail length, field epoch, and frame index under
+`protocol.variable_server_record_emitter`.
+
+The 2026-08-09 browser-free live run regenerated expanded server frames `9`
+and `11` together with one initial snapshot, 11 fixed records, and nine NPC
+spawns. The client entered and rendered map `101000000`. Transcript
+`downloads/maple_custom_server_observed/variable_server_emitter_live_20260809/world/1786314493694015926_replay_12857.jsonl`
+folds validly to `active`, variants `385:0` and `156:1`, 463 bounded opaque
+bytes, nine NPCs, and paired heartbeat traffic.
+
 ## Typed NPC-spawn generation
 
 Add `--generate-field-npc-spawns` to the world replay command to regenerate

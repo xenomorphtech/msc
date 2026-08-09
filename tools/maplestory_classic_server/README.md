@@ -162,6 +162,12 @@ selected character but runtime telemetry exposes only whether it matched, not
 the identifier. Add the flag to the command above; it composes with both the
 initial snapshot and NPC emitters.
 
+`--generate-variable-server-records` handles the capture-bounded opcode-`156`
+and `385` variants. Both begin with a one-byte discriminator. The level-1
+variants end there; the stream-`114` variants retain exact opaque tails of 18
+and 445 bytes respectively. The emitter round-trips and replaces the complete
+records without exposing those bytes or assigning them security semantics.
+
 `--generate-field-npc-spawns` applies the same boundary to every fully typed
 opcode-`300` observation. It validates the complete fold, reconstructs each
 22-byte NPC spawn from its aliased entity state, reparses it, checks frame
@@ -395,6 +401,9 @@ The gameplay fold currently models these capture-backed boundaries:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
   reconstructs every occurrence rather than assuming they are bootstrap-only,
+- server opcodes `156`/`385`: capture-bounded discriminator variants; compact
+  records have no tail, expanded records preserve 18/445 opaque bytes and stay
+  partial until primitive-reader evidence can type those tails,
 - server opcode `300`: complete 22-byte NPC spawn records whose facing field is
   preserved as the observed byte value rather than narrowed to a boolean;
   `--generate-field-npc-spawns` can reconstruct all such replay frames from
@@ -1133,6 +1142,10 @@ When fixed-width server records are generated,
 opcode, neutral shape/value, field epoch, patch count, and the predicted
 unchanged player/phase state. Character ids are omitted; opcode `59` reports
 only its flag, zero-reserved invariant, and world-entry match.
+When variable server records are generated,
+`protocol.variable_server_record_emitter` reports the two frame indices,
+opcodes, discriminator values, opaque-tail lengths, field epochs, patch count,
+and unchanged player/phase prediction. Opaque bytes are never returned.
 When NPC spawn frames are generated, `protocol.npc_spawn_emitter` reports the
 typed emitter, frame/patch count, represented field epochs, identifier-free
 alias/template/position/range records, and the predicted capture-equivalent

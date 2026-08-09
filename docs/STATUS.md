@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  25,609 full, 43,954 partial, 1,537 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 12,988 full, 21,604 partial,
-  615 unknown, and zero invalid; stream `114` reports 27/14/35/0. Thirteen
+  25,611 full, 43,954 partial, 1,535 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 12,988 full, 21,606 partial,
+  613 unknown, and zero invalid; stream `114` reports 27/16/33/0. Thirteen
   long-corpus state-correlation warnings remain: the prior 12 plus one
   aggregate warning for six one-HP combat prediction differences.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
@@ -78,6 +78,18 @@
   `fixed_server_emitter_live_20260809/world/1786313433938476085_replay_12857.jsonl`
   folds validly to `active`, one matching character context, nine NPCs, and
   paired heartbeats.
+- Opcodes `156` and `385` now have capture-bounded discriminator envelopes.
+  Stream `126` has complete three-byte variants `156:0`/`385:1`; streams `92`
+  and `114` have partial variants `156:1`/`385:0` with exact 18/445-byte opaque
+  tails. The fold emits neutral events and counts 463 opaque bytes without
+  exposing contents or assigning security semantics.
+- `--generate-variable-server-records` regenerates those records with exact
+  reparse/length/index/conflict checks. A browser-free live run patched stream
+  `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
+  The client rendered map `101000000`; transcript
+  `variable_server_emitter_live_20260809/world/1786314493694015926_replay_12857.jsonl`
+  folds validly to `active`, both expected variants, 463 opaque bytes, nine
+  NPCs, and paired heartbeats.
 - `--generate-field-npc-spawns` now reconstructs every fully typed opcode-`300`
   frame from the folded aliased entity model. It validates exact 22-byte
   re-encoding, reparsing, frame uniqueness, and patch conflicts; runtime status
@@ -582,9 +594,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 1. Use the owner/proximity negative controls to isolate the remaining
    client-side drop eligibility condition; serve a reactive pickup only after
    observing an authentic opcode-`185` request.
-2. Bound the variable-width opcode-`156` and `385` records adjacent to initial
-   field entry, then decide whether their capture variants support typed
-   state-driven emitters without importing position-dependent assumptions.
+2. Capture primitive-reader traces for the expanded opcode-`156` and `385`
+   variants so their 18/445-byte opaque tails can be subdivided without
+   guessing security or gameplay semantics.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Add a bounded per-trigger event budget so repeated valid gameplay events

@@ -39,6 +39,7 @@ from .packets import (
     InitialProgressionSnapshot,
     InitialInventoryItem,
     TypedInitialFieldSnapshot,
+    VariableServerRecord,
     InventoryChangeSet,
     InventoryModification,
     ItemPickupRequest,
@@ -610,6 +611,12 @@ class GameplayGameState:
         default_factory=Counter
     )
     initial_character_contexts: int = 0
+    variable_server_records: int = 0
+    variable_server_records_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    variable_server_variants: Counter[str] = field(default_factory=Counter)
+    variable_server_opaque_bytes: int = 0
     pending_movements: int = 0
     termination_received: bool = False
 
@@ -717,6 +724,39 @@ class FixedServerReplayPlan:
             "frames": [frame.safe_dict() for frame in self.frames],
             "prediction": {
                 "fixed_server_record_events": len(self.frames),
+                "player_state": "unchanged",
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class VariableServerReplayFrame:
+    server_frame_index: int
+    record: VariableServerRecord = field(repr=False)
+    field_epoch: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "server_frame_index": self.server_frame_index,
+            "opcode": self.record.opcode,
+            "variant": self.record.variant,
+            "opaque_tail_length": len(self.record.opaque_tail),
+            "field_epoch": self.field_epoch,
+        }
+
+
+@dataclass(frozen=True)
+class VariableServerReplayPlan:
+    frames: tuple[VariableServerReplayFrame, ...]
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "emitter": "typed_variable_server_record",
+            "frame_count": len(self.frames),
+            "frames": [frame.safe_dict() for frame in self.frames],
+            "prediction": {
+                "variable_server_record_events": len(self.frames),
                 "player_state": "unchanged",
                 "phase": "unchanged",
             },
@@ -3176,6 +3216,16 @@ class GameplayAnalysis:
                 "initial_character_contexts": (
                     self.state.initial_character_contexts
                 ),
+                "variable_server_records": self.state.variable_server_records,
+                "variable_server_records_by_opcode": dict(
+                    self.state.variable_server_records_by_opcode
+                ),
+                "variable_server_variants": dict(
+                    self.state.variable_server_variants
+                ),
+                "variable_server_opaque_bytes": (
+                    self.state.variable_server_opaque_bytes
+                ),
                 "termination_received": self.state.termination_received,
                 "transport_closed": self.transport_closed,
             },
@@ -5212,6 +5262,37 @@ class GameplayStateFold:
                         else ("field snapshot body remains opaque",)
                     )
                 ),
+            )
+        if opcode in {156, 385}:
+            variable_record = VariableServerRecord.parse(payload)
+            variant_key = f"{opcode}:{variable_record.variant}"
+            self.state.variable_server_records += 1
+            self.state.variable_server_records_by_opcode[opcode] += 1
+            self.state.variable_server_variants[variant_key] += 1
+            self.state.variable_server_opaque_bytes += len(
+                variable_record.opaque_tail
+            )
+            details = {
+                "opcode": opcode,
+                "variant": variable_record.variant,
+                "opaque_tail_length": len(variable_record.opaque_tail),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "variable_server_record_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="variable_server_record",
+                coverage=(
+                    ShapeCoverage.FULL
+                    if not variable_record.opaque_tail
+                    else ShapeCoverage.PARTIAL
+                ),
+                parsed=variable_record,
+                details=details,
             )
         if opcode in {11, 24, 56, 58, 59, 96, 105, 178, 386, 388, 389}:
             if opcode in FixedServerEmptyRecord.SUPPORTED_OPCODES:
@@ -7998,6 +8079,49 @@ def plan_fixed_server_record_replay(
     return FixedServerReplayPlan(frames=tuple(frames))
 
 
+def plan_variable_server_record_replay(
+    transcript: Transcript,
+) -> VariableServerReplayPlan:
+    """Materialize every capture-bounded opcode-156/385 variant record."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    frames: list[VariableServerReplayFrame] = []
+    for observation in analysis.observations:
+        if observation.kind != "variable_server_record":
+            continue
+        record = observation.parsed
+        if not isinstance(record, VariableServerRecord):
+            raise ValueError(
+                "variable-server observation has no typed record"
+            )
+        payload = record.to_bytes()
+        if len(payload) != observation.length:
+            raise ValueError(
+                "typed variable-server emitter changed packet length"
+            )
+        if VariableServerRecord.parse(payload) != record:
+            raise ValueError(
+                "typed variable-server emitter failed round-trip validation"
+            )
+        frames.append(
+            VariableServerReplayFrame(
+                server_frame_index=observation.direction_index,
+                record=record,
+                field_epoch=int(observation.details["field_epoch"]),
+            )
+        )
+    if not frames:
+        raise ValueError("world transcript has no variable-server frames")
+    frame_indices = [frame.server_frame_index for frame in frames]
+    if len(frame_indices) != len(set(frame_indices)):
+        raise ValueError(
+            "typed variable-server frames contain duplicate server indices"
+        )
+    return VariableServerReplayPlan(frames=tuple(frames))
+
+
 def render_gameplay_analysis(
     analysis: GameplayAnalysis,
     *,
@@ -8230,6 +8354,12 @@ def render_gameplay_analysis(
             f"fixed_server_records=count:{state.fixed_server_records} "
             f"by_opcode:{dict(state.fixed_server_records_by_opcode)} "
             f"character_contexts:{state.initial_character_contexts}"
+        ),
+        (
+            f"variable_server_records=count:{state.variable_server_records} "
+            f"by_opcode:{dict(state.variable_server_records_by_opcode)} "
+            f"variants:{dict(state.variable_server_variants)} "
+            f"opaque_bytes:{state.variable_server_opaque_bytes}"
         ),
         (
             f"frames=client:{state.packets_by_direction['client_to_server']} "

@@ -498,6 +498,20 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertTrue(arguments.generate_fixed_server_records)
 
+    def test_replay_parser_accepts_typed_variable_server_emitter(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--generate-variable-server-records",
+            ]
+        )
+
+        self.assertTrue(arguments.generate_variable_server_records)
+
     def test_replay_parser_accepts_typed_post_transcript_hp_update(self) -> None:
         arguments = build_parser().parse_args(
             [
