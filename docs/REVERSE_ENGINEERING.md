@@ -222,17 +222,27 @@ maximum capping. The live reactive test reproduced the predicted red-potion
 `2 -> 1` and HP `50 -> 100` effects. Keep the tick role and last-item
 remove-versus-zero behavior unnamed until independent evidence resolves them.
 
+Client opcode `185` also no longer needs a primitive-reader trace for its
+captured boundary. Its 23-byte base and 35-byte extended forms, the three short
+opcode-`49` result variants, and all three opcode-`312` removal widths
+round-trip across stream `92`. FIFO inventory/mesos effect correlation plus
+exact drop-id removal correlation matches all 54 local pickup chains. The
+remaining useful trace target is opcode `311`, which must establish a typed
+field-drop spawn before a safe live pickup can be generated. Keep the opcode
+`185` validation token, optional proof, opcode-`49` flags, and opcode-`312`
+reason/actor roles neutral.
+
 ## Next debugger work
 
 1. Locate the inner character-record parser reached from the 170-byte server
    opcode-`4` response and name its exact fields.
 2. Trace the two opcode-`402` branches only if the capture-faithful 2.5-second
    sequence still fails to produce client opcode `5`.
-3. Trace the bounded five-byte player-movement type-`3` command only if a
-   controlled effect requires its semantics; the opcode-`41` stat-delta,
-   opcode-`39` inventory-effect, and opcode-`80` consumable-use grammars are
-   complete at their evidenced boundaries, so prioritize isolated item-pickup
-   and equipment request handlers.
+3. Trace opcode-`311` field-drop spawn to enable a controlled live pickup;
+   trace the bounded five-byte player-movement type-`3` command only if a
+   controlled effect requires its semantics. The opcode-`41` stat-delta,
+   opcode-`39` inventory-effect, opcode-`80` consumable-use, and opcode-`185`
+   pickup-request grammars are complete at their evidenced boundaries.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory

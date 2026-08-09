@@ -15,6 +15,7 @@ from .gamestate import (
 from .packets import (
     CharacterStatUpdate,
     CompactFieldTransition,
+    FieldDropRemoval,
     FieldLoadStage,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
@@ -23,6 +24,7 @@ from .packets import (
     InitialInventoryItem,
     InventoryChangeSet,
     InventoryModification,
+    ItemPickupRequest,
     ItemUseRequest,
     MobControllerChange,
     MobEnterField,
@@ -37,6 +39,7 @@ from .packets import (
     PlayerMovementBroadcast,
     PlayerMovementPath,
     PlayerMovementSubmission,
+    PickupGainNotice,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -115,6 +118,15 @@ class PendingItemUse:
     effect_field: str | None
     expected_effect_value: int | None
     inventory_confirmed: bool = False
+
+
+@dataclass
+class PendingItemPickup:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: ItemPickupRequest
+    effect: dict[str, object] | None = None
+    result_confirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -245,6 +257,21 @@ class GameplayGameState:
     item_use_effect_matches: int = 0
     item_use_effect_mismatches: int = 0
     pending_item_uses: int = 0
+    item_pickup_requests: int = 0
+    item_pickup_base_requests: int = 0
+    item_pickup_extended_requests: int = 0
+    item_pickup_field_epoch_matches: int = 0
+    item_pickup_field_epoch_mismatches: int = 0
+    item_pickup_results: int = 0
+    item_pickup_results_by_kind: Counter[str] = field(default_factory=Counter)
+    item_pickup_effect_matches: int = 0
+    item_pickup_effect_mismatches: int = 0
+    item_pickup_inferred_mesos_baselines: int = 0
+    item_pickup_removal_matches: int = 0
+    item_pickup_removal_mismatches: int = 0
+    pending_item_pickups: int = 0
+    field_drop_removals: int = 0
+    field_drop_removals_by_reason: Counter[int] = field(default_factory=Counter)
     movement_submissions: int = 0
     movement_submissions_for_unknown_mobs: int = 0
     movement_submissions_with_unknown_template: int = 0
@@ -912,6 +939,43 @@ class GameplayAnalysis:
                     self.state.item_use_effect_mismatches
                 ),
                 "pending_item_uses": self.state.pending_item_uses,
+                "item_pickup_requests": self.state.item_pickup_requests,
+                "item_pickup_base_requests": (
+                    self.state.item_pickup_base_requests
+                ),
+                "item_pickup_extended_requests": (
+                    self.state.item_pickup_extended_requests
+                ),
+                "item_pickup_field_epoch_matches": (
+                    self.state.item_pickup_field_epoch_matches
+                ),
+                "item_pickup_field_epoch_mismatches": (
+                    self.state.item_pickup_field_epoch_mismatches
+                ),
+                "item_pickup_results": self.state.item_pickup_results,
+                "item_pickup_results_by_kind": dict(
+                    self.state.item_pickup_results_by_kind
+                ),
+                "item_pickup_effect_matches": (
+                    self.state.item_pickup_effect_matches
+                ),
+                "item_pickup_effect_mismatches": (
+                    self.state.item_pickup_effect_mismatches
+                ),
+                "item_pickup_inferred_mesos_baselines": (
+                    self.state.item_pickup_inferred_mesos_baselines
+                ),
+                "item_pickup_removal_matches": (
+                    self.state.item_pickup_removal_matches
+                ),
+                "item_pickup_removal_mismatches": (
+                    self.state.item_pickup_removal_mismatches
+                ),
+                "pending_item_pickups": self.state.pending_item_pickups,
+                "field_drop_removals": self.state.field_drop_removals,
+                "field_drop_removals_by_reason": dict(
+                    self.state.field_drop_removals_by_reason
+                ),
                 "movement_submissions": self.state.movement_submissions,
                 "movement_submissions_for_unknown_mobs": (
                     self.state.movement_submissions_for_unknown_mobs
@@ -1050,11 +1114,13 @@ class GameplayStateFold:
         self._npc_aliases: dict[int, str] = {}
         self._mob_aliases: dict[int, str] = {}
         self._player_aliases: dict[int, str] = {}
+        self._drop_aliases: dict[int, str] = {}
         self._pending_movements: dict[
             tuple[int, int], deque[PendingMobMovement]
         ] = {}
         self._pending_heartbeat_probes: deque[int] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
+        self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
 
@@ -1064,6 +1130,29 @@ class GameplayStateFold:
             alias = f"{prefix}:{len(aliases) + 1}"
             aliases[object_id] = alias
         return alias
+
+    def _attach_item_pickup_effect(
+        self, frame: PlainFrame, effect: dict[str, object]
+    ) -> PendingItemPickup | None:
+        pending = next(
+            (
+                candidate
+                for candidate in self._pending_item_pickups
+                if candidate.effect is None and not candidate.result_confirmed
+            ),
+            None,
+        )
+        if pending is None:
+            return None
+        pending.effect = {
+            **effect,
+            "request_frame": pending.request_frame_index,
+            "response_ms": round(
+                (frame.timestamp_ns - pending.request_timestamp_ns) / 1e6,
+                3,
+            ),
+        }
+        return pending
 
     @staticmethod
     def _mob_spawn_details(spawn: MobSpawnData) -> dict[str, object]:
@@ -1339,6 +1428,55 @@ class GameplayStateFold:
                     "captured potion templates remain neutral",
                 ),
             )
+        if opcode == 185:
+            request = ItemPickupRequest.parse(payload)
+            alias = self._alias(
+                self._drop_aliases, request.drop_object_id, "drop"
+            )
+            epoch_matches = request.field_epoch == self.state.field_epoch
+            self.state.item_pickup_requests += 1
+            if request.optional_proof:
+                self.state.item_pickup_extended_requests += 1
+            else:
+                self.state.item_pickup_base_requests += 1
+            if epoch_matches:
+                self.state.item_pickup_field_epoch_matches += 1
+            else:
+                self.state.item_pickup_field_epoch_mismatches += 1
+                self.warnings.append(
+                    f"item-pickup request field epoch {request.field_epoch} "
+                    f"did not match folded epoch {self.state.field_epoch}"
+                )
+            self._pending_item_pickups.append(
+                PendingItemPickup(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                )
+            )
+            self.state.pending_item_pickups += 1
+            details: dict[str, object] = {
+                **request.safe_dict(),
+                "drop": alias,
+                "field_epoch_matches": epoch_matches,
+            }
+            self._event(
+                frame,
+                "item_pickup_requested",
+                details=details,
+                identifiers={"drop_object_id": request.drop_object_id},
+            )
+            return self._observation(
+                frame,
+                kind="item_pickup_request",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=request,
+                details=details,
+                issues=(
+                    "pickup control, validation token, and optional proof "
+                    "semantics remain neutral",
+                ),
+            )
         if opcode == 182:
             movement = PlayerMovementSubmission.parse(payload)
             path = movement.movement
@@ -1498,6 +1636,7 @@ class GameplayStateFold:
         if opcode == 39:
             change_set = InventoryChangeSet.parse(payload)
             modification_details: list[dict[str, object]] = []
+            pickup_effect_candidates: list[dict[str, object]] = []
             applied_modifications = 0
             self.state.inventory_change_packets += 1
             self.state.inventory_update_flags[change_set.update_flag] += 1
@@ -1541,6 +1680,22 @@ class GameplayStateFold:
                         items.append(added)
                     else:
                         items[existing_index] = added
+                    if added.quantity is not None and added.quantity > 0:
+                        pickup_effect_candidates.append(
+                            {
+                                "kind": "item",
+                                "inventory": inventory_name,
+                                "slot": added.slot,
+                                "item_id": added.item_id,
+                                "quantity_delta": added.quantity,
+                                "previous_quantity": (
+                                    existing.quantity
+                                    if existing is not None
+                                    else None
+                                ),
+                                "current_quantity": added.quantity,
+                            }
+                        )
                     applied_modifications += 1
                 elif (
                     modification.operation
@@ -1555,6 +1710,24 @@ class GameplayStateFold:
                     else:
                         details["item_id"] = existing.item_id
                         details["previous_quantity"] = existing.quantity
+                        if existing.quantity is not None:
+                            quantity_delta = (
+                                modification.quantity - existing.quantity
+                            )
+                            if quantity_delta > 0:
+                                pickup_effect_candidates.append(
+                                    {
+                                        "kind": "item",
+                                        "inventory": inventory_name,
+                                        "slot": modification.slot,
+                                        "item_id": existing.item_id,
+                                        "quantity_delta": quantity_delta,
+                                        "previous_quantity": existing.quantity,
+                                        "current_quantity": (
+                                            modification.quantity
+                                        ),
+                                    }
+                                )
                         pending_item_use = next(
                             (
                                 pending
@@ -1621,6 +1794,13 @@ class GameplayStateFold:
                     sorted(items, key=lambda item: item.slot)
                 )
                 modification_details.append(details)
+            item_pickup_effect: dict[str, object] | None = None
+            if len(pickup_effect_candidates) == 1:
+                pending_item_pickup = self._attach_item_pickup_effect(
+                    frame, pickup_effect_candidates[0]
+                )
+                if pending_item_pickup is not None:
+                    item_pickup_effect = pending_item_pickup.effect
             details = {
                 "update_flag": change_set.update_flag,
                 "modification_count": len(change_set.modifications),
@@ -1628,6 +1808,8 @@ class GameplayStateFold:
                 "modifications": modification_details,
                 "field_epoch": self.state.field_epoch,
             }
+            if item_pickup_effect is not None:
+                details["item_pickup_effect"] = item_pickup_effect
             self._event(frame, "inventory_change_set_received", details=details)
             return self._observation(
                 frame,
@@ -1700,6 +1882,29 @@ class GameplayStateFold:
                     )
                 self._pending_item_uses.remove(pending_item_use)
                 self.state.pending_item_uses -= 1
+            item_pickup_effect: dict[str, object] | None = None
+            if set(changes) == {"mesos"}:
+                previous_mesos = changes["mesos"]["previous"]
+                current_mesos = changes["mesos"]["current"]
+                if current_mesos is not None:
+                    mesos_delta = (
+                        None
+                        if previous_mesos is None
+                        else current_mesos - previous_mesos
+                    )
+                    if mesos_delta is None or mesos_delta > 0:
+                        pending_item_pickup = self._attach_item_pickup_effect(
+                            frame,
+                            {
+                                "kind": "mesos",
+                                "amount_delta": mesos_delta,
+                                "previous_mesos": previous_mesos,
+                                "current_mesos": current_mesos,
+                                "baseline_known": previous_mesos is not None,
+                            },
+                        )
+                        if pending_item_pickup is not None:
+                            item_pickup_effect = pending_item_pickup.effect
             self.state.player_stat_updates += 1
             self.state.player_stat_updates_by_mask[update.stat_mask] += 1
             self.state.player_stat_request_flags[update.request_flag] += 1
@@ -1719,6 +1924,8 @@ class GameplayStateFold:
             }
             if item_use_effect is not None:
                 details["item_use_effect"] = item_use_effect
+            if item_pickup_effect is not None:
+                details["item_pickup_effect"] = item_pickup_effect
             self._event(frame, "player_stats_updated", details=details)
             issues = [
                 "stat update request flag and final marker semantics remain neutral"
@@ -1734,6 +1941,194 @@ class GameplayStateFold:
                 parsed=update,
                 details=details,
                 issues=tuple(issues),
+            )
+        if opcode == 49 and len(payload) in {8, 12, 15}:
+            notice = PickupGainNotice.parse(payload)
+            pending = next(
+                (
+                    candidate
+                    for candidate in self._pending_item_pickups
+                    if not candidate.result_confirmed
+                ),
+                None,
+            )
+            self.state.item_pickup_results += 1
+            self.state.item_pickup_results_by_kind[notice.kind_name] += 1
+            result_matches = False
+            details: dict[str, object] = {
+                **notice.safe_dict(),
+                "matched_request": pending is not None,
+                "field_epoch": self.state.field_epoch,
+            }
+            identifiers: dict[str, object] = {}
+            if pending is not None:
+                effect = pending.effect
+                if notice.kind == PickupGainNotice.ITEM:
+                    result_matches = (
+                        notice.result_flag == 0
+                        and effect is not None
+                        and effect.get("kind") == "item"
+                        and effect.get("item_id") == notice.item_id
+                        and effect.get("quantity_delta") == notice.quantity
+                    )
+                elif notice.kind == PickupGainNotice.MESOS:
+                    if (
+                        effect is not None
+                        and effect.get("kind") == "mesos"
+                        and not effect.get("baseline_known")
+                        and notice.mesos_amount is not None
+                    ):
+                        current_mesos = effect.get("current_mesos")
+                        result_matches = (
+                            notice.result_flag == 0
+                            and isinstance(current_mesos, int)
+                            and current_mesos >= notice.mesos_amount
+                        )
+                        if result_matches:
+                            effect["amount_delta"] = notice.mesos_amount
+                            effect["inferred_previous_mesos"] = (
+                                current_mesos - notice.mesos_amount
+                            )
+                            self.state.item_pickup_inferred_mesos_baselines += 1
+                    else:
+                        result_matches = (
+                            notice.result_flag == 0
+                            and effect is not None
+                            and effect.get("kind") == "mesos"
+                            and effect.get("amount_delta")
+                            == notice.mesos_amount
+                        )
+                else:
+                    result_matches = notice.result_flag == 0 and effect is None
+                pending.result_confirmed = True
+                alias = self._alias(
+                    self._drop_aliases,
+                    pending.request.drop_object_id,
+                    "drop",
+                )
+                details.update(
+                    {
+                        "drop": alias,
+                        "request_frame": pending.request_frame_index,
+                        "effect": effect,
+                        "effect_matches_notice": result_matches,
+                        "response_ms": round(
+                            (
+                                frame.timestamp_ns
+                                - pending.request_timestamp_ns
+                            )
+                            / 1e6,
+                            3,
+                        ),
+                    }
+                )
+                identifiers["drop_object_id"] = (
+                    pending.request.drop_object_id
+                )
+            if result_matches:
+                self.state.item_pickup_effect_matches += 1
+            else:
+                self.state.item_pickup_effect_mismatches += 1
+                self.warnings.append(
+                    f"pickup {notice.kind_name} notice did not match the "
+                    "next pending request effect"
+                )
+            self._event(
+                frame,
+                "item_pickup_result_received",
+                details=details,
+                identifiers=identifiers,
+            )
+            return self._observation(
+                frame,
+                kind="pickup_gain_notice",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=notice,
+                details=details,
+                issues=(
+                    "pickup result flag, mesos subtype/tail, and special-value "
+                    "semantics remain neutral",
+                ),
+            )
+        if opcode == 312 and len(payload) in {7, 11, 15}:
+            removal = FieldDropRemoval.parse(payload)
+            alias = self._alias(
+                self._drop_aliases, removal.drop_object_id, "drop"
+            )
+            actor_alias = (
+                self._alias(self._player_aliases, removal.actor_id, "player")
+                if removal.actor_id is not None
+                else None
+            )
+            pending = next(
+                (
+                    candidate
+                    for candidate in self._pending_item_pickups
+                    if candidate.request.drop_object_id
+                    == removal.drop_object_id
+                ),
+                None,
+            )
+            self.state.field_drop_removals += 1
+            self.state.field_drop_removals_by_reason[removal.reason] += 1
+            details: dict[str, object] = {
+                **removal.safe_dict(),
+                "drop": alias,
+                "actor": actor_alias,
+                "matched_pickup_request": pending is not None,
+                "field_epoch": self.state.field_epoch,
+            }
+            identifiers: dict[str, object] = {
+                "drop_object_id": removal.drop_object_id
+            }
+            if removal.actor_id is not None:
+                identifiers["actor_id"] = removal.actor_id
+            if pending is not None:
+                removal_matches = (
+                    pending.result_confirmed
+                    and removal.reason == 5
+                )
+                details.update(
+                    {
+                        "request_frame": pending.request_frame_index,
+                        "result_confirmed": pending.result_confirmed,
+                        "pickup_removal_matches": removal_matches,
+                        "response_ms": round(
+                            (
+                                frame.timestamp_ns
+                                - pending.request_timestamp_ns
+                            )
+                            / 1e6,
+                            3,
+                        ),
+                    }
+                )
+                if removal_matches:
+                    self.state.item_pickup_removal_matches += 1
+                else:
+                    self.state.item_pickup_removal_mismatches += 1
+                    self.warnings.append(
+                        f"field removal for {alias} did not complete its "
+                        "pending pickup result chain"
+                    )
+                self._pending_item_pickups.remove(pending)
+                self.state.pending_item_pickups -= 1
+            self._event(
+                frame,
+                "field_drop_removed",
+                details=details,
+                identifiers=identifiers,
+            )
+            return self._observation(
+                frame,
+                kind="field_drop_removal",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=removal,
+                details=details,
+                issues=(
+                    "drop-removal reason, actor role, and trailing value "
+                    "semantics remain neutral",
+                ),
             )
         if opcode == 9:
             termination = WorldSessionTermination.parse(payload)
@@ -1779,10 +2174,13 @@ class GameplayStateFold:
             self.state.observed_players.clear()
             self.state.player_x = None
             self.state.player_y = None
+            self._drop_aliases.clear()
             self._pending_movements.clear()
             self.state.pending_movements = 0
             self._pending_item_uses.clear()
             self.state.pending_item_uses = 0
+            self._pending_item_pickups.clear()
+            self.state.pending_item_pickups = 0
             details = {
                 "field_epoch": self.state.field_epoch,
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
@@ -2471,6 +2869,11 @@ class GameplayStateFold:
                 f"{self.state.pending_item_uses} item-use requests had no "
                 "complete captured inventory/effect response"
             )
+        if self.state.pending_item_pickups:
+            self.warnings.append(
+                f"{self.state.pending_item_pickups} item-pickup requests had no "
+                "complete captured effect/result/removal chain"
+            )
         if last_frame is not None and transport_closed:
             self._event(
                 last_frame,
@@ -2485,6 +2888,7 @@ class GameplayStateFold:
                         self.state.pending_heartbeat_probes
                     ),
                     "pending_item_uses": self.state.pending_item_uses,
+                    "pending_item_pickups": self.state.pending_item_pickups,
                 },
             )
 
@@ -2933,6 +3337,22 @@ def render_gameplay_analysis(
             f"unknown_slots:{state.item_use_unknown_slots} "
             f"item_mismatches:{state.item_use_item_mismatches} "
             f"pending:{state.pending_item_uses}"
+        ),
+        (
+            f"item_pickup=requests:{state.item_pickup_requests} "
+            f"base:{state.item_pickup_base_requests} "
+            f"extended:{state.item_pickup_extended_requests} "
+            f"epoch_matches:{state.item_pickup_field_epoch_matches} "
+            f"epoch_mismatches:{state.item_pickup_field_epoch_mismatches} "
+            f"results:{state.item_pickup_results} "
+            f"effect_matches:{state.item_pickup_effect_matches} "
+            f"effect_mismatches:{state.item_pickup_effect_mismatches} "
+            "inferred_mesos_baselines:"
+            f"{state.item_pickup_inferred_mesos_baselines} "
+            f"removal_matches:{state.item_pickup_removal_matches} "
+            f"removal_mismatches:{state.item_pickup_removal_mismatches} "
+            f"field_removals:{state.field_drop_removals} "
+            f"pending:{state.pending_item_pickups}"
         ),
         (
             f"progression=skills:{len(state.skill_levels)} "

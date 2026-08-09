@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 114 tests.
+The last run passed all 116 tests.
 
 ## Inspect and compare captures
 
@@ -371,6 +371,22 @@ the `2 -> 1` and `50 -> 100` prediction. The completed transcript folded with
 one inventory match, one stat-effect match, zero mismatches/pending requests,
 and 20/20 matched heartbeat pairs.
 
+## Pickup request/effect validation
+
+The gameplay analyzer now decodes the complete capture-observed pickup chain:
+client opcode `185`, the positive opcode-`39` inventory or opcode-`41` mesos
+effect, server opcode `49`, and server opcode `312`. Stream `92` contains 54
+requests (48 base plus six with a 12-byte opaque proof), 54 short result
+records, and 100 field-drop removals. All records round-trip. Exact drop-id
+correlation yields 24 item, 29 mesos, and one special result; all 54 effects
+and all 54 local removals match with zero pending requests. Reports use
+field-local `drop:N` aliases and do not print runtime drop or actor ids.
+
+This is currently a validation/folding boundary, not a live generator. Stream
+`114` has no safe field drop left at hold-open, so a real-client replay first
+needs a typed opcode-`311` spawn model. Until then the server deliberately does
+not synthesize a drop id, validation token, or opaque proof.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
@@ -534,8 +550,9 @@ Replace the remaining opaque replay portions with stateful handling:
 
 1. Decode the inner 167 bytes of each character-list response record and emit
    it from typed player state.
-2. Continue client-request correlation with isolated item pickup, equipment,
-   and interaction captures; consumable use is now modeled end to end.
+2. Decode opcode-`311` field-drop spawn and use the modeled opcode-`185` chain
+   for a controlled real-client pickup A/B; continue with equipment and
+   interaction captures.
 3. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
 4. Obtain a short final-field capture with a known mob and validate the typed

@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 114 tests.
+- The custom-server suite currently passes all 116 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -97,6 +97,12 @@
   inventory match, one effect match, zero mismatches/pending requests, and all
   20 heartbeat pairs matched. Runtime status reported one observed/served
   request, zero rejections, and two response packets.
+- Client opcode `185`, server opcode `49`, and server opcode `312` now form a
+  typed item-pickup chain. All 54 stream-`92` requests round-trip (48 base and
+  six extended), match their folded field epoch, inventory/mesos/special
+  result, and exact drop-id removal. All 100 field-drop removals round-trip;
+  the 54 local chains have zero effect/removal mismatches and zero pending
+  requests. A live A/B remains gated on decoding opcode-`311` drop spawn.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -213,8 +219,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 1. Decode the captured opcode-`4` character-list inner records and generate the
    list from typed player state rather than replay bytes.
-2. Continue correlating typed effects with isolated item-pickup, equipment,
-   and interaction requests; consumable use is now modeled end to end.
+2. Decode opcode-`311` field-drop spawn, then validate the modeled pickup chain
+   through a controlled real-client A/B; continue with equipment and
+   interaction requests.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.

@@ -513,6 +513,77 @@ responses changed the visible inventory from `2` to `1` and the HUD from HP
 request, one matching inventory response, one matching stat effect, zero
 mismatches/pending requests, and 20 matched heartbeat pairs.
 
+## Item pickup (`client 185` -> `server 39/41`, `server 49`, `server 312`)
+
+The capture-validated client request has a 23-byte base form and a 35-byte
+extended form:
+
+```text
+uint16 opcode = 185
+uint32 control_value                   # zero in all captured requests
+uint8  field_epoch
+uint32 client_tick
+int16  position_x
+int16  position_y
+uint32 drop_object_id
+uint32 item_validation_token           # role remains neutral
+byte[0 or 12] optional_proof            # contents remain opaque
+```
+
+Stream `92` contains 54 requests: 48 base and six extended. Every `field_epoch`
+equals the fold's current field epoch, the ticks preserve request ordering, and
+all 54 packets round-trip. Normal reports replace `drop_object_id` with a
+field-local `drop:N` alias, expose only token presence, and report the optional
+proof length rather than its bytes.
+
+The corresponding short server opcode-`49` records have three exact variants:
+
+```text
+uint16 opcode = 49
+uint8  result_flag                     # zero in all 54 records
+uint8  kind
+
+kind 0, item (12 bytes total):
+    uint32 item_template_id
+    uint32 quantity
+
+kind 1, mesos (15 bytes total):
+    uint8  subkind                     # zero in all 29 records
+    uint64 amount
+    uint16 tail                        # zero in all 29 records
+
+kind 2, special (8 bytes total):
+    uint32 special_value               # behavioral role remains neutral
+```
+
+There are 24 item, 29 mesos, and one special result. For item results, the fold
+attaches the immediately preceding positive opcode-`39` add/quantity delta.
+For mesos, it attaches the positive opcode-`41` previous/current delta. The
+initial snapshot does not yet seed mesos, so the first result anchors an
+inferred prior balance of `4100`; the other 28 are independently checked as
+direct deltas. The special result has no inventory or stat effect. All 54
+result chains match. Request-to-result latency is 27.801-111.964 ms, averaging
+68.239 ms.
+
+Field-drop removal opcode `312` has three exact widths:
+
+```text
+7 bytes:  uint16 opcode, uint8 reason, uint32 drop_object_id
+11 bytes: uint16 opcode, uint8 reason, uint32 drop_object_id,
+          uint32 actor_id
+15 bytes: uint16 opcode, uint8 reason, uint32 drop_object_id,
+          uint32 actor_id, uint32 trailing_value
+```
+
+All 100 records round-trip: 25 are seven-byte records (reason `0` or `1`), 10
+are 11-byte records (reason `2`), and 65 are 15-byte records (reason `5`, zero
+tail). Exact drop-id correlation identifies 54 of the 15-byte records as the
+removals completing local pickup requests; the other 11 belong to other
+actors. All 54 local removals follow a matching opcode-`49` result and leave no
+pending pickup. Request-to-removal latency is 27.829-111.964 ms, averaging
+79.723 ms. The behavioral meaning of the reason, actor, validation-token, and
+optional-proof fields remains deliberately neutral.
+
 ## Character stat deltas (`server 41`)
 
 The capture-validated prefix and conditional-value grammar is:

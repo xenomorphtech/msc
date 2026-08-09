@@ -2221,6 +2221,307 @@ class ItemUseRequest:
 
 
 @dataclass(frozen=True)
+class ItemPickupRequest:
+    """Client request to collect one field drop."""
+
+    control_value: int
+    field_epoch: int
+    client_tick: int
+    position_x: int
+    position_y: int
+    drop_object_id: int
+    item_validation_token: int
+    optional_proof: bytes = b""
+    opcode: int = 185
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ItemPickupRequest":
+        reader = PacketReader(payload, packet_name="item_pickup_request")
+        _expect_opcode(reader, 185)
+        control_value = reader.u32("control_value")
+        field_epoch = reader.u8("field_epoch")
+        client_tick = reader.u32("client_tick")
+        position_x = reader.i16("position_x")
+        position_y = reader.i16("position_y")
+        drop_object_id = reader.u32("drop_object_id")
+        item_validation_token = reader.u32("item_validation_token")
+        if reader.remaining not in {0, 12}:
+            raise PacketShapeError(
+                "item_pickup_request optional proof must be absent or 12 bytes"
+            )
+        optional_proof = reader.bytes(reader.remaining, "optional_proof")
+        reader.finish()
+        return cls(
+            control_value=control_value,
+            field_epoch=field_epoch,
+            client_tick=client_tick,
+            position_x=position_x,
+            position_y=position_y,
+            drop_object_id=drop_object_id,
+            item_validation_token=item_validation_token,
+            optional_proof=optional_proof,
+        )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "control_value": self.control_value,
+            "field_epoch": self.field_epoch,
+            "client_tick": self.client_tick,
+            "position_x": self.position_x,
+            "position_y": self.position_y,
+            "item_validation_token_present": bool(self.item_validation_token),
+            "optional_proof_bytes": len(self.optional_proof),
+        }
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.control_value <= 0xFFFF_FFFF:
+            raise PacketShapeError("item-pickup control value must fit in u32")
+        if not 0 <= self.field_epoch <= 0xFF:
+            raise PacketShapeError("item-pickup field epoch must fit in u8")
+        if not 0 <= self.client_tick <= 0xFFFF_FFFF:
+            raise PacketShapeError("item-pickup client tick must fit in u32")
+        for name, value in (
+            ("position x", self.position_x),
+            ("position y", self.position_y),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(f"item-pickup {name} must fit in i16")
+        for name, value in (
+            ("drop object id", self.drop_object_id),
+            ("item validation token", self.item_validation_token),
+        ):
+            if not 0 <= value <= 0xFFFF_FFFF:
+                raise PacketShapeError(f"item-pickup {name} must fit in u32")
+        if len(self.optional_proof) not in {0, 12}:
+            raise PacketShapeError(
+                "item-pickup optional proof must be absent or 12 bytes"
+            )
+        return struct.pack(
+            "<HIBIhhII",
+            self.opcode,
+            self.control_value,
+            self.field_epoch,
+            self.client_tick,
+            self.position_x,
+            self.position_y,
+            self.drop_object_id,
+            self.item_validation_token,
+        ) + bytes(self.optional_proof)
+
+
+@dataclass(frozen=True)
+class PickupGainNotice:
+    """Server confirmation describing the value collected from a field drop."""
+
+    result_flag: int
+    kind: int
+    item_id: int | None = None
+    quantity: int | None = None
+    mesos_subkind: int | None = None
+    mesos_amount: int | None = None
+    mesos_tail: int | None = None
+    special_value: int | None = None
+    opcode: int = 49
+
+    ITEM = 0
+    MESOS = 1
+    SPECIAL = 2
+    KIND_NAMES = {ITEM: "item", MESOS: "mesos", SPECIAL: "special"}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "PickupGainNotice":
+        reader = PacketReader(payload, packet_name="pickup_gain_notice")
+        _expect_opcode(reader, 49)
+        result_flag = reader.u8("result_flag")
+        kind = reader.u8("kind")
+        values: dict[str, int] = {}
+        if kind == cls.ITEM:
+            values["item_id"] = reader.u32("item_id")
+            values["quantity"] = reader.u32("quantity")
+        elif kind == cls.MESOS:
+            values["mesos_subkind"] = reader.u8("mesos_subkind")
+            values["mesos_amount"] = reader.u64("mesos_amount")
+            values["mesos_tail"] = reader.u16("mesos_tail")
+        elif kind == cls.SPECIAL:
+            values["special_value"] = reader.u32("special_value")
+        else:
+            raise PacketShapeError(
+                f"pickup_gain_notice kind {kind} is not capture-modeled"
+            )
+        reader.finish()
+        return cls(result_flag=result_flag, kind=kind, **values)
+
+    @property
+    def kind_name(self) -> str:
+        return self.KIND_NAMES[self.kind]
+
+    def safe_dict(self) -> dict[str, int | str | None]:
+        details: dict[str, int | str | None] = {
+            "result_flag": self.result_flag,
+            "kind": self.kind_name,
+        }
+        if self.kind == self.ITEM:
+            details.update(item_id=self.item_id, quantity=self.quantity)
+        elif self.kind == self.MESOS:
+            details.update(
+                mesos_subkind=self.mesos_subkind,
+                mesos_amount=self.mesos_amount,
+                mesos_tail=self.mesos_tail,
+            )
+        else:
+            details["special_value"] = self.special_value
+        return details
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.result_flag <= 0xFF:
+            raise PacketShapeError("pickup result flag must fit in u8")
+        if self.kind not in self.KIND_NAMES:
+            raise PacketShapeError(
+                f"pickup notice kind {self.kind} is unsupported"
+            )
+        body = struct.pack("<HBB", self.opcode, self.result_flag, self.kind)
+        if self.kind == self.ITEM:
+            if self.item_id is None or self.quantity is None:
+                raise PacketShapeError("item pickup notice requires item and quantity")
+            if any(
+                value is not None
+                for value in (
+                    self.mesos_subkind,
+                    self.mesos_amount,
+                    self.mesos_tail,
+                    self.special_value,
+                )
+            ):
+                raise PacketShapeError("item pickup notice has foreign fields")
+            if not 0 <= self.item_id <= 0xFFFF_FFFF:
+                raise PacketShapeError("pickup item id must fit in u32")
+            if not 0 <= self.quantity <= 0xFFFF_FFFF:
+                raise PacketShapeError("pickup item quantity must fit in u32")
+            return body + struct.pack("<II", self.item_id, self.quantity)
+        if self.kind == self.MESOS:
+            if (
+                self.mesos_subkind is None
+                or self.mesos_amount is None
+                or self.mesos_tail is None
+            ):
+                raise PacketShapeError("mesos pickup notice requires all fields")
+            if (
+                self.item_id is not None
+                or self.quantity is not None
+                or self.special_value is not None
+            ):
+                raise PacketShapeError("mesos pickup notice has foreign fields")
+            if not 0 <= self.mesos_subkind <= 0xFF:
+                raise PacketShapeError("mesos pickup subkind must fit in u8")
+            if not 0 <= self.mesos_amount <= 0xFFFF_FFFF_FFFF_FFFF:
+                raise PacketShapeError("mesos pickup amount must fit in u64")
+            if not 0 <= self.mesos_tail <= 0xFFFF:
+                raise PacketShapeError("mesos pickup tail must fit in u16")
+            return body + struct.pack(
+                "<BQH", self.mesos_subkind, self.mesos_amount, self.mesos_tail
+            )
+        if self.kind == self.SPECIAL:
+            if self.special_value is None:
+                raise PacketShapeError("special pickup notice requires a value")
+            if any(
+                value is not None
+                for value in (
+                    self.item_id,
+                    self.quantity,
+                    self.mesos_subkind,
+                    self.mesos_amount,
+                    self.mesos_tail,
+                )
+            ):
+                raise PacketShapeError("special pickup notice has foreign fields")
+            if not 0 <= self.special_value <= 0xFFFF_FFFF:
+                raise PacketShapeError("special pickup value must fit in u32")
+            return body + struct.pack("<I", self.special_value)
+        raise PacketShapeError(f"pickup notice kind {self.kind} is unsupported")
+
+
+@dataclass(frozen=True)
+class FieldDropRemoval:
+    """Server field-drop removal in one of the three capture-observed widths."""
+
+    reason: int
+    drop_object_id: int
+    actor_id: int | None = None
+    trailing_value: int | None = None
+    opcode: int = 312
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FieldDropRemoval":
+        if len(payload) not in {7, 11, 15}:
+            raise PacketShapeError(
+                "field_drop_removal must be exactly 7, 11, or 15 bytes"
+            )
+        reader = PacketReader(payload, packet_name="field_drop_removal")
+        _expect_opcode(reader, 312)
+        reason = reader.u8("reason")
+        drop_object_id = reader.u32("drop_object_id")
+        actor_id = reader.u32("actor_id") if reader.remaining else None
+        trailing_value = (
+            reader.u32("trailing_value") if reader.remaining else None
+        )
+        reader.finish()
+        return cls(
+            reason=reason,
+            drop_object_id=drop_object_id,
+            actor_id=actor_id,
+            trailing_value=trailing_value,
+        )
+
+    @property
+    def variant(self) -> str:
+        if self.actor_id is None:
+            return "drop_only"
+        if self.trailing_value is None:
+            return "with_actor"
+        return "with_actor_and_tail"
+
+    def safe_dict(self) -> dict[str, int | str | bool]:
+        details: dict[str, int | str | bool] = {
+            "reason": self.reason,
+            "variant": self.variant,
+            "actor_present": self.actor_id is not None,
+        }
+        if self.trailing_value is not None:
+            details["trailing_value"] = self.trailing_value
+        return details
+
+    def to_bytes(self) -> bytes:
+        for name, value, maximum in (
+            ("reason", self.reason, 0xFF),
+            ("drop object id", self.drop_object_id, 0xFFFF_FFFF),
+        ):
+            if not 0 <= value <= maximum:
+                raise PacketShapeError(f"field-drop {name} is out of range")
+        if self.actor_id is None:
+            if self.trailing_value is not None:
+                raise PacketShapeError(
+                    "field-drop trailing value requires an actor id"
+                )
+            return struct.pack(
+                "<HBI", self.opcode, self.reason, self.drop_object_id
+            )
+        if not 0 <= self.actor_id <= 0xFFFF_FFFF:
+            raise PacketShapeError("field-drop actor id must fit in u32")
+        body = struct.pack(
+            "<HBII",
+            self.opcode,
+            self.reason,
+            self.drop_object_id,
+            self.actor_id,
+        )
+        if self.trailing_value is None:
+            return body
+        if not 0 <= self.trailing_value <= 0xFFFF_FFFF:
+            raise PacketShapeError("field-drop trailing value must fit in u32")
+        return body + struct.pack("<I", self.trailing_value)
+
+
+@dataclass(frozen=True)
 class PlayerMovementCommand:
     command_type: int
     opaque_payload: bytes

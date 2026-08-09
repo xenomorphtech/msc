@@ -24,6 +24,7 @@ from maple_server.gameplay import (  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     CompactFieldTransition,
+    FieldDropRemoval,
     FieldLoadStage,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
@@ -36,6 +37,7 @@ from maple_server.packets import (  # noqa: E402
     InitialProgressionSnapshot,
     InventoryChangeSet,
     InventoryModification,
+    ItemPickupRequest,
     ItemUseRequest,
     MobControllerChange,
     MobEnterField,
@@ -53,6 +55,7 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementCommand,
     PlayerMovementPath,
     PlayerMovementSubmission,
+    PickupGainNotice,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -355,6 +358,7 @@ def fixture_gameplay_transcript(
     stat_updates: bool = False,
     inventory_changes: bool = False,
     item_use: bool = False,
+    item_pickup: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -524,6 +528,124 @@ def fixture_gameplay_transcript(
                 current_hp=120,
             ).to_bytes(),
         )
+    if item_pickup:
+        append(
+            "client_to_server",
+            ItemPickupRequest(
+                control_value=0,
+                field_epoch=1,
+                client_tick=102_040,
+                position_x=120,
+                position_y=-210,
+                drop_object_id=40_001,
+                item_validation_token=1_352_639_939,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=4,
+                        slot=20,
+                        item=fixture_stack_inventory_item(
+                            slot=20,
+                            item_id=4_010_003,
+                            quantity=1,
+                        ),
+                    ),
+                ),
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            PickupGainNotice(
+                result_flag=0,
+                kind=PickupGainNotice.ITEM,
+                item_id=4_010_003,
+                quantity=1,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            FieldDropRemoval(
+                reason=5,
+                drop_object_id=40_001,
+                actor_id=CHARACTER_ID,
+                trailing_value=0,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ItemPickupRequest(
+                control_value=0,
+                field_epoch=1,
+                client_tick=102_041,
+                position_x=121,
+                position_y=-210,
+                drop_object_id=40_002,
+                item_validation_token=0,
+                optional_proof=bytes.fromhex("00112233445566778899aabb"),
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            CharacterStatUpdate(
+                request_flag=1,
+                stat_mask=CharacterStatUpdate.MESOS,
+                mesos=16,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            PickupGainNotice(
+                result_flag=0,
+                kind=PickupGainNotice.MESOS,
+                mesos_subkind=0,
+                mesos_amount=16,
+                mesos_tail=0,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            FieldDropRemoval(
+                reason=5,
+                drop_object_id=40_002,
+                actor_id=CHARACTER_ID,
+                trailing_value=0,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ItemPickupRequest(
+                control_value=0,
+                field_epoch=1,
+                client_tick=102_042,
+                position_x=122,
+                position_y=-210,
+                drop_object_id=40_003,
+                item_validation_token=3_854_219_900,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            PickupGainNotice(
+                result_flag=0,
+                kind=PickupGainNotice.SPECIAL,
+                special_value=2_380_000,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            FieldDropRemoval(
+                reason=5,
+                drop_object_id=40_003,
+                actor_id=CHARACTER_ID,
+                trailing_value=0,
+            ).to_bytes(),
+        )
     if player_movement:
         append(
             "client_to_server",
@@ -614,6 +736,78 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(PacketShapeError, "between 1 and 32767"):
             ItemUseRequest(client_tick=0, slot=0, item_id=2_000_014).to_bytes()
+
+    def test_item_pickup_packet_family_round_trip(self) -> None:
+        base_payload = bytes.fromhex(
+            "b90000000000029c660100e9fb9c04711f0000c3a59f50"
+        )
+        extended_payload = bytes.fromhex(
+            "b900000000000477b90200a8fe2d003c1c0000d5a06278"
+            "a8fe2d004fa0482729e30797"
+        )
+        base = ItemPickupRequest.parse(base_payload)
+        extended = ItemPickupRequest.parse(extended_payload)
+
+        self.assertEqual(base.to_bytes(), base_payload)
+        self.assertEqual(base.field_epoch, 2)
+        self.assertEqual(base.position_x, -1_047)
+        self.assertEqual(base.position_y, 1_180)
+        self.assertEqual(base.drop_object_id, 8_049)
+        self.assertEqual(base.optional_proof, b"")
+        self.assertEqual(extended.to_bytes(), extended_payload)
+        self.assertEqual(len(extended.optional_proof), 12)
+        self.assertNotIn("drop_object_id", base.safe_dict())
+        with self.assertRaisesRegex(PacketShapeError, "absent or 12 bytes"):
+            ItemPickupRequest(
+                control_value=0,
+                field_epoch=2,
+                client_tick=1,
+                position_x=0,
+                position_y=0,
+                drop_object_id=1,
+                item_validation_token=0,
+                optional_proof=b"short",
+            ).to_bytes()
+
+        gain_payloads = (
+            bytes.fromhex("3100000013303d0001000000"),
+            bytes.fromhex("310000010010000000000000000000"),
+            PickupGainNotice(
+                result_flag=0,
+                kind=PickupGainNotice.SPECIAL,
+                special_value=2_380_000,
+            ).to_bytes(),
+        )
+        gains = tuple(PickupGainNotice.parse(payload) for payload in gain_payloads)
+        self.assertEqual(
+            tuple(gain.to_bytes() for gain in gains), gain_payloads
+        )
+        self.assertEqual(
+            tuple(gain.kind_name for gain in gains),
+            ("item", "mesos", "special"),
+        )
+
+        removals = (
+            FieldDropRemoval(reason=1, drop_object_id=8_041),
+            FieldDropRemoval(reason=2, drop_object_id=50_056, actor_id=338_724),
+            FieldDropRemoval(
+                reason=5,
+                drop_object_id=8_050,
+                actor_id=302_104,
+                trailing_value=0,
+            ),
+        )
+        self.assertEqual(
+            tuple(len(removal.to_bytes()) for removal in removals),
+            (7, 11, 15),
+        )
+        self.assertEqual(
+            tuple(
+                FieldDropRemoval.parse(removal.to_bytes())
+                for removal in removals
+            ),
+            removals,
+        )
 
     def test_inventory_change_set_round_trip(self) -> None:
         cash_item = fixture_cash_inventory_item(slot=4)
@@ -1293,6 +1487,75 @@ class GameplayStateFoldTest(unittest.TestCase):
             policy.respond(
                 ItemUseRequest(client_tick=102_101, slot=1, item_id=2_000_000)
             )
+
+    def test_correlates_item_pickup_effect_notice_and_removal_chains(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                item_pickup=True,
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.item_pickup_requests, 3)
+        self.assertEqual(analysis.state.item_pickup_base_requests, 2)
+        self.assertEqual(analysis.state.item_pickup_extended_requests, 1)
+        self.assertEqual(analysis.state.item_pickup_field_epoch_matches, 3)
+        self.assertEqual(analysis.state.item_pickup_field_epoch_mismatches, 0)
+        self.assertEqual(analysis.state.item_pickup_results, 3)
+        self.assertEqual(
+            analysis.state.item_pickup_results_by_kind,
+            {"item": 1, "mesos": 1, "special": 1},
+        )
+        self.assertEqual(analysis.state.item_pickup_effect_matches, 3)
+        self.assertEqual(analysis.state.item_pickup_effect_mismatches, 0)
+        self.assertEqual(
+            analysis.state.item_pickup_inferred_mesos_baselines, 1
+        )
+        self.assertEqual(analysis.state.item_pickup_removal_matches, 3)
+        self.assertEqual(analysis.state.item_pickup_removal_mismatches, 0)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+        self.assertEqual(analysis.state.field_drop_removals, 3)
+        self.assertEqual(analysis.state.field_drop_removals_by_reason, {5: 3})
+        self.assertEqual(analysis.state.mesos, 16)
+        picked_item = next(
+            item
+            for item in analysis.state.inventory_items["etc"]
+            if item.slot == 20
+        )
+        self.assertEqual((picked_item.item_id, picked_item.quantity), (4_010_003, 1))
+
+        request_events = [
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_requested"
+        ]
+        result_events = [
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_result_received"
+        ]
+        removal_events = [
+            event
+            for event in analysis.events
+            if event.kind == "field_drop_removed"
+            and event.details["matched_pickup_request"]
+        ]
+        self.assertEqual(len(request_events), 3)
+        self.assertEqual(len(result_events), 3)
+        self.assertEqual(len(removal_events), 3)
+        self.assertTrue(
+            all(event.details["effect_matches_notice"] for event in result_events)
+        )
+        self.assertTrue(
+            all(event.details["pickup_removal_matches"] for event in removal_events)
+        )
+        safe = analysis.safe_dict()
+        self.assertNotIn("drop_object_id", str(safe["events"]))
+        self.assertNotIn("drop_object_id", str(safe["packets"]))
+        self.assertNotIn("actor_id", str(safe["events"]))
+        self.assertNotIn("actor_id", str(safe["packets"]))
 
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())

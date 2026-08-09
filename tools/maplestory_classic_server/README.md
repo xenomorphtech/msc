@@ -251,6 +251,13 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `80`: a 12-byte Use-item request containing client tick, signed
   slot, and item template; the fold correlates it with the following opcode-`39`
   quantity change and captured opcode-`41` potion effect,
+- client opcode `185`: 23-byte and 35-byte item-pickup requests containing the
+  folded field epoch, client tick, position, aliased drop id, neutral validation
+  token, and optional 12-byte proof,
+- server opcode `49`: the three pickup-result variants for item quantity, mesos
+  amount, and a still-neutral special value,
+- server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
+  to local pickup requests by the exact aliased drop id,
 - server opcode `41`: masked player-stat deltas for the capture-observed INT,
   LUK, HP, MP, AP, EXP, and 64-bit mesos fields, plus bounded neutral flag/tail
   values,
@@ -291,8 +298,9 @@ field-load messages form 13 ordered stage pairs; all 53 NPC spawns and 77 NPC
 state updates validate; all 531 local-player movement submissions and 113
 remote-player broadcasts round-trip; 11,949 mob movement acknowledgements
 match prior captured submissions; and all 75 server heartbeat probes pair with
-the next 75 client responses. Two mob movement submissions remain pending at
-capture end.
+the next 75 client responses. All 54 pickup requests also match their value
+effect, opcode-`49` result, and opcode-`312` removal, while all 100 removal
+packets round-trip. Two mob movement submissions remain pending at capture end.
 
 Twelve of the 13 opcode-`157` packets use an exact 95-byte compact transition
 shape (two-byte opcode plus 93-byte body). `CompactFieldTransition` decodes the
@@ -405,6 +413,31 @@ opcode `80`, and the reactive server emitted opcodes `39,41`. The UI and the
 independently folded transcript both showed quantity `2 -> 1` and HP
 `50/222 -> 100/222`, with one inventory match, one effect match, no pending or
 mismatched request, and all 20 heartbeat pairs matched.
+
+Client opcode `185` now connects field drops to inventory and mesos state.
+Stream `92` contains 54 requests: 48 exact 23-byte base records and six records
+with one additional opaque 12-byte proof. Every request's one-byte field epoch
+matches the folded field epoch. The stable prefix contains a neutral 32-bit
+control value, the epoch, client tick, signed position, runtime drop id, and a
+neutral 32-bit validation token. Reports replace the runtime id with a
+field-local `drop:N` alias and expose only whether the neutral token is present.
+
+The matching opcode-`49` result set contains 24 item/quantity records, 29
+64-bit mesos-amount records, and one still-neutral special-value record. The
+fold attaches the preceding positive opcode-`39` inventory delta or opcode-`41`
+mesos delta FIFO, checks it against that result, then closes the request when
+opcode `312` removes the same drop id. The first mesos pickup infers its prior
+balance as `4100` because the initial snapshot does not yet decode the mesos
+baseline; the remaining 28 validate by direct previous/current deltas. All 54
+effect/result checks and all 54 removals match, with no pending requests. The
+100 opcode-`312` packets divide into 25 drop-only, 10 actor-bearing, and 65
+actor-plus-tail records; 54 of the last group are the local correlated pickups
+and 11 belong to other actors. Actor and reason roles remain neutral.
+
+A live pickup replay is intentionally deferred: short stream `114` does not
+leave a modeled field drop available after replay. Generating one safely first
+requires the opcode-`311` field-drop spawn shape, so the server does not invent
+a runtime object id or validation token from adjacency alone.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
