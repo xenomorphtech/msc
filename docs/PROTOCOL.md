@@ -988,6 +988,34 @@ The codec and fold therefore preserve the exact numeric boundaries under
 neutral names, emit value distributions and events, and classify the family as
 partial semantic coverage.
 
+## Client opcode `54` neutral numeric record
+
+The client packet is exactly 24 bytes:
+
+```text
+uint16 opcode = 54
+uint32 control_value
+uint8  flag_1
+uint8  flag_2
+uint32 value_1
+uint32 value_2
+uint32 value_3
+uint32 tail_value
+```
+
+Stream `126` contains 120 packets. Its flag pair is always `255:0`, and
+`tail_value` is zero 57 times and one 63 times. The control value is unique in
+every packet and ranges from `364201` to `3341793`; `value_1` has 12 observed
+values, `value_2` has eight, and `value_3` ranges from `2333245` to `2545094`.
+Stream `92` adds 31 packets: 30 use flag pair `255:0`, one uses `0:0`, and its
+tail distribution is 16 zero/15 one. Stream `114` has none.
+
+All 151 packets consume exactly and re-encode byte-for-byte. The codec retains
+the manifest's numeric widths but uses neutral field names; the fold emits
+per-packet events, compact distributions, and numeric ranges without applying
+an unproven gameplay effect. The family therefore remains partial semantic
+coverage.
+
 ## `58880` exchange
 
 The client sent a stable HTTP/1.1 request:
@@ -1043,7 +1071,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 25,597
-full, 43,012 partial, 2,491 unknown-but-lossless, and zero invalid packet
+full, 43,132 partial, 2,371 unknown-but-lossless, and zero invalid packet
 observations. The fold reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 

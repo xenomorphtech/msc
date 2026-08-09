@@ -17,6 +17,7 @@ from .packets import (
     ClientOpcode101Record,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
+    ClientOpcode54Record,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -371,6 +372,23 @@ class GameplayGameState:
     pending_opcode_426_notifications: int = 0
     last_opcode_426_round_trip_ms: float | None = None
     max_opcode_426_round_trip_ms: float | None = None
+    client_opcode_54_packets: int = 0
+    client_opcode_54_flag_pairs: Counter[str] = field(
+        default_factory=Counter
+    )
+    client_opcode_54_value_1_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_54_value_2_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_54_tail_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_54_control_min: int | None = None
+    client_opcode_54_control_max: int | None = None
+    client_opcode_54_value_3_min: int | None = None
+    client_opcode_54_value_3_max: int | None = None
     client_opcode_101_packets: int = 0
     client_opcode_101_header_values: Counter[int] = field(
         default_factory=Counter
@@ -1597,6 +1615,33 @@ class GameplayAnalysis:
                 "max_opcode_426_round_trip_ms": (
                     self.state.max_opcode_426_round_trip_ms
                 ),
+                "client_opcode_54_packets": (
+                    self.state.client_opcode_54_packets
+                ),
+                "client_opcode_54_flag_pairs": dict(
+                    self.state.client_opcode_54_flag_pairs
+                ),
+                "client_opcode_54_value_1_values": dict(
+                    self.state.client_opcode_54_value_1_values
+                ),
+                "client_opcode_54_value_2_values": dict(
+                    self.state.client_opcode_54_value_2_values
+                ),
+                "client_opcode_54_tail_values": dict(
+                    self.state.client_opcode_54_tail_values
+                ),
+                "client_opcode_54_control_min": (
+                    self.state.client_opcode_54_control_min
+                ),
+                "client_opcode_54_control_max": (
+                    self.state.client_opcode_54_control_max
+                ),
+                "client_opcode_54_value_3_min": (
+                    self.state.client_opcode_54_value_3_min
+                ),
+                "client_opcode_54_value_3_max": (
+                    self.state.client_opcode_54_value_3_max
+                ),
                 "client_opcode_101_packets": (
                     self.state.client_opcode_101_packets
                 ),
@@ -2317,6 +2362,55 @@ class GameplayStateFold:
                 parsed=response,
                 details=details,
                 issues=("heartbeat response token remains opaque",),
+            )
+        if opcode == 54:
+            record = ClientOpcode54Record.parse(payload)
+            self.state.client_opcode_54_packets += 1
+            flag_pair = f"{record.flag_1}:{record.flag_2}"
+            self.state.client_opcode_54_flag_pairs[flag_pair] += 1
+            self.state.client_opcode_54_value_1_values[record.value_1] += 1
+            self.state.client_opcode_54_value_2_values[record.value_2] += 1
+            self.state.client_opcode_54_tail_values[record.tail_value] += 1
+            self.state.client_opcode_54_control_min = min(
+                self.state.client_opcode_54_control_min
+                if self.state.client_opcode_54_control_min is not None
+                else record.control_value,
+                record.control_value,
+            )
+            self.state.client_opcode_54_control_max = max(
+                self.state.client_opcode_54_control_max
+                if self.state.client_opcode_54_control_max is not None
+                else record.control_value,
+                record.control_value,
+            )
+            self.state.client_opcode_54_value_3_min = min(
+                self.state.client_opcode_54_value_3_min
+                if self.state.client_opcode_54_value_3_min is not None
+                else record.value_3,
+                record.value_3,
+            )
+            self.state.client_opcode_54_value_3_max = max(
+                self.state.client_opcode_54_value_3_max
+                if self.state.client_opcode_54_value_3_max is not None
+                else record.value_3,
+                record.value_3,
+            )
+            details = {
+                **record.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_54_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_54_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=details,
+                issues=("client opcode-54 field roles remain neutral",),
             )
         if opcode == 101:
             record = ClientOpcode101Record.parse(payload)
@@ -4623,6 +4717,18 @@ def render_gameplay_analysis(
     client_opcode_13_message_types = json.dumps(
         dict(sorted(state.client_opcode_13_messages_by_type.items()))
     )
+    client_opcode_54_flag_pairs = json.dumps(
+        dict(sorted(state.client_opcode_54_flag_pairs.items()))
+    )
+    client_opcode_54_value_1_values = json.dumps(
+        dict(sorted(state.client_opcode_54_value_1_values.items()))
+    )
+    client_opcode_54_value_2_values = json.dumps(
+        dict(sorted(state.client_opcode_54_value_2_values.items()))
+    )
+    client_opcode_54_tail_values = json.dumps(
+        dict(sorted(state.client_opcode_54_tail_values.items()))
+    )
     client_opcode_101_header_values = json.dumps(
         dict(sorted(state.client_opcode_101_header_values.items()))
     )
@@ -4866,6 +4972,17 @@ def render_gameplay_analysis(
             f"pending:{state.pending_opcode_426_notifications} "
             f"last_rtt_ms:{state.last_opcode_426_round_trip_ms} "
             f"max_rtt_ms:{state.max_opcode_426_round_trip_ms}"
+        ),
+        (
+            f"client_opcode_54=packets:{state.client_opcode_54_packets} "
+            f"flag_pairs:{client_opcode_54_flag_pairs} "
+            f"value_1_values:{client_opcode_54_value_1_values} "
+            f"value_2_values:{client_opcode_54_value_2_values} "
+            f"tail_values:{client_opcode_54_tail_values} "
+            f"control_range:{state.client_opcode_54_control_min}.."
+            f"{state.client_opcode_54_control_max} "
+            f"value_3_range:{state.client_opcode_54_value_3_min}.."
+            f"{state.client_opcode_54_value_3_max}"
         ),
         (
             f"client_opcode_101=packets:{state.client_opcode_101_packets} "

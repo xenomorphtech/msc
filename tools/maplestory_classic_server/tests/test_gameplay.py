@@ -29,6 +29,7 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode101Record,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
+    ClientOpcode54Record,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -444,6 +445,7 @@ def fixture_gameplay_transcript(
     compact_transition: bool = False,
     initial_snapshot: bool = False,
     player_movement: bool = False,
+    opcode_54_records: bool = False,
     opcode_101_records: bool = False,
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
@@ -887,6 +889,31 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             MobLeaveField(object_id=MOB_OBJECT_ID, reason=0).to_bytes(),
+        )
+    if opcode_54_records:
+        append(
+            "client_to_server",
+            ClientOpcode54Record(
+                control_value=364_201,
+                flag_1=255,
+                flag_2=0,
+                value_1=1,
+                value_2=100_100,
+                value_3=2_333_245,
+                tail_value=1,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientOpcode54Record(
+                control_value=807_666,
+                flag_1=0,
+                flag_2=0,
+                value_1=3,
+                value_2=130_100,
+                value_3=4_447_306,
+                tail_value=0,
+            ).to_bytes(),
         )
     if opcode_101_records:
         append(
@@ -1722,6 +1749,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
             secondary_value=0,
             tail_value=0,
         )
+        opcode_54_record = ClientOpcode54Record(
+            control_value=364_201,
+            flag_1=255,
+            flag_2=0,
+            value_1=1,
+            value_2=100_100,
+            value_3=2_333_245,
+            tail_value=1,
+        )
         fixed_envelope = Opcode13Type1Envelope(opaque_payload=b"fixed123")
         variable_envelope = Opcode13Envelope(
             message_type=6,
@@ -1747,6 +1783,21 @@ class GameplayPacketShapeTest(unittest.TestCase):
             opcode_101_record,
         )
         self.assertEqual(len(opcode_101_record.to_bytes()), 11)
+        self.assertEqual(
+            ClientOpcode54Record.parse(opcode_54_record.to_bytes()),
+            opcode_54_record,
+        )
+        self.assertEqual(len(opcode_54_record.to_bytes()), 24)
+        with self.assertRaisesRegex(PacketShapeError, "flag_1 must fit"):
+            ClientOpcode54Record(
+                control_value=364_201,
+                flag_1=256,
+                flag_2=0,
+                value_1=1,
+                value_2=100_100,
+                value_3=2_333_245,
+                tail_value=1,
+            ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "tail_value must fit"):
             ClientOpcode101Record(
                 header_value=0,
@@ -2497,6 +2548,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
                 player_movement=True,
+                opcode_54_records=True,
                 opcode_101_records=True,
                 opcode_13_messages=True,
                 opcode_217_records=True,
@@ -2585,6 +2637,42 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "opcode=309 kind=opcode_309_acknowledgement coverage=full",
+            report,
+        )
+        self.assertEqual(analysis.state.client_opcode_54_packets, 2)
+        self.assertEqual(
+            analysis.state.client_opcode_54_flag_pairs,
+            {"255:0": 1, "0:0": 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_54_value_1_values, {1: 1, 3: 1}
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_54_value_2_values,
+            {100_100: 1, 130_100: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_54_tail_values, {0: 1, 1: 1}
+        )
+        self.assertEqual(analysis.state.client_opcode_54_control_min, 364_201)
+        self.assertEqual(analysis.state.client_opcode_54_control_max, 807_666)
+        self.assertEqual(
+            analysis.state.client_opcode_54_value_3_min, 2_333_245
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_54_value_3_max, 4_447_306
+        )
+        self.assertIn(
+            'client_opcode_54=packets:2 flag_pairs:{"0:0": 1, "255:0": 1} '
+            'value_1_values:{"1": 1, "3": 1} '
+            'value_2_values:{"100100": 1, "130100": 1} '
+            'tail_values:{"0": 1, "1": 1} '
+            'control_range:364201..807666 '
+            'value_3_range:2333245..4447306',
+            report,
+        )
+        self.assertIn(
+            "opcode=54 kind=client_opcode_54_record coverage=partial",
             report,
         )
         self.assertEqual(analysis.state.client_opcode_101_packets, 2)

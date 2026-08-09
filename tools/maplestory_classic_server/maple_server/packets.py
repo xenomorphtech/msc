@@ -2942,6 +2942,72 @@ class FieldDropRemoval:
 
 
 @dataclass(frozen=True)
+class ClientOpcode54Record:
+    control_value: int
+    flag_1: int
+    flag_2: int
+    value_1: int
+    value_2: int
+    value_3: int
+    tail_value: int
+    opcode: int = 54
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode54Record":
+        reader = PacketReader(payload, packet_name="client_opcode_54")
+        _expect_opcode(reader, 54)
+        record = cls(
+            control_value=reader.u32("control_value"),
+            flag_1=reader.u8("flag_1"),
+            flag_2=reader.u8("flag_2"),
+            value_1=reader.u32("value_1"),
+            value_2=reader.u32("value_2"),
+            value_3=reader.u32("value_3"),
+            tail_value=reader.u32("tail_value"),
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "control_value": self.control_value,
+            "flag_1": self.flag_1,
+            "flag_2": self.flag_2,
+            "value_1": self.value_1,
+            "value_2": self.value_2,
+            "value_3": self.value_3,
+            "tail_value": self.tail_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        for name, value, maximum in (
+            ("control_value", self.control_value, 0xFFFF_FFFF),
+            ("flag_1", self.flag_1, 0xFF),
+            ("flag_2", self.flag_2, 0xFF),
+            ("value_1", self.value_1, 0xFFFF_FFFF),
+            ("value_2", self.value_2, 0xFFFF_FFFF),
+            ("value_3", self.value_3, 0xFFFF_FFFF),
+            ("tail_value", self.tail_value, 0xFFFF_FFFF),
+        ):
+            if not 0 <= value <= maximum:
+                raise PacketShapeError(
+                    f"client opcode-54 {name} must fit in "
+                    f"u{maximum.bit_length()}"
+                )
+        return struct.pack(
+            "<HIBBIIII",
+            self.opcode,
+            self.control_value,
+            self.flag_1,
+            self.flag_2,
+            self.value_1,
+            self.value_2,
+            self.value_3,
+            self.tail_value,
+        )
+
+
+@dataclass(frozen=True)
 class ClientOpcode101Record:
     header_value: int
     primary_value: int
