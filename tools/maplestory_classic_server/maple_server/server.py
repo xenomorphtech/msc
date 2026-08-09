@@ -52,7 +52,11 @@ from .gameplay import (
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
-from .http_api import ServerRuntime, start_runtime_http_api
+from .http_api import (
+    ServerPacketInjection,
+    ServerRuntime,
+    start_runtime_http_api,
+)
 from .packets import (
     ChannelTransitionResponse,
     CharacterListEnvelope,
@@ -415,6 +419,7 @@ async def replay_connection(
     ) = None,
     mob_health_response_policy: MobHealthResponsePolicy | None = None,
     runtime_protocol: dict[str, object] | None = None,
+    server_packet_injection: ServerPacketInjection | None = None,
 ) -> None:
     if hold_open_seconds < 0:
         raise ValueError("hold_open_seconds cannot be negative")
@@ -916,6 +921,7 @@ async def replay_connection(
         else None
     )
     connection_error: str | None = None
+    server_packet_injection_token: int | None = None
 
     async def read_live_frame() -> tuple[bytes, int | None, bytes]:
         nonlocal client_iv
@@ -957,9 +963,7 @@ async def replay_connection(
         for delay, reactive_plaintext in zip(delays, plaintexts, strict=True):
             if delay > 0:
                 await asyncio.sleep(delay)
-            await send_encrypted_frame(
-                encrypt_next_server_frame(reactive_plaintext)
-            )
+            await send_server_plaintext(reactive_plaintext)
 
     try:
         if initial_delay_seconds > 0:
@@ -1022,6 +1026,10 @@ async def replay_connection(
             or item_use_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
+            or (
+                server_packet_injection is not None
+                and server_packet_injection.enabled
+            )
         )
         if needs_server_cipher:
             server_iv, server_version_mask = post_transcript_server_cipher_state(
@@ -1112,6 +1120,14 @@ async def replay_connection(
                     + 1
                 )
 
+        server_plaintext_lock = asyncio.Lock()
+
+        async def send_server_plaintext(plaintext: bytes) -> None:
+            async with server_plaintext_lock:
+                await send_encrypted_frame(
+                    encrypt_next_server_frame(plaintext)
+                )
+
         async def send_movement_follow_up_decisions(
             *,
             decision_limit: int | None = None,
@@ -1160,9 +1176,7 @@ async def replay_connection(
                     raise RuntimeError(
                         "incomplete movement decision queue has no next packet"
                     )
-                await send_encrypted_frame(
-                    encrypt_next_server_frame(plaintext)
-                )
+                await send_server_plaintext(plaintext)
                 apply_emitted_server_plaintext(
                     plaintext, confirm_movement=True
                 )
@@ -1357,7 +1371,7 @@ async def replay_connection(
                 )
                 if gap_delay_seconds > 0:
                     await asyncio.sleep(gap_delay_seconds)
-            await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+            await send_server_plaintext(plaintext)
             is_movement_plaintext = (
                 movement_schedule is not None
                 and movement_plaintext_start is not None
@@ -1398,7 +1412,24 @@ async def replay_connection(
                     await read_live_frame()
                 else:
                     await read_and_record_encrypted_frame(client_reader, observed)
-            await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+            await send_server_plaintext(plaintext)
+
+        async def inject_server_plaintext(
+            plaintext: bytes,
+        ) -> dict[str, object]:
+            await send_server_plaintext(plaintext)
+            apply_emitted_server_plaintext(plaintext)
+            details = {
+                "opcode": int.from_bytes(plaintext[:2], "little"),
+                "plaintext_length": len(plaintext),
+            }
+            record_runtime_event("http_server_packet_injected", details)
+            return details
+
+        if server_packet_injection is not None and server_packet_injection.enabled:
+            server_packet_injection_token = server_packet_injection.register(
+                inject_server_plaintext
+            )
 
         if hold_open_seconds > 0:
             loop = asyncio.get_running_loop()
@@ -1411,9 +1442,7 @@ async def replay_connection(
             while (remaining := deadline - loop.time()) > 0:
                 now = loop.time()
                 if next_heartbeat_at is not None and now >= next_heartbeat_at:
-                    await send_encrypted_frame(
-                        encrypt_next_server_frame(HeartbeatProbe().to_bytes())
-                    )
+                    await send_server_plaintext(HeartbeatProbe().to_bytes())
                     pending_periodic_heartbeats.append(loop.time())
                     if heartbeat_metrics is not None:
                         heartbeat_metrics["probes_sent"] = (
@@ -1559,9 +1588,7 @@ async def replay_connection(
                         )
                         continue
                     for plaintext in response_plan.plaintexts:
-                        await send_encrypted_frame(
-                            encrypt_next_server_frame(plaintext)
-                        )
+                        await send_server_plaintext(plaintext)
                         if item_use_response_policy is not None:
                             item_use_response_policy.apply_server_packet(
                                 plaintext
@@ -1629,9 +1656,7 @@ async def replay_connection(
                         )
                         continue
                     for plaintext in response_plan.plaintexts:
-                        await send_encrypted_frame(
-                            encrypt_next_server_frame(plaintext)
-                        )
+                        await send_server_plaintext(plaintext)
                         if item_pickup_response_policy is not None:
                             item_pickup_response_policy.apply_server_packet(
                                 plaintext
@@ -1712,9 +1737,7 @@ async def replay_connection(
                         )
                         continue
                     for plaintext in response_plan.plaintexts:
-                        await send_encrypted_frame(
-                            encrypt_next_server_frame(plaintext)
-                        )
+                        await send_server_plaintext(plaintext)
                         if (
                             mob_movement_acknowledgement_policy
                             is not None
@@ -1829,11 +1852,7 @@ async def replay_connection(
                             },
                         )
                         continue
-                    await send_encrypted_frame(
-                        encrypt_next_server_frame(
-                            acknowledgement.to_bytes()
-                        )
-                    )
+                    await send_server_plaintext(acknowledgement.to_bytes())
                     if mob_acknowledgement_metrics is not None:
                         mob_acknowledgement_metrics["responses_sent"] = (
                             int(
@@ -1891,6 +1910,11 @@ async def replay_connection(
         connection_error = f"{type(exception).__name__}: {exception}"
         raise
     finally:
+        if (
+            server_packet_injection is not None
+            and server_packet_injection_token is not None
+        ):
+            server_packet_injection.unregister(server_packet_injection_token)
         if observed is not None:
             observed.close(error=connection_error)
         client_writer.close()
@@ -3475,6 +3499,14 @@ def add_listener_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         help="enable the runtime HTTP API on this loopback port",
     )
+    parser.add_argument(
+        "--enable-http-packet-injection",
+        action="store_true",
+        help=(
+            "allow opt-in plaintext server-packet injection through the "
+            "loopback HTTP API (replay mode only)"
+        ),
+    )
 
 
 def inspect_transcript(path: Path) -> None:
@@ -3575,6 +3607,13 @@ def common_suffix_length(first: bytes, second: bytes) -> int:
 async def async_main(arguments: argparse.Namespace) -> None:
     runtime_config: dict[str, object]
     runtime_protocol: dict[str, object] = {}
+    if arguments.enable_http_packet_injection and arguments.command != "replay":
+        raise ValueError("HTTP packet injection is available only in replay mode")
+    if arguments.enable_http_packet_injection and arguments.http_api_port is None:
+        raise ValueError("HTTP packet injection requires --http-api-port")
+    server_packet_injection = ServerPacketInjection(
+        enabled=arguments.enable_http_packet_injection
+    )
     if arguments.command == "capture-proxy":
         client_result_rewrites = dict(arguments.rewrite_client_opcode_result)
         if len(client_result_rewrites) != len(
@@ -4487,6 +4526,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             mob_health_response_policy=mob_health_response_policy,
             runtime_protocol=runtime_protocol,
+            server_packet_injection=server_packet_injection,
         )
         runtime_config = {
             "source": "pcap" if arguments.pcap is not None else "transcript",
@@ -4571,6 +4611,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 arguments.reactive_mob_health_responses
             ),
             "dropped_server_frame_indices": sorted(dropped_server_frames),
+            "http_packet_injection_enabled": (
+                arguments.enable_http_packet_injection
+            ),
         }
         if arguments.world_heartbeat_interval_seconds is not None:
             runtime_protocol["world_heartbeat"] = {
@@ -4597,6 +4640,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
         listen_port=arguments.listen_port,
         config=runtime_config,
         protocol=runtime_protocol,
+        server_packet_injection=server_packet_injection,
     )
     await run_listener(
         arguments.listen_host,

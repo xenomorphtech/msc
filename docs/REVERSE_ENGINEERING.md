@@ -199,6 +199,14 @@ Attaching before NGS finishes startup can still invalidate the run. Do not
 leave a breakpoint probe attached, and always restore process-local patches.
 
 `gdb_trace_packet_reads.py` traces the build's packet primitive readers by RVA.
+Its manifest-backed labels now cover all 12 readers used by this build:
+`u16=0x1cd0300`, `u8=0x1cd0530`, `bool=0x1cd0560`, `i8=0x1cd0700`,
+`i16=0x1cd0730`, `i32=0x1cd0760`, `i64=0x1cd0790`, `u64=0x1cd07c0`,
+`datetime=0x1cd09d0`, `u32=0x1cd0b00`, `utf16=0x1cd0ca0`, and
+`string=0x1cd0ce0`. Opcode filtering accepts either the cached plaintext opcode
+or the opcode at the framed buffer cursor, which avoids silently dropping the
+first targeted read.
+
 Set `MAPLE_TRACE_OPCODE` to restrict output to one plaintext opcode,
 `MAPLE_TRACE_DUMP_BYTES=0` to omit repeated packet-buffer hex, and
 `MAPLE_TRACE_STOP_CURSOR` to disable all reader breakpoints at a known final
@@ -213,7 +221,10 @@ MAPLE_TRACE_STOP_CURSOR=4506
 The stream-`114` initial field packet produced 734 reader calls and reached the
 configured final cursor, which made the trace useful as a complete structural
 read ledger rather than a truncated console dump. Use GDB non-stop mode and
-`continue -a`; an all-stop attach stalls Wine's worker/GC threads. Even the
+`continue -a`; set non-stop before `attach`, pass `SIGSEGV`, `SIGUSR1`, and
+`SIGUSR2` without stopping/printing, and issue `continue -a` again if attach
+left other threads stopped. Detach immediately after the targeted packet; an
+all-stop or lingering attach stalls Wine's worker/GC threads. Even the
 non-stop trace can destabilize the instrumented client after hundreds of
 breakpoints, so treat that client process as sacrificial and validate the
 recovered layout offline against the PCAP. The decoded 112-byte prefix now
@@ -224,6 +235,18 @@ two extracted inventory regions round-trip independently. The remaining
 and extended-property collections plus a fixed trailer. The complete initial
 packet is now structurally bounded; semantic identification of neutral fields
 is the next boundary.
+
+The same short-lived method closed both expanded variable-server records. For
+opcode `385`, the trace read the discriminator bool at framed cursor `6`, then
+89 repetitions of `u8` and `i32`, ending exactly at framed cursor `452` for the
+448-byte plaintext. For opcode `156`, it read `u8` at cursor `6`, a five-byte
+packet UTF-16 string at cursor `7`, bool at `12`, and three `i32` values at
+`13`, `17`, and `21`, ending exactly at cursor `25` for the 21-byte plaintext.
+Offline capture decoding and exact re-emission confirm both ledgers. The live
+client then accepted exact post-bootstrap replays of both packets without a
+map/player-state change and continued pairing heartbeats. These traces prove
+field widths, repetition counts, and complete consumption only; names remain
+neutral and no security interpretation is attached.
 
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor

@@ -21,15 +21,18 @@ import gdb
 
 
 READER_RVAS = {
-    0x1CD0530: "read_byte",
-    0x1CD0560: "reader_1cd0560",
-    0x1CD0700: "read_signed_byte",
-    0x1CD0730: "read_u16",
-    0x1CD0760: "reader_1cd0760",
-    0x1CD0790: "read_u64",
-    0x1CD09D0: "reader_1cd09d0",
-    0x1CD0B00: "reader_1cd0b00",
-    0x1CD0CA0: "reader_1cd0ca0",
+    0x1CD0300: "read_u16",
+    0x1CD0530: "read_u8",
+    0x1CD0560: "read_bool",
+    0x1CD0700: "read_i8",
+    0x1CD0730: "read_i16",
+    0x1CD0760: "read_i32",
+    0x1CD0790: "read_i64",
+    0x1CD07C0: "read_u64",
+    0x1CD09D0: "read_datetime",
+    0x1CD0B00: "read_u32",
+    0x1CD0CA0: "read_utf16",
+    0x1CD0CE0: "read_string",
 }
 PACKET_BUFFER_OFFSET = 0x10
 PACKET_CURSOR_OFFSET = 0x18
@@ -117,7 +120,10 @@ class PacketReadBreakpoint(gdb.Breakpoint):
                 if length >= 6
                 else None
             )
-            if target_opcode is not None and frame_opcode != target_opcode:
+            if target_opcode is not None and target_opcode not in {
+                cached_opcode,
+                frame_opcode,
+            }:
                 return False
             payload = (
                 bytes(

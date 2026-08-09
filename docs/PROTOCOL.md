@@ -599,39 +599,59 @@ shapes, nine NPCs, and paired heartbeat traffic.
 ## Variable server records (`156`, `385`)
 
 Both opcodes select between a compact and expanded capture variant with the
-first byte after the opcode:
+first byte after the opcode. Short-lived GDB primitive-reader traces now bound
+both expanded branches completely:
 
 ```text
 uint16 opcode
 uint8  variant
-byte[] opaque_tail
 
-opcode 156, variant 0: tail length 0
-opcode 156, variant 1: tail length 18
-opcode 385, variant 0: tail length 445
-opcode 385, variant 1: tail length 0
+opcode 156, variant 0:
+    end
+opcode 156, variant 1:
+    utf16_packet_string text    # u16 units, UTF-16LE units, zero byte
+    bool8 flag
+    int32 values[3]
+
+opcode 385, variant 0:
+    repeat 89:
+        uint8 selector
+        int32 value
+opcode 385, variant 1:
+    end
 ```
 
 Streams `92` and `114` contain the expanded pair `385:0`/`156:1`, byte-for-byte
 identical between the two sessions. Stream `126` contains the compact pair
-`385:1`/`156:0`. No other variants or lengths occur. Compact forms therefore
-have full shape coverage; expanded forms have partial coverage because their
-tails remain opaque. The fold records opcode/variant counts, total opaque
-bytes, field epoch, and `variable_server_record_received` events without
-dumping tail contents.
+`385:1`/`156:0`. No other variants occur. The captured opcode-`385` expanded
+packet is 448 bytes: its 89 selectors have counts
+`0:45, 1:2, 2:3, 4:26, 5:6, 6:7`; the signed values range from `0` to
+`2001005` with 43 distinct values. The captured 21-byte opcode-`156` expanded
+packet has one text code unit, a false flag, and values `(2001004, 0, 0)`.
+These are structural observations only; selector, text, flag, and value roles
+remain neutral and no security meaning is inferred.
+
+All four forms now have full shape coverage and exact typed round trips. The
+fold records opcode/variant counts, 89 selector/value entries per expanded
+opcode `385`, three typed int32 values per expanded opcode `156`, zero opaque
+bytes, field epoch, and `variable_server_record_received` events. Safe output
+retains only text length, flag, value/entry counts, and never the text or raw
+values.
 
 `--generate-variable-server-records` re-emits every bounded observation at its
 original frame index after length/reparse/uniqueness/conflict validation.
 `protocol.variable_server_record_emitter` exposes only frame index, opcode,
-variant, opaque-tail length, field epoch, patch count, and the predicted
-unchanged player/phase state.
+variant, text length, flag, value/entry counts, field epoch, patch count, and
+the predicted unchanged player/phase state.
 
-A browser-free stream-`114` proof regenerated frame `9` (`385:0`, 445-byte
-tail) and frame `11` (`156:1`, 18-byte tail), composed with the initial, fixed,
-and NPC emitters. The real client rendered map `101000000`; its independent
-transcript is valid and active with both variable events, 463 opaque bytes,
-nine NPCs, and paired heartbeats. This establishes lossless replay acceptance
-without treating the opaque data as decoded or security-related.
+A browser-free stream-`114` proof regenerated frames `9` and `11`, composed
+with the initial, fixed, and NPC emitters. A later opt-in HTTP experiment sent
+those same two expanded plaintexts through the active cipher state. The real
+client remained active on map `101000000` with HP `50/222`, MP `97/342`, and
+110/110 paired generated heartbeats. Its transcript folds validly to four
+variable events, 178 typed entries, six typed int32 values, and zero opaque
+bytes. This establishes exact generation and post-bootstrap replay acceptance,
+not the higher-level purpose of either packet.
 
 ## Inventory change sets (`server 39`)
 
@@ -1827,10 +1847,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 25,597
-full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 12,976 full, 21,604 partial,
-627 unknown, and zero invalid; stream `114` remains 16/14/46/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 25,611
+full, 43,954 partial, 1,535 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 12,990 full, 21,604 partial,
+613 unknown, and zero invalid; stream `114` reaches 29/14/33/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its 13 remaining warnings are cross-packet state correlations:
 12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed

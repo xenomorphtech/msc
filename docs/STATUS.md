@@ -53,8 +53,8 @@
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   25,611 full, 43,954 partial, 1,535 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 12,988 full, 21,606 partial,
-  613 unknown, and zero invalid; stream `114` reports 27/16/33/0. Thirteen
+  packet observations. Stream `92` now reports 12,990 full, 21,604 partial,
+  613 unknown, and zero invalid; stream `114` reports 29/14/33/0. Thirteen
   long-corpus state-correlation warnings remain: the prior 12 plus one
   aggregate warning for six one-HP combat prediction differences.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
@@ -78,18 +78,27 @@
   `fixed_server_emitter_live_20260809/world/1786313433938476085_replay_12857.jsonl`
   folds validly to `active`, one matching character context, nine NPCs, and
   paired heartbeats.
-- Opcodes `156` and `385` now have capture-bounded discriminator envelopes.
-  Stream `126` has complete three-byte variants `156:0`/`385:1`; streams `92`
-  and `114` have partial variants `156:1`/`385:0` with exact 18/445-byte opaque
-  tails. The fold emits neutral events and counts 463 opaque bytes without
-  exposing contents or assigning security semantics.
+- Opcodes `156` and `385` now have fully typed compact/expanded branches.
+  Stream `126` has three-byte variants `156:0`/`385:1`; streams `92` and `114`
+  have `156:1` as packet UTF-16 text, bool, and three int32 values, plus
+  `385:0` as exactly 89 `uint8 selector, int32 value` entries. Short live GDB
+  traces and exact capture round trips close both former opaque tails without
+  assigning security or gameplay semantics.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
   The client rendered map `101000000`; transcript
   `variable_server_emitter_live_20260809/world/1786314493694015926_replay_12857.jsonl`
-  folds validly to `active`, both expected variants, 463 opaque bytes, nine
-  NPCs, and paired heartbeats.
+  folds validly to `active`, both expected variants, 89 entries, three typed
+  values, zero opaque bytes, nine NPCs, and paired heartbeats.
+- Replay mode has an opt-in loopback `POST /api/v1/server-packets` endpoint.
+  It is disabled by default, requires `--enable-http-packet-injection`, exactly
+  one active replay connection, bounded exact JSON, and serializes encryption
+  and writes with heartbeats/reactive responses. Safe status exposes counters
+  but never packet bytes. Exact live `385:0` and `156:1` injections left the
+  client active on map `101000000` at HP `50/222`, MP `97/342`, with 110/110
+  heartbeats; the transcript folds to four variable events, 178 entries, six
+  typed values, zero opaque bytes, and two injection events.
 - `--generate-field-npc-spawns` now reconstructs every fully typed opcode-`300`
   frame from the folded aliased entity model. It validates exact 22-byte
   re-encoding, reparsing, frame uniqueness, and patch conflicts; runtime status
@@ -409,8 +418,9 @@ leave packets, and the observed fold matched that action/effect/lifecycle while
 remaining `active`. `GET /api/v1/status` exposes the policy under
 `protocol.mob_health_responses`: its mutable state is nested under `state`, and
 the parent carries observed/served/rejected counts, response-packet count, and
-the last identifier-free response plan. The HTTP listener remains read-only
-and loopback-only, using namespace/OS access as its current security boundary.
+the last identifier-free response plan. The HTTP status route remains read-only
+and loopback-only; packet injection is absent unless explicitly enabled under
+the namespace/OS security boundary.
 
 The same live path now validates the derived mob-movement policy. Stream `114`
 provided the held-open field, stream `92` provided 11,949 deterministic
@@ -471,8 +481,8 @@ final foothold `635`/stance `2`, and 11/11 matched heartbeats.
 Composed movement is now transmission-paced state rather than only a startup
 prediction. Each replay connection owns a scheduler that rejects identity or
 position/foothold/stance discontinuities and advances only after the exact
-expected encrypted write drains. The read-only API observed the live sequence
-as `planned (785,-2677, 0/2)`, `in_progress (833,-2677, 1/2)`, then `complete
+expected encrypted write drains. The read-only status route observed the live
+sequence as `planned (785,-2677, 0/2)`, `in_progress (833,-2677, 1/2)`, then `complete
 (881,-2677, 2/2)`; it also exposes last/next safe steps and confirmed/planning
 frame counts. The frozen transcript folds validly with the two events
 10.002838 seconds apart, ten type-`0` commands, final foothold `635`/stance
@@ -485,8 +495,8 @@ previous schedule's final packet drains. The real client first received one
 automatic path `(785,-2677) -> (833,-2677)`; only afterward did the queue plan
 the composed continuation `(833,-2677) -> (881,-2677) -> (929,-2677)` from
 the baseline-plus-confirmed prefix. Because a fresh evidence fold takes about
-32.5 seconds, it runs off the asyncio loop. The read-only API remained
-responsive throughout with `phase=planning`, one sent packet, zero currently
+32.5 seconds, it runs off the asyncio loop. The read-only status route
+remained responsive throughout with `phase=planning`, one sent packet, zero currently
 planned packets remaining, and `planning_decision_index=2`; it then exposed
 three total packets and finished at `3/3`. The frozen transcript is valid with
 three broadcasts, fifteen type-`0` commands, exact continuity, and 8/8 matched
@@ -501,7 +511,7 @@ seconds and the composed follow-up took 0.005125 seconds. A second live run
 retained the same `785 -> 833 -> 881 -> 929` result with 10.008720- and
 10.002057-second movement gaps, rather than the former 42.500916-second first
 gap. Its independent fold is valid with fifteen commands and 6/6 heartbeats.
-Safe cache counts are available through the read-only API.
+Safe cache counts are available through the read-only status route.
 
 A bounded relative-movement policy now derives targets from confirmed state
 instead of requiring every endpoint at startup. With two `(+96,0)` decisions,
@@ -510,7 +520,7 @@ after its predecessor completed. Runtime finished three decisions and five
 packets at the predicted foothold/stance. The frozen transcript validates
 `785 -> 833 -> 881 -> 929 -> 977 -> 1025`, twenty-five type-`0` commands, four
 approximately three-second gaps, and 6/6 heartbeats. Policy count, displacement,
-step bound, and foothold remain safe/read-only API state.
+step bound, and foothold remain safe status-route state.
 
 Those relative decisions can now be gated by the modeled server-opcode-`10` /
 client-opcode-`23` heartbeat match instead of chaining immediately. One match
@@ -521,8 +531,8 @@ decision. A browser-free real-client run exposed decision 2 mid-flight at
 `(1025,-2677)` after the second. The independent transcript is valid with
 21/21 heartbeats and exact movement gaps 5.326966, 1.000527, 3.999752, and
 1.000549 seconds. Runtime trigger telemetry finished with three matched events,
-two decisions started/completed, and one post-completion event ignored; HTTP
-remains read-only.
+two decisions started/completed, and one post-completion event ignored; the
+HTTP status route remains read-only.
 
 The policy can now use a client-originated gameplay event as well.
 `served-mob-movement` waits for a known active mob's opcode-`207` submission,
@@ -534,7 +544,7 @@ frame order `207 -> 283 -> 282 -> 282`, reaching the predicted
 `833 -> 881 -> 929` state. Its independent fold has three broadcasts, fifteen
 type-`0` commands, one matched movement pair, zero pending/unmatched movement,
 and 4/4 separately matched heartbeats. Runtime finished one event/decision and
-`awaiting_event:false`; HTTP remains read-only.
+`awaiting_event:false`; the HTTP status route remains read-only.
 
 A bounded local-player proximity predicate is now the third policy trigger.
 It compares each typed opcode-`182` path endpoint with the confirmed mob using
@@ -545,8 +555,8 @@ distance `310` without sending movement. A later frame-`107` endpoint
 `108`/`109`, and completed the predicted `833 -> 881 -> 929` state. The
 independent transcript is valid with six live predicate observations/one
 entry, three broadcasts, fifteen type-`0` commands, and 11/11 separately
-matched heartbeats. Safe API telemetry records no identifiers and HTTP remains
-read-only.
+matched heartbeats. Safe API telemetry records no identifiers and the HTTP
+status route remains read-only.
 
 The three event-driven triggers now share a bounded post-decision cooldown.
 `--mob-movement-policy-cooldown-seconds` accepts `0..3600`, starts only after
@@ -558,7 +568,8 @@ responses emitted no movement, and the first response after expiry authorized
 frames `89`/`90`. Runtime recorded two completed decisions and three cooldown
 rejections. The frozen transcript is valid with no warnings, ends at the
 predicted `(1025,-2677)`, and contains five broadcasts/twenty-five type-`0`
-commands plus 16/16 matched heartbeats. HTTP remains read-only.
+commands plus 16/16 matched heartbeats. The HTTP status route remains
+read-only.
 
 Replay transcripts now make policy decisions directly auditable. Bounded,
 JSON-safe `runtime_event` records capture trigger observations, decision
@@ -594,14 +605,15 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 1. Use the owner/proximity negative controls to isolate the remaining
    client-side drop eligibility condition; serve a reactive pickup only after
    observing an authentic opcode-`185` request.
-2. Capture primitive-reader traces for the expanded opcode-`156` and `385`
-   variants so their 18/445-byte opaque tails can be subdivided without
-   guessing security or gameplay semantics.
+2. On fresh client processes, vary one neutrally named opcode-`156`/`385`
+   field at a time through the opt-in injection endpoint and compare the
+   observed client/fold/heartbeat effect with the modeled unchanged-state
+   prediction, restarting rather than compounding a stalled-client result.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Add a bounded per-trigger event budget so repeated valid gameplay events
-   can be rate-limited independently of the shared cooldown while preserving
-   the read-only HTTP boundary.
+   can be rate-limited independently of the shared cooldown while keeping
+   packet injection an explicit, loopback-only opt-in.
 
 ## Useful proof artifacts
 

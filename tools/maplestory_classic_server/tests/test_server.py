@@ -56,6 +56,7 @@ from maple_server.gameplay import (  # noqa: E402
     ReactiveMobHealth,
     analyze_gameplay_transcript,
 )
+from maple_server.http_api import ServerPacketInjection  # noqa: E402
 from maple_server.protocol import (  # noqa: E402
     crypt_payload,
     encode_frame_header,
@@ -92,6 +93,7 @@ from maple_server.packets import (  # noqa: E402
     PickupGainNotice,
     WorldHandoff,
     WorldSelection,
+    VariableServerRecord,
 )
 from maple_server.transcript import (  # noqa: E402
     Transcript,
@@ -608,6 +610,22 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertEqual(arguments.world_heartbeat_interval_seconds, 10)
+
+    def test_replay_parser_accepts_opt_in_http_packet_injection(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--http-api-port",
+                "12858",
+                "--enable-http-packet-injection",
+                "--transcript",
+                "world.jsonl",
+            ]
+        )
+
+        self.assertTrue(arguments.enable_http_packet_injection)
 
     def test_replay_parser_accepts_reactive_mob_acknowledgements(self) -> None:
         arguments = build_parser().parse_args(
@@ -1209,6 +1227,88 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks)
             server.close()
             await server.wait_closed()
+
+    async def test_replay_injects_plaintext_through_active_cipher_state(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"\x34\x12captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="injection-source", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            injection = ServerPacketInjection(enabled=True)
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=1,
+                            server_packet_injection=injection,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            for _ in range(100):
+                if injection.safe_dict()["ready"]:
+                    break
+                await asyncio.sleep(0.001)
+            self.assertTrue(injection.safe_dict()["ready"])
+
+            injected_plaintext = VariableServerRecord(
+                opcode=385, variant=1, opaque_tail=b""
+            ).to_bytes()
+            result = await injection.inject(injected_plaintext)
+            encrypted = await reader.readexactly(4 + len(injected_plaintext))
+            self.assertEqual(
+                crypt_payload(encrypted[4:], shuffle_iv(server_iv)),
+                injected_plaintext,
+            )
+            self.assertEqual(result["opcode"], 385)
+            self.assertEqual(result["plaintext_length"], 3)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            self.assertFalse(injection.safe_dict()["ready"])
+
+            observed_paths = tuple(observed_directory.glob("*.jsonl"))
+            self.assertEqual(len(observed_paths), 1)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(observed_paths[0])
+            )
+            self.assertTrue(analysis.valid)
+            self.assertEqual(analysis.state.variable_server_records, 1)
 
     async def test_replay_periodically_probes_and_folds_heartbeat_responses(
         self,

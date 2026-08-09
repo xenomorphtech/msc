@@ -616,6 +616,8 @@ class GameplayGameState:
         default_factory=Counter
     )
     variable_server_variants: Counter[str] = field(default_factory=Counter)
+    variable_server_typed_entries: int = 0
+    variable_server_typed_values: int = 0
     variable_server_opaque_bytes: int = 0
     pending_movements: int = 0
     termination_received: bool = False
@@ -742,6 +744,19 @@ class VariableServerReplayFrame:
             "opcode": self.record.opcode,
             "variant": self.record.variant,
             "opaque_tail_length": len(self.record.opaque_tail),
+            "entry_count": len(self.record.entries),
+            "text_code_units": (
+                len(self.record.text.encode("utf-16le")) // 2
+                if self.record.text is not None
+                else 0
+            ),
+            "flag": self.record.flag,
+            "value_count": len(self.record.values),
+            "compact": (
+                bool(self.record.variant)
+                if self.record.opcode == 385
+                else None
+            ),
             "field_epoch": self.field_epoch,
         }
 
@@ -757,6 +772,15 @@ class VariableServerReplayPlan:
             "frames": [frame.safe_dict() for frame in self.frames],
             "prediction": {
                 "variable_server_record_events": len(self.frames),
+                "typed_entry_count": sum(
+                    len(frame.record.entries) for frame in self.frames
+                ),
+                "typed_value_count": sum(
+                    len(frame.record.values) for frame in self.frames
+                ),
+                "opaque_byte_count": sum(
+                    len(frame.record.opaque_tail) for frame in self.frames
+                ),
                 "player_state": "unchanged",
                 "phase": "unchanged",
             },
@@ -3223,6 +3247,12 @@ class GameplayAnalysis:
                 "variable_server_variants": dict(
                     self.state.variable_server_variants
                 ),
+                "variable_server_typed_entries": (
+                    self.state.variable_server_typed_entries
+                ),
+                "variable_server_typed_values": (
+                    self.state.variable_server_typed_values
+                ),
                 "variable_server_opaque_bytes": (
                     self.state.variable_server_opaque_bytes
                 ),
@@ -5269,6 +5299,12 @@ class GameplayStateFold:
             self.state.variable_server_records += 1
             self.state.variable_server_records_by_opcode[opcode] += 1
             self.state.variable_server_variants[variant_key] += 1
+            self.state.variable_server_typed_entries += len(
+                variable_record.entries
+            )
+            self.state.variable_server_typed_values += len(
+                variable_record.values
+            )
             self.state.variable_server_opaque_bytes += len(
                 variable_record.opaque_tail
             )
@@ -5276,8 +5312,18 @@ class GameplayStateFold:
                 "opcode": opcode,
                 "variant": variable_record.variant,
                 "opaque_tail_length": len(variable_record.opaque_tail),
+                "entry_count": len(variable_record.entries),
+                "text_code_units": (
+                    len(variable_record.text.encode("utf-16le")) // 2
+                    if variable_record.text is not None
+                    else 0
+                ),
+                "flag": variable_record.flag,
+                "value_count": len(variable_record.values),
                 "field_epoch": self.state.field_epoch,
             }
+            if opcode == 385:
+                details["compact"] = bool(variable_record.variant)
             self._event(
                 frame,
                 "variable_server_record_received",
@@ -8359,6 +8405,8 @@ def render_gameplay_analysis(
             f"variable_server_records=count:{state.variable_server_records} "
             f"by_opcode:{dict(state.variable_server_records_by_opcode)} "
             f"variants:{dict(state.variable_server_variants)} "
+            f"typed_entries:{state.variable_server_typed_entries} "
+            f"typed_values:{state.variable_server_typed_values} "
             f"opaque_bytes:{state.variable_server_opaque_bytes}"
         ),
         (

@@ -5448,51 +5448,162 @@ class InitialCharacterContextRecord:
 
 
 @dataclass(frozen=True)
+class VariableServerEntry:
+    selector: int
+    value: int
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack("<Bi", self.selector, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"variable-server entry field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class VariableServerRecord:
     opcode: int
     variant: int
-    opaque_tail: bytes = field(repr=False)
+    opaque_tail: bytes = field(default=b"", repr=False)
+    entries: tuple[VariableServerEntry, ...] = ()
+    text: str | None = None
+    flag: bool | None = None
+    values: tuple[int, ...] = ()
 
-    CAPTURED_TAIL_LENGTHS = {
-        (156, 0): 0,
-        (156, 1): 18,
-        (385, 0): 445,
-        (385, 1): 0,
-    }
+    OPCODE_385_EXPANDED_ENTRY_COUNT = 89
 
     @classmethod
     def parse(cls, payload: bytes) -> "VariableServerRecord":
         reader = PacketReader(payload, packet_name="variable_server_record")
         opcode = reader.u16("opcode")
         variant = reader.u8("variant")
+        entries: tuple[VariableServerEntry, ...] = ()
+        text = None
+        flag = None
+        values: tuple[int, ...] = ()
+        opaque_tail = b""
+        if opcode == 156 and variant in {0, 1}:
+            if variant:
+                text = reader.utf16_string("text", trailing_byte=True)
+                flag_raw = reader.u8("flag")
+                if flag_raw not in {0, 1}:
+                    raise PacketShapeError(
+                        "variable_server_record.flag is "
+                        f"{flag_raw}, expected boolean 0 or 1"
+                    )
+                flag = bool(flag_raw)
+                values = tuple(
+                    reader.i32(f"values[{index}]") for index in range(3)
+                )
+        elif opcode == 385 and variant in {0, 1}:
+            entry_count = (
+                0 if variant else cls.OPCODE_385_EXPANDED_ENTRY_COUNT
+            )
+            entries = tuple(
+                VariableServerEntry(
+                    selector=reader.u8(f"entries[{index}].selector"),
+                    value=reader.i32(f"entries[{index}].value"),
+                )
+                for index in range(entry_count)
+            )
+        else:
+            opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
         record = cls(
             opcode=opcode,
             variant=variant,
-            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+            opaque_tail=opaque_tail,
+            entries=entries,
+            text=text,
+            flag=flag,
+            values=values,
         )
         reader.finish()
         record._validate()
         return record
 
     def _validate(self) -> None:
-        expected_tail_length = self.CAPTURED_TAIL_LENGTHS.get(
-            (self.opcode, self.variant)
+        if self.opaque_tail:
+            raise PacketShapeError(
+                "variable-server records have typed fields, not an opaque tail"
+            )
+        if self.opcode == 156 and self.variant in {0, 1}:
+            if self.entries:
+                raise PacketShapeError(
+                    "opcode 156 has scalar fields, not typed entries"
+                )
+            if not self.variant:
+                if self.text is not None or self.flag is not None or self.values:
+                    raise PacketShapeError(
+                        "opcode 156 variant 0 has no scalar fields"
+                    )
+                return
+            if self.text is None:
+                raise PacketShapeError(
+                    "opcode 156 variant 1 requires a UTF-16 text field"
+                )
+            if type(self.flag) is not bool:
+                raise PacketShapeError(
+                    "opcode 156 variant 1 requires a boolean flag"
+                )
+            if len(self.values) != 3:
+                raise PacketShapeError(
+                    "opcode 156 variant 1 requires exactly 3 int32 values"
+                )
+            encode_utf16_string(self.text, trailing_byte=True)
+            try:
+                struct.pack("<iii", *self.values)
+            except struct.error as error:
+                raise PacketShapeError(
+                    "opcode 156 variant 1 values must fit int32"
+                ) from error
+            return
+        if self.opcode == 385 and self.variant in {0, 1}:
+            expected_entry_count = (
+                0
+                if self.variant
+                else self.OPCODE_385_EXPANDED_ENTRY_COUNT
+            )
+            if self.text is not None or self.flag is not None or self.values:
+                raise PacketShapeError(
+                    "opcode 385 has typed entries, not scalar fields"
+                )
+            if len(self.entries) != expected_entry_count:
+                raise PacketShapeError(
+                    f"opcode 385 variant {self.variant} has "
+                    f"{len(self.entries)} entries, expected "
+                    f"{expected_entry_count}"
+                )
+            for entry in self.entries:
+                entry.to_bytes()
+            return
+        raise PacketShapeError(
+            "unsupported variable-server opcode/variant "
+            f"{self.opcode}/{self.variant}"
         )
-        if expected_tail_length is None:
-            raise PacketShapeError(
-                "unsupported variable-server opcode/variant "
-                f"{self.opcode}/{self.variant}"
-            )
-        if len(self.opaque_tail) != expected_tail_length:
-            raise PacketShapeError(
-                f"variable-server opcode {self.opcode} variant {self.variant} "
-                f"tail has {len(self.opaque_tail)} bytes, expected "
-                f"{expected_tail_length}"
-            )
 
     def to_bytes(self) -> bytes:
         self._validate()
-        return struct.pack("<HB", self.opcode, self.variant) + self.opaque_tail
+        if self.opcode == 156 and self.variant:
+            if self.text is None or self.flag is None:
+                raise PacketShapeError(
+                    "opcode 156 variant 1 is missing typed fields"
+                )
+            body = b"".join(
+                (
+                    encode_utf16_string(self.text, trailing_byte=True),
+                    struct.pack("<Biii", int(self.flag), *self.values),
+                )
+            )
+        else:
+            body = b"".join(entry.to_bytes() for entry in self.entries)
+        return b"".join(
+            (
+                struct.pack("<HB", self.opcode, self.variant),
+                body,
+                self.opaque_tail,
+            )
+        )
 
 
 @dataclass(frozen=True)

@@ -71,6 +71,7 @@ from maple_server.packets import (  # noqa: E402
     InitialInventorySnapshot,
     InitialProgressionSnapshot,
     TypedInitialFieldSnapshot,
+    VariableServerEntry,
     VariableServerRecord,
     InventoryChangeSet,
     InventoryModification,
@@ -200,8 +201,21 @@ def fixture_fixed_server_records() -> tuple[object, ...]:
 def fixture_variable_server_records() -> tuple[VariableServerRecord, ...]:
     return (
         VariableServerRecord(opcode=156, variant=0, opaque_tail=b""),
-        VariableServerRecord(opcode=156, variant=1, opaque_tail=b"\x11" * 18),
-        VariableServerRecord(opcode=385, variant=0, opaque_tail=b"\x22" * 445),
+        VariableServerRecord(
+            opcode=156,
+            variant=1,
+            text="x",
+            flag=False,
+            values=(0x11111111, 0, 0),
+        ),
+        VariableServerRecord(
+            opcode=385,
+            variant=0,
+            entries=tuple(
+                VariableServerEntry(selector=index, value=index - 44)
+                for index in range(89)
+            ),
+        ),
         VariableServerRecord(opcode=385, variant=1, opaque_tail=b""),
     )
 
@@ -1642,8 +1656,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 variant=2,
                 opaque_tail=b"",
             ).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "expected 445"):
-            replace(records[2], opaque_tail=b"").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "expected 89"):
+            replace(records[2], entries=()).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "exactly 3"):
+            replace(records[1], values=(1, 2)).to_bytes()
 
     def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
         stage = FieldLoadStage(
@@ -2973,14 +2989,33 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.variable_server_variants,
             {"156:0": 1, "156:1": 1, "385:0": 1, "385:1": 1},
         )
-        self.assertEqual(analysis.state.variable_server_opaque_bytes, 463)
+        self.assertEqual(analysis.state.variable_server_typed_entries, 89)
+        self.assertEqual(analysis.state.variable_server_typed_values, 3)
+        self.assertEqual(analysis.state.variable_server_opaque_bytes, 0)
         self.assertEqual([frame.record for frame in plan.frames], list(records))
         safe = plan.safe_dict()
         self.assertEqual(safe["emitter"], "typed_variable_server_record")
         self.assertEqual(
             [frame["opaque_tail_length"] for frame in safe["frames"]],
-            [0, 18, 445, 0],
+            [0, 0, 0, 0],
         )
+        self.assertEqual(
+            [frame["entry_count"] for frame in safe["frames"]],
+            [0, 0, 89, 0],
+        )
+        self.assertEqual(
+            [frame["text_code_units"] for frame in safe["frames"]],
+            [0, 1, 0, 0],
+        )
+        self.assertEqual(
+            [frame["flag"] for frame in safe["frames"]],
+            [None, False, None, None],
+        )
+        self.assertEqual(
+            [frame["value_count"] for frame in safe["frames"]],
+            [0, 3, 0, 0],
+        )
+        self.assertEqual(safe["prediction"]["typed_value_count"], 3)
         self.assertNotIn("11111111", repr(safe))
         self.assertNotIn("22222222", repr(safe))
 

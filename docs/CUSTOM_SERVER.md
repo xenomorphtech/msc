@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 25,597 observations are full, 43,954 partial, 1,549
+`--fail-on-invalid`: 25,611 observations are full, 43,954 partial, 1,535
 unknown-but-lossless, and none invalid. The original 12 warnings are state
 correlations, not shape failures. The combat model adds one aggregate warning
 for six delayed predictions that differ by one HP, so the current total is 13.
@@ -103,8 +103,8 @@ The analyzer now accepts the exact 11-byte type-`1` shape and the existing
 length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
 counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
 packets across all three observed variants, all with exact round trips.
-Together, these latest modeled families leave the long-corpus totals at 25,597
-full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid.
+Together, these latest modeled families leave the long-corpus totals at 25,611
+full, 43,954 partial, 1,535 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a
@@ -394,21 +394,75 @@ Add `--generate-variable-server-records` for the opcode-`156` and `385`
 records adjacent to field entry. Each packet has a typed opcode and one-byte
 variant discriminator. In `1-10FS.pcapng`, opcode `156` variant `0` and opcode
 `385` variant `1` are complete three-byte packets. In both `111.pcapng` world
-streams, opcode `156` variant `1` carries an exact 18-byte opaque tail and
-opcode `385` variant `0` carries an exact 445-byte opaque tail. The expanded
-forms remain partial; no security or gameplay role is assigned to their tails.
+streams, opcode `156` variant `1` carries a packet UTF-16 string, a boolean,
+and three int32 values; opcode `385` variant `0` carries exactly 89 repeated
+`uint8 selector, int32 value` entries. All four branches are fully consumed and
+round-trip exactly. The field names remain neutral; no security or gameplay
+role is assigned from shape alone.
 
 The option performs the same valid-fold, exact-length, reparse, unique-index,
 and patch-conflict checks as the fixed emitter. Runtime status exposes only
-opcode, variant, opaque-tail length, field epoch, and frame index under
-`protocol.variable_server_record_emitter`.
+opcode, variant, text length, flag, value/entry counts, field epoch, and frame
+index under `protocol.variable_server_record_emitter`; text and raw values are
+not included.
 
 The 2026-08-09 browser-free live run regenerated expanded server frames `9`
 and `11` together with one initial snapshot, 11 fixed records, and nine NPC
 spawns. The client entered and rendered map `101000000`. Transcript
 `downloads/maple_custom_server_observed/variable_server_emitter_live_20260809/world/1786314493694015926_replay_12857.jsonl`
-folds validly to `active`, variants `385:0` and `156:1`, 463 bounded opaque
-bytes, nine NPCs, and paired heartbeat traffic.
+folds validly to `active`, variants `385:0` and `156:1`, 89 typed entries,
+three typed values, zero opaque bytes, nine NPCs, and paired heartbeat traffic.
+
+## Opt-in live server-packet injection
+
+Replay mode can expose one deliberately narrow mutation endpoint for controlled
+client experiments. It is disabled by default and requires both the loopback
+HTTP listener and the explicit opt-in flag:
+
+```text
+--http-api-port 12858
+--enable-http-packet-injection
+```
+
+The flag is rejected outside replay mode or without `--http-api-port`. The HTTP
+listener still accepts only a numeric loopback address. There is no application-
+level authentication: the trust boundary is the local namespace/OS account, so
+enable the endpoint only while all local callers are trusted.
+
+Send exactly one plaintext server packet as even-length hex. The packet must
+contain at least its two-byte opcode, is capped at 64 KiB, and the JSON body is
+capped at 128 KiB:
+
+```sh
+sudo ip netns exec mapleproxy curl -sS \
+  -H 'Content-Type: application/json' \
+  --data '{"plaintext_hex":"810100"}' \
+  http://127.0.0.1:12858/api/v1/server-packets
+```
+
+The request shape is exact: no fields other than `plaintext_hex` are accepted.
+Success returns `accepted`, opcode, plaintext length, and send time, but never
+packet bytes. Disabled injection returns `403`; no active replay connection or
+multiple ambiguous connections returns `409`; malformed and oversized inputs
+return `400`/`413`. `GET /api/v1/status` exposes only readiness, active-
+connection count, attempts, sends, failures, the last opcode/length/time, and
+the last error.
+
+The selected connection registers only after its replay bootstrap frames and
+unregisters on close. Injected plaintext shares one async lock with generated
+heartbeats and reactive responses, so encryption and socket-write order cannot
+advance the Maple cipher IV out of sequence. Successful sends are also written
+to the replay transcript as packet and `http_server_packet_injected` runtime
+records and pass through the existing modeled-response policies.
+
+The browser-free live proof injected exact captured opcode-`385` and `156`
+expanded packets after the client was active. The client stayed on map
+`101000000` at HP `50/222` and MP `97/342`; 110/110 generated heartbeat probes
+were answered. Transcript
+`downloads/maple_custom_server_observed/http_injection_live_20260809/world/1786315909674330462_replay_12857.jsonl`
+folds validly to four variable records, 178 typed selector/value entries, six
+typed int32 values, zero opaque bytes, and two injection events, matching the
+predicted unchanged player/phase state.
 
 ## Typed NPC-spawn generation
 
@@ -699,7 +753,7 @@ folds validly with no warnings: two attacks/59 submitted damage, one matched
 health effect, one zero-health update and leave, no active mob or pending
 effect, and 17/17 matched heartbeats.
 
-Query the read-only API from the listener's namespace:
+Query the read-only status route from the listener's namespace:
 
 ```sh
 sudo ip netns exec mapleproxy curl -s \
@@ -713,8 +767,9 @@ packet counters plus `last_response` with damage, HP before/after, emitted
 percentages/opcodes, zero entries, skipped terminal hits, and removal. The API
 also reports the most recent safe `last_rejection`; rejected/untargeted attacks
 receive no modeled response but do not close the held-open connection. The API
-remains loopback-only and read-only; it needs no separate authentication under
-the current local namespace/OS access boundary.
+remains loopback-only; status is read-only, while server-packet injection is
+absent unless explicitly enabled under the current local namespace/OS access
+boundary.
 
 Captured official combat still has six delayed ±1 HP authority adjustments.
 The exact responder does not claim to reproduce those, does not synthesize
@@ -1090,9 +1145,10 @@ heartbeats. One response is matched only when an outstanding server opcode
 `10` probe exists, and each match can start at most one still-pending policy
 decision. It does not gate the initial movement packet. The first packet of an
 authorized decision is sent immediately; `--mob-movement-step-delay-seconds`
-still paces later packets inside that decision. The read-only API exposes
-`mode`, `awaiting_event`, `matched_events_observed`, `decisions_started`,
-`decisions_completed`, and `events_ignored_after_completion` under
+still paces later packets inside that decision. The read-only status route
+exposes `mode`, `awaiting_event`, `matched_events_observed`,
+`decisions_started`, `decisions_completed`, and
+`events_ignored_after_completion` under
 `protocol.mob_movement_broadcast.policy_trigger`.
 
 The real-client heartbeat-gated run reached an observable intermediate state
