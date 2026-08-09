@@ -710,6 +710,18 @@ for template `100100`. The unique route from `(785,-2677)` to `(881,-2677)` is
 frame `18818` twice; the client rendered the final endpoint and the independent
 fold validated two broadcasts, ten commands, and 11/11 heartbeats.
 
+`--mob-movement-step-delay-seconds SECONDS` gives the generated movement
+sequence its own nonnegative inter-step pace without delaying unrelated
+post-transcript packets. Explicit per-gap delays retain precedence. Each
+connection constructs a mutable `MobMovementBroadcastScheduler`; it validates
+entity/template/field/object identity and exact position/foothold/stance
+continuity, then advances only after the expected encrypted packet drains.
+Its confirmed packet prefix can be supplied to the existing planner, so a
+later in-process decision starts from the last transmitted intermediate state.
+The real-client proof observed `planned (785) -> in_progress (833) -> complete
+(881)` at `0/2`, `1/2`, and `2/2` packets. The folded movement events were
+10.002838 seconds apart, with ten type-`0` commands and 10/10 heartbeats.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold
@@ -955,7 +967,12 @@ Automatic plans also report the number of matching displacement paths and
 distinct relative motion shapes, making the uniqueness decision inspectable.
 Composed plans additionally report their step bound, selected source-frame
 sequence, intermediate step plans, usable/ambiguous displacement counts, and
-shortest-sequence count. Planned/sent packet counters cover the whole sequence.
+shortest-sequence count. The parent reports planned/sent/remaining packet
+counts. Its mutable `state` reports `planned`/`in_progress`/`complete`, current
+and target position/foothold/stance, last sent and next safe step, confirmed
+movement-frame count, and the baseline-plus-confirmed frame count available to
+later planning. State changes after the socket write drains; it is not a
+client acknowledgement.
 When reactive mob-health responses are
 enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,

@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 137 tests.
+- The custom-server suite currently passes all 146 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -391,6 +391,17 @@ snail `(785,-2677) -> (833,-2677) -> (881,-2677)` and sent 2/2 planned packets.
 Its independent fold is valid with two known broadcasts, ten type-`0` commands,
 final foothold `635`/stance `2`, and 11/11 matched heartbeats.
 
+Composed movement is now transmission-paced state rather than only a startup
+prediction. Each replay connection owns a scheduler that rejects identity or
+position/foothold/stance discontinuities and advances only after the exact
+expected encrypted write drains. The read-only API observed the live sequence
+as `planned (785,-2677, 0/2)`, `in_progress (833,-2677, 1/2)`, then `complete
+(881,-2677, 2/2)`; it also exposes last/next safe steps and confirmed/planning
+frame counts. The frozen transcript folds validly with the two events
+10.002838 seconds apart, ten type-`0` commands, final foothold `635`/stance
+`2`, and 10/10 matched heartbeats. The scheduler retains only the confirmed
+movement prefix for a later in-process planning fold.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -405,10 +416,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Add a paced runtime movement scheduler whose mutable modeled mob state
-   advances as each generated broadcast is sent, so later planning decisions
-   can start from the confirmed intermediate state rather than a startup-only
-   plan.
+4. Add a bounded in-process follow-up movement queue that invokes the existing
+   planner with the scheduler's baseline-plus-confirmed frame prefix, then
+   validate a second decision made after the first packet. Keep HTTP read-only
+   until a separate authenticated mutation design exists.
 
 ## Useful proof artifacts
 

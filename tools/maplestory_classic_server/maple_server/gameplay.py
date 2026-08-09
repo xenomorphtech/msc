@@ -1215,6 +1215,7 @@ class MobMovementBroadcastPlan:
     previous_x: int
     previous_y: int
     previous_foothold_id: int
+    previous_stance: int
     target_x: int
     target_y: int
     target_foothold_id: int
@@ -1236,6 +1237,7 @@ class MobMovementBroadcastPlan:
                 "x": self.previous_x,
                 "y": self.previous_y,
                 "foothold_id": self.previous_foothold_id,
+                "stance": self.previous_stance,
             },
             "predicted": {
                 "x": self.target_x,
@@ -1299,6 +1301,7 @@ class MobMovementBroadcastSequencePlan:
                 "x": first.previous_x,
                 "y": first.previous_y,
                 "foothold_id": first.previous_foothold_id,
+                "stance": first.previous_stance,
             },
             "predicted": {
                 "x": last.target_x,
@@ -1323,6 +1326,215 @@ class MobMovementBroadcastSequencePlan:
                 "ambiguous_displacements": self.ambiguous_displacements,
                 "shortest_sequence_count": self.shortest_sequence_count,
             },
+        }
+
+
+@dataclass
+class MobMovementBroadcastScheduler:
+    """Track the sent prefix of one validated mob-movement plan."""
+
+    steps: tuple[MobMovementBroadcastPlan, ...] = field(repr=False)
+    baseline_server_frames: tuple[bytes, ...] = field(
+        default=(), repr=False
+    )
+    packets_sent: int = field(default=0, init=False)
+    current_x: int = field(init=False)
+    current_y: int = field(init=False)
+    current_foothold_id: int = field(init=False)
+    current_stance: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        if not self.steps:
+            raise ValueError("mob movement schedule requires at least one step")
+        first = self.steps[0]
+        expected_entity = first.entity
+        expected_template_id = first.template_id
+        expected_field_epoch = first.field_epoch
+        expected_object_id = first.broadcast.object_id
+        expected_state = (
+            first.previous_x,
+            first.previous_y,
+            first.previous_foothold_id,
+            first.previous_stance,
+        )
+        for step_index, step in enumerate(self.steps, 1):
+            if (
+                step.entity != expected_entity
+                or step.template_id != expected_template_id
+                or step.field_epoch != expected_field_epoch
+                or step.broadcast.object_id != expected_object_id
+            ):
+                raise ValueError(
+                    f"mob movement schedule step {step_index} changes entity, "
+                    "template, field epoch, or object"
+                )
+            previous_state = (
+                step.previous_x,
+                step.previous_y,
+                step.previous_foothold_id,
+                step.previous_stance,
+            )
+            if previous_state != expected_state:
+                raise ValueError(
+                    f"mob movement schedule step {step_index} is "
+                    f"discontinuous: {previous_state} != {expected_state}"
+                )
+            expected_state = (
+                step.target_x,
+                step.target_y,
+                step.target_foothold_id,
+                step.stance,
+            )
+        (
+            self.current_x,
+            self.current_y,
+            self.current_foothold_id,
+            self.current_stance,
+        ) = (
+            first.previous_x,
+            first.previous_y,
+            first.previous_foothold_id,
+            first.previous_stance,
+        )
+
+    @property
+    def plaintexts(self) -> tuple[bytes, ...]:
+        return tuple(step.broadcast.to_bytes() for step in self.steps)
+
+    @property
+    def packets_remaining(self) -> int:
+        return len(self.steps) - self.packets_sent
+
+    @property
+    def confirmed_server_frames(self) -> tuple[bytes, ...]:
+        """Return only movement steps whose writes completed."""
+
+        return tuple(
+            step.broadcast.to_bytes()
+            for step in self.steps[: self.packets_sent]
+        )
+
+    @property
+    def planning_server_frames(self) -> tuple[bytes, ...]:
+        """Return the planning baseline plus the confirmed movement prefix."""
+
+        return self.baseline_server_frames + self.confirmed_server_frames
+
+    def confirm_sent(self, plaintext: bytes) -> MobMovementBroadcastPlan:
+        """Advance modeled state after the expected packet was drained."""
+
+        if self.packets_sent >= len(self.steps):
+            raise ValueError("mob movement schedule is already complete")
+        step = self.steps[self.packets_sent]
+        expected_plaintext = step.broadcast.to_bytes()
+        if plaintext != expected_plaintext:
+            raise ValueError(
+                "sent mob movement packet does not match the next scheduled "
+                f"step {self.packets_sent + 1}"
+            )
+        current_state = (
+            self.current_x,
+            self.current_y,
+            self.current_foothold_id,
+            self.current_stance,
+        )
+        expected_state = (
+            step.previous_x,
+            step.previous_y,
+            step.previous_foothold_id,
+            step.previous_stance,
+        )
+        if current_state != expected_state:
+            raise RuntimeError(
+                "mob movement scheduler state diverged from the next step: "
+                f"{current_state} != {expected_state}"
+            )
+        self.current_x = step.target_x
+        self.current_y = step.target_y
+        self.current_foothold_id = step.target_foothold_id
+        self.current_stance = step.stance
+        self.packets_sent += 1
+        return step
+
+    @staticmethod
+    def _step_safe_dict(
+        step_index: int, step: MobMovementBroadcastPlan
+    ) -> dict[str, object]:
+        return {
+            "step_index": step_index,
+            "source_server_frame_index": step.source_server_frame_index,
+            "previous": {
+                "x": step.previous_x,
+                "y": step.previous_y,
+                "foothold_id": step.previous_foothold_id,
+                "stance": step.previous_stance,
+            },
+            "predicted": {
+                "x": step.target_x,
+                "y": step.target_y,
+                "foothold_id": step.target_foothold_id,
+                "stance": step.stance,
+            },
+        }
+
+    def safe_dict(self) -> dict[str, object]:
+        first = self.steps[0]
+        final = self.steps[-1]
+        if self.packets_sent == 0:
+            phase = "planned"
+        elif self.packets_sent == len(self.steps):
+            phase = "complete"
+        else:
+            phase = "in_progress"
+        last_sent_step = (
+            self._step_safe_dict(
+                self.packets_sent,
+                self.steps[self.packets_sent - 1],
+            )
+            if self.packets_sent
+            else None
+        )
+        next_step = (
+            self._step_safe_dict(
+                self.packets_sent + 1,
+                self.steps[self.packets_sent],
+            )
+            if self.packets_sent < len(self.steps)
+            else None
+        )
+        return {
+            "phase": phase,
+            "entity": first.entity,
+            "template_id": first.template_id,
+            "field_epoch": first.field_epoch,
+            "current": {
+                "x": self.current_x,
+                "y": self.current_y,
+                "foothold_id": self.current_foothold_id,
+                "stance": self.current_stance,
+            },
+            "target": {
+                "x": final.target_x,
+                "y": final.target_y,
+                "foothold_id": final.target_foothold_id,
+                "stance": final.stance,
+            },
+            "last_sent_step": last_sent_step,
+            "next_step": next_step,
+            "confirmed_server_frame_count": len(
+                self.confirmed_server_frames
+            ),
+            "planning_server_frame_count": len(
+                self.planning_server_frames
+            ),
+        }
+
+    def telemetry_dict(self) -> dict[str, object]:
+        return {
+            "packets_planned": len(self.steps),
+            "packets_sent": self.packets_sent,
+            "packets_remaining": self.packets_remaining,
+            "state": self.safe_dict(),
         }
 
 
@@ -5692,14 +5904,15 @@ def _captured_mob_movement_paths(
 def _active_mobs_after_server_frames(
     analysis: GameplayAnalysis,
     server_frames: tuple[bytes, ...],
-) -> dict[int, tuple[str, int, int, int, int]]:
-    active_mobs: dict[int, tuple[str, int, int, int, int]] = {
+) -> dict[int, tuple[str, int, int, int, int, int]]:
+    active_mobs: dict[int, tuple[str, int, int, int, int, int]] = {
         object_id: (
             mob.alias,
             mob.spawn.template_id,
             mob.x,
             mob.y,
             mob.foothold_id,
+            mob.stance,
         )
         for object_id, mob in analysis.state.mobs.items()
     }
@@ -5718,6 +5931,7 @@ def _active_mobs_after_server_frames(
             spawn.x,
             spawn.y,
             spawn.foothold_id,
+            spawn.stance,
         )
 
     for plaintext in server_frames:
@@ -5739,9 +5953,14 @@ def _active_mobs_after_server_frames(
             current = active_mobs.get(broadcast.object_id)
             if current is None:
                 continue
-            entity, template_id, current_x, current_y, current_foothold = (
-                current
-            )
+            (
+                entity,
+                template_id,
+                current_x,
+                current_y,
+                current_foothold,
+                current_stance,
+            ) = current
             absolute_commands = tuple(
                 command
                 for command in broadcast.commands
@@ -5755,6 +5974,7 @@ def _active_mobs_after_server_frames(
                 )
                 if final_command.foothold_id is not None:
                     current_foothold = final_command.foothold_id
+                current_stance = final_command.stance
             else:
                 current_x = broadcast.reference_x
                 current_y = broadcast.reference_y
@@ -5764,6 +5984,7 @@ def _active_mobs_after_server_frames(
                 current_x,
                 current_y,
                 current_foothold,
+                current_stance,
             )
     return active_mobs
 
@@ -5863,6 +6084,7 @@ def plan_mob_movement_broadcast(
         previous_x,
         previous_y,
         previous_foothold_id,
+        previous_stance,
     ) = next(iter(active_mobs.items()))
     mode = "stationary"
     source_server_frame_index = None
@@ -6087,6 +6309,7 @@ def plan_mob_movement_broadcast(
         previous_x=previous_x,
         previous_y=previous_y,
         previous_foothold_id=previous_foothold_id,
+        previous_stance=previous_stance,
         target_x=target_x,
         target_y=target_y,
         target_foothold_id=foothold_id,
@@ -6152,6 +6375,7 @@ def plan_composed_mob_movement_broadcasts(
         previous_x,
         previous_y,
         previous_foothold_id,
+        _,
     ) = next(iter(active_mobs.items()))
     if previous_foothold_id != foothold_id:
         raise ValueError(

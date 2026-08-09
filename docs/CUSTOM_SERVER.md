@@ -795,7 +795,7 @@ The validated composed run changed the automatic command to:
 
 ```text
 --emit-mob-movement-composed-path '2:881:-2677:635'
---post-transcript-frame-delay-seconds 10
+--mob-movement-step-delay-seconds 10
 --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_composed_path_visual_20260809
 ```
 
@@ -810,6 +810,49 @@ position. Transcript
 `generated_mob_composed_path_visual_20260809/1786292585566000786_replay_12857.jsonl`
 folds validly with two known broadcasts, ten type-`0` commands, no unknown mob,
 final foothold `635`/stance `2`, and 11/11 matched heartbeats.
+
+Generated movement plans now become one mutable scheduler per replay
+connection. Scheduler construction rejects a change of entity, template,
+field epoch, object, or any discontinuity in position, foothold, or stance.
+It begins at the first step's `previous` state and advances only after the
+matching encrypted packet has been written and `drain()` has completed. An
+unexpected or out-of-order plaintext cannot advance it. The confirmed
+movement prefix is retained beside the original post-transcript planning
+baseline, so another in-process planning decision can fold only packets that
+were actually transmitted.
+
+`--mob-movement-step-delay-seconds SECONDS` controls only gaps between
+consecutive scheduled movement packets. A matching explicit
+`--post-transcript-gap-delay-seconds` still wins for that particular gap;
+unrelated post-transcript frames continue to use the ordinary frame delay.
+The option is nonnegative and requires a movement-emission option.
+
+The runtime object keeps the immutable plan/evidence fields and adds:
+
+```text
+protocol.mob_movement_broadcast.packets_planned
+protocol.mob_movement_broadcast.packets_sent
+protocol.mob_movement_broadcast.packets_remaining
+protocol.mob_movement_broadcast.state.phase               # planned/in_progress/complete
+protocol.mob_movement_broadcast.state.current             # x/y/foothold/stance
+protocol.mob_movement_broadcast.state.target
+protocol.mob_movement_broadcast.state.last_sent_step
+protocol.mob_movement_broadcast.state.next_step
+protocol.mob_movement_broadcast.state.confirmed_server_frame_count
+protocol.mob_movement_broadcast.state.planning_server_frame_count
+```
+
+A second real-client run used the dedicated 10-second step delay. Before any
+connection, status was `planned` at `(785,-2677)` with `0/2` packets sent.
+After the first packet, status was `in_progress` at `(833,-2677)`, with one
+packet remaining and step 2 still predicted at `(881,-2677)`. It then became
+`complete` at that final state with `2/2` sent. Transcript
+`generated_mob_scheduler_visual_20260809/1786294591708398631_replay_12857.jsonl`
+folds validly with the two movement events 10.002838 seconds apart, two known
+broadcasts, ten type-`0` commands, final foothold `635`/stance `2`, and 10/10
+matched heartbeats. This validates both client effect and transmission-paced
+state advancement; `drain()` confirms the local write, not a client-level
+movement acknowledgement.
 
 ## Historical synthetic staging experiment
 

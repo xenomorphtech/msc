@@ -13,6 +13,7 @@ from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     GameplayStateFold,
     MobHealthResponsePolicy,
+    MobMovementBroadcastScheduler,
     analyze_gameplay_transcript,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
@@ -3851,6 +3852,80 @@ class GameplayStateFoldTest(unittest.TestCase):
             ),
             ((200, -200), (250, -200)),
         )
+        scheduler = MobMovementBroadcastScheduler(
+            sequence_plan.steps,
+            baseline_server_frames=(post_spawn,),
+        )
+        self.assertEqual(scheduler.packets_sent, 0)
+        self.assertEqual(scheduler.packets_remaining, 2)
+        self.assertEqual(scheduler.confirmed_server_frames, ())
+        self.assertEqual(
+            scheduler.safe_dict()["current"],
+            {
+                "x": 200,
+                "y": -200,
+                "foothold_id": 8,
+                "stance": translated_spawn.stance,
+            },
+        )
+        self.assertEqual(scheduler.safe_dict()["phase"], "planned")
+        with self.assertRaisesRegex(ValueError, "next scheduled step 1"):
+            scheduler.confirm_sent(
+                sequence_plan.steps[1].broadcast.to_bytes()
+            )
+        self.assertEqual(scheduler.packets_sent, 0)
+
+        scheduler.confirm_sent(sequence_plan.steps[0].broadcast.to_bytes())
+        in_progress = scheduler.telemetry_dict()
+        self.assertEqual(in_progress["packets_sent"], 1)
+        self.assertEqual(in_progress["packets_remaining"], 1)
+        self.assertEqual(in_progress["state"]["phase"], "in_progress")
+        self.assertEqual(
+            in_progress["state"]["current"],
+            {
+                "x": 250,
+                "y": -200,
+                "foothold_id": 8,
+                "stance": sequence_plan.steps[0].stance,
+            },
+        )
+        self.assertEqual(
+            in_progress["state"]["last_sent_step"]["step_index"],
+            1,
+        )
+        self.assertEqual(
+            in_progress["state"]["next_step"]["step_index"],
+            2,
+        )
+        self.assertEqual(
+            scheduler.confirmed_server_frames,
+            (sequence_plan.steps[0].broadcast.to_bytes(),),
+        )
+        replanned_from_confirmed_state = plan_mob_movement_broadcast(
+            fixture_gameplay_transcript(compact_transition=True),
+            post_transcript_server_frames=(
+                scheduler.planning_server_frames
+            ),
+            evidence_transcript=evidence,
+            target_x=300,
+            target_y=-200,
+            foothold_id=8,
+            path_evidence_server_frame_index=source_frame,
+        )
+        self.assertEqual(
+            (
+                replanned_from_confirmed_state.previous_x,
+                replanned_from_confirmed_state.previous_y,
+            ),
+            (250, -200),
+        )
+        scheduler.confirm_sent(sequence_plan.steps[1].broadcast.to_bytes())
+        complete = scheduler.telemetry_dict()
+        self.assertEqual(complete["packets_sent"], 2)
+        self.assertEqual(complete["packets_remaining"], 0)
+        self.assertEqual(complete["state"]["phase"], "complete")
+        self.assertEqual(complete["state"]["next_step"], None)
+        self.assertNotIn("object_id", str(complete))
         sequence_fold = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
                 extra_server_plaintexts=(

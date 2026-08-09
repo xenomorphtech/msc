@@ -24,6 +24,8 @@ from .gameplay import (
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
     MobMovementAcknowledgementPolicy,
+    MobMovementBroadcastPlan,
+    MobMovementBroadcastScheduler,
     analyze_gameplay_transcript,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
@@ -380,7 +382,9 @@ async def replay_connection(
     npc_state_replay_plaintext: bytes | None = None,
     player_stat_update_plaintext: bytes | None = None,
     inventory_quantity_update_plaintext: bytes | None = None,
-    mob_movement_broadcast_plaintexts: tuple[bytes, ...] = (),
+    mob_movement_broadcast_plans: tuple[MobMovementBroadcastPlan, ...] = (),
+    mob_movement_baseline_server_frames: tuple[bytes, ...] = (),
+    mob_movement_step_delay_seconds: float | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
     item_use_response_policy: ItemUseResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
@@ -429,6 +433,18 @@ async def replay_connection(
         )
     if post_transcript_frame_delay_seconds < 0:
         raise ValueError("post_transcript_frame_delay_seconds cannot be negative")
+    if (
+        mob_movement_step_delay_seconds is not None
+        and mob_movement_step_delay_seconds < 0
+    ):
+        raise ValueError("mob_movement_step_delay_seconds cannot be negative")
+    if (
+        mob_movement_step_delay_seconds is not None
+        and not mob_movement_broadcast_plans
+    ):
+        raise ValueError(
+            "mob movement step delay requires a movement schedule"
+        )
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
     if any(
@@ -489,6 +505,41 @@ async def replay_connection(
             "inventory_quantity_update_plaintext must be a post-transcript "
             "server frame"
         )
+    movement_schedule = (
+        MobMovementBroadcastScheduler(
+            mob_movement_broadcast_plans,
+            baseline_server_frames=mob_movement_baseline_server_frames,
+        )
+        if mob_movement_broadcast_plans
+        else None
+    )
+    movement_plaintexts = (
+        movement_schedule.plaintexts
+        if movement_schedule is not None
+        else ()
+    )
+    movement_post_transcript_start: int | None = None
+    if movement_plaintexts:
+        movement_post_transcript_start = next(
+            (
+                start
+                for start in range(
+                    len(post_transcript_server_frames)
+                    - len(movement_plaintexts)
+                    + 1
+                )
+                if post_transcript_server_frames[
+                    start : start + len(movement_plaintexts)
+                ]
+                == movement_plaintexts
+            ),
+            None,
+        )
+        if movement_post_transcript_start is None:
+            raise ValueError(
+                "mob movement schedule must appear contiguously in the "
+                "post-transcript server frames"
+            )
     previous_timestamp_ns: int | None = None
     patched_server_events = iter(
         patch_server_event_data(
@@ -583,6 +634,21 @@ async def replay_connection(
         raise TypeError(
             "runtime mob_health_responses telemetry must be a dictionary"
         )
+    movement_broadcast_metrics = (
+        runtime_protocol.get("mob_movement_broadcast")
+        if runtime_protocol is not None
+        else None
+    )
+    if movement_broadcast_metrics is not None and not isinstance(
+        movement_broadcast_metrics, dict
+    ):
+        raise TypeError(
+            "runtime mob_movement_broadcast telemetry must be a dictionary"
+        )
+    if movement_schedule is not None and movement_broadcast_metrics is not None:
+        movement_broadcast_metrics.update(
+            movement_schedule.telemetry_dict()
+        )
     client_iv = (
         parse_handshake(transcript.server_bytes).first_iv
         if (
@@ -646,7 +712,10 @@ async def replay_connection(
                     inventory_quantity_update_plaintext is not None
                 ),
                 "emit_mob_movement_broadcast": (
-                    bool(mob_movement_broadcast_plaintexts)
+                    bool(mob_movement_broadcast_plans)
+                ),
+                "mob_movement_step_delay_seconds": (
+                    mob_movement_step_delay_seconds
                 ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
@@ -793,6 +862,11 @@ async def replay_connection(
         post_transcript_plaintexts = (
             tuple(pending_opcode_replies) + post_transcript_server_frames
         )
+        movement_plaintext_start = (
+            len(pending_opcode_replies) + movement_post_transcript_start
+            if movement_post_transcript_start is not None
+            else None
+        )
         if post_transcript_plaintexts and post_transcript_start_delay_seconds > 0:
             await asyncio.sleep(post_transcript_start_delay_seconds)
         for index, plaintext in enumerate(post_transcript_plaintexts):
@@ -801,7 +875,17 @@ async def replay_connection(
                 gap_delay_seconds = (
                     post_transcript_gap_delays_seconds[gap_index]
                     if gap_index < len(post_transcript_gap_delays_seconds)
-                    else post_transcript_frame_delay_seconds
+                    else (
+                        mob_movement_step_delay_seconds
+                        if (
+                            mob_movement_step_delay_seconds is not None
+                            and movement_plaintext_start is not None
+                            and movement_plaintext_start < index
+                            < movement_plaintext_start
+                            + len(movement_plaintexts)
+                        )
+                        else post_transcript_frame_delay_seconds
+                    )
                 )
                 if gap_delay_seconds > 0:
                     await asyncio.sleep(gap_delay_seconds)
@@ -833,20 +917,15 @@ async def replay_connection(
                         mob_movement_acknowledgement_policy.safe_dict()
                     )
             if (
-                plaintext in mob_movement_broadcast_plaintexts
-                and runtime_protocol is not None
+                movement_schedule is not None
+                and movement_plaintext_start is not None
+                and movement_plaintext_start <= index
+                < movement_plaintext_start + len(movement_plaintexts)
             ):
-                movement_broadcast_metrics = runtime_protocol.get(
-                    "mob_movement_broadcast"
-                )
-                if isinstance(movement_broadcast_metrics, dict):
-                    movement_broadcast_metrics["packets_sent"] = (
-                        int(
-                            movement_broadcast_metrics.get(
-                                "packets_sent", 0
-                            )
-                        )
-                        + 1
+                movement_schedule.confirm_sent(plaintext)
+                if movement_broadcast_metrics is not None:
+                    movement_broadcast_metrics.update(
+                        movement_schedule.telemetry_dict()
                     )
             if (
                 npc_state_replay_plaintext is not None
@@ -2466,6 +2545,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="delay between consecutive post-transcript server frames",
     )
     replay.add_argument(
+        "--mob-movement-step-delay-seconds",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "override the default delay only between consecutive generated "
+            "mob-movement steps"
+        ),
+    )
+    replay.add_argument(
         "--post-transcript-gap-delay-seconds",
         dest="post_transcript_gap_delays_seconds",
         action="append",
@@ -3228,7 +3317,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
         post_transcript_server_frames = tuple(
             arguments.post_transcript_server_frames
         )
-        mob_movement_broadcast_plaintexts: tuple[bytes, ...] = ()
+        mob_movement_broadcast_plans: tuple[
+            MobMovementBroadcastPlan, ...
+        ] = ()
+        mob_movement_baseline_server_frames = (
+            post_transcript_server_frames
+        )
         if (
             arguments.emit_mob_movement_broadcast is not None
             or arguments.emit_mob_movement_path is not None
@@ -3254,16 +3348,16 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     foothold_id=foothold_id,
                     max_steps=max_steps,
                 )
-                mob_movement_broadcast_plaintexts = tuple(
-                    broadcast.to_bytes()
-                    for broadcast in sequence_plan.broadcasts
+                mob_movement_broadcast_plans = sequence_plan.steps
+                movement_schedule_preview = MobMovementBroadcastScheduler(
+                    mob_movement_broadcast_plans,
+                    baseline_server_frames=(
+                        mob_movement_baseline_server_frames
+                    ),
                 )
                 runtime_protocol["mob_movement_broadcast"] = {
                     **sequence_plan.safe_dict(),
-                    "packets_planned": len(
-                        mob_movement_broadcast_plaintexts
-                    ),
-                    "packets_sent": 0,
+                    **movement_schedule_preview.telemetry_dict(),
                 }
             else:
                 if arguments.emit_mob_movement_broadcast is not None:
@@ -3303,17 +3397,33 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     ),
                     auto_select_captured_path=auto_select_captured_path,
                 )
-                mob_movement_broadcast_plaintexts = (
-                    mob_movement_broadcast_plan.broadcast.to_bytes(),
+                mob_movement_broadcast_plans = (
+                    mob_movement_broadcast_plan,
+                )
+                movement_schedule_preview = MobMovementBroadcastScheduler(
+                    mob_movement_broadcast_plans,
+                    baseline_server_frames=(
+                        mob_movement_baseline_server_frames
+                    ),
                 )
                 runtime_protocol["mob_movement_broadcast"] = {
                     **mob_movement_broadcast_plan.safe_dict(),
-                    "packets_planned": 1,
-                    "packets_sent": 0,
+                    **movement_schedule_preview.telemetry_dict(),
                 }
-            post_transcript_server_frames += (
-                mob_movement_broadcast_plaintexts
+            post_transcript_server_frames += tuple(
+                plan.broadcast.to_bytes()
+                for plan in mob_movement_broadcast_plans
             )
+        if arguments.mob_movement_step_delay_seconds is not None:
+            if arguments.mob_movement_step_delay_seconds < 0:
+                raise ValueError(
+                    "--mob-movement-step-delay-seconds cannot be negative"
+                )
+            if not mob_movement_broadcast_plans:
+                raise ValueError(
+                    "--mob-movement-step-delay-seconds requires a "
+                    "mob-movement emission option"
+                )
         npc_state_replay_plaintext = None
         if npc_state_replay_plan is not None:
             npc_state_replay_plaintext = npc_state_replay_plan.update.to_bytes()
@@ -3368,8 +3478,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
             inventory_quantity_update_plaintext=(
                 inventory_quantity_update_plaintext
             ),
-            mob_movement_broadcast_plaintexts=(
-                mob_movement_broadcast_plaintexts
+            mob_movement_broadcast_plans=(
+                mob_movement_broadcast_plans
+            ),
+            mob_movement_baseline_server_frames=(
+                mob_movement_baseline_server_frames
+            ),
+            mob_movement_step_delay_seconds=(
+                arguments.mob_movement_step_delay_seconds
             ),
             item_pickup_response_policy=item_pickup_response_policy,
             item_use_response_policy=item_use_response_policy,
@@ -3429,6 +3545,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "emit_mob_movement_composed_path": (
                 arguments.emit_mob_movement_composed_path
+            ),
+            "mob_movement_step_delay_seconds": (
+                arguments.mob_movement_step_delay_seconds
             ),
             "reactive_mob_health_responses": (
                 arguments.reactive_mob_health_responses

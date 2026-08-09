@@ -1022,6 +1022,24 @@ The independent transcript folds validly with two known broadcasts, ten
 type-`0` commands, final foothold `635`/stance `2`, and 11/11 matched
 heartbeats.
 
+At runtime those two packets are no longer represented only by a startup plan
+and final sent counter. A per-connection scheduler validates that every step
+retains the same entity/template/field/object and that each previous
+position/foothold/stance equals the prior predicted result. It advances its
+`current` state only after the expected encrypted write drains, retains the
+confirmed opcode-`282` prefix for later planning folds, and exposes
+`planned`, `in_progress`, or `complete` state plus last/next safe step reports.
+Out-of-order plaintext is rejected without changing the model.
+
+The live pacing proof repeated the `(48,0) + (48,0)` route with a dedicated
+10-second movement-step delay. Runtime status observed the intermediate
+`(833,-2677)` state at `1/2` sent rather than prematurely reporting the final
+target, then completed at `(881,-2677)` and `2/2`. The independently folded
+events are 10.002838 seconds apart and retain exact continuity:
+`(785,-2677, stance 3) -> (833,-2677, stance 2) ->
+(881,-2677, stance 2)` on foothold `635`. The transcript remains valid with
+two broadcasts, ten type-`0` commands, and 10/10 heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:
