@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  24,600 full, 38,027 partial, 8,473 unknown-but-lossless, and zero invalid
+  24,999 full, 38,027 partial, 8,074 unknown-but-lossless, and zero invalid
   packet observations. Twelve state-correlation warnings remain.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
@@ -62,6 +62,10 @@
   and operation-`2` equip moves. All 256 change sets and 232 modifications
   decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
   spawns also validate after preserving the facing byte values `0/1/2/4/5`.
+- Server opcode `293` is now an exact seven-byte mob-health-percentage update.
+  Stream `92` has 208 and stream `126` has 399; every long-corpus update names
+  an active mob, 189 reach zero, and none increase within a mob lifecycle.
+  Zero-health state does not remove the mob before opcode `280` does so.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

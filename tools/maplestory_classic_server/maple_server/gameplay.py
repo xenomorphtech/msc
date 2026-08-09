@@ -29,6 +29,7 @@ from .packets import (
     ItemUseRequest,
     MobControllerChange,
     MobEnterField,
+    MobHealthPercentageUpdate,
     MobLeaveField,
     MobMovementAcknowledgement,
     MobMovementBroadcast,
@@ -72,6 +73,7 @@ class MobEntity:
     x: int = 0
     y: int = 0
     stance: int = 0
+    health_percentage: int | None = None
 
 
 @dataclass
@@ -233,6 +235,10 @@ class GameplayGameState:
     mob_leaves: int = 0
     mob_controller_changes: int = 0
     mob_movement_broadcasts: int = 0
+    mob_health_percentage_updates: int = 0
+    mob_health_zero_updates: int = 0
+    mob_health_increases: int = 0
+    mob_health_updates_for_unknown_mobs: int = 0
     unknown_mob_leaves: int = 0
     unknown_mob_broadcasts: int = 0
     mob_broadcast_commands: int = 0
@@ -1073,6 +1079,7 @@ class GameplayAnalysis:
                 "x": entity.x,
                 "y": entity.y,
                 "stance": entity.stance,
+                "health_percentage": entity.health_percentage,
                 "foothold_id": entity.spawn.foothold_id,
                 "origin_foothold_id": entity.spawn.origin_foothold_id,
                 "spawn_effect": entity.spawn.spawn_effect,
@@ -1225,6 +1232,14 @@ class GameplayAnalysis:
                 "mob_controller_changes": self.state.mob_controller_changes,
                 "mob_movement_broadcasts": (
                     self.state.mob_movement_broadcasts
+                ),
+                "mob_health_percentage_updates": (
+                    self.state.mob_health_percentage_updates
+                ),
+                "mob_health_zero_updates": self.state.mob_health_zero_updates,
+                "mob_health_increases": self.state.mob_health_increases,
+                "mob_health_updates_for_unknown_mobs": (
+                    self.state.mob_health_updates_for_unknown_mobs
                 ),
                 "unknown_mob_leaves": self.state.unknown_mob_leaves,
                 "unknown_mob_broadcasts": self.state.unknown_mob_broadcasts,
@@ -3475,6 +3490,49 @@ class GameplayStateFold:
                 parsed=acknowledgement,
                 details=details,
             )
+        if opcode == 293:
+            update = MobHealthPercentageUpdate.parse(payload)
+            alias = self._alias(self._mob_aliases, update.object_id, "mob")
+            entity = self.state.mobs.get(update.object_id)
+            previous_percentage = (
+                entity.health_percentage if entity is not None else None
+            )
+            if entity is None:
+                self.state.mob_health_updates_for_unknown_mobs += 1
+                self.warnings.append(
+                    f"{alias} received a health percentage without an "
+                    "active spawn"
+                )
+            else:
+                if (
+                    previous_percentage is not None
+                    and update.health_percentage > previous_percentage
+                ):
+                    self.state.mob_health_increases += 1
+                entity.health_percentage = update.health_percentage
+            self.state.mob_health_percentage_updates += 1
+            if update.health_percentage == 0:
+                self.state.mob_health_zero_updates += 1
+            details = {
+                "entity": alias,
+                "known_entity": entity is not None,
+                "previous_percentage": previous_percentage,
+                "health_percentage": update.health_percentage,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "mob_health_percentage_updated",
+                details=details,
+                identifiers={"object_id": update.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="mob_health_percentage_update",
+                coverage=ShapeCoverage.FULL,
+                parsed=update,
+                details=details,
+            )
         if opcode == 10:
             probe = HeartbeatProbe.parse(payload)
             self._pending_heartbeat_probes.append(frame.timestamp_ns)
@@ -4280,6 +4338,11 @@ def render_gameplay_analysis(
             f"controller_changes:{state.mob_controller_changes} "
             f"movement_broadcasts:{state.mob_movement_broadcasts} "
             f"broadcast_commands:{state.mob_broadcast_commands} "
+            f"health_updates:{state.mob_health_percentage_updates} "
+            f"health_zero:{state.mob_health_zero_updates} "
+            f"health_increases:{state.mob_health_increases} "
+            "health_unknown_active_mob:"
+            f"{state.mob_health_updates_for_unknown_mobs} "
             f"field_known_templates:{len(state.mob_templates)}"
         ),
         (

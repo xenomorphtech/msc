@@ -1841,6 +1841,40 @@ class MobLeaveField:
 
 
 @dataclass(frozen=True)
+class MobHealthPercentageUpdate:
+    object_id: int
+    health_percentage: int
+    opcode: int = 293
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobHealthPercentageUpdate":
+        reader = PacketReader(
+            payload, packet_name="mob_health_percentage_update"
+        )
+        _expect_opcode(reader, 293)
+        object_id = reader.u32("object_id")
+        health_percentage = reader.u8("health_percentage")
+        reader.finish()
+        if health_percentage > 100:
+            raise PacketShapeError(
+                "mob health percentage must be between zero and 100"
+            )
+        return cls(
+            object_id=object_id,
+            health_percentage=health_percentage,
+        )
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.health_percentage <= 100:
+            raise PacketShapeError(
+                "mob health percentage must be between zero and 100"
+            )
+        return struct.pack(
+            "<HIB", self.opcode, self.object_id, self.health_percentage
+        )
+
+
+@dataclass(frozen=True)
 class CharacterStatUpdate:
     request_flag: int
     stat_mask: int

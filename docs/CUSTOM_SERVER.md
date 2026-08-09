@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 24,600 observations are full, 38,027 partial, 8,473
+`--fail-on-invalid`: 24,999 observations are full, 38,027 partial, 8,074
 unknown-but-lossless, and none invalid. The 12 remaining warnings are state
 correlations, not shape failures. The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.

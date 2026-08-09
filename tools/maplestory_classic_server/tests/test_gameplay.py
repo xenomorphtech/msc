@@ -45,6 +45,7 @@ from maple_server.packets import (  # noqa: E402
     ItemUseRequest,
     MobControllerChange,
     MobEnterField,
+    MobHealthPercentageUpdate,
     MobLeaveField,
     MobMovementAcknowledgement,
     MobMovementBroadcast,
@@ -518,6 +519,14 @@ def fixture_gameplay_transcript(
     )
     append("client_to_server", FieldLoadStage(stage=1).to_bytes())
     append("client_to_server", FieldLoadStage(stage=2).to_bytes())
+    for health_percentage in (75, 50, 0):
+        append(
+            "server_to_client",
+            MobHealthPercentageUpdate(
+                object_id=MOB_OBJECT_ID,
+                health_percentage=health_percentage,
+            ).to_bytes(),
+        )
     if stat_updates:
         append(
             "server_to_client",
@@ -1442,6 +1451,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
             spawn=fixture_mob_spawn(extended_status=True),
         )
         left = MobLeaveField(object_id=MOB_OBJECT_ID, reason=1)
+        health = MobHealthPercentageUpdate(
+            object_id=MOB_OBJECT_ID,
+            health_percentage=42,
+        )
         released = MobControllerChange(
             control_level=0,
             object_id=MOB_OBJECT_ID,
@@ -1463,6 +1476,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             (MobEnterField, entered),
             (MobEnterField, extended_enter),
             (MobLeaveField, left),
+            (MobHealthPercentageUpdate, health),
             (MobControllerChange, released),
             (MobControllerChange, controlled),
             (MobMovementBroadcast, broadcast),
@@ -1471,6 +1485,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(entered.to_bytes()), 48)
         self.assertEqual(len(extended_enter.to_bytes()), 56)
         self.assertEqual(len(left.to_bytes()), 7)
+        self.assertEqual(len(health.to_bytes()), 7)
         self.assertEqual(len(released.to_bytes()), 7)
         self.assertEqual(len(controlled.to_bytes()), 49)
         self.assertEqual(len(broadcast.to_bytes()), 32)
@@ -1480,6 +1495,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 object_id=MOB_OBJECT_ID,
                 spawn=fixture_mob_spawn(),
             ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "between zero and 100"):
+            replace(health, health_percentage=101).to_bytes()
 
     def test_world_session_termination_round_trip(self) -> None:
         termination = WorldSessionTermination(opaque_reason=b"ended!!")
@@ -2075,6 +2092,13 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.mob_entries, 1)
         self.assertEqual(analysis.state.mob_controller_changes, 1)
         self.assertEqual(analysis.state.mob_movement_broadcasts, 1)
+        self.assertEqual(analysis.state.mob_health_percentage_updates, 3)
+        self.assertEqual(analysis.state.mob_health_zero_updates, 1)
+        self.assertEqual(analysis.state.mob_health_increases, 0)
+        self.assertEqual(analysis.state.mob_health_updates_for_unknown_mobs, 0)
+        self.assertEqual(
+            analysis.state.mobs[MOB_OBJECT_ID].health_percentage, 0
+        )
         self.assertEqual(analysis.state.mob_broadcast_commands, 1)
         self.assertEqual(analysis.state.mob_broadcast_commands_by_type, {0: 1})
         self.assertEqual(analysis.state.unknown_mob_broadcasts, 0)
@@ -2122,6 +2146,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("mob_entered_field", event_kinds)
         self.assertIn("mob_controller_changed", event_kinds)
         self.assertIn("mob_movement_broadcast", event_kinds)
+        self.assertIn("mob_health_percentage_updated", event_kinds)
         self.assertIn("field_became_active", event_kinds)
         self.assertIn("mob_movement_submitted", event_kinds)
         self.assertIn("mob_movement_acknowledged", event_kinds)

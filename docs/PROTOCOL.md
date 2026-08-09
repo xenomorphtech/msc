@@ -775,6 +775,23 @@ observed values `0`, `1`, `2`, `4`, and `5`; all 78 stream-`126` spawns parse
 and round-trip. The fold exposes the neutral byte as `facing_value` and keeps
 the hidden field separately boolean.
 
+## Mob health percentage (`server 293`)
+
+The complete update is seven bytes:
+
+```text
+uint16 opcode = 293
+uint32 mob_object_id
+uint8  health_percentage             # inclusive 0..100
+```
+
+Stream `92` contains 208 updates and stream `126` contains 399. Every
+long-corpus object id resolves to an active mob in the current field epoch;
+189 values are zero and no value increases during one mob lifecycle. The fold
+stores current/previous percentages and emits `mob_health_percentage_updated`.
+A zero value does not itself remove the entity: membership still changes only
+on the separate opcode-`280` leave packet.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:
@@ -873,8 +890,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 24,600
-full, 38,027 partial, 8,473 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 24,999
+full, 38,027 partial, 8,074 unknown-but-lossless, and zero invalid packet
 observations. The fold reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 
