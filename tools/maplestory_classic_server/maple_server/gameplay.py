@@ -40,6 +40,7 @@ from .packets import (
     MobLeaveField,
     MobMovementAcknowledgement,
     MobMovementBroadcast,
+    MobMovementCommand,
     MobMovementSubmission,
     MobSpawnData,
     NpcSpawn,
@@ -136,6 +137,7 @@ class MobEntity:
     controller_level: int = 0
     x: int = 0
     y: int = 0
+    foothold_id: int = 0
     stance: int = 0
     health_percentage: int | None = None
     max_hp: int | None = None
@@ -1204,6 +1206,58 @@ class ItemPickupResponsePolicy:
 
 
 @dataclass(frozen=True)
+class MobMovementBroadcastPlan:
+    broadcast: MobMovementBroadcast = field(repr=False)
+    entity: str
+    template_id: int
+    field_epoch: int
+    previous_x: int
+    previous_y: int
+    previous_foothold_id: int
+    target_x: int
+    target_y: int
+    target_foothold_id: int
+    stance: int
+    broadcast_evidence: int
+    exact_stationary_shape_evidence: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "entity": self.entity,
+            "template_id": self.template_id,
+            "field_epoch": self.field_epoch,
+            "previous": {
+                "x": self.previous_x,
+                "y": self.previous_y,
+                "foothold_id": self.previous_foothold_id,
+            },
+            "predicted": {
+                "x": self.target_x,
+                "y": self.target_y,
+                "foothold_id": self.target_foothold_id,
+                "stance": self.stance,
+            },
+            "packet": {
+                "opcode": self.broadcast.opcode,
+                "control_prefix": self.broadcast.opaque_control.hex(),
+                "reference_x": self.broadcast.reference_x,
+                "reference_y": self.broadcast.reference_y,
+                "command_count": len(self.broadcast.commands),
+                "commands": [
+                    command.safe_dict()
+                    for command in self.broadcast.commands
+                ],
+            },
+            "evidence": {
+                "broadcasts": self.broadcast_evidence,
+                "exact_stationary_shape": (
+                    self.exact_stationary_shape_evidence
+                ),
+            },
+        }
+
+
+@dataclass(frozen=True)
 class MobMovementAcknowledgementPolicy:
     status_values_by_template: dict[int, int]
     observations_by_template: dict[int, int]
@@ -1553,7 +1607,7 @@ class GameplayAnalysis:
                     entity.attack_relay_high_bit_markers
                 ),
                 "last_attack_hit_action": entity.last_attack_hit_action,
-                "foothold_id": entity.spawn.foothold_id,
+                "foothold_id": entity.foothold_id,
                 "origin_foothold_id": entity.spawn.origin_foothold_id,
                 "spawn_effect": entity.spawn.spawn_effect,
             }
@@ -4398,6 +4452,7 @@ class GameplayStateFold:
                 controller_level=controller_level,
                 x=entered.spawn.x,
                 y=entered.spawn.y,
+                foothold_id=entered.spawn.foothold_id,
                 stance=entered.spawn.stance,
                 max_hp=REFERENCE_MOB_MAX_HP.get(entered.spawn.template_id),
             )
@@ -4483,6 +4538,7 @@ class GameplayStateFold:
                     entity.spawn = change.spawn
                 entity.x = change.spawn.x
                 entity.y = change.spawn.y
+                entity.foothold_id = change.spawn.foothold_id
                 entity.stance = change.spawn.stance
                 entity.controller_level = change.control_level
             elif entity is not None:
@@ -4524,16 +4580,33 @@ class GameplayStateFold:
             broadcast = MobMovementBroadcast.parse(payload)
             alias = self._alias(self._mob_aliases, broadcast.object_id, "mob")
             entity = self.state.mobs.get(broadcast.object_id)
+            previous = (
+                {
+                    "x": entity.x,
+                    "y": entity.y,
+                    "foothold_id": entity.foothold_id,
+                    "stance": entity.stance,
+                }
+                if entity is not None
+                else None
+            )
             if entity is None:
                 self.state.unknown_mob_broadcasts += 1
-            absolute_positions = [
-                command.position
+            absolute_commands = [
+                command
                 for command in broadcast.commands
                 if command.position is not None
             ]
             if entity is not None:
-                if absolute_positions:
-                    entity.x, entity.y = absolute_positions[-1]
+                if absolute_commands:
+                    final_command = absolute_commands[-1]
+                    entity.x, entity.y = final_command.position or (
+                        entity.x,
+                        entity.y,
+                    )
+                    final_foothold = final_command.foothold_id
+                    if final_foothold is not None:
+                        entity.foothold_id = final_foothold
                 else:
                     entity.x = broadcast.reference_x
                     entity.y = broadcast.reference_y
@@ -4556,6 +4629,17 @@ class GameplayStateFold:
                 "commands": [
                     command.safe_dict() for command in broadcast.commands
                 ],
+                "previous": previous,
+                "result": (
+                    {
+                        "x": entity.x,
+                        "y": entity.y,
+                        "foothold_id": entity.foothold_id,
+                        "stance": entity.stance,
+                    }
+                    if entity is not None
+                    else None
+                ),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -5452,6 +5536,186 @@ def derive_item_pickup_response_policy(
         ),
         source_effect_matches=evidence_state.item_pickup_effect_matches,
         source_removal_matches=evidence_state.item_pickup_removal_matches,
+    )
+
+
+def plan_mob_movement_broadcast(
+    transcript: Transcript,
+    *,
+    post_transcript_server_frames: tuple[bytes, ...] = (),
+    evidence_transcript: Transcript | None = None,
+    target_x: int,
+    target_y: int,
+    foothold_id: int,
+    stance: int = 4,
+) -> MobMovementBroadcastPlan:
+    """Plan one capture-proven stationary placement for one modeled mob."""
+
+    if not all(-0x8000 <= value <= 0x7FFF for value in (target_x, target_y)):
+        raise ValueError("mob movement target coordinates must fit in int16")
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise ValueError("mob movement target foothold must fit in uint16")
+    if not 0 <= stance <= 0xFF:
+        raise ValueError("mob movement target stance must fit in uint8")
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    evidence_analysis = (
+        analysis
+        if evidence_transcript is None
+        else analyze_gameplay_transcript(evidence_transcript)
+    )
+    if not evidence_analysis.valid:
+        raise ValueError(
+            "mob-movement broadcast evidence transcript failed packet/state "
+            "validation"
+        )
+
+    control_prefix = bytes.fromhex("0000ff00000000")
+    evidence_broadcasts = tuple(
+        observation.parsed
+        for observation in evidence_analysis.observations
+        if isinstance(observation.parsed, MobMovementBroadcast)
+    )
+    exact_stationary_shape_evidence = 0
+    for broadcast in evidence_broadcasts:
+        if broadcast.opaque_control != control_prefix:
+            continue
+        if len(broadcast.commands) != 1:
+            continue
+        command = broadcast.commands[0]
+        if (
+            command.command_type == 0
+            and command.position
+            == (broadcast.reference_x, broadcast.reference_y)
+            and command.velocity == (0, 0)
+            and command.stance == stance
+            and command.duration_ms == 1_080
+        ):
+            exact_stationary_shape_evidence += 1
+    if exact_stationary_shape_evidence == 0:
+        raise ValueError(
+            "movement evidence has no exact stationary opcode-282 shape for "
+            f"stance {stance}"
+        )
+
+    active_mobs: dict[int, tuple[str, int, int, int, int]] = {
+        object_id: (
+            mob.alias,
+            mob.spawn.template_id,
+            mob.x,
+            mob.y,
+            mob.foothold_id,
+        )
+        for object_id, mob in analysis.state.mobs.items()
+    }
+    runtime_aliases: dict[int, str] = {}
+
+    def adopt_spawn(object_id: int, spawn: MobSpawnData) -> None:
+        if object_id in active_mobs:
+            entity = active_mobs[object_id][0]
+        else:
+            entity = runtime_aliases.setdefault(
+                object_id, f"mob:runtime:{len(runtime_aliases) + 1}"
+            )
+        active_mobs[object_id] = (
+            entity,
+            spawn.template_id,
+            spawn.x,
+            spawn.y,
+            spawn.foothold_id,
+        )
+
+    for plaintext in post_transcript_server_frames:
+        if len(plaintext) < 2:
+            continue
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 279:
+            entered = MobEnterField.parse(plaintext)
+            adopt_spawn(entered.object_id, entered.spawn)
+        elif opcode == 281:
+            controller = MobControllerChange.parse(plaintext)
+            if controller.spawn is not None:
+                adopt_spawn(controller.object_id, controller.spawn)
+        elif opcode == 280:
+            left = MobLeaveField.parse(plaintext)
+            active_mobs.pop(left.object_id, None)
+        elif opcode == 282:
+            broadcast = MobMovementBroadcast.parse(plaintext)
+            current = active_mobs.get(broadcast.object_id)
+            if current is None:
+                continue
+            entity, template_id, current_x, current_y, current_foothold = current
+            absolute_commands = tuple(
+                command
+                for command in broadcast.commands
+                if command.position is not None
+            )
+            if absolute_commands:
+                final_command = absolute_commands[-1]
+                current_x, current_y = final_command.position or (
+                    current_x,
+                    current_y,
+                )
+                final_foothold = final_command.foothold_id
+                if final_foothold is not None:
+                    current_foothold = final_foothold
+            else:
+                current_x = broadcast.reference_x
+                current_y = broadcast.reference_y
+            active_mobs[broadcast.object_id] = (
+                entity,
+                template_id,
+                current_x,
+                current_y,
+                current_foothold,
+            )
+
+    if len(active_mobs) != 1:
+        raise ValueError(
+            "mob movement broadcast planning requires exactly one active "
+            f"modeled mob, found {len(active_mobs)}"
+        )
+    object_id, (
+        entity,
+        template_id,
+        previous_x,
+        previous_y,
+        previous_foothold_id,
+    ) = next(iter(active_mobs.items()))
+    broadcast = MobMovementBroadcast(
+        object_id=object_id,
+        opaque_control=control_prefix,
+        reference_x=target_x,
+        reference_y=target_y,
+        commands=(
+            MobMovementCommand.absolute(
+                position_x=target_x,
+                position_y=target_y,
+                velocity_x=0,
+                velocity_y=0,
+                foothold_id=foothold_id,
+                stance=stance,
+                duration_ms=1_080,
+            ),
+        ),
+    )
+    broadcast.to_bytes()
+    return MobMovementBroadcastPlan(
+        broadcast=broadcast,
+        entity=entity,
+        template_id=template_id,
+        field_epoch=analysis.state.field_epoch,
+        previous_x=previous_x,
+        previous_y=previous_y,
+        previous_foothold_id=previous_foothold_id,
+        target_x=target_x,
+        target_y=target_y,
+        target_foothold_id=foothold_id,
+        stance=stance,
+        broadcast_evidence=len(evidence_broadcasts),
+        exact_stationary_shape_evidence=exact_stationary_shape_evidence,
     )
 
 

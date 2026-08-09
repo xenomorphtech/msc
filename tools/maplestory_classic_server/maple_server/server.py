@@ -29,6 +29,7 @@ from .gameplay import (
     derive_item_use_response_policy,
     derive_mob_health_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
     plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
@@ -378,6 +379,7 @@ async def replay_connection(
     npc_state_replay_plaintext: bytes | None = None,
     player_stat_update_plaintext: bytes | None = None,
     inventory_quantity_update_plaintext: bytes | None = None,
+    mob_movement_broadcast_plaintext: bytes | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
     item_use_response_policy: ItemUseResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
@@ -642,6 +644,9 @@ async def replay_connection(
                 "emit_inventory_quantity_update": (
                     inventory_quantity_update_plaintext is not None
                 ),
+                "emit_mob_movement_broadcast": (
+                    mob_movement_broadcast_plaintext is not None
+                ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
                 ),
@@ -825,6 +830,23 @@ async def replay_connection(
                 if mob_acknowledgement_metrics is not None:
                     mob_acknowledgement_metrics["state"] = (
                         mob_movement_acknowledgement_policy.safe_dict()
+                    )
+            if (
+                mob_movement_broadcast_plaintext is not None
+                and plaintext == mob_movement_broadcast_plaintext
+                and runtime_protocol is not None
+            ):
+                movement_broadcast_metrics = runtime_protocol.get(
+                    "mob_movement_broadcast"
+                )
+                if isinstance(movement_broadcast_metrics, dict):
+                    movement_broadcast_metrics["packets_sent"] = (
+                        int(
+                            movement_broadcast_metrics.get(
+                                "packets_sent", 0
+                            )
+                        )
+                        + 1
                     )
             if (
                 npc_state_replay_plaintext is not None
@@ -1476,6 +1498,33 @@ def parse_i16_position(specification: str) -> tuple[int, int]:
     if not all(-0x8000 <= value <= 0x7FFF for value in (position_x, position_y)):
         raise argparse.ArgumentTypeError("position coordinates must fit in i16")
     return position_x, position_y
+
+
+def parse_mob_movement_broadcast_target(
+    specification: str,
+) -> tuple[int, int, int, int]:
+    parts = specification.split(":")
+    if len(parts) not in {3, 4}:
+        raise argparse.ArgumentTypeError(
+            "mob movement broadcast must use X:Y:FOOTHOLD[:STANCE]"
+        )
+    position_x, position_y = parse_i16_position(":".join(parts[:2]))
+    try:
+        foothold_id = int(parts[2], 0)
+        stance = int(parts[3], 0) if len(parts) == 4 else 4
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold and stance must be integers"
+        ) from error
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must fit in uint16"
+        )
+    if not 0 <= stance <= 0xFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement stance must fit in uint8"
+        )
+    return position_x, position_y, foothold_id, stance
 
 
 def parse_inventory_quantity_update(
@@ -2234,8 +2283,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--mob-movement-evidence-transcript",
         type=Path,
         help=(
-            "derive opcode-283 acknowledgement values from a separate "
-            "validated world transcript"
+            "derive opcode-282 stationary shapes and opcode-283 "
+            "acknowledgement values from a separate validated world transcript"
         ),
     )
     mob_movement_evidence.add_argument(
@@ -2243,8 +2292,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_non_negative_int,
         metavar="STREAM",
         help=(
-            "derive mob-movement acknowledgement evidence from another TCP "
-            "stream in the replay --pcap"
+            "derive mob-movement broadcast/acknowledgement evidence from "
+            "another TCP stream in the replay --pcap"
+        ),
+    )
+    replay.add_argument(
+        "--emit-mob-movement-broadcast",
+        type=parse_mob_movement_broadcast_target,
+        metavar="X:Y:FOOTHOLD[:STANCE]",
+        help=(
+            "append one capture-proven stationary opcode-282 placement for "
+            "the only active modeled mob; requires --keep-world-open"
         ),
     )
     replay.add_argument(
@@ -2819,10 +2877,29 @@ async def async_main(arguments: argparse.Namespace) -> None:
         if (
             arguments.mob_movement_evidence_transcript is not None
             or arguments.mob_movement_evidence_tcp_stream is not None
-        ) and not arguments.reactive_mob_movement_acknowledgements:
+        ) and not (
+            arguments.reactive_mob_movement_acknowledgements
+            or arguments.emit_mob_movement_broadcast is not None
+        ):
             raise ValueError(
                 "mob-movement evidence options require "
-                "--reactive-mob-movement-acknowledgements"
+                "--reactive-mob-movement-acknowledgements or "
+                "--emit-mob-movement-broadcast"
+            )
+        movement_evidence_transcript = None
+        if arguments.mob_movement_evidence_transcript is not None:
+            movement_evidence_transcript = Transcript.load(
+                arguments.mob_movement_evidence_transcript
+            )
+        elif arguments.mob_movement_evidence_tcp_stream is not None:
+            if arguments.pcap is None:
+                raise ValueError(
+                    "--mob-movement-evidence-tcp-stream requires --pcap"
+                )
+            movement_evidence_transcript = load_pcap_tcp_stream(
+                arguments.pcap,
+                arguments.mob_movement_evidence_tcp_stream,
+                tshark=arguments.tshark,
             )
         mob_movement_acknowledgement_policy = None
         if arguments.reactive_mob_movement_acknowledgements:
@@ -2830,21 +2907,6 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 raise ValueError(
                     "--reactive-mob-movement-acknowledgements requires "
                     "--keep-world-open"
-                )
-            movement_evidence_transcript = None
-            if arguments.mob_movement_evidence_transcript is not None:
-                movement_evidence_transcript = Transcript.load(
-                    arguments.mob_movement_evidence_transcript
-                )
-            elif arguments.mob_movement_evidence_tcp_stream is not None:
-                if arguments.pcap is None:
-                    raise ValueError(
-                        "--mob-movement-evidence-tcp-stream requires --pcap"
-                    )
-                movement_evidence_transcript = load_pcap_tcp_stream(
-                    arguments.pcap,
-                    arguments.mob_movement_evidence_tcp_stream,
-                    tshark=arguments.tshark,
                 )
             mob_movement_acknowledgement_policy = (
                 derive_mob_movement_acknowledgement_policy(
@@ -3058,6 +3120,37 @@ async def async_main(arguments: argparse.Namespace) -> None:
         post_transcript_server_frames = tuple(
             arguments.post_transcript_server_frames
         )
+        mob_movement_broadcast_plaintext = None
+        if arguments.emit_mob_movement_broadcast is not None:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--emit-mob-movement-broadcast requires --keep-world-open"
+                )
+            target_x, target_y, foothold_id, stance = (
+                arguments.emit_mob_movement_broadcast
+            )
+            mob_movement_broadcast_plan = plan_mob_movement_broadcast(
+                transcript,
+                post_transcript_server_frames=(
+                    post_transcript_server_frames
+                ),
+                evidence_transcript=movement_evidence_transcript,
+                target_x=target_x,
+                target_y=target_y,
+                foothold_id=foothold_id,
+                stance=stance,
+            )
+            mob_movement_broadcast_plaintext = (
+                mob_movement_broadcast_plan.broadcast.to_bytes()
+            )
+            post_transcript_server_frames += (
+                mob_movement_broadcast_plaintext,
+            )
+            runtime_protocol["mob_movement_broadcast"] = {
+                **mob_movement_broadcast_plan.safe_dict(),
+                "packets_planned": 1,
+                "packets_sent": 0,
+            }
         npc_state_replay_plaintext = None
         if npc_state_replay_plan is not None:
             npc_state_replay_plaintext = npc_state_replay_plan.update.to_bytes()
@@ -3112,6 +3205,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             inventory_quantity_update_plaintext=(
                 inventory_quantity_update_plaintext
             ),
+            mob_movement_broadcast_plaintext=(
+                mob_movement_broadcast_plaintext
+            ),
             item_pickup_response_policy=item_pickup_response_policy,
             item_use_response_policy=item_use_response_policy,
             mob_movement_acknowledgement_policy=(
@@ -3157,6 +3253,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "reactive_mob_movement_acknowledgements": (
                 arguments.reactive_mob_movement_acknowledgements
+            ),
+            "mob_movement_evidence_tcp_stream": (
+                arguments.mob_movement_evidence_tcp_stream
+            ),
+            "emit_mob_movement_broadcast": (
+                arguments.emit_mob_movement_broadcast
             ),
             "reactive_mob_health_responses": (
                 arguments.reactive_mob_health_responses

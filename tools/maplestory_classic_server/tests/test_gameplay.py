@@ -17,6 +17,7 @@ from maple_server.gameplay import (  # noqa: E402
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
     plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
@@ -499,6 +500,7 @@ def fixture_gameplay_transcript(
     item_pickup: bool = False,
     active_item_drop: bool = False,
     active_item_drop_owner: int | None = None,
+    extra_server_plaintexts: tuple[bytes, ...] = (),
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -1130,6 +1132,8 @@ def fixture_gameplay_transcript(
                 parameter=1,
             ).to_bytes(),
         )
+    for plaintext in extra_server_plaintexts:
+        append("server_to_client", plaintext)
     if terminate:
         append(
             "server_to_client",
@@ -3593,6 +3597,91 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             policy.known_mob_templates[MOB_OBJECT_ID], 210_100
         )
+
+    def test_plans_stationary_mob_broadcast_from_runtime_spawn(self) -> None:
+        stationary_evidence = MobMovementBroadcast(
+            object_id=MOB_OBJECT_ID,
+            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            reference_x=100,
+            reference_y=-200,
+            commands=(
+                MobMovementCommand.absolute(
+                    position_x=100,
+                    position_y=-200,
+                    velocity_x=0,
+                    velocity_y=0,
+                    foothold_id=7,
+                    stance=4,
+                    duration_ms=1_080,
+                ),
+            ),
+        ).to_bytes()
+        post_spawn = MobEnterField(
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(),
+        ).to_bytes()
+        post_controller = MobControllerChange(
+            control_level=1,
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(),
+        ).to_bytes()
+        plan = plan_mob_movement_broadcast(
+            fixture_gameplay_transcript(compact_transition=True),
+            post_transcript_server_frames=(post_spawn, post_controller),
+            evidence_transcript=fixture_gameplay_transcript(
+                extra_server_plaintexts=(stationary_evidence,)
+            ),
+            target_x=200,
+            target_y=-200,
+            foothold_id=8,
+        )
+
+        self.assertEqual(plan.entity, "mob:runtime:1")
+        self.assertEqual(plan.template_id, 210_100)
+        self.assertEqual((plan.previous_x, plan.previous_y), (100, -200))
+        self.assertEqual(plan.exact_stationary_shape_evidence, 1)
+        broadcast = MobMovementBroadcast.parse(plan.broadcast.to_bytes())
+        self.assertEqual(
+            (broadcast.reference_x, broadcast.reference_y),
+            (200, -200),
+        )
+        self.assertEqual(broadcast.opaque_control.hex(), "0000ff00000000")
+        self.assertEqual(broadcast.commands[0].position, (200, -200))
+        self.assertEqual(broadcast.commands[0].velocity, (0, 0))
+        self.assertEqual(broadcast.commands[0].foothold_id, 8)
+        self.assertEqual(broadcast.commands[0].duration_ms, 1_080)
+        self.assertNotIn("object_id", plan.safe_dict())
+
+        folded = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_server_plaintexts=(plan.broadcast.to_bytes(),)
+            )
+        )
+        self.assertTrue(folded.valid)
+        self.assertEqual(
+            (
+                folded.state.mobs[MOB_OBJECT_ID].x,
+                folded.state.mobs[MOB_OBJECT_ID].y,
+            ),
+            (200, -200),
+        )
+        self.assertEqual(folded.state.mobs[MOB_OBJECT_ID].foothold_id, 8)
+        self.assertEqual(folded.state.mobs[MOB_OBJECT_ID].stance, 4)
+        self.assertEqual(
+            folded.safe_dict()["state"]["mobs"][0]["foothold_id"],
+            8,
+        )
+
+        with self.assertRaisesRegex(ValueError, "exactly one active"):
+            plan_mob_movement_broadcast(
+                fixture_gameplay_transcript(compact_transition=True),
+                evidence_transcript=fixture_gameplay_transcript(
+                    extra_server_plaintexts=(stationary_evidence,)
+                ),
+                target_x=200,
+                target_y=-200,
+                foothold_id=8,
+            )
 
     def test_movement_acknowledgement_policy_rejects_unknown_field_mob(
         self,

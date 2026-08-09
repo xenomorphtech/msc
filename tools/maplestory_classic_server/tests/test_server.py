@@ -26,6 +26,7 @@ from maple_server.server import (  # noqa: E402
     parse_client_opcode_result_rewrite,
     parse_i16_position,
     parse_inventory_quantity_update,
+    parse_mob_movement_broadcast_target,
     parse_server_opcode_byte_rewrite,
     parse_server_frame_patch,
     parse_plaintext_hex,
@@ -71,6 +72,7 @@ from maple_server.packets import (  # noqa: E402
     MobHealthPercentageUpdate,
     MobLeaveField,
     MobMovementAcknowledgement,
+    MobMovementBroadcast,
     MobMovementCommand,
     MobMovementPath,
     MobMovementSubmission,
@@ -516,6 +518,31 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertEqual(arguments.mob_movement_evidence_tcp_stream, 92)
+
+    def test_replay_parser_accepts_mob_movement_broadcast(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--keep-world-open",
+                "--hold-open-seconds",
+                "600",
+                "--emit-mob-movement-broadcast",
+                "733:-2677:635:5",
+            ]
+        )
+
+        self.assertEqual(
+            arguments.emit_mob_movement_broadcast,
+            (733, -2677, 635, 5),
+        )
+        self.assertEqual(
+            parse_mob_movement_broadcast_target("733:-2677:635"),
+            (733, -2677, 635, 4),
+        )
 
     def test_replay_parser_accepts_reactive_mob_health_responses(self) -> None:
         arguments = build_parser().parse_args(
@@ -1972,12 +1999,33 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     opaque_tail=b"\x00" * 4,
                 ),
             ).to_bytes()
+            broadcast = MobMovementBroadcast(
+                object_id=object_id,
+                opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                reference_x=200,
+                reference_y=-200,
+                commands=(
+                    MobMovementCommand.absolute(
+                        position_x=200,
+                        position_y=-200,
+                        velocity_x=0,
+                        velocity_y=0,
+                        foothold_id=8,
+                        stance=4,
+                        duration_ms=1_080,
+                    ),
+                ),
+            ).to_bytes()
             runtime_protocol = {
                 "mob_movement_acknowledgements": {
                     "submissions_observed": 0,
                     "responses_sent": 0,
                     "submissions_rejected": 0,
-                }
+                },
+                "mob_movement_broadcast": {
+                    "packets_planned": 1,
+                    "packets_sent": 0,
+                },
             }
             tasks: set[asyncio.Task[None]] = set()
 
@@ -1990,7 +2038,11 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             source,
                             strict=False,
                             hold_open_seconds=0.2,
-                            post_transcript_server_frames=(controller,),
+                            post_transcript_server_frames=(
+                                controller,
+                                broadcast,
+                            ),
+                            mob_movement_broadcast_plaintext=broadcast,
                             mob_movement_acknowledgement_policy=policy,
                             runtime_protocol=runtime_protocol,
                         )
@@ -2011,6 +2063,16 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     crypt_payload(controller_wire[4:], first_response_iv)
                 ).object_id,
                 object_id,
+            )
+            second_response_iv = shuffle_iv(first_response_iv)
+            broadcast_wire = await reader.readexactly(len(broadcast) + 4)
+            observed_broadcast = MobMovementBroadcast.parse(
+                crypt_payload(broadcast_wire[4:], second_response_iv)
+            )
+            self.assertEqual(observed_broadcast.object_id, object_id)
+            self.assertEqual(
+                observed_broadcast.commands[0].position,
+                (200, -200),
             )
             movement_path = MobMovementPath(
                 opaque_control=b"\x01" + b"\x00" * 18,
@@ -2046,7 +2108,8 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             encrypted_acknowledgement = await reader.readexactly(17)
             acknowledgement = MobMovementAcknowledgement.parse(
                 crypt_payload(
-                    encrypted_acknowledgement[4:], shuffle_iv(first_response_iv)
+                    encrypted_acknowledgement[4:],
+                    shuffle_iv(second_response_iv),
                 )
             )
             self.assertEqual(acknowledgement.object_id, object_id)
@@ -2068,6 +2131,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 metrics["last_response"]["template_id"], 210_100
             )
             self.assertEqual(metrics["state"]["active_known_mob_count"], 1)
+            self.assertEqual(
+                runtime_protocol["mob_movement_broadcast"]["packets_sent"],
+                1,
+            )
 
     async def test_replay_preserves_delays_inside_reactive_reply_sequence(
         self,

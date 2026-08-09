@@ -352,6 +352,16 @@ pending movement. Runtime status nests the safe policy under
 last response/rejection at the parent. Generated mob-death opcode `280` now
 updates both health and movement active state.
 
+One state-driven opcode-`282` primitive is now proven too. From 5,284 stream-
+`92` broadcasts, the planner accepts only the dominant control prefix and exact
+one-command stationary placement shape. A live stream-`114` run introduced a
+template-`100100` snail at `(433,-2677)` and generated one placement at
+`(833,-2677)`, foothold `635`, stance `4`. The real client rendered it at the
+predicted target; the frozen transcript folds validly to that exact state with
+one known broadcast/command and 11/11 matched heartbeats. HTTP status exposes
+the identifier-free plan/evidence and planned/sent count under
+`protocol.mob_movement_broadcast`.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -366,9 +376,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Generate opcode-`282` mob-movement broadcasts from owned mob state and
-   verify that the real client and offline fold agree on the resulting
-   position/lifecycle changes.
+4. Extend the proven stationary opcode-`282` placement into captured-shape
+   multi-command paths, retaining foothold continuity and checking each
+   real-client endpoint against the independent fold.
 
 ## Useful proof artifacts
 

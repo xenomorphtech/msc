@@ -659,6 +659,58 @@ Unknown live submissions are rejected without closing transport. A generated
 health-policy opcode-`280` is also applied to movement state so a dead mob is
 removed from both policies consistently.
 
+### Generated opcode-282 placement
+
+The custom server also owns one conservative server-to-client movement
+primitive. `--emit-mob-movement-broadcast X:Y:FOOTHOLD[:STANCE]` selects the
+only active modeled mob after explicit post-transcript frames, validates an
+exact stationary shape in the movement evidence, predicts the state delta, and
+appends one typed opcode `282`. The validated visual run used:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --mob-movement-evidence-tcp-stream 92 \
+  --reactive-mob-health-responses \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=433:-2677:635:635' \
+  --emit-mob-movement-broadcast '833:-2677:635:4' \
+  --post-transcript-start-delay-seconds 2 \
+  --post-transcript-frame-delay-seconds 30 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_broadcast_visual_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 3600
+```
+
+The evidence corpus has 5,284 broadcasts. Prefix `0000ff00000000` occurs in
+5,230; 1,509 of those have one absolute command whose position equals the
+reference, zero velocity, and duration 1,080 ms. The selected stance `4` has
+1,055 exact examples. The plan refuses zero/multiple active mobs, absent
+stance-specific evidence, invalid coordinates/footholds, or an invalid replay
+instead of guessing.
+
+The injected template-`100100` snail started at `(433,-2677)` on foothold
+`635`. After the generated packet, the real client rendered it at the predicted
+right-side target `(833,-2677)`. Runtime API
+`protocol.mob_movement_broadcast` reported the aliased entity/template,
+previous and predicted position/foothold/stance, exact command fields, evidence
+counts, and `packets_planned:1`/`packets_sent:1`. The final transcript
+`generated_mob_broadcast_visual_20260809/1786286736690024914_replay_12857.jsonl`
+folds validly to mob position `(833,-2677)`, stance `4`, one known broadcast,
+one command, and 11 matched heartbeats with none pending. This proves a
+stationary placement effect, not autonomous multi-command mob motion.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client

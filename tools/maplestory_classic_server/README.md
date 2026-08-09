@@ -602,8 +602,9 @@ fields directly; no acknowledgement bytes remain bundled as an opaque status
 blob. The fold reports all nine observed combinations and their counts while
 leaving the behavioral meaning of the 16-bit value unnamed.
 
-The fold now tracks the mob lifecycle needed by a future reactive opcode-`283`
-generator. All 337 entry records, 175 leaves, 589 controller changes, and 5,284
+The fold tracks the mob lifecycle used by the reactive opcode-`283` generator
+and state-driven opcode-`282` planner. All 337 entry records, 175 leaves, 589
+controller changes, and 5,284
 server movement broadcasts validate and round-trip exactly. The broadcasts
 contain 18,874 commands: 18,610 type `0`, 222 type `1`, and 42 type `2`. Every
 leave and broadcast resolves to an active modeled mob.
@@ -659,6 +660,25 @@ template, and no pending movement while the connection and heartbeat exchange
 remained active. Generated opcode-`280` packets from the health responder also
 update the movement policy's active set, so the two state owners cannot diverge
 when a mob dies.
+
+`--emit-mob-movement-broadcast X:Y:FOOTHOLD[:STANCE]` appends one
+state-driven opcode `282` for the sole active modeled mob after all explicit
+post-transcript frames. `plan_mob_movement_broadcast()` validates the replay
+and optional separate movement-evidence transcript, adopts typed entries,
+controller spawns, leaves, and earlier broadcasts, then emits only the exact
+captured stationary shape: control `0000ff00000000`, reference equal to the
+single absolute command, zero velocity, and duration 1,080 ms. Stream `92`
+contains 5,284 broadcasts, 5,230 with that control prefix, 1,509 exact
+stationary placements across the captured stances, and 1,055 for default
+stance `4`.
+
+The real-client proof injected a template-`100100` snail at `(433,-2677)` on
+foothold `635`, generated one placement at `(833,-2677)`/stance `4`, and kept
+stream `114` open. The snail appeared at the predicted right-side location;
+runtime status reported one planned/sent packet. The independently observed
+transcript folded validly to the exact predicted mob position and stance with
+one broadcast/command and 11 matched heartbeats. This is a proven stationary
+placement primitive, not yet a generated autonomous movement path.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
@@ -897,7 +917,11 @@ movement acknowledgements are enabled,
 derived policy, evidence, final field epoch, and known/active counts. The parent
 object reports observed submissions, sent responses, rejections, the last safe
 response (template, sequence, flag/value/auxiliary fields), and the last safe
-rejection. When reactive mob-health responses are enabled,
+rejection. A planned placement appears under
+`protocol.mob_movement_broadcast`, including the aliased entity/template,
+previous and predicted position/foothold/stance, typed packet fields, evidence
+counts, and planned/sent counters. When reactive mob-health responses are
+enabled,
 `protocol.mob_health_responses.state` reports field epoch, aliased active mobs,
 template/current/max HP, floor percentage, capture-evidence counters, and the
 exact response rules. The parent object reports observed/served/rejected

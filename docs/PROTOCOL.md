@@ -882,7 +882,7 @@ because the first was terminal. The observed fold contains one attack, one
 zero-health update, one leave, zero active mobs, and zero pending effects while
 the connection and generated heartbeat exchange remained active.
 
-## Mob movement (`client 207`, `server 283`)
+## Mob movement (`client 207`, `server 282/283`)
 
 The client submits a field-local mob object, a sequence number, and one typed
 movement path:
@@ -909,6 +909,26 @@ have signed relative velocity, stance, and duration. All 12,100 stream-`92`
 submissions, 40,090 commands, and nine-byte trailers parse and re-encode
 exactly; stream `126` validates the same boundaries across another 22,855
 submissions. The 19 control bytes remain deliberately opaque.
+
+Server opcode `282` broadcasts movement for one field-local mob without the
+client sequence or nine-byte trailer:
+
+```text
+uint16 opcode = 282
+uint32 mob_object_id
+byte[7] control_prefix
+int16  reference_x
+int16  reference_y
+uint8  command_count                 # nonzero
+repeat command_count: mob_movement_command
+```
+
+Stream `92` contains 5,284 broadcasts and 18,874 commands; every referenced
+object is active and every packet re-encodes exactly. Control prefix
+`0000ff00000000` occurs 5,230 times. Of those, 1,509 packets use the exact
+one-command stationary placement shape: the reference equals the absolute
+command position, velocity is zero, and duration is 1,080 ms. Stances `2`,
+`4`, and `5` are all captured; stance `4` has 1,055 exact examples.
 
 The complete acknowledgement is 13 plaintext bytes:
 
@@ -942,6 +962,16 @@ the final player position. The client produced 205 opcode-`207` submissions;
 the server generated 205 opcode-`283` packets, and the independent transcript
 fold matched all 205 with flag/value/auxiliary rules exact and no pending
 movement. Heartbeats and the world connection remained active.
+
+The state-driven broadcast proof used stream `114` as the held-open field and
+stream `92` as shape evidence. A typed opcode-`279` introduced one
+template-`100100` snail at `(433,-2677)` on foothold `635`; the custom server
+then generated one opcode-`282` stationary placement for `(833,-2677)`, the
+same foothold, and stance `4`. The real client rendered the snail at the
+predicted target. The independent observed fold is valid and ends with that
+exact mob position/stance, one known broadcast, one command, and 11/11 matched
+heartbeats. This validates the placement effect; it does not yet claim an
+autonomous multi-command movement policy.
 
 ## Player movement (`client 182`, `server 202`)
 
