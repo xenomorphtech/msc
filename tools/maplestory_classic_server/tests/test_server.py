@@ -456,6 +456,20 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertEqual(arguments.rewrite_initial_current_hp, 1)
 
+    def test_replay_parser_accepts_typed_initial_field_emitter(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--generate-initial-field-snapshot",
+            ]
+        )
+
+        self.assertTrue(arguments.generate_initial_field_snapshot)
+
     def test_replay_parser_accepts_typed_post_transcript_hp_update(self) -> None:
         arguments = build_parser().parse_args(
             [

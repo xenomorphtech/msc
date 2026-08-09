@@ -294,11 +294,15 @@ PCAP replay normalizes TCP segments to handshake/frame-aligned transcript
 events before serving them. The login handoff builder validates that the
 selected and handed-off character IDs match before rewriting the endpoint.
 
-## Typed initial-HP effect validation
+## Typed initial-field generation and HP effect validation
 
-The first state-driven field mutation uses the complete large opcode-`157`
-model instead of a raw byte offset. Start the stream-`114` world target inside
-`mapleproxy` with:
+The reusable generator uses the complete large opcode-`157` model instead of a
+raw byte offset. Pass `--generate-initial-field-snapshot` to materialize and
+re-emit the captured baseline through character, all nine inventory groups,
+marker-specific progression, and trailer state. The marker-`23` packets from
+`111.pcapng` and the compact marker-`26` packet from `1-10FS.pcapng` all
+round-trip exactly. To apply the separately live-validated HP mutation, start
+the stream-`114` world target inside `mapleproxy` with:
 
 ```sh
 sudo ip netns exec mapleproxy sudo -u sdancer env \
@@ -322,8 +326,9 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
 The planner first requires a valid gameplay fold and exactly one typed initial
 snapshot. It bounds HP by the decoded maximum, replaces only the nested
 `current_hp`, requires the generated packet to retain its length, parses it
-back, and refuses a raw patch targeting the same server frame. The loopback
-status route is:
+back through both the nested generator and envelope, and refuses a raw patch
+targeting the same server frame. Baseline generation additionally requires
+byte-for-byte equality with the source packet. The loopback status route is:
 
 ```sh
 sudo ip netns exec mapleproxy curl \
@@ -337,6 +342,11 @@ pending. Its observed transcript folded validly to `active`, HP `1/222`, the
 original inventory and progression, nine NPCs, and all 30 heartbeat pairs
 matched including the captured pair. This matches the planner's
 identifier-free prediction across packet, client, and folded-state evidence.
+Baseline generation appears under
+`protocol.initial_field_snapshot_emitter`; HP mutation appears under
+`protocol.initial_player_hp_rewrite`. Both report the frame index, emitter,
+inventory group/item counts, skill count, progression shape/variant,
+original/emitted/max HP, prediction, and patch count.
 
 ## Typed post-transcript HP update validation
 
@@ -1343,8 +1353,8 @@ Replace the remaining opaque replay portions with stateful handling:
 1. Isolate the additional client-side drop eligibility condition using the
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
-2. Expand the proven typed opcode-`157` mutation into a generated initial field
-   snapshot, then replace subsequent capture frames with state-driven packets.
+2. Replace the next finite field-bootstrap replay frames with state-driven
+   packets built from the now-generated initial gamestate.
 3. Reuse the proven typed final-field mob injection to validate the existing
    movement-acknowledgement policy through the real client.
 4. Capture a ranked or multi-character account to validate the conditional

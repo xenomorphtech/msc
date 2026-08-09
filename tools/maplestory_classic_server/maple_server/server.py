@@ -44,7 +44,7 @@ from .gameplay import (
     plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
     plan_final_field_npc_state_replay,
-    plan_initial_player_hp_rewrite,
+    plan_initial_field_snapshot_replay,
     plan_inventory_quantity_update,
     render_gameplay_analysis,
     world_session_termination_frame_index,
@@ -2904,6 +2904,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="delay transcript playback after accept (useful for debugger attach)",
     )
     replay.add_argument(
+        "--generate-initial-field-snapshot",
+        action="store_true",
+        help=(
+            "materialize the initial opcode-157 snapshot through character, "
+            "inventory, progression, and trailer state before replay"
+        ),
+    )
+    replay.add_argument(
         "--rewrite-initial-current-hp",
         type=int,
         metavar="HP",
@@ -3916,22 +3924,35 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     field_drop_position_replay_plan is not None
                 ),
             }
-        initial_hp_replay_plan = None
-        if arguments.rewrite_initial_current_hp is not None:
-            initial_hp_replay_plan = plan_initial_player_hp_rewrite(
-                transcript, arguments.rewrite_initial_current_hp
+        initial_field_replay_plan = None
+        if (
+            arguments.generate_initial_field_snapshot
+            or arguments.rewrite_initial_current_hp is not None
+        ):
+            initial_field_replay_plan = plan_initial_field_snapshot_replay(
+                transcript,
+                arguments.rewrite_initial_current_hp,
             )
-            if initial_hp_replay_plan.server_frame_index in server_frame_patches:
+            if (
+                initial_field_replay_plan.server_frame_index
+                in server_frame_patches
+            ):
                 raise ValueError(
-                    f"server frame {initial_hp_replay_plan.server_frame_index} "
-                    "is set by both --server-frame-patch and "
-                    "--rewrite-initial-current-hp"
+                    "server frame "
+                    f"{initial_field_replay_plan.server_frame_index} "
+                    "is set by both an explicit patch and the typed initial "
+                    "field emitter"
                 )
-            server_frame_patches[initial_hp_replay_plan.server_frame_index] = (
-                initial_hp_replay_plan.replacement.to_bytes()
+            server_frame_patches[
+                initial_field_replay_plan.server_frame_index
+            ] = initial_field_replay_plan.replacement.to_bytes()
+            protocol_key = (
+                "initial_player_hp_rewrite"
+                if arguments.rewrite_initial_current_hp is not None
+                else "initial_field_snapshot_emitter"
             )
-            runtime_protocol["initial_player_hp_rewrite"] = {
-                **initial_hp_replay_plan.safe_dict(),
+            runtime_protocol[protocol_key] = {
+                **initial_field_replay_plan.safe_dict(),
                 "frames_patched": 1,
             }
         grouped_client_opcode_replies: dict[int, list[bytes]] = {}
@@ -4403,6 +4424,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "rewrite_initial_current_hp": (
                 arguments.rewrite_initial_current_hp
+            ),
+            "generate_initial_field_snapshot": (
+                arguments.generate_initial_field_snapshot
             ),
             "rewrite_final_field_drop_position": (
                 arguments.rewrite_final_field_drop_position

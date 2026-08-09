@@ -1450,7 +1450,7 @@ class InitialInventorySnapshot:
 
 @dataclass(frozen=True)
 class InitialFieldTrailer:
-    """Fixed final 112 bytes of the initial field packet."""
+    """Marker-specific final trailer of the initial field packet."""
 
     opaque_blocks: tuple[bytes, bytes]
     reserved_u16: int
@@ -1489,6 +1489,13 @@ class InitialFieldTrailer:
         trailer._validate()
         return trailer
 
+    @property
+    def text_code_unit_lengths(self) -> tuple[int, ...]:
+        return tuple(
+            len(value.encode("utf-16-le")) // 2
+            for value in self.opaque_texts
+        )
+
     def _validate(self) -> None:
         expected_block = b"\x01\x01\x01\x00" + b"\xff" * 4 + b"\x00" * 9
         if self.opaque_blocks != (expected_block, expected_block):
@@ -1499,22 +1506,19 @@ class InitialFieldTrailer:
             raise PacketShapeError(
                 "initial field trailer reserved integers must be zero"
             )
-        text_lengths = tuple(
-            len(value.encode("utf-16-le")) // 2 for value in self.opaque_texts
-        )
-        if text_lengths != (
-            0,
-            1,
-            1,
-            16,
-            0,
-        ):
+        text_lengths = self.text_code_unit_lengths
+        full_text_lengths = (0, 1, 1, 16, 0)
+        compact_text_lengths = (0, 0, 0, 0, 0)
+        if text_lengths not in (full_text_lengths, compact_text_lengths):
             raise PacketShapeError(
-                "initial field trailer text lengths must be 0/1/1/16/0"
+                "initial field trailer text lengths must match the full or "
+                "compact captured shape"
             )
-        if self.constant_u8 != 2:
+        expected_constant = 2 if text_lengths == full_text_lengths else 0
+        if self.constant_u8 != expected_constant:
             raise PacketShapeError(
-                "initial field trailer constant byte must be two"
+                "initial field trailer constant byte does not match its "
+                "text variant"
             )
         if self.sentinel_filetime_ticks != INITIAL_ITEM_SENTINEL_TICKS:
             raise PacketShapeError(
@@ -1655,6 +1659,10 @@ class InitialProgressionSnapshot:
             raise PacketShapeError(
                 f"initial progression snapshot variant is {self.variant}"
             )
+        if self.trailer.text_code_unit_lengths != (0, 1, 1, 16, 0):
+            raise PacketShapeError(
+                "keyed-property initial progression requires the full trailer"
+            )
 
     @staticmethod
     def _encode_keyed_strings(values: tuple[tuple[int, str], ...]) -> bytes:
@@ -1720,6 +1728,136 @@ class InitialProgressionSnapshot:
 
 
 @dataclass(frozen=True)
+class CompactInitialProgressionSnapshot:
+    """Marker-26 progression variant with a compact neutral trailer header."""
+
+    reserved_flag: int
+    skill_levels: tuple[tuple[int, int], ...]
+    reserved_u16_1: int
+    string_properties: tuple[tuple[int, str], ...]
+    timestamp_properties: tuple[tuple[int, int], ...]
+    reserved_i64: int
+    saved_map_ids: tuple[int, ...]
+    opaque_variant_header: bytes
+    trailer: InitialFieldTrailer
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "CompactInitialProgressionSnapshot":
+        reader = PacketReader(
+            payload, packet_name="compact_initial_progression_snapshot"
+        )
+        reserved_flag = reader.u8("reserved_flag")
+        skill_levels = tuple(
+            (
+                reader.u32(f"skill_levels[{index}].skill_id"),
+                reader.u32(f"skill_levels[{index}].level"),
+            )
+            for index in range(reader.u16("skill_level_count"))
+        )
+        reserved_u16_1 = reader.u16("reserved_u16_1")
+        string_properties = tuple(
+            (
+                reader.u32(f"string_properties[{index}].key"),
+                reader.utf16_string(
+                    f"string_properties[{index}].value", trailing_byte=True
+                ),
+            )
+            for index in range(reader.u16("string_property_count"))
+        )
+        timestamp_properties = tuple(
+            (
+                reader.u32(f"timestamp_properties[{index}].key"),
+                reader.i64(f"timestamp_properties[{index}].ticks"),
+            )
+            for index in range(reader.u16("timestamp_property_count"))
+        )
+        reserved_i64 = reader.i64("reserved_i64")
+        saved_map_ids = tuple(
+            reader.u32(f"saved_map_ids[{index}]") for index in range(16)
+        )
+        opaque_variant_header = reader.bytes(7, "opaque_variant_header")
+        snapshot = cls(
+            reserved_flag=reserved_flag,
+            skill_levels=skill_levels,
+            reserved_u16_1=reserved_u16_1,
+            string_properties=string_properties,
+            timestamp_properties=timestamp_properties,
+            reserved_i64=reserved_i64,
+            saved_map_ids=saved_map_ids,
+            opaque_variant_header=opaque_variant_header,
+            trailer=InitialFieldTrailer.parse_from(reader),
+        )
+        reader.finish()
+        snapshot._validate()
+        return snapshot
+
+    def _validate(self) -> None:
+        if self.reserved_flag != 0 or self.reserved_u16_1 != 0:
+            raise PacketShapeError(
+                "compact initial progression reserved fields must be zero"
+            )
+        if self.reserved_i64 != 0:
+            raise PacketShapeError(
+                "compact initial progression reserved int64 must be zero"
+            )
+        if len(self.saved_map_ids) != 16:
+            raise PacketShapeError(
+                "compact initial progression must contain 16 saved map ids"
+            )
+        if len(self.opaque_variant_header) != 7:
+            raise PacketShapeError(
+                "compact initial progression variant header must be 7 bytes"
+            )
+        if self.trailer.text_code_unit_lengths != (0, 0, 0, 0, 0):
+            raise PacketShapeError(
+                "compact initial progression requires the compact trailer"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        for field, values in (
+            ("skill levels", self.skill_levels),
+            ("string properties", self.string_properties),
+            ("timestamp properties", self.timestamp_properties),
+        ):
+            if len(values) > 0xFFFF:
+                raise PacketShapeError(
+                    f"compact initial progression has too many {field}"
+                )
+        try:
+            return b"".join(
+                (
+                    struct.pack("<BH", self.reserved_flag, len(self.skill_levels)),
+                    b"".join(
+                        struct.pack("<II", skill_id, level)
+                        for skill_id, level in self.skill_levels
+                    ),
+                    struct.pack(
+                        "<HH",
+                        self.reserved_u16_1,
+                        len(self.string_properties),
+                    ),
+                    InitialProgressionSnapshot._encode_keyed_strings(
+                        self.string_properties
+                    ),
+                    struct.pack("<H", len(self.timestamp_properties)),
+                    b"".join(
+                        struct.pack("<Iq", key, ticks)
+                        for key, ticks in self.timestamp_properties
+                    ),
+                    struct.pack("<q", self.reserved_i64),
+                    struct.pack("<16I", *self.saved_map_ids),
+                    self.opaque_variant_header,
+                    self.trailer.to_bytes(),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"compact initial progression field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class InitialFieldSnapshot:
     """Initial opcode-157 field packet with a typed character-stat prefix."""
 
@@ -1766,10 +1904,13 @@ class InitialFieldSnapshot:
     def parse_inventory(self) -> InitialInventorySnapshot:
         return InitialInventorySnapshot.parse(self.opaque_tail)
 
-    def parse_progression(self) -> InitialProgressionSnapshot:
-        return InitialProgressionSnapshot.parse(
-            self.parse_inventory().opaque_remainder
-        )
+    def parse_progression(
+        self,
+    ) -> InitialProgressionSnapshot | CompactInitialProgressionSnapshot:
+        payload = self.parse_inventory().opaque_remainder
+        if self.marker == 26:
+            return CompactInitialProgressionSnapshot.parse(payload)
+        return InitialProgressionSnapshot.parse(payload)
 
     def _validate(self) -> None:
         if self.marker not in {23, 26}:
@@ -1819,6 +1960,110 @@ class InitialFieldSnapshot:
                 f"initial field snapshot field is out of range: {error}"
             ) from error
         return prefix + self.character.to_bytes() + self.opaque_tail
+
+
+@dataclass(frozen=True)
+class TypedInitialFieldSnapshot:
+    """Initial field packet materialized through every decoded nested shape."""
+
+    marker: int
+    reserved_flag: int
+    contains_character_data: int
+    character_data_mode: int
+    reserved_u16: int
+    opaque_session_u32s: tuple[int, int, int]
+    sentinel_i64: int
+    character_record_prefix: int
+    character: InitialCharacterSnapshot
+    inventory_opaque_prefix: bytes
+    inventory_groups: tuple[InitialInventoryGroup, ...]
+    progression: InitialProgressionSnapshot | CompactInitialProgressionSnapshot
+    opcode: int = 157
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "TypedInitialFieldSnapshot":
+        envelope = InitialFieldSnapshot.parse(payload)
+        inventory = envelope.parse_inventory()
+        progression = envelope.parse_progression()
+        snapshot = cls(
+            marker=envelope.marker,
+            reserved_flag=envelope.reserved_flag,
+            contains_character_data=envelope.contains_character_data,
+            character_data_mode=envelope.character_data_mode,
+            reserved_u16=envelope.reserved_u16,
+            opaque_session_u32s=envelope.opaque_session_u32s,
+            sentinel_i64=envelope.sentinel_i64,
+            character_record_prefix=envelope.character_record_prefix,
+            character=envelope.character,
+            inventory_opaque_prefix=inventory.opaque_prefix,
+            inventory_groups=inventory.groups,
+            progression=progression,
+            opcode=envelope.opcode,
+        )
+        snapshot._validate()
+        return snapshot
+
+    @property
+    def inventory_item_count(self) -> int:
+        return sum(len(group.items) for group in self.inventory_groups)
+
+    def _validate(self) -> None:
+        envelope = InitialFieldSnapshot(
+            marker=self.marker,
+            reserved_flag=self.reserved_flag,
+            contains_character_data=self.contains_character_data,
+            character_data_mode=self.character_data_mode,
+            reserved_u16=self.reserved_u16,
+            opaque_session_u32s=self.opaque_session_u32s,
+            sentinel_i64=self.sentinel_i64,
+            character_record_prefix=self.character_record_prefix,
+            character=self.character,
+            opaque_tail=b"\x00",
+            opcode=self.opcode,
+        )
+        envelope._validate()
+        if self.marker == 26:
+            if not isinstance(
+                self.progression, CompactInitialProgressionSnapshot
+            ):
+                raise PacketShapeError(
+                    "marker-26 initial field snapshot requires compact "
+                    "progression"
+                )
+        elif not isinstance(self.progression, InitialProgressionSnapshot):
+            raise PacketShapeError(
+                "marker-23 initial field snapshot requires keyed-property "
+                "progression"
+            )
+        InitialInventorySnapshot(
+            opaque_prefix=self.inventory_opaque_prefix,
+            groups=self.inventory_groups,
+            opaque_remainder=self.progression.to_bytes(),
+        ).to_bytes()
+
+    def to_snapshot(self) -> InitialFieldSnapshot:
+        self._validate()
+        inventory = InitialInventorySnapshot(
+            opaque_prefix=self.inventory_opaque_prefix,
+            groups=self.inventory_groups,
+            opaque_remainder=self.progression.to_bytes(),
+        )
+        return InitialFieldSnapshot(
+            marker=self.marker,
+            reserved_flag=self.reserved_flag,
+            contains_character_data=self.contains_character_data,
+            character_data_mode=self.character_data_mode,
+            reserved_u16=self.reserved_u16,
+            opaque_session_u32s=self.opaque_session_u32s,
+            sentinel_i64=self.sentinel_i64,
+            character_record_prefix=self.character_record_prefix,
+            character=self.character,
+            opaque_tail=inventory.to_bytes(),
+            opcode=self.opcode,
+        )
+
+    def to_bytes(self) -> bytes:
+        return self.to_snapshot().to_bytes()
 
 
 @dataclass(frozen=True)

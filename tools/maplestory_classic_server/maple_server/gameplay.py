@@ -21,6 +21,7 @@ from .packets import (
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     CompactFieldTransition,
+    CompactInitialProgressionSnapshot,
     FieldDropRemoval,
     FieldDropSpawn,
     FieldLoadStage,
@@ -28,7 +29,9 @@ from .packets import (
     HeartbeatProbe,
     HeartbeatResponse,
     InitialFieldSnapshot,
+    InitialProgressionSnapshot,
     InitialInventoryItem,
+    TypedInitialFieldSnapshot,
     InventoryChangeSet,
     InventoryModification,
     ItemPickupRequest,
@@ -303,6 +306,7 @@ class GameplayGameState:
         default_factory=dict, repr=False
     )
     progression_variant: int | None = None
+    progression_shape: str | None = None
     server_local_filetime_ticks: int | None = None
     entry_character_id: int | None = field(default=None, repr=False)
     npcs: dict[int, NpcEntity] = field(default_factory=dict, repr=False)
@@ -626,6 +630,7 @@ class InitialPlayerHpReplayPlan:
     rewritten_current_hp: int
     max_hp: int
     replacement: InitialFieldSnapshot = field(repr=False)
+    typed_state: TypedInitialFieldSnapshot = field(repr=False)
 
     def safe_dict(self) -> dict[str, object]:
         return {
@@ -633,6 +638,20 @@ class InitialPlayerHpReplayPlan:
             "original_current_hp": self.original_current_hp,
             "rewritten_current_hp": self.rewritten_current_hp,
             "max_hp": self.max_hp,
+            "emitter": "typed_initial_field_snapshot",
+            "inventory_group_count": len(self.typed_state.inventory_groups),
+            "inventory_item_count": self.typed_state.inventory_item_count,
+            "skill_level_count": len(
+                self.typed_state.progression.skill_levels
+            ),
+            "progression_shape": (
+                "compact"
+                if self.typed_state.marker == 26
+                else "keyed_properties"
+            ),
+            "progression_variant": getattr(
+                self.typed_state.progression, "variant", None
+            ),
             "prediction": {
                 "current_hp": self.rewritten_current_hp,
                 "max_hp": self.max_hp,
@@ -2435,6 +2454,7 @@ class GameplayAnalysis:
                 },
                 "progression": {
                     "region_bytes": self.state.progression_region_bytes,
+                    "shape": self.state.progression_shape,
                     "skill_levels": self.state.skill_levels,
                     "string_property_code_units": (
                         self.state.string_property_code_units
@@ -4760,6 +4780,11 @@ class GameplayStateFold:
                 if transition is None and len(payload) >= 112
                 else None
             )
+            typed_initial_snapshot = (
+                TypedInitialFieldSnapshot.parse(payload)
+                if initial_snapshot is not None
+                else None
+            )
             cleared_npcs = len(self.state.npcs)
             cleared_mobs = len(self.state.mobs)
             cleared_drops = len(self.state.field_drops)
@@ -4816,10 +4841,24 @@ class GameplayStateFold:
             if initial_snapshot is not None:
                 character = initial_snapshot.character
                 inventory = initial_snapshot.parse_inventory()
-                progression = (
-                    initial_snapshot.parse_progression()
-                    if initial_snapshot.marker == 23
+                assert typed_initial_snapshot is not None
+                progression = typed_initial_snapshot.progression
+                progression_shape = (
+                    "compact"
+                    if isinstance(
+                        progression, CompactInitialProgressionSnapshot
+                    )
+                    else "keyed_properties"
+                )
+                progression_variant = (
+                    progression.variant
+                    if isinstance(progression, InitialProgressionSnapshot)
                     else None
+                )
+                extended_properties = (
+                    progression.extended_properties
+                    if isinstance(progression, InitialProgressionSnapshot)
+                    else ()
                 )
                 self.state.initial_field_snapshots += 1
                 self.state.transition_sequence = None
@@ -4853,32 +4892,24 @@ class GameplayStateFold:
                     )
                     for group in inventory.groups
                 }
-                if progression is not None:
-                    self.state.skill_levels = dict(progression.skill_levels)
-                    self.state.string_property_code_units = {
-                        key: len(value.encode("utf-16-le")) // 2
-                        for key, value in progression.string_properties
-                    }
-                    self.state.timestamp_property_keys = tuple(
-                        key for key, _ in progression.timestamp_properties
-                    )
-                    self.state.saved_map_ids = progression.saved_map_ids
-                    self.state.extended_property_code_units = {
-                        key: len(value.encode("utf-16-le")) // 2
-                        for key, value in progression.extended_properties
-                    }
-                    self.state.progression_variant = progression.variant
-                    self.state.server_local_filetime_ticks = (
-                        progression.trailer.server_local_filetime_ticks
-                    )
-                else:
-                    self.state.skill_levels = {}
-                    self.state.string_property_code_units = {}
-                    self.state.timestamp_property_keys = ()
-                    self.state.saved_map_ids = ()
-                    self.state.extended_property_code_units = {}
-                    self.state.progression_variant = None
-                    self.state.server_local_filetime_ticks = None
+                self.state.skill_levels = dict(progression.skill_levels)
+                self.state.string_property_code_units = {
+                    key: len(value.encode("utf-16-le")) // 2
+                    for key, value in progression.string_properties
+                }
+                self.state.timestamp_property_keys = tuple(
+                    key for key, _ in progression.timestamp_properties
+                )
+                self.state.saved_map_ids = progression.saved_map_ids
+                self.state.extended_property_code_units = {
+                    key: len(value.encode("utf-16-le")) // 2
+                    for key, value in extended_properties
+                }
+                self.state.progression_variant = progression_variant
+                self.state.progression_shape = progression_shape
+                self.state.server_local_filetime_ticks = (
+                    progression.trailer.server_local_filetime_ticks
+                )
                 if (
                     self.state.entry_character_id is not None
                     and character.character_id != self.state.entry_character_id
@@ -4922,7 +4953,8 @@ class GameplayStateFold:
                             group.name: len(group.items)
                             for group in inventory.groups
                         },
-                        "progression_typed": progression is not None,
+                        "progression_typed": True,
+                        "progression_shape": progression_shape,
                         "inventory_items": {
                             group.name: [
                                 {
@@ -4937,9 +4969,8 @@ class GameplayStateFold:
                         },
                     }
                 )
-                if progression is not None:
-                    details.update(
-                        {
+                details.update(
+                    {
                             "skill_levels": dict(progression.skill_levels),
                             "string_properties": [
                                 {
@@ -4955,7 +4986,7 @@ class GameplayStateFold:
                                 for key, _ in progression.timestamp_properties
                             ],
                             "saved_map_ids": list(progression.saved_map_ids),
-                            "progression_variant": progression.variant,
+                            "progression_variant": progression_variant,
                             "extended_properties": [
                                 {
                                     "key": key,
@@ -4963,7 +4994,7 @@ class GameplayStateFold:
                                         len(value.encode("utf-16-le")) // 2
                                     ),
                                 }
-                                for key, value in progression.extended_properties
+                                for key, value in extended_properties
                             ],
                             "trailer_text_code_units": [
                                 len(value.encode("utf-16-le")) // 2
@@ -4975,7 +5006,13 @@ class GameplayStateFold:
                             "unknown_tail_u32": (
                                 progression.trailer.unknown_tail_u32
                             ),
-                        }
+                    }
+                )
+                if isinstance(
+                    progression, CompactInitialProgressionSnapshot
+                ):
+                    details["compact_variant_header_hex"] = (
+                        progression.opaque_variant_header.hex()
                     )
                 event_identifiers["character_id"] = character.character_id
             elif transition is None:
@@ -5047,8 +5084,8 @@ class GameplayStateFold:
                     transition
                     if transition is not None
                     else (
-                        initial_snapshot
-                        if initial_snapshot is not None
+                        typed_initial_snapshot
+                        if typed_initial_snapshot is not None
                         else snapshot
                     )
                 ),
@@ -5058,16 +5095,11 @@ class GameplayStateFold:
                     if transition is not None
                     else (
                         (
-                            (
-                                "initial field snapshot marker-26 progression "
-                                "region remains opaque"
-                                if initial_snapshot.marker == 26
-                                else "initial field snapshot equipment metadata "
-                                "and progression/trailer meanings remain "
-                                "partially opaque"
-                            ),
+                            "initial field snapshot equipment metadata and "
+                            "neutral progression/trailer roles remain "
+                            "partially opaque",
                         )
-                        if initial_snapshot is not None
+                        if typed_initial_snapshot is not None
                         else ("field snapshot body remains opaque",)
                     )
                 ),
@@ -7398,7 +7430,10 @@ def plan_final_field_drop_owner_to_player_rewrite(
     snapshot_observations = tuple(
         observation
         for observation in analysis.observations
-        if isinstance(observation.parsed, InitialFieldSnapshot)
+        if isinstance(
+            observation.parsed,
+            (InitialFieldSnapshot, TypedInitialFieldSnapshot),
+        )
     )
     if len(snapshot_observations) != 1:
         raise ValueError(
@@ -7465,11 +7500,11 @@ def plan_final_field_drop_owner_to_player_rewrite(
     )
 
 
-def plan_initial_player_hp_rewrite(
+def plan_initial_field_snapshot_replay(
     transcript: Transcript,
-    current_hp: int,
+    current_hp: int | None = None,
 ) -> InitialPlayerHpReplayPlan:
-    """Rewrite only the typed current-HP field in the initial snapshot."""
+    """Materialize and optionally mutate the complete typed initial snapshot."""
     analysis = analyze_gameplay_transcript(transcript)
     if not analysis.valid:
         raise ValueError("world transcript failed packet/state validation")
@@ -7484,29 +7519,68 @@ def plan_initial_player_hp_rewrite(
         )
     observation = observations[0]
     snapshot = observation.parsed
-    if not isinstance(snapshot, InitialFieldSnapshot):
+    if isinstance(snapshot, TypedInitialFieldSnapshot):
+        typed_state = snapshot
+        envelope = snapshot.to_snapshot()
+    elif isinstance(snapshot, InitialFieldSnapshot):
+        envelope = snapshot
+        typed_state = TypedInitialFieldSnapshot.parse(snapshot.to_bytes())
+    else:
         raise ValueError("initial field observation has no typed snapshot")
-    if not 0 <= current_hp <= snapshot.character.max_hp:
+    emitted_current_hp = (
+        typed_state.character.current_hp
+        if current_hp is None
+        else current_hp
+    )
+    if not 0 <= emitted_current_hp <= typed_state.character.max_hp:
         raise ValueError(
             f"rewritten current HP must be between 0 and "
-            f"{snapshot.character.max_hp}"
+            f"{typed_state.character.max_hp}"
         )
-    replacement = replace(
-        snapshot,
-        character=replace(snapshot.character, current_hp=current_hp),
+    typed_replacement = replace(
+        typed_state,
+        character=replace(
+            typed_state.character,
+            current_hp=emitted_current_hp,
+        ),
     )
-    replacement_payload = replacement.to_bytes()
+    replacement_payload = typed_replacement.to_bytes()
     if len(replacement_payload) != observation.length:
-        raise ValueError("initial HP rewrite unexpectedly changed packet length")
+        raise ValueError(
+            "typed initial field emitter unexpectedly changed packet length"
+        )
+    if current_hp is None and replacement_payload != envelope.to_bytes():
+        raise ValueError(
+            "typed initial field emitter changed the unmodified snapshot"
+        )
+    if (
+        TypedInitialFieldSnapshot.parse(replacement_payload)
+        != typed_replacement
+    ):
+        raise ValueError(
+            "typed initial field emitter failed nested-state round-trip validation"
+        )
+    replacement = typed_replacement.to_snapshot()
     if InitialFieldSnapshot.parse(replacement_payload) != replacement:
-        raise ValueError("initial HP rewrite failed packet round-trip validation")
+        raise ValueError(
+            "typed initial field emitter failed envelope round-trip validation"
+        )
     return InitialPlayerHpReplayPlan(
         server_frame_index=observation.direction_index,
-        original_current_hp=snapshot.character.current_hp,
-        rewritten_current_hp=current_hp,
-        max_hp=snapshot.character.max_hp,
+        original_current_hp=typed_state.character.current_hp,
+        rewritten_current_hp=emitted_current_hp,
+        max_hp=typed_state.character.max_hp,
         replacement=replacement,
+        typed_state=typed_replacement,
     )
+
+
+def plan_initial_player_hp_rewrite(
+    transcript: Transcript,
+    current_hp: int,
+) -> InitialPlayerHpReplayPlan:
+    """Compatibility wrapper for a current-HP typed snapshot mutation."""
+    return plan_initial_field_snapshot_replay(transcript, current_hp)
 
 
 def plan_current_hp_stat_update(
@@ -7847,7 +7921,8 @@ def render_gameplay_analysis(
             f"removed_unknown:{state.field_drop_removals_for_unknown_drop}"
         ),
         (
-            f"progression=skills:{len(state.skill_levels)} "
+            f"progression=shape:{state.progression_shape} "
+            f"skills:{len(state.skill_levels)} "
             f"string_properties:{len(state.string_property_code_units)} "
             f"timestamp_properties:{len(state.timestamp_property_keys)} "
             f"extended_properties:{len(state.extended_property_code_units)} "

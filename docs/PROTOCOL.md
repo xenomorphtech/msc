@@ -455,10 +455,29 @@ event with variant `initial_character_snapshot`.
 The level-1 capture uses marker `26` rather than marker `23` but retains the
 same typed character and inventory grammar. Its 823-byte initial packet seeds
 character level `1`, job `0`, HP/MP maxima, and nine inventory groups. The
-537-byte inventory region round-trips; its following 172-byte progression
-region remains opaque because it does not use the longer marker-`23`
-progression/trailer grammar. Reports distinguish this with
-`snapshot_marker: 26` and `progression_typed: false`.
+537-byte inventory region contains five items and round-trips. Its following
+172-byte compact progression is also typed:
+
+```text
+uint8  reserved_flag = 0
+uint16 skill_count = 1
+repeat skill_count: uint32 skill_id, uint32 level   # captured (12, 0)
+uint16 reserved = 0
+uint16 string_property_count = 0
+uint16 timestamp_property_count = 0
+int64  reserved = 0
+uint32 saved_map_id[16]
+byte[7] neutral_variant_header
+byte[] compact_trailer
+```
+
+The compact trailer reuses the two validated 17-byte blocks, followed by five
+empty UTF-16 strings, a zero variant constant, reserved data, the FILETIME
+sentinel, server-local FILETIME, and final `uint32`. The 172-byte region and
+complete 823-byte packet round-trip exactly. Reports now expose
+`snapshot_marker: 26`, `progression_typed: true`, and
+`progression_shape: compact`, and the gamestate fold retains the skill, saved
+maps, and server clock.
 
 The 1,422-byte continuation is also structurally complete:
 
@@ -508,6 +527,17 @@ real-client run changed captured HP `50/222` to `1/222`. The client HUD showed
 `phase=active`, map `101000000`, HP `1/222`, unchanged inventory/progression,
 nine active NPCs, and matched heartbeat traffic. This confirms the field
 offset and width as a live effect, not only an offline round trip.
+
+`TypedInitialFieldSnapshot` is the reusable generator boundary for both large
+variants. `--generate-initial-field-snapshot` materializes the envelope,
+character, inventory groups/items, marker-specific progression, and trailer,
+then requires byte-identical same-length output when no mutation is requested.
+`GET /api/v1/status` exposes that plan under
+`protocol.initial_field_snapshot_emitter` with frame index, emitter name,
+inventory group/item counts, skill count, progression shape/variant,
+original/emitted/max HP, prediction, and `frames_patched`. The existing HP
+option performs its bounded mutation through the same generator and exposes
+the fields under `protocol.initial_player_hp_rewrite`.
 
 The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server
@@ -1741,7 +1771,7 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
   opaque pending independent variants.
 - The 19-byte handoff and large initial world snapshot are structurally
   validated; equipment-specific metadata, keyed-property roles, parts of the
-  fixed trailer, the marker-`26` 172-byte progression region, and several
+  fixed trailers, the marker-`26` seven-byte variant header, and several
   one-time field bootstrap opcodes remain semantically neutral.
 - The purpose and required state for the TLS `5050` connection remain unknown.
 - The exact semantics of captured opcode-`0` result values other than the

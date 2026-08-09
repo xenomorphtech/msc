@@ -126,12 +126,15 @@ it for the first opcode-`5` reply, for example
 `5=/path/to/reference.pcapng@83:17?character-list`; malformed records are
 rejected before replay encryption.
 
-`--rewrite-initial-current-hp HP` is the typed field-state mutation path. It
-requires exactly one valid large opcode-`157` snapshot, validates the complete
-gameplay fold, replaces only `InitialCharacterSnapshot.current_hp`, checks the
-requested value against the decoded maximum, and round-trips the same-length
-packet before replay patches and re-encrypts that server frame. It refuses an
-explicit patch of the same frame. For example:
+`--generate-initial-field-snapshot` is the typed field-state emitter. It
+requires exactly one valid large opcode-`157` snapshot, materializes the
+character, all nine inventory groups and their bounded item records, the
+marker-`23` keyed-property or marker-`26` compact progression variant, and the
+trailer. It re-encodes and reparses the same-length packet before replay
+replaces that server frame. `--rewrite-initial-current-hp HP` uses the same
+emitter while replacing only `InitialCharacterSnapshot.current_hp` and
+checking the requested value against the decoded maximum. Either mode refuses
+an explicit patch of the same frame. For example, exact baseline emission is:
 
 ```sh
 python -m maple_server replay \
@@ -142,9 +145,12 @@ python -m maple_server replay \
   --tcp-stream 114 \
   --keep-world-open \
   --world-heartbeat-interval-seconds 10 \
-  --rewrite-initial-current-hp 1 \
+  --generate-initial-field-snapshot \
   --hold-open-seconds 300
 ```
+
+Use `--rewrite-initial-current-hp 1` in place of the generation flag for the
+capture-validated controlled HP mutation.
 
 `--emit-current-hp-update HP` generates a new typed server opcode-`41` after
 the captured transcript. It validates the complete gameplay fold, bounds the
@@ -462,6 +468,14 @@ identifier. The same event includes per-group item counts and slot/template/
 quantity records. Its packet observation is deliberately `partial`, because
 equipment-specific metadata and several progression/trailer roles are
 structurally bounded but not yet semantically named.
+
+The level-1 stream-`126` marker-`26` snapshot now follows the same fold and
+emitter path. Its 823 bytes split into the shared typed character state, a
+537-byte inventory region with five items across nine groups, and a typed
+172-byte compact progression containing skill pair `12 -> 0`, 16 saved-map
+slots, a seven-byte neutral variant header, and the compact trailer. It reports
+`progression_typed: true` and `progression_shape: compact`; the complete packet
+re-emits byte-for-byte.
 
 The typed HP rewrite was validated through the real client using stream `114`.
 The planner predicted HP `1/222` with map, inventory, progression, and phase
@@ -1074,10 +1088,12 @@ accepted/active/completed/failed connection counters, and a `protocol` object.
 When periodic world heartbeats are enabled,
 `protocol.world_heartbeat` reports the interval, probes sent, responses
 observed, pending probes, and last/maximum round-trip milliseconds.
-When the initial player HP is rewritten,
-`protocol.initial_player_hp_rewrite` reports the original/current/max values,
-the patched server-frame index, patch count, and the identifier-free predicted
-unchanged state components.
+When the baseline initial snapshot is generated,
+`protocol.initial_field_snapshot_emitter` reports its frame index, emitter,
+inventory group/item counts, skill count, progression shape/variant,
+original/emitted/max HP, prediction, and patch count. When initial player HP is
+rewritten, the same fields appear under
+`protocol.initial_player_hp_rewrite`.
 When a post-transcript HP stat update is generated,
 `protocol.player_stat_update` reports opcode/mask/flag, field epoch,
 original/emitted/max HP, the predicted unchanged state components, and planned

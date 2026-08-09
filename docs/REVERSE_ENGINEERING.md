@@ -225,6 +225,15 @@ and extended-property collections plus a fixed trailer. The complete initial
 packet is now structurally bounded; semantic identification of neutral fields
 is the next boundary.
 
+The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
+marker-`26` branch without another debugger trace. Exact offline cursor
+accounting splits its 823 bytes into the shared character prefix, a 537-byte
+nine-group inventory with five items, and a 172-byte progression. That final
+region uses the common counted skills/properties/saved-map prefix, then a
+seven-byte neutral variant header and compact trailer. Parsing and re-emitting
+that variant byte-for-byte guards against treating a shorter valid branch as
+an opaque exception or forcing the marker-`23` grammar onto it.
+
 Client opcode `80` no longer needs a debugger trace for its primitive shape.
 All 17 stream-`92` instances are exactly `u16 opcode, u32 tick, i16 Use slot,
 u32 item template` and round-trip. Their typed state correlations establish

@@ -164,6 +164,20 @@
   fold seeds player, field, inventory, progression, and server-clock state,
   emits it on the field event, and validates the embedded character id against
   the world-entry request.
+- The `1-10FS.pcapng` stream-`126` marker-`26` initial packet is no longer an
+  opaque progression exception. Its 823 bytes split into the shared character
+  state, a 537-byte nine-group/five-item inventory, and a typed 172-byte
+  compact progression with one skill pair, 16 saved maps, a seven-byte neutral
+  variant header, and compact trailer. `TypedInitialFieldSnapshot` now
+  round-trips this packet and both `111.pcapng` marker-`23` variants exactly;
+  the fold emits `progression_shape` and includes compact skills, maps, and
+  clock state.
+- `--generate-initial-field-snapshot` now reconstructs the complete nested
+  opcode-`157` state before replay, verifies same-length byte equality for the
+  unmodified baseline, reparses both envelope and nested forms, and exposes
+  identifier-free inventory/progression telemetry through
+  `protocol.initial_field_snapshot_emitter`. The HP rewrite is a compatibility
+  mutation over this same emitter.
 - `--rewrite-initial-current-hp` now performs a validated, same-length typed
   mutation of only the large opcode-`157` player HP field. A real stream-`114`
   replay changed captured HP `50/222` to `1/222`; the client entered the field

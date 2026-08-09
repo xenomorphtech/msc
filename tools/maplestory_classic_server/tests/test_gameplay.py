@@ -30,6 +30,7 @@ from maple_server.gameplay import (  # noqa: E402
     plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
     plan_inventory_quantity_update,
+    plan_initial_field_snapshot_replay,
     plan_initial_player_hp_rewrite,
     plan_final_field_npc_state_replay,
     mob_hp_bounds_for_percentage,
@@ -46,6 +47,7 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     CompactFieldTransition,
+    CompactInitialProgressionSnapshot,
     FieldDropRemoval,
     FieldDropSpawn,
     FieldLoadStage,
@@ -58,6 +60,7 @@ from maple_server.packets import (  # noqa: E402
     InitialInventoryItem,
     InitialInventorySnapshot,
     InitialProgressionSnapshot,
+    TypedInitialFieldSnapshot,
     InventoryChangeSet,
     InventoryModification,
     ItemPickupRequest,
@@ -424,6 +427,31 @@ def fixture_initial_progression_snapshot() -> InitialProgressionSnapshot:
     )
 
 
+def fixture_compact_initial_progression_snapshot(
+) -> CompactInitialProgressionSnapshot:
+    expected_block = b"\x01\x01\x01\x00" + b"\xff" * 4 + b"\x00" * 9
+    return CompactInitialProgressionSnapshot(
+        reserved_flag=0,
+        skill_levels=((12, 0),),
+        reserved_u16_1=0,
+        string_properties=(),
+        timestamp_properties=(),
+        reserved_i64=0,
+        saved_map_ids=(999_999_999,) * 15 + (0,),
+        opaque_variant_header=b"\x00" * 7,
+        trailer=InitialFieldTrailer(
+            opaque_blocks=(expected_block, expected_block),
+            reserved_u16=0,
+            opaque_texts=("", "", "", "", ""),
+            constant_u8=0,
+            reserved_u32=0,
+            sentinel_filetime_ticks=94_354_848_000_000_000,
+            server_local_filetime_ticks=134_306_812_493_680_000,
+            unknown_tail_u32=1,
+        ),
+    )
+
+
 def fixture_initial_field_snapshot() -> InitialFieldSnapshot:
     item_sentinel_ticks = 94_354_848_000_000_000
     use_item_record = b"".join(
@@ -485,6 +513,21 @@ def fixture_initial_field_snapshot() -> InitialFieldSnapshot:
     )
 
 
+def fixture_compact_initial_field_snapshot() -> InitialFieldSnapshot:
+    full = fixture_initial_field_snapshot()
+    inventory = full.parse_inventory()
+    return replace(
+        full,
+        marker=26,
+        opaque_tail=replace(
+            inventory,
+            opaque_remainder=(
+                fixture_compact_initial_progression_snapshot().to_bytes()
+            ),
+        ).to_bytes(),
+    )
+
+
 def fixture_gameplay_transcript(
     *,
     repeat_npc_update: bool = False,
@@ -496,6 +539,7 @@ def fixture_gameplay_transcript(
     acknowledgement_auxiliary_2: int = 0,
     compact_transition: bool = False,
     initial_snapshot: bool = False,
+    initial_snapshot_payload: bytes | None = None,
     player_movement: bool = False,
     attack_actions: bool = False,
     opcode_101_records: bool = False,
@@ -555,7 +599,9 @@ def fixture_gameplay_transcript(
     append(
         "server_to_client",
         (
-            fixture_initial_field_snapshot().to_bytes()
+            initial_snapshot_payload
+            if initial_snapshot_payload is not None
+            else fixture_initial_field_snapshot().to_bytes()
             if initial_snapshot
             else FieldSnapshotEnvelope(
                 opaque_snapshot=b"sanitized-field"
@@ -1487,6 +1533,42 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(PacketShapeError, "tail"):
             replace(snapshot, opaque_tail=b"").to_bytes()
+
+    def test_typed_initial_field_snapshot_round_trips_full_and_compact_state(
+        self,
+    ) -> None:
+        full = fixture_initial_field_snapshot()
+        full_typed = TypedInitialFieldSnapshot.parse(full.to_bytes())
+        compact = fixture_compact_initial_field_snapshot()
+        compact_typed = TypedInitialFieldSnapshot.parse(compact.to_bytes())
+
+        self.assertEqual(full_typed.to_bytes(), full.to_bytes())
+        self.assertIsInstance(
+            full_typed.progression, InitialProgressionSnapshot
+        )
+        self.assertEqual(compact_typed.to_bytes(), compact.to_bytes())
+        self.assertIsInstance(
+            compact_typed.progression,
+            CompactInitialProgressionSnapshot,
+        )
+        self.assertEqual(compact_typed.progression.skill_levels, ((12, 0),))
+        self.assertEqual(len(compact_typed.to_bytes()), len(compact.to_bytes()))
+        with self.assertRaisesRegex(PacketShapeError, "requires compact"):
+            replace(full_typed, marker=26).to_bytes()
+        with self.assertRaisesRegex(
+            PacketShapeError, "requires keyed-property"
+        ):
+            replace(compact_typed, marker=23).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "full trailer"):
+            replace(
+                full_typed.progression,
+                trailer=compact_typed.progression.trailer,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "compact trailer"):
+            replace(
+                compact_typed.progression,
+                trailer=full_typed.progression.trailer,
+            ).to_bytes()
 
     def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
         stage = FieldLoadStage(
@@ -2703,6 +2785,37 @@ class GameplayStateFoldTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 0 and 222"):
             plan_initial_player_hp_rewrite(transcript, 223)
 
+    def test_plans_lossless_typed_initial_field_snapshot_emission(self) -> None:
+        transcript = fixture_gameplay_transcript(initial_snapshot=True)
+
+        plan = plan_initial_field_snapshot_replay(transcript)
+        emitted = plan.replacement.to_bytes()
+        typed = TypedInitialFieldSnapshot.parse(emitted)
+
+        self.assertEqual(plan.original_current_hp, 70)
+        self.assertEqual(plan.rewritten_current_hp, 70)
+        self.assertEqual(typed, plan.typed_state)
+        self.assertEqual(typed.inventory_item_count, 1)
+        self.assertEqual(len(typed.inventory_groups), 9)
+        self.assertEqual(typed.progression.variant, 1)
+        self.assertEqual(plan.safe_dict()["emitter"], "typed_initial_field_snapshot")
+
+    def test_plans_lossless_compact_initial_field_snapshot_emission(self) -> None:
+        snapshot = fixture_compact_initial_field_snapshot()
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot_payload=snapshot.to_bytes()
+        )
+
+        plan = plan_initial_field_snapshot_replay(transcript)
+
+        self.assertEqual(plan.replacement.to_bytes(), snapshot.to_bytes())
+        self.assertIsInstance(
+            plan.typed_state.progression,
+            CompactInitialProgressionSnapshot,
+        )
+        self.assertEqual(plan.safe_dict()["progression_shape"], "compact")
+        self.assertEqual(plan.safe_dict()["skill_level_count"], 1)
+
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -2779,12 +2892,43 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.inventory_items["use"][0].quantity, 3)
         self.assertEqual(analysis.state.skill_levels, {2_001_002: 1, 2_001_005: 6})
         self.assertEqual(analysis.state.progression_variant, 1)
+        self.assertEqual(analysis.state.progression_shape, "keyed_properties")
         self.assertEqual(
             analysis.state.server_local_filetime_ticks,
             134_306_812_493_680_000,
         )
         self.assertIn("partially opaque", observation.issues[0])
         self.assertNotIn('"name": "player"', analysis.to_json())
+
+    def test_folds_compact_initial_progression_into_player_state(self) -> None:
+        snapshot = fixture_compact_initial_field_snapshot()
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot_payload=snapshot.to_bytes()
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.state.initial_field_snapshots, 1)
+        self.assertEqual(analysis.state.progression_shape, "compact")
+        self.assertEqual(analysis.state.progression_variant, None)
+        self.assertEqual(analysis.state.skill_levels, {12: 0})
+        self.assertEqual(analysis.state.extended_property_code_units, {})
+        self.assertEqual(
+            analysis.safe_dict()["state"]["progression"]["shape"],
+            "compact",
+        )
+        observation = next(
+            item
+            for item in analysis.observations
+            if item.kind == "initial_field_snapshot"
+        )
+        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(observation.details["progression_shape"], "compact")
+        self.assertEqual(
+            observation.details["compact_variant_header_hex"], "00" * 7
+        )
+        self.assertIn("partially opaque", observation.issues[0])
 
     def test_folds_player_movement_into_local_and_remote_state(self) -> None:
         analysis = analyze_gameplay_transcript(
