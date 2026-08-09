@@ -109,9 +109,15 @@
   fields and variant suffixes opaque.
 - Server opcodes `218`/`219` now have capture-bounded attack-relay envelopes:
   opcode, aliased player object id, a packed target-count/hit-count nibble, and
-  an opaque body constrained to observed total lengths. Stream `126` adds
-  41/99 relays and stream `92` adds 1/42. Exact damage fields are not yet
-  decoded, so combat generation/replay remains disabled.
+  repeated mob-id/hit-action/damage arrays between opaque prefixes and the
+  opcode-`219` four-byte tail. Stream `126` adds 41/99 relays, 123 target
+  records (118 known mobs plus five zero placeholders), and 166 damage words;
+  stream `92` adds 1/42 relays, 71 known-mob records, and 88 damage words. Safe
+  events expose aliases and low-31-bit damage magnitudes, and active mob state
+  accumulates relay hit/damage totals without overriding opcode-`293` health.
+  The damage high-bit marker stays neutral. Combat generation/replay remains
+  disabled until the prefix/tail fields and mob maximum-HP mapping are
+  recovered.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

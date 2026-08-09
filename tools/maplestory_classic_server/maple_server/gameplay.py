@@ -85,6 +85,10 @@ class MobEntity:
     y: int = 0
     stance: int = 0
     health_percentage: int | None = None
+    attack_relay_hits: int = 0
+    attack_relay_damage: int = 0
+    attack_relay_high_bit_markers: int = 0
+    last_attack_hit_action: int | None = None
 
 
 @dataclass
@@ -394,6 +398,17 @@ class GameplayGameState:
     server_attack_hit_counts: Counter[int] = field(default_factory=Counter)
     server_attack_relays_for_known_players: int = 0
     server_attack_relays_for_unknown_players: int = 0
+    server_attack_target_records: int = 0
+    server_attack_zero_object_targets: int = 0
+    server_attack_targets_for_active_mobs: int = 0
+    server_attack_targets_for_known_mobs: int = 0
+    server_attack_targets_for_unknown_mobs: int = 0
+    server_attack_hit_actions: Counter[int] = field(default_factory=Counter)
+    server_attack_damage_entries: int = 0
+    server_attack_damage_total: int = 0
+    server_attack_damage_min: int | None = None
+    server_attack_damage_max: int | None = None
+    server_attack_damage_high_bit_markers: int = 0
     client_opcode_101_packets: int = 0
     client_opcode_101_header_values: Counter[int] = field(
         default_factory=Counter
@@ -1163,6 +1178,12 @@ class GameplayAnalysis:
                 "y": entity.y,
                 "stance": entity.stance,
                 "health_percentage": entity.health_percentage,
+                "attack_relay_hits": entity.attack_relay_hits,
+                "attack_relay_damage": entity.attack_relay_damage,
+                "attack_relay_high_bit_markers": (
+                    entity.attack_relay_high_bit_markers
+                ),
+                "last_attack_hit_action": entity.last_attack_hit_action,
                 "foothold_id": entity.spawn.foothold_id,
                 "origin_foothold_id": entity.spawn.origin_foothold_id,
                 "spawn_effect": entity.spawn.spawn_effect,
@@ -1657,6 +1678,39 @@ class GameplayAnalysis:
                 ),
                 "server_attack_relays_for_unknown_players": (
                     self.state.server_attack_relays_for_unknown_players
+                ),
+                "server_attack_target_records": (
+                    self.state.server_attack_target_records
+                ),
+                "server_attack_zero_object_targets": (
+                    self.state.server_attack_zero_object_targets
+                ),
+                "server_attack_targets_for_active_mobs": (
+                    self.state.server_attack_targets_for_active_mobs
+                ),
+                "server_attack_targets_for_known_mobs": (
+                    self.state.server_attack_targets_for_known_mobs
+                ),
+                "server_attack_targets_for_unknown_mobs": (
+                    self.state.server_attack_targets_for_unknown_mobs
+                ),
+                "server_attack_hit_actions": dict(
+                    self.state.server_attack_hit_actions
+                ),
+                "server_attack_damage_entries": (
+                    self.state.server_attack_damage_entries
+                ),
+                "server_attack_damage_total": (
+                    self.state.server_attack_damage_total
+                ),
+                "server_attack_damage_min": (
+                    self.state.server_attack_damage_min
+                ),
+                "server_attack_damage_max": (
+                    self.state.server_attack_damage_max
+                ),
+                "server_attack_damage_high_bit_markers": (
+                    self.state.server_attack_damage_high_bit_markers
                 ),
                 "client_opcode_101_packets": (
                     self.state.client_opcode_101_packets
@@ -4010,18 +4064,86 @@ class GameplayStateFold:
                 self.state.server_attack_relays_for_known_players += 1
             else:
                 self.state.server_attack_relays_for_unknown_players += 1
+            target_details: list[dict[str, object]] = []
+            target_object_ids: list[int] = []
+            for target in relay.targets:
+                self.state.server_attack_target_records += 1
+                self.state.server_attack_hit_actions[target.hit_action] += 1
+                damage_values = target.damage_values
+                self.state.server_attack_damage_entries += len(damage_values)
+                self.state.server_attack_damage_total += sum(damage_values)
+                self.state.server_attack_damage_high_bit_markers += sum(
+                    target.high_bit_markers
+                )
+                if damage_values:
+                    target_min = min(damage_values)
+                    target_max = max(damage_values)
+                    self.state.server_attack_damage_min = min(
+                        self.state.server_attack_damage_min
+                        if self.state.server_attack_damage_min is not None
+                        else target_min,
+                        target_min,
+                    )
+                    self.state.server_attack_damage_max = max(
+                        self.state.server_attack_damage_max
+                        if self.state.server_attack_damage_max is not None
+                        else target_max,
+                        target_max,
+                    )
+                target_detail: dict[str, object] = target.safe_dict()
+                if target.object_id == 0:
+                    self.state.server_attack_zero_object_targets += 1
+                    target_detail.update(
+                        {
+                            "target": None,
+                            "active_target": False,
+                            "known_target": False,
+                        }
+                    )
+                else:
+                    target_alias = self._alias(
+                        self._mob_aliases, target.object_id, "mob"
+                    )
+                    target_entity = self.state.mobs.get(target.object_id)
+                    active_target = target_entity is not None
+                    known_target = target.object_id in self.state.mob_templates
+                    if target_entity is not None:
+                        self.state.server_attack_targets_for_active_mobs += 1
+                        target_entity.attack_relay_hits += len(damage_values)
+                        target_entity.attack_relay_damage += sum(damage_values)
+                        target_entity.attack_relay_high_bit_markers += sum(
+                            target.high_bit_markers
+                        )
+                        target_entity.last_attack_hit_action = target.hit_action
+                    if known_target:
+                        self.state.server_attack_targets_for_known_mobs += 1
+                    else:
+                        self.state.server_attack_targets_for_unknown_mobs += 1
+                    target_detail.update(
+                        {
+                            "target": target_alias,
+                            "active_target": active_target,
+                            "known_target": known_target,
+                        }
+                    )
+                    target_object_ids.append(target.object_id)
+                target_details.append(target_detail)
             details = {
                 **relay.safe_dict(),
                 "opcode": relay.opcode,
                 "actor": actor_alias,
                 "known_actor": known_actor,
+                "targets": target_details,
                 "field_epoch": self.state.field_epoch,
             }
+            identifiers: dict[str, object] = {"object_id": relay.object_id}
+            if target_object_ids:
+                identifiers["target_object_ids"] = target_object_ids
             self._event(
                 frame,
                 "server_attack_relay_received",
                 details=details,
-                identifiers={"object_id": relay.object_id},
+                identifiers=identifiers,
             )
             return self._observation(
                 frame,
@@ -4030,8 +4152,9 @@ class GameplayStateFold:
                 parsed=relay,
                 details=details,
                 issues=(
-                    "packed target/hit counts are capture-correlated; attack "
-                    "relay body remains uninterpreted",
+                    "target/damage arrays are capture-bounded; attack relay "
+                    "prefix/tail fields and damage high-bit marker remain "
+                    "uninterpreted",
                 ),
             )
         if opcode == 293:
@@ -4808,6 +4931,9 @@ def render_gameplay_analysis(
     server_attack_hit_counts = json.dumps(
         dict(sorted(state.server_attack_hit_counts.items()))
     )
+    server_attack_hit_actions = json.dumps(
+        dict(sorted(state.server_attack_hit_actions.items()))
+    )
     client_opcode_101_header_values = json.dumps(
         dict(sorted(state.client_opcode_101_header_values.items()))
     )
@@ -5071,7 +5197,22 @@ def render_gameplay_analysis(
             "known_player_relays:"
             f"{state.server_attack_relays_for_known_players} "
             "unknown_player_relays:"
-            f"{state.server_attack_relays_for_unknown_players}"
+            f"{state.server_attack_relays_for_unknown_players} "
+            f"target_records:{state.server_attack_target_records} "
+            f"zero_object_targets:{state.server_attack_zero_object_targets} "
+            "active_relay_targets:"
+            f"{state.server_attack_targets_for_active_mobs} "
+            "known_relay_targets:"
+            f"{state.server_attack_targets_for_known_mobs} "
+            "unknown_relay_targets:"
+            f"{state.server_attack_targets_for_unknown_mobs} "
+            f"hit_actions:{server_attack_hit_actions} "
+            f"damage_entries:{state.server_attack_damage_entries} "
+            f"damage_total:{state.server_attack_damage_total} "
+            f"damage_range:{state.server_attack_damage_min}.."
+            f"{state.server_attack_damage_max} "
+            "damage_high_bits:"
+            f"{state.server_attack_damage_high_bit_markers}"
         ),
         (
             f"client_opcode_101=packets:{state.client_opcode_101_packets} "

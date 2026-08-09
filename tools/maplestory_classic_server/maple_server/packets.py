@@ -3130,6 +3130,30 @@ class ClientOpcode54AttackAction:
 
 
 @dataclass(frozen=True)
+class ServerAttackRelayTarget:
+    object_id: int
+    hit_action: int
+    raw_damage_values: tuple[int, ...]
+
+    @property
+    def damage_values(self) -> tuple[int, ...]:
+        return tuple(value & 0x7FFF_FFFF for value in self.raw_damage_values)
+
+    @property
+    def high_bit_markers(self) -> tuple[bool, ...]:
+        return tuple(
+            bool(value & 0x8000_0000) for value in self.raw_damage_values
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "hit_action": self.hit_action,
+            "damage_values": list(self.damage_values),
+            "high_bit_markers": list(self.high_bit_markers),
+        }
+
+
+@dataclass(frozen=True)
 class ServerAttackRelay:
     object_id: int
     packed_counts: int
@@ -3148,6 +3172,68 @@ class ServerAttackRelay:
     @property
     def hit_count(self) -> int:
         return self.packed_counts & 0x0F
+
+    def _split_body(
+        self,
+    ) -> tuple[bytes, tuple[ServerAttackRelayTarget, ...], bytes]:
+        tail_length = 4 if self.opcode == 219 else 0
+        target_record_length = 5 + 4 * self.hit_count
+        prefix_length = (
+            len(self.opaque_body)
+            - tail_length
+            - self.target_count * target_record_length
+        )
+        expected_prefix_lengths = {218: {6, 11}, 219: {11, 15}}.get(
+            self.opcode
+        )
+        if expected_prefix_lengths is None:
+            raise PacketShapeError(
+                f"server attack relay opcode is {self.opcode}, "
+                "expected 218 or 219"
+            )
+        if prefix_length not in expected_prefix_lengths:
+            expected = ", ".join(
+                str(value) for value in sorted(expected_prefix_lengths)
+            )
+            raise PacketShapeError(
+                f"server opcode-{self.opcode} attack relay packed counts "
+                f"0x{self.packed_counts:02x} imply a {prefix_length}-byte "
+                f"prefix, expected one of {expected}"
+            )
+
+        reader = PacketReader(
+            self.opaque_body, packet_name="server_attack_relay_body"
+        )
+        opaque_prefix = reader.bytes(prefix_length, "opaque_prefix")
+        targets: list[ServerAttackRelayTarget] = []
+        for target_index in range(self.target_count):
+            targets.append(
+                ServerAttackRelayTarget(
+                    object_id=reader.u32(f"targets[{target_index}].object_id"),
+                    hit_action=reader.u8(f"targets[{target_index}].hit_action"),
+                    raw_damage_values=tuple(
+                        reader.u32(
+                            f"targets[{target_index}].damage_values[{hit_index}]"
+                        )
+                        for hit_index in range(self.hit_count)
+                    ),
+                )
+            )
+        opaque_tail = reader.bytes(tail_length, "opaque_tail")
+        reader.finish()
+        return opaque_prefix, tuple(targets), opaque_tail
+
+    @property
+    def opaque_prefix(self) -> bytes:
+        return self._split_body()[0]
+
+    @property
+    def targets(self) -> tuple[ServerAttackRelayTarget, ...]:
+        return self._split_body()[1]
+
+    @property
+    def opaque_tail(self) -> bytes:
+        return self._split_body()[2]
 
     @classmethod
     def parse(cls, payload: bytes) -> "ServerAttackRelay":
@@ -3171,13 +3257,24 @@ class ServerAttackRelay:
             opaque_body=reader.bytes(reader.remaining, "opaque_body"),
         )
         reader.finish()
+        relay._split_body()
         return relay
 
     def safe_dict(self) -> dict[str, int]:
+        opaque_prefix, targets, opaque_tail = self._split_body()
         return {
             "target_count": self.target_count,
             "hit_count": self.hit_count,
             "opaque_body_bytes": len(self.opaque_body),
+            "opaque_prefix_bytes": len(opaque_prefix),
+            "target_records": len(targets),
+            "damage_values": sum(
+                len(target.raw_damage_values) for target in targets
+            ),
+            "high_bit_markers": sum(
+                sum(target.high_bit_markers) for target in targets
+            ),
+            "opaque_tail_bytes": len(opaque_tail),
         }
 
     def to_bytes(self) -> bytes:
@@ -3203,6 +3300,7 @@ class ServerAttackRelay:
                     f"server attack relay {name} must fit in "
                     f"u{maximum.bit_length()}"
                 )
+        self._split_body()
         return (
             struct.pack("<HIB", self.opcode, self.object_id, self.packed_counts)
             + self.opaque_body

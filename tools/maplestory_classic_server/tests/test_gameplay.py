@@ -99,6 +99,28 @@ PLAYER_OBJECT_ID = 30_001
 PERMANENT_ITEM_EXPIRATION = 150_842_304_000_000_000
 
 
+def fixture_attack_relay_body(
+    *,
+    prefix_length: int,
+    target_count: int,
+    hit_count: int,
+    tail_length: int,
+    zero_targets: bool = False,
+) -> bytes:
+    body = bytearray(prefix_length)
+    for target_index in range(target_count):
+        object_id = 0 if zero_targets else MOB_OBJECT_ID + target_index
+        body.extend(object_id.to_bytes(4, "little"))
+        body.append(0 if zero_targets else 6)
+        for hit_index in range(hit_count):
+            damage = 0 if zero_targets else 40 + target_index + hit_index
+            if not zero_targets and hit_index == 0:
+                damage |= 0x8000_0000
+            body.extend(damage.to_bytes(4, "little"))
+    body.extend(b"\x00" * tail_length)
+    return bytes(body)
+
+
 def fixture_npc() -> NpcSpawn:
     return NpcSpawn(
         object_id=NPC_OBJECT_ID,
@@ -967,7 +989,12 @@ def fixture_gameplay_transcript(
                 opcode=218,
                 object_id=PLAYER_OBJECT_ID,
                 packed_counts=0x11,
-                opaque_body=b"\x00" * 20,
+                opaque_body=fixture_attack_relay_body(
+                    prefix_length=11,
+                    target_count=1,
+                    hit_count=1,
+                    tail_length=0,
+                ),
             ).to_bytes(),
         )
         append(
@@ -976,7 +1003,12 @@ def fixture_gameplay_transcript(
                 opcode=219,
                 object_id=PLAYER_OBJECT_ID,
                 packed_counts=0x12,
-                opaque_body=b"\x00" * 32,
+                opaque_body=fixture_attack_relay_body(
+                    prefix_length=15,
+                    target_count=1,
+                    hit_count=2,
+                    tail_length=4,
+                ),
             ).to_bytes(),
         )
     if opcode_101_records:
@@ -1847,14 +1879,28 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ServerAttackRelay(
                 opcode=opcode,
                 object_id=PLAYER_OBJECT_ID,
-                packed_counts=0x12,
-                opaque_body=b"\x00" * (total_length - 7),
+                packed_counts=packed_counts,
+                opaque_body=fixture_attack_relay_body(
+                    prefix_length=prefix_length,
+                    target_count=packed_counts >> 4,
+                    hit_count=packed_counts & 0x0F,
+                    tail_length=4 if opcode == 219 else 0,
+                    zero_targets=opcode == 218 and prefix_length == 6,
+                ),
             )
-            for opcode, total_lengths in (
-                (218, (18, 22, 27)),
-                (219, (22, 26, 31, 35, 39, 44, 53, 62)),
+            for opcode, packed_counts, prefix_length in (
+                (218, 0x01, 11),
+                (218, 0x11, 6),
+                (218, 0x11, 11),
+                (219, 0x01, 11),
+                (219, 0x02, 15),
+                (219, 0x11, 11),
+                (219, 0x11, 15),
+                (219, 0x12, 15),
+                (219, 0x21, 15),
+                (219, 0x31, 15),
+                (219, 0x41, 15),
             )
-            for total_length in total_lengths
         ]
         fixed_envelope = Opcode13Type1Envelope(opaque_payload=b"fixed123")
         variable_envelope = Opcode13Envelope(
@@ -1896,15 +1942,25 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 ServerAttackRelay.parse(attack_relay.to_bytes()),
                 attack_relay,
             )
-        self.assertEqual(server_attack_relays[3].target_count, 1)
-        self.assertEqual(server_attack_relays[3].hit_count, 2)
-        self.assertNotIn("object_id", server_attack_relays[3].safe_dict())
+        two_hit_relay = server_attack_relays[7]
+        self.assertEqual(two_hit_relay.target_count, 1)
+        self.assertEqual(two_hit_relay.hit_count, 2)
+        self.assertEqual(len(two_hit_relay.targets), 1)
+        self.assertEqual(two_hit_relay.targets[0].object_id, MOB_OBJECT_ID)
+        self.assertEqual(two_hit_relay.targets[0].damage_values, (40, 41))
+        self.assertEqual(
+            two_hit_relay.targets[0].high_bit_markers, (True, False)
+        )
+        self.assertNotIn("object_id", two_hit_relay.safe_dict())
+        self.assertNotIn("object_id", two_hit_relay.targets[0].safe_dict())
         with self.assertRaisesRegex(PacketShapeError, "suffix needs 26 bytes"):
             replace(
                 client_attack_actions[1], opaque_suffix=b"\x00" * 25
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "expected one of"):
             replace(server_attack_relays[0], opaque_body=b"\x00" * 12).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "imply a 7-byte prefix"):
+            replace(server_attack_relays[2], packed_counts=0x12).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "flag_1 must fit"):
             ClientOpcode54AttackAction(
                 control_value=364_201,
@@ -2794,6 +2850,33 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.server_attack_relays_for_unknown_players, 0
         )
+        self.assertEqual(analysis.state.server_attack_target_records, 2)
+        self.assertEqual(analysis.state.server_attack_zero_object_targets, 0)
+        self.assertEqual(
+            analysis.state.server_attack_targets_for_active_mobs, 2
+        )
+        self.assertEqual(
+            analysis.state.server_attack_targets_for_known_mobs, 2
+        )
+        self.assertEqual(
+            analysis.state.server_attack_targets_for_unknown_mobs, 0
+        )
+        self.assertEqual(analysis.state.server_attack_hit_actions, {6: 2})
+        self.assertEqual(analysis.state.server_attack_damage_entries, 3)
+        self.assertEqual(analysis.state.server_attack_damage_total, 121)
+        self.assertEqual(analysis.state.server_attack_damage_min, 40)
+        self.assertEqual(analysis.state.server_attack_damage_max, 41)
+        self.assertEqual(
+            analysis.state.server_attack_damage_high_bit_markers, 2
+        )
+        active_mob = analysis.state.mobs[MOB_OBJECT_ID]
+        self.assertEqual(active_mob.attack_relay_hits, 3)
+        self.assertEqual(active_mob.attack_relay_damage, 121)
+        self.assertEqual(active_mob.attack_relay_high_bit_markers, 2)
+        self.assertEqual(active_mob.last_attack_hit_action, 6)
+        safe_mob = analysis.safe_dict()["state"]["mobs"][0]
+        self.assertEqual(safe_mob["attack_relay_hits"], 3)
+        self.assertEqual(safe_mob["attack_relay_damage"], 121)
         self.assertIn(
             'combat=client_actions:5 client_opcodes:{"50": 2, "52": 2, '
             '"54": 1}',
@@ -2821,6 +2904,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn("kind=client_attack_submitted", report)
         self.assertIn("kind=server_attack_relay_received", report)
+        self.assertIn('"damage_values":[40,41]', report)
+        self.assertIn('"high_bit_markers":[true,false]', report)
         self.assertNotIn("987654321", report)
         self.assertNotIn(str(MOB_OBJECT_ID), report)
         self.assertNotIn(str(PLAYER_OBJECT_ID), report)

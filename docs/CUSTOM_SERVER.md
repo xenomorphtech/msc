@@ -131,8 +131,12 @@ Client opcodes `50`/`52`/`54` now fold into one attack-action model. Stream
 variants and every opcode-`54` action carry a capture-correlated mob target;
 safe output aliases it and omits client tokens. Server opcodes `218`/`219`
 likewise fold as 140 and 43 attack relays, with aliased actors and packed
-target/hit counts. Their remaining bodies and exact damage fields stay opaque,
-so the custom server validates but does not generate or replay combat yet.
+target/hit counts. Their bodies now expose 194 target records and 254 damage
+words across both captures, with aliased mobs and a neutral high-bit marker;
+active mobs also accumulate relay hit/damage telemetry. Only the varying
+prefixes and opcode-`219` tail remain opaque. The custom server still does not
+generate or replay combat because those fields and the mob maximum-HP mapping
+are not established.
 
 ## Replay the login capture locally
 
@@ -666,8 +670,9 @@ project's own `README.md` for all options.
   five-field distributions with exact byte consumption and round trips.
 - Client opcodes `50`/`52`/`54` now fold 961 sustained-capture attack actions
   with aliased mob targets where present; server opcodes `218`/`219` fold 183
-  attack relays with packed target/hit counts. Opaque damage bodies remain out
-  of generation and replay.
+  attack relays with packed target/hit counts, 194 typed target records, and
+  254 damage words. Opaque prefix/tail fields and HP mapping remain out of
+  generation and replay.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

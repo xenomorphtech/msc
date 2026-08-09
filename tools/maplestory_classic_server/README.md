@@ -365,7 +365,8 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `293`: exact object-id plus one-byte mob-health percentage;
   zero is retained as state and does not replace the separate leave packet,
 - server opcodes `218`/`219`: attack-relay envelopes with an aliased player
-  object id, packed target/hit counts, and capture-bounded opaque bodies,
+  object id, packed target/hit counts, typed mob/hit-action/damage arrays, and
+  capture-bounded opaque prefixes/tails,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
@@ -685,11 +686,16 @@ Server opcodes `218` and `219` form the corresponding capture-bounded attack
 relay family. Their prefix is opcode, player object id, and one packed byte;
 the high nibble is the target count and the low nibble is the hit count. Stream
 `126` contains 41/99 relays and stream `92` contains 1/42. Every actor id is a
-player id known somewhere in its capture. The fold reports arrival-time player
-correlation and aliased actors while preserving opaque bodies of the observed
-total lengths. Health/leave correlations support the attack interpretation,
-but exact damage fields remain unknown, so the server does not yet generate or
-replay these packets.
+player id known somewhere in its capture. Packed counts bound repeated records
+of mob id, hit-action byte, and one u32 damage word per hit. Stream `126`
+contains 123 target records: 118 name known mobs and five are all-zero opcode-
+`218` placeholders; its 166 damage words have low-31-bit magnitudes `0..80` and
+12 set high-bit markers. Stream `92` has 71 known-mob records and 88 damage
+words (`1..366`, 20 high-bit markers). Every nonzero target uses hit action
+`6`. The fold aliases actors and targets and reports damage telemetry while
+accumulating hit/damage totals on each currently active mob. It retains the
+varying prefixes, opcode-`219` tail, and high-bit meaning as opaque. Those gaps
+and the unknown mob maximum-HP mapping still prevent safe generation or replay.
 
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
@@ -948,3 +954,7 @@ It intentionally cannot launch an authenticated official session.
 34. Correlate client opcodes `50`/`52`/`54` with mob targets, bound server
     attack relays `218`/`219`, fold identifier-safe combat events and packed
     count distributions, and leave damage/replay semantics explicitly opaque.
+35. Decode every relay target/hit-action/damage array, validate 194 target
+    records and 254 damage words across both sustained captures, and keep
+    replay disabled until opaque attack prefixes/tails and mob HP mapping are
+    recovered.

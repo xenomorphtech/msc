@@ -1057,10 +1057,19 @@ Both server families use this capture-bounded envelope:
 uint16 opcode = 218 or 219
 uint32 player_object_id             # aliased in safe reports
 uint8  packed_counts
-byte[remaining_length] opaque_body
 
 target_count = packed_counts >> 4
 hit_count    = packed_counts & 0x0f
+
+byte[prefix_length] opaque_prefix   # 218: 6/11; 219: 11/15
+repeat target_count:
+  uint32 mob_object_id              # aliased; zero in five 218 placeholders
+  uint8  hit_action                 # 6 for every nonzero captured target
+  repeat hit_count:
+    uint32 raw_damage
+      damage_value = raw_damage & 0x7fffffff
+      high_bit_marker = raw_damage >> 31
+byte[4] opaque_tail                 # opcode 219 only
 ```
 
 Opcode `218` has observed total lengths `18`, `22`, and `27`; opcode `219` has
@@ -1068,15 +1077,27 @@ lengths `22`, `26`, `31`, `35`, `39`, `44`, `53`, and `62`. Stream `126`
 contains 41 opcode-`218` and 99 opcode-`219` relays. Stream `92` contains one
 and 42. Every prefix object id is a player object id observed somewhere in the
 same capture. The nibble split is supported by the manifest's packed
-attack-count prefix and by body-length scaling, but the bodies remain partial
-semantic coverage.
+attack-count prefix and by body-length scaling. Given those counts, every body
+decomposes exactly into a 6/11-byte opcode-`218` prefix or 11/15-byte opcode-
+`219` prefix, repeated target records, and the opcode-`219` four-byte tail.
+
+Stream `126` has 123 target records and 166 damage words. Of those records,
+118 name known mobs and use hit action `6`; five short opcode-`218` records are
+all-zero placeholders. Low-31-bit damage magnitudes range from `0` to `80`,
+and 12 raw words set the high bit. Stream `92` has 71 target records, all known
+mobs with hit action `6`, and 88 damage words ranging from `1` to `366`; 20 set
+the high bit. Thus all 194 target records and 254 damage words across the two
+sustained captures consume exactly and re-encode as part of their relay.
 
 The fold emits `server_attack_relay_received`, aliases the actor, records the
-packed target/hit distributions, and preserves the body losslessly without
-printing it. These captures validate action-to-health/leave correlations, not
-the exact damage-number encoding. The custom server therefore does not yet
-generate or replay attacks: doing so would claim semantics that the opaque
-client suffixes and relay bodies have not established.
+packed target/hit distributions, aliases each nonzero mob, and reports damage
+magnitudes plus a neutral high-bit marker. Active mob entities accumulate the
+observed relay hit/damage totals without replacing the authoritative opcode-
+`293` health percentage. Raw ids and raw body bytes remain hidden. These
+captures validate action-to-health/leave correlations and damage array
+boundaries, but do not establish the varying attack prefixes, opcode-`219`
+tail, high-bit meaning, or mob maximum HP needed to predict the next percentage
+update. The custom server therefore does not yet generate or replay attacks.
 
 ## `58880` exchange
 
