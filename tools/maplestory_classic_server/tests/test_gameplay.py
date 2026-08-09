@@ -13,12 +13,14 @@ from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     analyze_gameplay_transcript,
     derive_mob_movement_acknowledgement_policy,
+    plan_current_hp_stat_update,
     plan_initial_player_hp_rewrite,
     plan_final_field_npc_state_replay,
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
 from maple_server.packets import (  # noqa: E402
+    CharacterStatUpdate,
     CompactFieldTransition,
     FieldLoadStage,
     FieldSnapshotEnvelope,
@@ -288,6 +290,7 @@ def fixture_gameplay_transcript(
     compact_transition: bool = False,
     initial_snapshot: bool = False,
     player_movement: bool = False,
+    stat_updates: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -380,6 +383,27 @@ def fixture_gameplay_transcript(
     )
     append("client_to_server", FieldLoadStage(stage=1).to_bytes())
     append("client_to_server", FieldLoadStage(stage=2).to_bytes())
+    if stat_updates:
+        append(
+            "server_to_client",
+            CharacterStatUpdate(
+                request_flag=0,
+                stat_mask=(
+                    CharacterStatUpdate.CURRENT_HP
+                    | CharacterStatUpdate.EXPERIENCE
+                ),
+                current_hp=77,
+                experience=2_000,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            CharacterStatUpdate(
+                request_flag=1,
+                stat_mask=CharacterStatUpdate.MESOS,
+                mesos=9_001,
+            ).to_bytes(),
+        )
     if player_movement:
         append(
             "client_to_server",
@@ -455,6 +479,50 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_character_stat_update_round_trip(self) -> None:
+        combined = CharacterStatUpdate(
+            request_flag=1,
+            stat_mask=(
+                CharacterStatUpdate.INTELLIGENCE
+                | CharacterStatUpdate.LUCK
+                | CharacterStatUpdate.ABILITY_POINTS
+            ),
+            intelligence=57,
+            luck=15,
+            ability_points=0,
+        )
+        zero_mask = CharacterStatUpdate(
+            request_flag=0,
+            stat_mask=0,
+            opaque_tail=b"\x01\x01",
+        )
+
+        self.assertEqual(
+            combined.to_bytes().hex(),
+            "2900010043000039000f00000000",
+        )
+        self.assertEqual(
+            CharacterStatUpdate.parse(combined.to_bytes()), combined
+        )
+        self.assertEqual(
+            CharacterStatUpdate.parse(zero_mask.to_bytes()), zero_mask
+        )
+        self.assertEqual(
+            combined.values,
+            {"intelligence": 57, "luck": 15, "ability_points": 0},
+        )
+        with self.assertRaisesRegex(PacketShapeError, "requires current_hp"):
+            CharacterStatUpdate(
+                request_flag=0,
+                stat_mask=CharacterStatUpdate.CURRENT_HP,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "unsupported bits"):
+            CharacterStatUpdate(
+                request_flag=0,
+                stat_mask=1,
+                opaque_tail=b"\x00",
+            ).to_bytes()
+
     def test_initial_field_snapshot_typed_prefix_round_trip(self) -> None:
         snapshot = fixture_initial_field_snapshot()
         encoded = snapshot.to_bytes()
@@ -780,6 +848,29 @@ class GameplayStateFoldTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 0 and 222"):
             plan_initial_player_hp_rewrite(transcript, 223)
 
+    def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            stat_updates=True,
+        )
+        plan = plan_current_hp_stat_update(transcript, 1)
+
+        self.assertEqual(plan.original_current_hp, 77)
+        self.assertEqual(plan.emitted_current_hp, 1)
+        self.assertEqual(plan.max_hp, 222)
+        self.assertEqual(plan.field_epoch, 1)
+        self.assertEqual(
+            plan.update,
+            CharacterStatUpdate(
+                request_flag=0,
+                stat_mask=CharacterStatUpdate.CURRENT_HP,
+                current_hp=1,
+            ),
+        )
+        self.assertEqual(plan.safe_dict()["prediction"]["current_hp"], 1)
+        with self.assertRaisesRegex(ValueError, "between 0 and 222"):
+            plan_current_hp_stat_update(transcript, 223)
+
     def test_folds_initial_snapshot_character_prefix_into_player_state(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(initial_snapshot=True)
@@ -852,6 +943,44 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(report["state"]["observed_remote_player_count"], 1)
         self.assertNotIn(
             "object_id", report["state"]["observed_remote_players"][0]
+        )
+
+    def test_folds_character_stat_updates_into_player_state(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(stat_updates=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.state.current_hp, 77)
+        self.assertEqual(analysis.state.experience, 2_000)
+        self.assertEqual(analysis.state.mesos, 9_001)
+        self.assertEqual(analysis.state.player_stat_updates, 2)
+        self.assertEqual(
+            analysis.state.player_stat_updates_by_mask,
+            {
+                CharacterStatUpdate.CURRENT_HP
+                | CharacterStatUpdate.EXPERIENCE: 1,
+                CharacterStatUpdate.MESOS: 1,
+            },
+        )
+        self.assertEqual(
+            analysis.state.player_stat_fields_updated,
+            {"current_hp": 1, "experience": 1, "mesos": 1},
+        )
+        self.assertEqual(analysis.state.player_stat_request_flags, {0: 1, 1: 1})
+        events = [
+            event for event in analysis.events if event.kind == "player_stats_updated"
+        ]
+        self.assertEqual(len(events), 2)
+        self.assertEqual(
+            events[0].details["changes"]["current_hp"],
+            {"previous": None, "current": 77},
+        )
+        report = analysis.safe_dict()
+        self.assertEqual(report["state"]["player"]["mesos"], 9_001)
+        self.assertEqual(
+            report["state"]["player_stat_updates_by_mask"],
+            {"0x00010400": 1, "0x00040000": 1},
         )
 
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:

@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 100 tests.
+The last run passed all 105 tests.
 
 ## Inspect and compare captures
 
@@ -254,6 +254,42 @@ original inventory and progression, nine NPCs, and all 30 heartbeat pairs
 matched including the captured pair. This matches the planner's
 identifier-free prediction across packet, client, and folded-state evidence.
 
+## Typed post-transcript HP update validation
+
+Opcode `41` is the captured player-stat delta family. The model decodes the
+observed INT, LUK, HP, MP, AP, EXP, and 64-bit mesos mask bits, folds each
+field independently, and preserves the neutral request flag and final marker.
+To emit a new current-HP delta after stream `114`:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --emit-current-hp-update 1 \
+  --post-transcript-start-delay-seconds 10 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/current_hp_stat_1 \
+  --timing-scale 1 \
+  --hold-open-seconds 180
+```
+
+The planner validates current/max HP, bounds the requested value, generates
+`29000000040000010000`, parses it back, and publishes
+`protocol.player_stat_update` with its prediction and sent count. The real
+client accepted the packet and displayed `HP 1/222`, while MP remained
+`97/342` and EXP remained `1464`. The recorded exchange folded validly to
+`active`, with one HP event carrying `previous:50` and `current:1`, and all
+nine generated heartbeats matched in the completed transcript. This is a
+post-entry state delta, separate from rewriting the initial snapshot.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
@@ -400,6 +436,9 @@ project's own `README.md` for all options.
 - The gameplay analyzer now emits typed local/remote player movement records
   and folds their endpoints instead of reporting opcodes `182` and `202` as
   unknown packets. Both PCAP world streams validate without warnings.
+- All 333 long-stream opcode-`41` stat packets now round-trip and fold into
+  player state. A generated HP-mask packet produced the predicted live
+  `50/222 -> 1/222` HUD and event-state change without disturbing liveness.
 
 ## Next server milestone
 
@@ -407,8 +446,8 @@ Replace the remaining opaque replay portions with stateful handling:
 
 1. Decode the inner 167 bytes of each character-list response record and emit
    it from typed player state.
-2. Capture short, isolated player interactions and model their request/effect
-   pairs as game-state events.
+2. Continue the completed stat-delta model with short, isolated inventory
+   request/effect pairs and fold item changes into game-state events.
 3. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
 4. Obtain a short final-field capture with a known mob and validate the typed

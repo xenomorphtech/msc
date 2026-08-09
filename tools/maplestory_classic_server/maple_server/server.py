@@ -23,6 +23,7 @@ from .gameplay import (
     MobMovementAcknowledgementPolicy,
     analyze_gameplay_transcript,
     derive_mob_movement_acknowledgement_policy,
+    plan_current_hp_stat_update,
     plan_final_field_npc_state_replay,
     plan_initial_player_hp_rewrite,
     render_gameplay_analysis,
@@ -360,6 +361,7 @@ async def replay_connection(
     keep_world_open: bool = False,
     world_heartbeat_interval_seconds: float | None = None,
     npc_state_replay_plaintext: bytes | None = None,
+    player_stat_update_plaintext: bytes | None = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
     ) = None,
@@ -416,6 +418,13 @@ async def replay_connection(
         raise ValueError(
             "npc_state_replay_plaintext must be a post-transcript server frame"
         )
+    if (
+        player_stat_update_plaintext is not None
+        and player_stat_update_plaintext not in post_transcript_server_frames
+    ):
+        raise ValueError(
+            "player_stat_update_plaintext must be a post-transcript server frame"
+        )
     previous_timestamp_ns: int | None = None
     patched_server_events = iter(
         patch_server_event_data(
@@ -448,6 +457,17 @@ async def replay_connection(
         npc_state_replay_metrics, dict
     ):
         raise TypeError("runtime npc_state_replay telemetry must be a dictionary")
+    player_stat_update_metrics = (
+        runtime_protocol.get("player_stat_update")
+        if runtime_protocol is not None
+        else None
+    )
+    if player_stat_update_metrics is not None and not isinstance(
+        player_stat_update_metrics, dict
+    ):
+        raise TypeError(
+            "runtime player_stat_update telemetry must be a dictionary"
+        )
     mob_acknowledgement_metrics = (
         runtime_protocol.get("mob_movement_acknowledgements")
         if runtime_protocol is not None
@@ -511,6 +531,9 @@ async def replay_connection(
                 ),
                 "repeat_final_field_npc_state_update": (
                     npc_state_replay_plaintext is not None
+                ),
+                "emit_current_hp_update": (
+                    player_stat_update_plaintext is not None
                 ),
                 "reactive_mob_movement_acknowledgements": (
                     mob_movement_acknowledgement_policy is not None
@@ -668,6 +691,14 @@ async def replay_connection(
             ):
                 npc_state_replay_metrics["packets_sent"] = (
                     int(npc_state_replay_metrics.get("packets_sent", 0)) + 1
+                )
+            if (
+                player_stat_update_plaintext is not None
+                and plaintext == player_stat_update_plaintext
+                and player_stat_update_metrics is not None
+            ):
+                player_stat_update_metrics["packets_sent"] = (
+                    int(player_stat_update_metrics.get("packets_sent", 0)) + 1
                 )
 
         for plaintext in post_transcript_replies:
@@ -1609,6 +1640,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--emit-current-hp-update",
+        type=int,
+        metavar="HP",
+        help=(
+            "generate one typed opcode-41 current-HP stat update after replay; "
+            "requires --keep-world-open and the validated stat-update model"
+        ),
+    )
+    replay.add_argument(
         "--server-frame-patch",
         action="append",
         default=[],
@@ -2135,6 +2175,20 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "packets_planned": 1,
                 "packets_sent": 0,
             }
+        current_hp_stat_update_plan = None
+        if arguments.emit_current_hp_update is not None:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--emit-current-hp-update requires --keep-world-open"
+                )
+            current_hp_stat_update_plan = plan_current_hp_stat_update(
+                transcript, arguments.emit_current_hp_update
+            )
+            runtime_protocol["player_stat_update"] = {
+                **current_hp_stat_update_plan.safe_dict(),
+                "packets_planned": 1,
+                "packets_sent": 0,
+            }
         mob_movement_acknowledgement_policy = None
         if arguments.reactive_mob_movement_acknowledgements:
             if not arguments.keep_world_open:
@@ -2253,6 +2307,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
         if npc_state_replay_plan is not None:
             npc_state_replay_plaintext = npc_state_replay_plan.update.to_bytes()
             post_transcript_server_frames += (npc_state_replay_plaintext,)
+        player_stat_update_plaintext = None
+        if current_hp_stat_update_plan is not None:
+            player_stat_update_plaintext = (
+                current_hp_stat_update_plan.update.to_bytes()
+            )
+            post_transcript_server_frames += (player_stat_update_plaintext,)
         handler = functools.partial(
             replay_connection,
             transcript=transcript,
@@ -2285,6 +2345,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 arguments.world_heartbeat_interval_seconds
             ),
             npc_state_replay_plaintext=npc_state_replay_plaintext,
+            player_stat_update_plaintext=player_stat_update_plaintext,
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
             ),
@@ -2306,6 +2367,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "rewrite_initial_current_hp": (
                 arguments.rewrite_initial_current_hp
             ),
+            "emit_current_hp_update": arguments.emit_current_hp_update,
             "reactive_mob_movement_acknowledgements": (
                 arguments.reactive_mob_movement_acknowledgements
             ),

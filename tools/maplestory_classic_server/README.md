@@ -141,6 +141,27 @@ python -m maple_server replay \
   --hold-open-seconds 300
 ```
 
+`--emit-current-hp-update HP` generates a new typed server opcode-`41` after
+the captured transcript. It validates the complete gameplay fold, bounds the
+requested value by modeled max HP, constructs the observed current-HP mask,
+round-trips the plaintext packet, and exposes the predicted delta through the
+runtime API. It requires `--keep-world-open`; use
+`--post-transcript-start-delay-seconds` when the effect should be delayed for
+observation:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --emit-current-hp-update 1 \
+  --post-transcript-start-delay-seconds 10 \
+  --hold-open-seconds 300
+```
+
 Validate a login capture and fold it into typed game state without printing
 account or character identifiers:
 
@@ -183,6 +204,9 @@ The gameplay fold currently models these capture-backed boundaries:
   use, setup, etc, and cash inventory lists, while the repeated 95-byte compact
   transition variant is fully bounded,
 - client opcode `158`: the complete `1 -> 2` field-load stage sequence,
+- server opcode `41`: masked player-stat deltas for the capture-observed INT,
+  LUK, HP, MP, AP, EXP, and 64-bit mesos fields, plus bounded neutral flag/tail
+  values,
 - client opcode `182`: local-player movement with a neutral 32-bit control
   value, signed reference position, typed command stream, and zero-marked
   start/end-position trailer,
@@ -287,6 +311,23 @@ positions for observed remote players, and emits `player_movement_submitted`
 and `remote_player_movement_broadcast` events. Short stream `114` folds its one
 local submission to `(633,-2677)` and its two broadcasts to two redacted
 remote-player aliases.
+
+Server opcode `41` now folds stat deltas instead of remaining an unknown
+packet. The stable prefix is a one-byte request flag and 32-bit mask. Observed
+values follow in ascending mask-bit order: INT/LUK/HP/MP/AP are 16-bit, EXP is
+32-bit, and mesos is 64-bit. A nonzero mask ends in one zero byte. All 333
+stream-`92` packets and 324 emitted field values round-trip, including combined
+HP+EXP and INT+LUK+AP masks. Fourteen zero-mask packets are bounded as either a
+single zero or the repeated `01 01` variant; their semantics and the request
+flag remain neutral. The final fold reports HP `50`, MP `97`, EXP `1464`, and
+mesos `4567`.
+
+A live stream-`114` replay then generated one typed current-HP update from
+`50 -> 1`. The real HUD showed `HP 1/222` while MP stayed `97/342` and EXP
+stayed `1464`. The recorded exchange independently folded to `active`, emitted
+one `player_stats_updated` event with previous/current HP `50/1`, and matched
+every generated heartbeat. Runtime telemetry reported one planned and one sent
+opcode-`41` packet.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
@@ -442,6 +483,10 @@ When the initial player HP is rewritten,
 `protocol.initial_player_hp_rewrite` reports the original/current/max values,
 the patched server-frame index, patch count, and the identifier-free predicted
 unchanged state components.
+When a post-transcript HP stat update is generated,
+`protocol.player_stat_update` reports opcode/mask/flag, field epoch,
+original/emitted/max HP, the predicted unchanged state components, and planned
+versus sent packet counts.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
 planned/sent packet counts, and the predicted fold delta. When reactive mob
@@ -559,3 +604,6 @@ It intentionally cannot launch an authenticated official session.
 21. Separate player movement from mob movement, bound client opcode `182` and
     server opcode `202`, round-trip all 644 captured packets and 4,281 commands,
     and fold local/remote positions into identifier-safe events and state.
+22. Decode masked server opcode `41` stat deltas, round-trip all 333 long-stream
+    packets, generate a typed current-HP update, and confirm the predicted
+    `50/222 -> 1/222` effect in the HUD, runtime telemetry, and observed fold.

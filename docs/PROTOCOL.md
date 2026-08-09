@@ -430,6 +430,46 @@ The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server
 clock without replacing the initial player-stat model.
 
+## Character stat deltas (`server 41`)
+
+The capture-validated prefix and conditional-value grammar is:
+
+```text
+uint16 opcode = 41
+uint8  request_flag                  # observed 0 or 1; role remains neutral
+uint32 stat_mask
+if stat_mask & 0x00000100: uint16 intelligence
+if stat_mask & 0x00000200: uint16 luck
+if stat_mask & 0x00000400: uint16 current_hp
+if stat_mask & 0x00001000: uint16 current_mp
+if stat_mask & 0x00004000: uint16 ability_points
+if stat_mask & 0x00010000: uint32 experience
+if stat_mask & 0x00040000: uint64 mesos
+byte[] bounded_tail
+```
+
+Conditional values occur in ascending mask-bit order. Every nonzero-mask
+packet ends with one zero byte. A zero mask has either a single-zero tail (one
+packet) or `01 01` (13 packets); these variants remain semantic unknowns rather
+than being assigned a guessed result meaning.
+
+Stream `92` contains 333 packets. Their masks/counts are `0x0:14`,
+`0x400:35`, `0x1000:207`, `0x4300:1`, `0x10000:44`, `0x10400:3`, and
+`0x40000:29`; request flags are `0:315` and `1:18`. All packets and all 324
+conditional values parse and re-encode exactly. The combined `0x4300` packet
+decodes INT `57`, LUK `15`, AP `0`, while `0x10400` concatenates current HP
+and EXP. The fold applies each field independently, records previous/current
+values in `player_stats_updated` events, and ends with HP `50`, MP `97`, EXP
+`1464`, and mesos `4567` after all field resets and deltas.
+
+The state-driven replay emitter uses request flag `0`, current-HP mask
+`0x00000400`, a bounded HP value, and the one-zero tail. A real stream-`114`
+client accepted generated plaintext `29000000040000010000`: its HUD changed
+from `50/222` to `1/222`, the observed transcript folded the event as
+`previous:50 -> current:1`, MP/EXP/map/inventory/progression stayed unchanged,
+and heartbeat responses continued. This validates the predicted effect without
+assigning semantics to the flag or tail marker.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

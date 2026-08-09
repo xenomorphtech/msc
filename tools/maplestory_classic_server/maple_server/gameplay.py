@@ -13,6 +13,7 @@ from .gamestate import (
     decode_transcript,
 )
 from .packets import (
+    CharacterStatUpdate,
     CompactFieldTransition,
     FieldLoadStage,
     FieldSnapshotEnvelope,
@@ -129,6 +130,7 @@ class GameplayGameState:
     skill_points: int | None = None
     experience: int | None = None
     fame: int | None = None
+    mesos: int | None = None
     player_x: int | None = None
     player_y: int | None = None
     inventory_region_bytes: int | None = None
@@ -178,6 +180,11 @@ class GameplayGameState:
     remote_player_movement_commands_by_type: Counter[int] = field(
         default_factory=Counter
     )
+    player_stat_updates: int = 0
+    player_stat_updates_by_mask: Counter[int] = field(default_factory=Counter)
+    player_stat_fields_updated: Counter[str] = field(default_factory=Counter)
+    player_stat_request_flags: Counter[int] = field(default_factory=Counter)
+    player_stat_zero_mask_updates: int = 0
     movement_submissions: int = 0
     movement_submissions_for_unknown_mobs: int = 0
     movement_submissions_with_unknown_template: int = 0
@@ -254,6 +261,36 @@ class InitialPlayerHpReplayPlan:
             "prediction": {
                 "current_hp": self.rewritten_current_hp,
                 "max_hp": self.max_hp,
+                "map_id": "unchanged",
+                "inventory": "unchanged",
+                "progression": "unchanged",
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class CurrentHpStatUpdateReplayPlan:
+    update: CharacterStatUpdate = field(repr=False)
+    original_current_hp: int
+    emitted_current_hp: int
+    max_hp: int
+    field_epoch: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "opcode": self.update.opcode,
+            "stat_mask": f"0x{self.update.stat_mask:08x}",
+            "request_flag": self.update.request_flag,
+            "field_epoch": self.field_epoch,
+            "original_current_hp": self.original_current_hp,
+            "emitted_current_hp": self.emitted_current_hp,
+            "max_hp": self.max_hp,
+            "prediction": {
+                "current_hp": self.emitted_current_hp,
+                "max_hp": self.max_hp,
+                "player_stat_updates_delta": 1,
+                "events_delta": 1,
                 "map_id": "unchanged",
                 "inventory": "unchanged",
                 "progression": "unchanged",
@@ -461,6 +498,7 @@ class GameplayAnalysis:
                     "skill_points": self.state.skill_points,
                     "experience": self.state.experience,
                     "fame": self.state.fame,
+                    "mesos": self.state.mesos,
                     "x": self.state.player_x,
                     "y": self.state.player_y,
                 },
@@ -539,6 +577,22 @@ class GameplayAnalysis:
                 ),
                 "remote_player_movement_commands_by_type": dict(
                     self.state.remote_player_movement_commands_by_type
+                ),
+                "player_stat_updates": self.state.player_stat_updates,
+                "player_stat_updates_by_mask": {
+                    f"0x{mask:08x}": count
+                    for mask, count in sorted(
+                        self.state.player_stat_updates_by_mask.items()
+                    )
+                },
+                "player_stat_fields_updated": dict(
+                    self.state.player_stat_fields_updated
+                ),
+                "player_stat_request_flags": dict(
+                    self.state.player_stat_request_flags
+                ),
+                "player_stat_zero_mask_updates": (
+                    self.state.player_stat_zero_mask_updates
                 ),
                 "movement_submissions": self.state.movement_submissions,
                 "movement_submissions_for_unknown_mobs": (
@@ -1041,6 +1095,50 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 41:
+            update = CharacterStatUpdate.parse(payload)
+            changes: dict[str, dict[str, int | None]] = {}
+            for field_name, current_value in update.values.items():
+                previous_value = getattr(self.state, field_name)
+                setattr(self.state, field_name, current_value)
+                changes[field_name] = {
+                    "previous": previous_value,
+                    "current": current_value,
+                }
+                self.state.player_stat_fields_updated[field_name] += 1
+            self.state.player_stat_updates += 1
+            self.state.player_stat_updates_by_mask[update.stat_mask] += 1
+            self.state.player_stat_request_flags[update.request_flag] += 1
+            if update.stat_mask == 0:
+                self.state.player_stat_zero_mask_updates += 1
+            details: dict[str, object] = {
+                "request_flag": update.request_flag,
+                "stat_mask": f"0x{update.stat_mask:08x}",
+                "changes": changes,
+                "changed_field_count": len(changes),
+                "tail_variant": (
+                    "single_zero"
+                    if update.opaque_tail == b"\x00"
+                    else "double_one"
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "player_stats_updated", details=details)
+            issues = [
+                "stat update request flag and final marker semantics remain neutral"
+            ]
+            if update.stat_mask == 0:
+                issues.append(
+                    "zero-mask single-zero/double-one variant remains opaque"
+                )
+            return self._observation(
+                frame,
+                kind="character_stat_update",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=update,
+                details=details,
+                issues=tuple(issues),
+            )
         if opcode == 9:
             termination = WorldSessionTermination.parse(payload)
             self.state.termination_received = True
@@ -1952,6 +2050,37 @@ def plan_initial_player_hp_rewrite(
     )
 
 
+def plan_current_hp_stat_update(
+    transcript: Transcript,
+    current_hp: int,
+) -> CurrentHpStatUpdateReplayPlan:
+    """Generate one typed post-transcript HP update from validated evidence."""
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    if analysis.state.current_hp is None or analysis.state.max_hp is None:
+        raise ValueError("world transcript has no modeled current/max HP state")
+    if not 0 <= current_hp <= analysis.state.max_hp:
+        raise ValueError(
+            f"emitted current HP must be between 0 and {analysis.state.max_hp}"
+        )
+    update = CharacterStatUpdate(
+        request_flag=0,
+        stat_mask=CharacterStatUpdate.CURRENT_HP,
+        current_hp=current_hp,
+    )
+    plaintext = update.to_bytes()
+    if CharacterStatUpdate.parse(plaintext) != update:
+        raise ValueError("generated current-HP stat update failed round-trip")
+    return CurrentHpStatUpdateReplayPlan(
+        update=update,
+        original_current_hp=analysis.state.current_hp,
+        emitted_current_hp=current_hp,
+        max_hp=analysis.state.max_hp,
+        field_epoch=analysis.state.field_epoch,
+    )
+
+
 def plan_final_field_npc_state_replay(
     transcript: Transcript,
 ) -> NpcStateReplayPlan:
@@ -2006,6 +2135,15 @@ def render_gameplay_analysis(
     remote_player_movement_command_types = json.dumps(
         dict(sorted(state.remote_player_movement_commands_by_type.items()))
     )
+    player_stat_masks = json.dumps(
+        {
+            f"0x{mask:08x}": count
+            for mask, count in sorted(state.player_stat_updates_by_mask.items())
+        }
+    )
+    player_stat_fields = json.dumps(
+        dict(sorted(state.player_stat_fields_updated.items()))
+    )
     acknowledgement_template_values = json.dumps(
         {
             template_id: sorted(status_values)
@@ -2051,7 +2189,12 @@ def render_gameplay_analysis(
             f"mp:{state.current_mp}/{state.max_mp} "
             f"str:{state.strength} dex:{state.dexterity} "
             f"int:{state.intelligence} luk:{state.luck} "
-            f"exp:{state.experience} fame:{state.fame}"
+            f"exp:{state.experience} fame:{state.fame} mesos:{state.mesos}"
+        ),
+        (
+            f"player_stat_updates=count:{state.player_stat_updates} "
+            f"masks:{player_stat_masks} fields:{player_stat_fields} "
+            f"zero_mask:{state.player_stat_zero_mask_updates}"
         ),
         (
             "inventory="

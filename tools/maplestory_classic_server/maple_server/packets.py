@@ -1817,6 +1817,117 @@ class MobLeaveField:
 
 
 @dataclass(frozen=True)
+class CharacterStatUpdate:
+    request_flag: int
+    stat_mask: int
+    intelligence: int | None = None
+    luck: int | None = None
+    current_hp: int | None = None
+    current_mp: int | None = None
+    ability_points: int | None = None
+    experience: int | None = None
+    mesos: int | None = None
+    opaque_tail: bytes = b"\x00"
+    opcode: int = 41
+
+    INTELLIGENCE = 0x0000_0100
+    LUCK = 0x0000_0200
+    CURRENT_HP = 0x0000_0400
+    CURRENT_MP = 0x0000_1000
+    ABILITY_POINTS = 0x0000_4000
+    EXPERIENCE = 0x0001_0000
+    MESOS = 0x0004_0000
+    _FIELD_SPECS = (
+        (INTELLIGENCE, "intelligence", "<H", 2),
+        (LUCK, "luck", "<H", 2),
+        (CURRENT_HP, "current_hp", "<H", 2),
+        (CURRENT_MP, "current_mp", "<H", 2),
+        (ABILITY_POINTS, "ability_points", "<H", 2),
+        (EXPERIENCE, "experience", "<I", 4),
+        (MESOS, "mesos", "<Q", 8),
+    )
+    _KNOWN_MASK = sum(spec[0] for spec in _FIELD_SPECS)
+
+    @property
+    def values(self) -> dict[str, int]:
+        return {
+            field_name: value
+            for bit, field_name, _, _ in self._FIELD_SPECS
+            if self.stat_mask & bit
+            for value in (getattr(self, field_name),)
+            if value is not None
+        }
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "CharacterStatUpdate":
+        reader = PacketReader(payload, packet_name="character_stat_update")
+        _expect_opcode(reader, 41)
+        request_flag = reader.u8("request_flag")
+        stat_mask = reader.u32("stat_mask")
+        unknown_mask = stat_mask & ~cls._KNOWN_MASK
+        if unknown_mask:
+            raise PacketShapeError(
+                "character stat update mask contains unsupported bits "
+                f"0x{unknown_mask:08x}"
+            )
+        values: dict[str, int] = {}
+        for bit, field_name, _, width in cls._FIELD_SPECS:
+            if stat_mask & bit:
+                values[field_name] = int.from_bytes(
+                    reader.bytes(width, field_name), "little"
+                )
+        opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
+        if stat_mask:
+            if opaque_tail != b"\x00":
+                raise PacketShapeError(
+                    "character stat update with values must end in one zero byte"
+                )
+        elif opaque_tail not in {b"\x00", b"\x01\x01"}:
+            raise PacketShapeError(
+                "zero-mask character stat update tail must be 00 or 0101"
+            )
+        return cls(
+            request_flag=request_flag,
+            stat_mask=stat_mask,
+            opaque_tail=opaque_tail,
+            **values,
+        )
+
+    def to_bytes(self) -> bytes:
+        unknown_mask = self.stat_mask & ~self._KNOWN_MASK
+        if unknown_mask:
+            raise PacketShapeError(
+                "character stat update mask contains unsupported bits "
+                f"0x{unknown_mask:08x}"
+            )
+        encoded_values: list[bytes] = []
+        for bit, field_name, format_string, _ in self._FIELD_SPECS:
+            value = getattr(self, field_name)
+            present = bool(self.stat_mask & bit)
+            if present != (value is not None):
+                requirement = "requires" if present else "does not allow"
+                raise PacketShapeError(
+                    f"character stat mask {requirement} {field_name}"
+                )
+            if value is not None:
+                encoded_values.append(struct.pack(format_string, value))
+        if self.stat_mask:
+            if self.opaque_tail != b"\x00":
+                raise PacketShapeError(
+                    "character stat update with values must end in one zero byte"
+                )
+        elif self.opaque_tail not in {b"\x00", b"\x01\x01"}:
+            raise PacketShapeError(
+                "zero-mask character stat update tail must be 00 or 0101"
+            )
+        return (
+            struct.pack("<HBI", self.opcode, self.request_flag, self.stat_mask)
+            + b"".join(encoded_values)
+            + self.opaque_tail
+        )
+
+
+@dataclass(frozen=True)
 class PlayerMovementCommand:
     command_type: int
     opaque_payload: bytes
