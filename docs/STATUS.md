@@ -364,6 +364,12 @@ pending movement. Runtime status nests the safe policy under
 `protocol.mob_movement_acknowledgements.state` and reports counters plus the
 last response/rejection at the parent. Generated mob-death opcode `280` now
 updates both health and movement active state.
+Reactive acknowledgements now emit identifier-safe submission,
+completion, and rejection runtime events. A fresh browser-free typed-snail run
+recorded 58 alternating request/completion pairs; all 58 packet-level
+acknowledgements matched, with no pending/unmatched movement, no analysis
+issues or warnings, and 7/7 matched heartbeats. Unknown-object tests prove
+the rejection event remains nonfatal and produces no guessed response.
 
 One state-driven opcode-`282` primitive is now proven too. From 5,284 stream-
 `92` broadcasts, the planner accepts only the dominant control prefix and exact

@@ -986,6 +986,17 @@ the server generated 205 opcode-`283` packets, and the independent transcript
 fold matched all 205 with flag/value/auxiliary rules exact and no pending
 movement. Heartbeats and the world connection remained active.
 
+The current replay also records each reactive submission and outcome as a
+safe runtime event. Request details retain template, sequence, command count,
+the control-byte predicate, and reference/start/end coordinates, but omit the
+runtime object id. A fresh browser-free run produced 13 alternating
+`mob_movement_submission_observed` and
+`mob_movement_acknowledgement_completed` events. All 58 generated opcode-`283`
+packets independently matched their opcode-`207` submissions; the valid,
+warning-free fold has no pending/unmatched movement and 7/7 heartbeats.
+Unknown-object unit coverage records a nonfatal
+`mob_movement_submission_rejected` event instead of inventing a response.
+
 The state-driven broadcast proof used stream `114` as the held-open field and
 stream `92` as shape evidence. A typed opcode-`279` introduced one
 template-`100100` snail at `(433,-2677)` on foothold `635`; the custom server

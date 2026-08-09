@@ -3243,6 +3243,47 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(
                 rejected_event.details["cooldown_remaining_seconds"], 0
             )
+            acknowledgement_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind
+                in {
+                    "mob_movement_submission_observed",
+                    "mob_movement_acknowledgement_completed",
+                    "mob_movement_submission_rejected",
+                }
+            ]
+            self.assertEqual(
+                [event.kind for event in acknowledgement_events],
+                [
+                    "mob_movement_submission_observed",
+                    "mob_movement_submission_rejected",
+                    "mob_movement_submission_observed",
+                    "mob_movement_acknowledgement_completed",
+                    "mob_movement_submission_observed",
+                    "mob_movement_acknowledgement_completed",
+                    "mob_movement_submission_observed",
+                    "mob_movement_acknowledgement_completed",
+                ],
+            )
+            self.assertFalse(
+                acknowledgement_events[0].details["target_known"]
+            )
+            self.assertEqual(
+                acknowledgement_events[1].details["reason"],
+                "movement submission has no explicit field-local "
+                "mob-template state",
+            )
+            self.assertEqual(
+                [
+                    event.details["sequence"]
+                    for event in acknowledgement_events
+                    if event.kind
+                    == "mob_movement_acknowledgement_completed"
+                ],
+                [42, 43, 44],
+            )
 
     async def test_relative_mob_policy_waits_for_player_proximity_entry(
         self,
@@ -3531,6 +3572,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.data("server_to_client", greeting + captured_frame)
             source_writer.close()
             source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
             object_id = 20_001
             policy = MobMovementAcknowledgementPolicy(
                 status_values_by_template={210_100: 35},
@@ -3609,6 +3651,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             strict=False,
+                            transcript_directory=observed_directory,
                             hold_open_seconds=0.2,
                             post_transcript_server_frames=(
                                 controller,
@@ -3720,6 +3763,40 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     "foothold_id": 8,
                     "stance": 4,
                 },
+            )
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid)
+            acknowledgement_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind
+                in {
+                    "mob_movement_submission_observed",
+                    "mob_movement_acknowledgement_completed",
+                    "mob_movement_submission_rejected",
+                }
+            ]
+            self.assertEqual(
+                [event.kind for event in acknowledgement_events],
+                [
+                    "mob_movement_submission_observed",
+                    "mob_movement_acknowledgement_completed",
+                ],
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["path_end"], [110, -200]
+            )
+            self.assertTrue(
+                acknowledgement_events[0].details["target_known"]
+            )
+            self.assertEqual(
+                acknowledgement_events[1].details["server_opcode"], 283
+            )
+            self.assertEqual(
+                acknowledgement_events[1].details["status_value"], 35
             )
 
     async def test_replay_preserves_delays_inside_reactive_reply_sequence(

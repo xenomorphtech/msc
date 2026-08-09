@@ -682,6 +682,18 @@ folds validly with `submitted:205`, `acknowledged:205`, `matched:205`,
 heartbeats and remained in the active phase until the test listener was
 stopped cleanly.
 
+Reactive acknowledgements now record bounded causal runtime events as well.
+`mob_movement_submission_observed` contains the known-template flag, template,
+sequence, command count, control-byte predicate, and reference/start/end
+coordinates without the runtime object id. A successful drain adds
+`mob_movement_acknowledgement_completed`; a policy refusal instead adds
+`mob_movement_submission_rejected` and its safe reason. Fresh browser-free
+transcript
+`reactive_mob_ack_policy_events_clean_20260809/1786307034810350480_replay_12857.jsonl`
+contains 58 alternating request/completion pairs. Its fold is valid and
+warning-free with 58/58 packet-level movement matches, no pending/unmatched
+movement, and 7/7 matched heartbeats.
+
 `protocol.mob_movement_acknowledgements.state` exposes the evidence mapping,
 field epoch, and identifier-free known/active mob counts. The parent reports
 submission/response/rejection counters, `last_response`, and `last_rejection`.

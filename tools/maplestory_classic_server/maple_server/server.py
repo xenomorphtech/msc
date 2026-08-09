@@ -1754,6 +1754,32 @@ async def replay_connection(
                     and mob_movement_acknowledgement_policy is not None
                 ):
                     movement = MobMovementSubmission.parse(client_plaintext)
+                    movement_path = movement.movement_path
+                    template_id = (
+                        mob_movement_acknowledgement_policy
+                        .known_mob_templates.get(movement.object_id)
+                    )
+                    movement_details: dict[str, object] = {
+                        "sequence": movement.sequence,
+                        "target_known": template_id is not None,
+                        "template_id": template_id,
+                        "control_byte_0_nonzero": bool(
+                            movement_path.opaque_control[0]
+                        ),
+                        "command_count": len(movement_path.commands),
+                        "reference_position": [
+                            movement_path.reference_x,
+                            movement_path.reference_y,
+                        ],
+                        "path_start": [
+                            movement_path.path_start_x,
+                            movement_path.path_start_y,
+                        ],
+                        "path_end": [
+                            movement_path.path_end_x,
+                            movement_path.path_end_y,
+                        ],
+                    }
                     if mob_acknowledgement_metrics is not None:
                         mob_acknowledgement_metrics["submissions_observed"] = (
                             int(
@@ -1763,6 +1789,10 @@ async def replay_connection(
                             )
                             + 1
                         )
+                    record_runtime_event(
+                        "mob_movement_submission_observed",
+                        movement_details,
+                    )
                     try:
                         acknowledgement = (
                             mob_movement_acknowledgement_policy.acknowledge(
@@ -1787,6 +1817,13 @@ async def replay_connection(
                             mob_acknowledgement_metrics["state"] = (
                                 mob_movement_acknowledgement_policy.safe_dict()
                             )
+                        record_runtime_event(
+                            "mob_movement_submission_rejected",
+                            {
+                                **movement_details,
+                                "reason": str(error),
+                            },
+                        )
                         continue
                     await send_encrypted_frame(
                         encrypt_next_server_frame(
@@ -1820,6 +1857,21 @@ async def replay_connection(
                         mob_acknowledgement_metrics["state"] = (
                             mob_movement_acknowledgement_policy.safe_dict()
                         )
+                    record_runtime_event(
+                        "mob_movement_acknowledgement_completed",
+                        {
+                            **movement_details,
+                            "server_opcode": acknowledgement.opcode,
+                            "status_flag": acknowledgement.status_flag,
+                            "status_value": acknowledgement.status_value,
+                            "status_auxiliary_1": (
+                                acknowledgement.status_auxiliary_1
+                            ),
+                            "status_auxiliary_2": (
+                                acknowledgement.status_auxiliary_2
+                            ),
+                        },
+                    )
                     if (
                         mob_movement_policy_trigger
                         == "served_mob_movement"

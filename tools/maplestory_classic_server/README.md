@@ -674,6 +674,13 @@ remained active. Generated opcode-`280` packets from the health responder also
 update the movement policy's active set, so the two state owners cannot diverge
 when a mob dies.
 
+With transcript recording enabled, each reactive submission now emits a safe
+request event containing template/sequence/path-shape data but no runtime
+object id. It is followed by a completed acknowledgement event after opcode
+`283` drains, or by a nonfatal rejection event. The fresh browser-free proof
+contains 58 alternating request/completion pairs; all 58 also match in the
+packet fold, with no pending/unmatched movement and 7/7 heartbeats.
+
 `--emit-mob-movement-broadcast X:Y:FOOTHOLD[:STANCE]` appends one
 state-driven opcode `282` for the sole active modeled mob after all explicit
 post-transcript frames. `plan_mob_movement_broadcast()` validates the replay
