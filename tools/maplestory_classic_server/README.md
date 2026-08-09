@@ -745,6 +745,17 @@ with movement gaps of 10.008720 and 10.002057 seconds, eliminating the prior
 32.5-second refold from the first gap. Its valid transcript contains fifteen
 type-`0` commands and 6/6 matched heartbeats.
 
+`--mob-movement-relative-policy DECISIONS:MAX_STEPS:DX:DY:FOOTHOLD` replaces
+an explicit follow-up target list with a small deterministic state policy. It
+derives each next endpoint from the last confirmed position, permits `1..8`
+decisions and `2..8` composed steps, rejects zero displacement or out-of-range
+coordinates, and remains mutually exclusive with explicit queued targets. A
+live two-decision `(+96,0)` policy produced
+`833 -> 929 -> 1025` after the initial packet. The scheduler sent five packets
+total, the client rendered the final endpoint, and the independent fold
+validated all five broadcasts/twenty-five commands with four approximately
+three-second gaps and 6/6 heartbeats.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold

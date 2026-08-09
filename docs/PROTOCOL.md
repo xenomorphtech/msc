@@ -1082,6 +1082,25 @@ again valid with exact `785 -> 833 -> 881 -> 929` continuity, three broadcasts,
 fifteen type-`0` commands, final foothold `635`/stance `2`, and 6/6 matched
 heartbeats.
 
+The first bounded gameplay policy derives relative targets from confirmed
+state rather than storing endpoint arguments. Its inputs are a `1..8` decision
+count, a `2..8` composition bound, signed `(dx,dy)`, and a foothold. Once a
+decision completes, the policy adds that displacement to the scheduler's
+current coordinates, validates the result as `int16`, and submits the derived
+target to the unchanged capture-backed composed planner. It cannot coexist
+with the explicit target queue. This changes scheduling policy only; every
+wire packet remains the same typed opcode `282` shape and every intermediate
+state remains independently foldable.
+
+The live policy used two `(+96,0)` decisions after an initial automatic
+placement. It derived `929` only from confirmed `833`, then derived `1025` only
+from confirmed `929`. Runtime completed three decisions, five planned/sent
+packets, and final state `(1025,-2677)` on foothold `635`/stance `2`. The client
+rendered that predicted endpoint. The frozen movement events preserve exact
+continuity `785 -> 833 -> 881 -> 929 -> 977 -> 1025`; their four gaps are
+3.011704, 3.000499, 3.008745, and 3.001274 seconds. The valid transcript has
+five broadcasts, twenty-five type-`0` commands, and 6/6 matched heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

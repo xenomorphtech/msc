@@ -29,6 +29,7 @@ from .gameplay import (
     MobMovementBroadcastPlan,
     MobMovementBroadcastScheduler,
     MobMovementPlanningContext,
+    MobMovementRelativeDecisionPolicy,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
     derive_item_pickup_response_policy,
@@ -392,6 +393,9 @@ async def replay_connection(
     mob_movement_follow_up_targets: tuple[
         tuple[int, int, int, int], ...
     ] = (),
+    mob_movement_follow_up_policy: (
+        MobMovementRelativeDecisionPolicy | None
+    ) = None,
     mob_movement_evidence_transcript: Transcript | None = None,
     mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
@@ -462,6 +466,21 @@ async def replay_connection(
             "mob movement follow-up decisions require an initial movement "
             "schedule"
         )
+    if (
+        mob_movement_follow_up_policy is not None
+        and not mob_movement_broadcast_plans
+    ):
+        raise ValueError(
+            "mob movement relative policy requires an initial movement "
+            "schedule"
+        )
+    if (
+        mob_movement_follow_up_targets
+        and mob_movement_follow_up_policy is not None
+    ):
+        raise ValueError(
+            "mob movement follow-up targets conflict with a relative policy"
+        )
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
     if any(
@@ -527,11 +546,15 @@ async def replay_connection(
             transcript,
             mob_movement_broadcast_plans,
             follow_up_targets=mob_movement_follow_up_targets,
+            follow_up_policy=mob_movement_follow_up_policy,
             evidence_transcript=mob_movement_evidence_transcript,
             planning_context=mob_movement_planning_context,
             baseline_server_frames=mob_movement_baseline_server_frames,
         )
-        if mob_movement_follow_up_targets
+        if (
+            mob_movement_follow_up_targets
+            or mob_movement_follow_up_policy is not None
+        )
         else MobMovementBroadcastScheduler(
             mob_movement_broadcast_plans,
             baseline_server_frames=mob_movement_baseline_server_frames,
@@ -757,6 +780,11 @@ async def replay_connection(
                         foothold_id,
                     ) in mob_movement_follow_up_targets
                 ],
+                "mob_movement_relative_policy": (
+                    mob_movement_follow_up_policy.safe_dict()
+                    if mob_movement_follow_up_policy is not None
+                    else None
+                ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
                 ),
@@ -1770,6 +1798,32 @@ def parse_mob_movement_composed_path_target(
     return max_steps, position_x, position_y, foothold_id
 
 
+def parse_mob_movement_relative_policy(
+    specification: str,
+) -> MobMovementRelativeDecisionPolicy:
+    parts = specification.split(":")
+    if len(parts) != 5:
+        raise argparse.ArgumentTypeError(
+            "mob movement relative policy must use "
+            "DECISIONS:MAX_STEPS:DX:DY:FOOTHOLD"
+        )
+    try:
+        decision_count = int(parts[0], 0)
+        max_steps = int(parts[1], 0)
+        displacement_x = int(parts[2], 0)
+        displacement_y = int(parts[3], 0)
+        foothold_id = int(parts[4], 0)
+        return MobMovementRelativeDecisionPolicy(
+            decision_count=decision_count,
+            max_steps=max_steps,
+            displacement_x=displacement_x,
+            displacement_y=displacement_y,
+            foothold_id=foothold_id,
+        )
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
 def parse_inventory_quantity_update(
     specification: str,
 ) -> tuple[str, int, int]:
@@ -2591,6 +2645,16 @@ def build_parser() -> argparse.ArgumentParser:
             "movement schedule is transmitted; may be repeated up to "
             f"{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS} times and requires "
             "an initial mob-movement emission option"
+        ),
+    )
+    replay.add_argument(
+        "--mob-movement-relative-policy",
+        type=parse_mob_movement_relative_policy,
+        metavar="DECISIONS:MAX_STEPS:DX:DY:FOOTHOLD",
+        help=(
+            "derive up to eight composed follow-up targets by repeatedly "
+            "adding DX:DY to the last confirmed mob state; requires an "
+            "initial mob-movement emission option"
         ),
     )
     replay.add_argument(
@@ -3427,15 +3491,29 @@ async def async_main(arguments: argparse.Namespace) -> None:
         mob_movement_follow_up_targets = tuple(
             arguments.queue_mob_movement_composed_path
         )
+        mob_movement_follow_up_policy = (
+            arguments.mob_movement_relative_policy
+        )
         if (
             mob_movement_follow_up_targets
+            and mob_movement_follow_up_policy is not None
+        ):
+            raise ValueError(
+                "--queue-mob-movement-composed-path conflicts with "
+                "--mob-movement-relative-policy"
+            )
+        if (
+            (
+                mob_movement_follow_up_targets
+                or mob_movement_follow_up_policy is not None
+            )
             and arguments.emit_mob_movement_broadcast is None
             and arguments.emit_mob_movement_path is None
             and arguments.emit_mob_movement_auto_path is None
             and arguments.emit_mob_movement_composed_path is None
         ):
             raise ValueError(
-                "--queue-mob-movement-composed-path requires "
+                "mob movement follow-up planning requires "
                 "an initial mob-movement emission option"
             )
         if (
@@ -3484,13 +3562,19 @@ async def async_main(arguments: argparse.Namespace) -> None:
                     planning_context=mob_movement_planning_context,
                 )
                 mob_movement_broadcast_plans = sequence_plan.steps
-                if mob_movement_follow_up_targets:
+                if (
+                    mob_movement_follow_up_targets
+                    or mob_movement_follow_up_policy is not None
+                ):
                     movement_schedule_preview = (
                         MobMovementBroadcastDecisionQueue(
                             transcript,
                             mob_movement_broadcast_plans,
                             follow_up_targets=(
                                 mob_movement_follow_up_targets
+                            ),
+                            follow_up_policy=(
+                                mob_movement_follow_up_policy
                             ),
                             evidence_transcript=(
                                 movement_evidence_transcript
@@ -3558,13 +3642,19 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 mob_movement_broadcast_plans = (
                     mob_movement_broadcast_plan,
                 )
-                if mob_movement_follow_up_targets:
+                if (
+                    mob_movement_follow_up_targets
+                    or mob_movement_follow_up_policy is not None
+                ):
                     movement_schedule_preview = (
                         MobMovementBroadcastDecisionQueue(
                             transcript,
                             mob_movement_broadcast_plans,
                             follow_up_targets=(
                                 mob_movement_follow_up_targets
+                            ),
+                            follow_up_policy=(
+                                mob_movement_follow_up_policy
                             ),
                             evidence_transcript=(
                                 movement_evidence_transcript
@@ -3673,6 +3763,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             mob_movement_follow_up_targets=(
                 mob_movement_follow_up_targets
             ),
+            mob_movement_follow_up_policy=(
+                mob_movement_follow_up_policy
+            ),
             mob_movement_evidence_transcript=(
                 movement_evidence_transcript
             ),
@@ -3740,6 +3833,11 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "queue_mob_movement_composed_path": list(
                 mob_movement_follow_up_targets
+            ),
+            "mob_movement_relative_policy": (
+                mob_movement_follow_up_policy.safe_dict()
+                if mob_movement_follow_up_policy is not None
+                else None
             ),
             "mob_movement_step_delay_seconds": (
                 arguments.mob_movement_step_delay_seconds

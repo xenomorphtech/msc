@@ -31,6 +31,7 @@ from maple_server.server import (  # noqa: E402
     parse_mob_movement_broadcast_target,
     parse_mob_movement_composed_path_target,
     parse_mob_movement_path_target,
+    parse_mob_movement_relative_policy,
     parse_server_opcode_byte_rewrite,
     parse_server_frame_patch,
     parse_plaintext_hex,
@@ -670,6 +671,43 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(
             parse_mob_movement_composed_path_target("2:300:-200:8"),
             (2, 300, -200, 8),
+        )
+
+    def test_replay_parser_accepts_relative_mob_movement_policy(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--keep-world-open",
+                "--emit-mob-movement-auto-path",
+                "833:-2677:635",
+                "--mob-movement-relative-policy",
+                "2:2:96:0:635",
+            ]
+        )
+
+        self.assertEqual(
+            arguments.mob_movement_relative_policy.safe_dict(),
+            {
+                "decision_count": 2,
+                "max_steps": 2,
+                "displacement_x": 96,
+                "displacement_y": 0,
+                "foothold_id": 635,
+            },
+        )
+        self.assertEqual(
+            parse_mob_movement_relative_policy("1:4:-32:16:7").safe_dict(),
+            {
+                "decision_count": 1,
+                "max_steps": 4,
+                "displacement_x": -32,
+                "displacement_y": 16,
+                "foothold_id": 7,
+            },
         )
 
     def test_replay_parser_accepts_reactive_mob_health_responses(self) -> None:

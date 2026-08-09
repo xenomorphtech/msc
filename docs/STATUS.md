@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 146 tests.
+- The custom-server suite currently passes all 147 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -426,6 +426,15 @@ retained the same `785 -> 833 -> 881 -> 929` result with 10.008720- and
 gap. Its independent fold is valid with fifteen commands and 6/6 heartbeats.
 Safe cache counts are available through the read-only API.
 
+A bounded relative-movement policy now derives targets from confirmed state
+instead of requiring every endpoint at startup. With two `(+96,0)` decisions,
+the client and API followed `833 -> 929 -> 1025`; each target was created only
+after its predecessor completed. Runtime finished three decisions and five
+packets at the predicted foothold/stance. The frozen transcript validates
+`785 -> 833 -> 881 -> 929 -> 977 -> 1025`, twenty-five type-`0` commands, four
+approximately three-second gaps, and 6/6 heartbeats. Policy count, displacement,
+step bound, and foothold remain safe/read-only API state.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -440,10 +449,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Drive a queued movement target from a bounded gameplay policy (for example,
-   a deterministic patrol over validated endpoints) rather than only startup
-   arguments. Keep HTTP read-only until a separate authenticated mutation
-   design exists.
+4. Gate each policy decision on a modeled runtime event (for example a matched
+   heartbeat or a bounded proximity predicate) instead of immediately chaining
+   after the prior movement; retain deterministic cooldowns and keep HTTP
+   read-only until a separate authenticated mutation design exists.
 
 ## Useful proof artifacts
 

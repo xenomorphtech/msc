@@ -1541,6 +1541,57 @@ class MobMovementBroadcastScheduler:
 MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS = 8
 
 
+@dataclass(frozen=True)
+class MobMovementRelativeDecisionPolicy:
+    """Derive bounded follow-up targets from the last confirmed position."""
+
+    decision_count: int
+    max_steps: int
+    displacement_x: int
+    displacement_y: int
+    foothold_id: int
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.decision_count <= MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS:
+            raise ValueError(
+                "mob movement relative policy decision count must be in 1..8"
+            )
+        if not 2 <= self.max_steps <= 8:
+            raise ValueError(
+                "mob movement relative policy max steps must be in 2..8"
+            )
+        if (self.displacement_x, self.displacement_y) == (0, 0):
+            raise ValueError(
+                "mob movement relative policy displacement cannot be zero"
+            )
+        if not 0 <= self.foothold_id <= 0xFFFF:
+            raise ValueError(
+                "mob movement relative policy foothold must fit in uint16"
+            )
+
+    def target_from(
+        self, x: int, y: int
+    ) -> tuple[int, int, int, int]:
+        target_x = x + self.displacement_x
+        target_y = y + self.displacement_y
+        if not all(
+            -0x8000 <= value <= 0x7FFF for value in (target_x, target_y)
+        ):
+            raise ValueError(
+                "mob movement relative policy target exceeds int16"
+            )
+        return self.max_steps, target_x, target_y, self.foothold_id
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "decision_count": self.decision_count,
+            "max_steps": self.max_steps,
+            "displacement_x": self.displacement_x,
+            "displacement_y": self.displacement_y,
+            "foothold_id": self.foothold_id,
+        }
+
+
 @dataclass
 class MobMovementBroadcastDecisionQueue:
     """Plan bounded follow-up decisions from transmission-confirmed state."""
@@ -1550,6 +1601,7 @@ class MobMovementBroadcastDecisionQueue:
     follow_up_targets: tuple[tuple[int, int, int, int], ...] = field(
         default=(), repr=False
     )
+    follow_up_policy: MobMovementRelativeDecisionPolicy | None = None
     evidence_transcript: Transcript | None = field(default=None, repr=False)
     planning_context: MobMovementPlanningContext | None = field(
         default=None, repr=False
@@ -1587,6 +1639,20 @@ class MobMovementBroadcastDecisionQueue:
                 "mob movement follow-up decision queue exceeds its "
                 f"limit of {self.max_follow_up_decisions}"
             )
+        if self.follow_up_targets and self.follow_up_policy is not None:
+            raise ValueError(
+                "mob movement follow-up targets conflict with a relative "
+                "decision policy"
+            )
+        if (
+            self.follow_up_policy is not None
+            and self.follow_up_policy.decision_count
+            > self.max_follow_up_decisions
+        ):
+            raise ValueError(
+                "mob movement relative policy exceeds the decision queue "
+                f"limit of {self.max_follow_up_decisions}"
+            )
         for decision_index, target in enumerate(self.follow_up_targets, 2):
             max_steps, _, _, _ = target
             if max_steps not in range(2, 9):
@@ -1615,7 +1681,15 @@ class MobMovementBroadcastDecisionQueue:
 
     @property
     def decisions_total(self) -> int:
-        return 1 + len(self.follow_up_targets)
+        return 1 + self._follow_up_decision_count
+
+    @property
+    def _follow_up_decision_count(self) -> int:
+        return (
+            self.follow_up_policy.decision_count
+            if self.follow_up_policy is not None
+            else len(self.follow_up_targets)
+        )
 
     @property
     def decisions_planned(self) -> int:
@@ -1652,7 +1726,8 @@ class MobMovementBroadcastDecisionQueue:
     def has_unplanned_decision(self) -> bool:
         return (
             self._active_schedule.packets_remaining == 0
-            and self._next_follow_up_index < len(self.follow_up_targets)
+            and self._next_follow_up_index
+            < self._follow_up_decision_count
         )
 
     @property
@@ -1705,7 +1780,14 @@ class MobMovementBroadcastDecisionQueue:
             )
 
         planning_server_frames = self._active_schedule.planning_server_frames
-        target = self.follow_up_targets[self._next_follow_up_index]
+        target = (
+            self.follow_up_policy.target_from(
+                self._active_schedule.current_x,
+                self._active_schedule.current_y,
+            )
+            if self.follow_up_policy is not None
+            else self.follow_up_targets[self._next_follow_up_index]
+        )
         max_steps, target_x, target_y, foothold_id = target
         next_plan = plan_composed_mob_movement_broadcasts(
             self.transcript,
@@ -1767,6 +1849,18 @@ class MobMovementBroadcastDecisionQueue:
                 self.decisions_planned + 1,
             )
         ]
+        next_policy_target = (
+            self._target_safe_dict(
+                self.decisions_planned + 1,
+                self.follow_up_policy.target_from(
+                    self._active_schedule.current_x,
+                    self._active_schedule.current_y,
+                ),
+            )
+            if self.follow_up_policy is not None
+            and self.has_unplanned_decision
+            else None
+        )
         state.update(
             {
                 "phase": phase,
@@ -1797,6 +1891,12 @@ class MobMovementBroadcastDecisionQueue:
                         else None
                     ),
                     "pending_targets": pending_targets,
+                    "relative_policy": (
+                        self.follow_up_policy.safe_dict()
+                        if self.follow_up_policy is not None
+                        else None
+                    ),
+                    "next_policy_target": next_policy_target,
                 },
             }
         )

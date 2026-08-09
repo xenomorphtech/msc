@@ -17,6 +17,7 @@ from maple_server.gameplay import (  # noqa: E402
     MobHealthResponsePolicy,
     MobMovementBroadcastDecisionQueue,
     MobMovementBroadcastScheduler,
+    MobMovementRelativeDecisionPolicy,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
     derive_item_pickup_response_policy,
@@ -3961,6 +3962,8 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "decisions_remaining": 2,
                 "active_decision_index": 1,
                 "planning_decision_index": None,
+                "relative_policy": None,
+                "next_policy_target": None,
                 "pending_targets": [
                     {
                         "decision_index": 2,
@@ -4061,6 +4064,57 @@ class GameplayStateFoldTest(unittest.TestCase):
                 evidence_transcript=evidence,
                 baseline_server_frames=(post_spawn,),
             )
+
+        relative_policy = MobMovementRelativeDecisionPolicy(
+            decision_count=2,
+            max_steps=2,
+            displacement_x=100,
+            displacement_y=0,
+            foothold_id=8,
+        )
+        policy_queue = MobMovementBroadcastDecisionQueue(
+            fixture_gameplay_transcript(compact_transition=True),
+            (automatic_plan,),
+            follow_up_policy=relative_policy,
+            evidence_transcript=evidence,
+            planning_context=planning_context,
+            baseline_server_frames=(post_spawn,),
+        )
+        self.assertEqual(
+            policy_queue.safe_dict()["decision_queue"]["relative_policy"],
+            relative_policy.safe_dict(),
+        )
+        policy_queue.confirm_sent(policy_queue.next_plaintext)
+        self.assertEqual(
+            policy_queue.safe_dict()["decision_queue"][
+                "next_policy_target"
+            ]["x"],
+            350,
+        )
+        for expected_target_x in (350, 450):
+            with patch(
+                "maple_server.gameplay.analyze_gameplay_transcript",
+                side_effect=AssertionError(
+                    "relative policy planning refolded a transcript"
+                ),
+            ):
+                policy_queue.plan_next_decision()
+            self.assertEqual(
+                policy_queue.active_schedule.steps[-1].target_x,
+                expected_target_x,
+            )
+            while policy_queue.next_plaintext is not None:
+                policy_queue.confirm_sent(policy_queue.next_plaintext)
+        policy_complete = policy_queue.telemetry_dict()
+        self.assertEqual(policy_complete["packets_sent"], 5)
+        self.assertEqual(policy_complete["state"]["phase"], "complete")
+        self.assertEqual(policy_complete["state"]["current"]["x"], 450)
+        self.assertEqual(
+            policy_complete["state"]["decision_queue"][
+                "decisions_completed"
+            ],
+            3,
+        )
         sequence_fold = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
                 extra_server_plaintexts=(

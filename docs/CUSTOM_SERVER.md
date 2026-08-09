@@ -916,6 +916,33 @@ heartbeats. Its movement gaps are 10.008720 and 10.002057 seconds, so the former
 remains. The live API moved directly from the first confirmed state to three
 known planned packets between one-second polls.
 
+For a state-derived bounded policy instead of enumerated endpoints, use:
+
+```text
+--emit-mob-movement-auto-path '833:-2677:635'
+--mob-movement-relative-policy '2:2:96:0:635'
+--mob-movement-step-delay-seconds 3
+```
+
+The policy format is `DECISIONS:MAX_STEPS:DX:DY:FOOTHOLD`. Decisions are bound
+to `1..8`, composed steps to `2..8`, and zero displacement is rejected. The
+next endpoint is calculated only when the previous decision is confirmed
+complete; derived coordinates must fit `int16`. It conflicts with explicit
+queued targets and still requires one initial movement emission.
+
+In the real-client proof, the initial automatic packet ended at `833`. Policy
+decision 1 derived target `929` from that confirmed state and composed two
+`(48,0)` packets; only after reaching `929` did decision 2 derive target `1025`
+and compose two more. The API finished with three decisions and five packets
+planned/sent, final foothold `635`/stance `2`, and the safe relative-policy
+parameters under `state.decision_queue`. The client rendered the snail at the
+predicted far-right endpoint. Transcript
+`generated_mob_relative_policy_visual_20260809/1786298675748836952_replay_12857.jsonl`
+folds validly through `785 -> 833 -> 881 -> 929 -> 977 -> 1025`, five known
+broadcasts, twenty-five type-`0` commands, and 6/6 matched heartbeats. The four
+movement gaps are 3.011704, 3.000499, 3.008745, and 3.001274 seconds, matching
+the dedicated three-second pace.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
