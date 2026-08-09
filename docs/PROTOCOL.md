@@ -1101,6 +1101,25 @@ continuity `785 -> 833 -> 881 -> 929 -> 977 -> 1025`; their four gaps are
 3.011704, 3.000499, 3.008745, and 3.001274 seconds. The valid transcript has
 five broadcasts, twenty-five type-`0` commands, and 6/6 matched heartbeats.
 
+Policy scheduling can now consume the already-modeled heartbeat correlation
+as its trigger rather than chaining immediately. In `matched-heartbeat` mode,
+only a client opcode `23` observed while a server opcode `10` probe is pending
+authorizes one follow-up decision. The initial movement remains unconditional,
+the first opcode `282` of each authorized decision is immediate, and any later
+opcode `282` packets in that same composed decision retain their configured
+step delay. This is a runtime scheduling invariant and does not change any wire
+shape.
+
+The real-client proof used five-second probes and a one-second movement-step
+delay. The first two matches authorized the two `(+96,0)` decisions; a third
+matched response after completion was observed but ignored. The frozen event
+order is `heartbeat response frame 78 -> movement frame 79`, then response
+frame `83 -> movement frame 84`. Exact movement gaps are 5.326966, 1.000527,
+3.999752, and 1.000549 seconds, separating the two event gates from each
+decision's internal pace. The transcript remains valid with exact
+`785 -> 833 -> 881 -> 929 -> 977 -> 1025` continuity, five broadcasts,
+twenty-five type-`0` commands, and 21/21 matched heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

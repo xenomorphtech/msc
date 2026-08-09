@@ -396,6 +396,7 @@ async def replay_connection(
     mob_movement_follow_up_policy: (
         MobMovementRelativeDecisionPolicy | None
     ) = None,
+    mob_movement_policy_trigger: str = "immediate",
     mob_movement_evidence_transcript: Transcript | None = None,
     mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
@@ -480,6 +481,26 @@ async def replay_connection(
     ):
         raise ValueError(
             "mob movement follow-up targets conflict with a relative policy"
+        )
+    if mob_movement_policy_trigger not in {
+        "immediate",
+        "matched_heartbeat",
+    }:
+        raise ValueError("unknown mob movement policy trigger")
+    if (
+        mob_movement_policy_trigger == "matched_heartbeat"
+        and mob_movement_follow_up_policy is None
+    ):
+        raise ValueError(
+            "matched-heartbeat movement trigger requires a relative policy"
+        )
+    if (
+        mob_movement_policy_trigger == "matched_heartbeat"
+        and world_heartbeat_interval_seconds is None
+    ):
+        raise ValueError(
+            "matched-heartbeat movement trigger requires periodic world "
+            "heartbeats"
         )
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
@@ -694,6 +715,17 @@ async def replay_connection(
         raise TypeError(
             "runtime mob_movement_broadcast telemetry must be a dictionary"
         )
+    movement_policy_trigger_metrics = (
+        movement_broadcast_metrics.get("policy_trigger")
+        if movement_broadcast_metrics is not None
+        else None
+    )
+    if movement_policy_trigger_metrics is not None and not isinstance(
+        movement_policy_trigger_metrics, dict
+    ):
+        raise TypeError(
+            "runtime movement policy trigger telemetry must be a dictionary"
+        )
     if movement_schedule is not None and movement_broadcast_metrics is not None:
         movement_broadcast_metrics.update(
             movement_schedule.telemetry_dict()
@@ -785,6 +817,7 @@ async def replay_connection(
                     if mob_movement_follow_up_policy is not None
                     else None
                 ),
+                "mob_movement_policy_trigger": mob_movement_policy_trigger,
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
                 ),
@@ -996,14 +1029,31 @@ async def replay_connection(
                     + 1
                 )
 
-        async def send_movement_follow_up_decisions() -> None:
+        async def send_movement_follow_up_decisions(
+            *,
+            decision_limit: int | None = None,
+            delay_before_first_packet: bool = True,
+        ) -> None:
             if not isinstance(
                 movement_schedule, MobMovementBroadcastDecisionQueue
             ):
                 return
             if movement_schedule.decisions_completed == 0:
                 return
-            while not movement_schedule.complete:
+            target_decisions_completed = (
+                movement_schedule.decisions_total
+                if decision_limit is None
+                else min(
+                    movement_schedule.decisions_total,
+                    movement_schedule.decisions_completed + decision_limit,
+                )
+            )
+            packets_sent_this_call = 0
+            while (
+                not movement_schedule.complete
+                and movement_schedule.decisions_completed
+                < target_decisions_completed
+            ):
                 if movement_schedule.has_unplanned_decision:
                     await asyncio.to_thread(
                         movement_schedule.plan_next_decision
@@ -1018,7 +1068,9 @@ async def replay_connection(
                     if mob_movement_step_delay_seconds is not None
                     else post_transcript_frame_delay_seconds
                 )
-                if delay_seconds > 0:
+                if delay_seconds > 0 and (
+                    delay_before_first_packet or packets_sent_this_call > 0
+                ):
                     await asyncio.sleep(delay_seconds)
                 plaintext = movement_schedule.next_plaintext
                 if plaintext is None:
@@ -1031,6 +1083,7 @@ async def replay_connection(
                 apply_emitted_server_plaintext(
                     plaintext, confirm_movement=True
                 )
+                packets_sent_this_call += 1
 
         post_transcript_plaintexts = (
             tuple(pending_opcode_replies) + post_transcript_server_frames
@@ -1074,7 +1127,8 @@ async def replay_connection(
                 confirm_movement=is_movement_plaintext,
             )
             if is_movement_plaintext:
-                await send_movement_follow_up_decisions()
+                if mob_movement_policy_trigger == "immediate":
+                    await send_movement_follow_up_decisions()
 
         for plaintext in post_transcript_replies:
             if remaining_opcode_replies:
@@ -1145,7 +1199,10 @@ async def replay_connection(
                     break
                 if not received:
                     break
-                if opcode == 23 and pending_periodic_heartbeats:
+                matched_periodic_heartbeat = (
+                    opcode == 23 and bool(pending_periodic_heartbeats)
+                )
+                if matched_periodic_heartbeat:
                     sent_at = pending_periodic_heartbeats.popleft()
                     round_trip_ms = (loop.time() - sent_at) * 1000
                     if heartbeat_metrics is not None:
@@ -1170,6 +1227,65 @@ async def replay_connection(
                         heartbeat_metrics["max_round_trip_ms"] = round(
                             max(float(prior_max or 0.0), round_trip_ms), 3
                         )
+                    if mob_movement_policy_trigger == "matched_heartbeat":
+                        if movement_policy_trigger_metrics is not None:
+                            movement_policy_trigger_metrics[
+                                "matched_events_observed"
+                            ] = (
+                                int(
+                                    movement_policy_trigger_metrics.get(
+                                        "matched_events_observed", 0
+                                    )
+                                )
+                                + 1
+                            )
+                        if (
+                            isinstance(
+                                movement_schedule,
+                                MobMovementBroadcastDecisionQueue,
+                            )
+                            and not movement_schedule.complete
+                        ):
+                            if movement_policy_trigger_metrics is not None:
+                                movement_policy_trigger_metrics[
+                                    "decisions_started"
+                                ] = (
+                                    int(
+                                        movement_policy_trigger_metrics.get(
+                                            "decisions_started", 0
+                                        )
+                                    )
+                                    + 1
+                                )
+                            decisions_completed_before = (
+                                movement_schedule.decisions_completed
+                            )
+                            await send_movement_follow_up_decisions(
+                                decision_limit=1,
+                                delay_before_first_packet=False,
+                            )
+                            if movement_policy_trigger_metrics is not None:
+                                movement_policy_trigger_metrics[
+                                    "decisions_completed"
+                                ] = int(
+                                    movement_policy_trigger_metrics.get(
+                                        "decisions_completed", 0
+                                    )
+                                ) + (
+                                    movement_schedule.decisions_completed
+                                    - decisions_completed_before
+                                )
+                        elif movement_policy_trigger_metrics is not None:
+                            movement_policy_trigger_metrics[
+                                "events_ignored_after_completion"
+                            ] = (
+                                int(
+                                    movement_policy_trigger_metrics.get(
+                                        "events_ignored_after_completion", 0
+                                    )
+                                )
+                                + 1
+                            )
                 if (
                     opcode == 185
                     and item_pickup_response_policy is not None
@@ -2658,6 +2774,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--mob-movement-policy-trigger",
+        choices=("immediate", "matched-heartbeat"),
+        default="immediate",
+        help=(
+            "start each relative-policy decision immediately or after one "
+            "matched periodic heartbeat response"
+        ),
+    )
+    replay.add_argument(
         "--reactive-mob-health-responses",
         action="store_true",
         help=(
@@ -3494,6 +3619,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         mob_movement_follow_up_policy = (
             arguments.mob_movement_relative_policy
         )
+        mob_movement_policy_trigger = (
+            arguments.mob_movement_policy_trigger.replace("-", "_")
+        )
         if (
             mob_movement_follow_up_targets
             and mob_movement_follow_up_policy is not None
@@ -3501,6 +3629,22 @@ async def async_main(arguments: argparse.Namespace) -> None:
             raise ValueError(
                 "--queue-mob-movement-composed-path conflicts with "
                 "--mob-movement-relative-policy"
+            )
+        if (
+            mob_movement_policy_trigger != "immediate"
+            and mob_movement_follow_up_policy is None
+        ):
+            raise ValueError(
+                "--mob-movement-policy-trigger matched-heartbeat requires "
+                "--mob-movement-relative-policy"
+            )
+        if (
+            mob_movement_policy_trigger == "matched_heartbeat"
+            and arguments.world_heartbeat_interval_seconds is None
+        ):
+            raise ValueError(
+                "matched-heartbeat movement policy trigger requires "
+                "--world-heartbeat-interval-seconds"
             )
         if (
             (
@@ -3683,6 +3827,13 @@ async def async_main(arguments: argparse.Namespace) -> None:
             runtime_protocol["mob_movement_broadcast"]["planning_cache"] = (
                 mob_movement_planning_context.safe_dict()
             )
+            runtime_protocol["mob_movement_broadcast"]["policy_trigger"] = {
+                "mode": mob_movement_policy_trigger,
+                "matched_events_observed": 0,
+                "decisions_started": 0,
+                "decisions_completed": 0,
+                "events_ignored_after_completion": 0,
+            }
             post_transcript_server_frames += tuple(
                 plan.broadcast.to_bytes()
                 for plan in mob_movement_broadcast_plans
@@ -3766,6 +3917,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             mob_movement_follow_up_policy=(
                 mob_movement_follow_up_policy
             ),
+            mob_movement_policy_trigger=mob_movement_policy_trigger,
             mob_movement_evidence_transcript=(
                 movement_evidence_transcript
             ),
@@ -3839,6 +3991,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 if mob_movement_follow_up_policy is not None
                 else None
             ),
+            "mob_movement_policy_trigger": mob_movement_policy_trigger,
             "mob_movement_step_delay_seconds": (
                 arguments.mob_movement_step_delay_seconds
             ),

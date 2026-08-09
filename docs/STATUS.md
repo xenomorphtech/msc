@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 147 tests.
+- The custom-server suite currently passes all 148 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -435,6 +435,18 @@ packets at the predicted foothold/stance. The frozen transcript validates
 approximately three-second gaps, and 6/6 heartbeats. Policy count, displacement,
 step bound, and foothold remain safe/read-only API state.
 
+Those relative decisions can now be gated by the modeled server-opcode-`10` /
+client-opcode-`23` heartbeat match instead of chaining immediately. One match
+starts at most one pending decision; the initial movement remains
+unconditional, and the configured packet pace still applies inside a composed
+decision. A browser-free real-client run exposed decision 2 mid-flight at
+`(881,-2677)` after the first match, then completed all five packets at
+`(1025,-2677)` after the second. The independent transcript is valid with
+21/21 heartbeats and exact movement gaps 5.326966, 1.000527, 3.999752, and
+1.000549 seconds. Runtime trigger telemetry finished with three matched events,
+two decisions started/completed, and one post-completion event ignored; HTTP
+remains read-only.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -449,10 +461,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
-4. Gate each policy decision on a modeled runtime event (for example a matched
-   heartbeat or a bounded proximity predicate) instead of immediately chaining
-   after the prior movement; retain deterministic cooldowns and keep HTTP
-   read-only until a separate authenticated mutation design exists.
+4. Add a bounded proximity or explicit client-response predicate as a second
+   modeled movement-policy trigger, retaining deterministic cooldowns and the
+   read-only HTTP boundary.
 
 ## Useful proof artifacts
 

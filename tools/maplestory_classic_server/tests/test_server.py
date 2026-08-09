@@ -52,6 +52,7 @@ from maple_server.gameplay import (  # noqa: E402
     MobMovementAcknowledgementPolicy,
     MobMovementBroadcastPlan,
     MobMovementBroadcastSequencePlan,
+    MobMovementRelativeDecisionPolicy,
     ReactiveMobHealth,
     analyze_gameplay_transcript,
 )
@@ -686,6 +687,10 @@ class TranscriptTest(unittest.TestCase):
                 "833:-2677:635",
                 "--mob-movement-relative-policy",
                 "2:2:96:0:635",
+                "--world-heartbeat-interval-seconds",
+                "10",
+                "--mob-movement-policy-trigger",
+                "matched-heartbeat",
             ]
         )
 
@@ -698,6 +703,9 @@ class TranscriptTest(unittest.TestCase):
                 "displacement_y": 0,
                 "foothold_id": 635,
             },
+        )
+        self.assertEqual(
+            arguments.mob_movement_policy_trigger, "matched-heartbeat"
         )
         self.assertEqual(
             parse_mob_movement_relative_policy("1:4:-32:16:7").safe_dict(),
@@ -2346,6 +2354,210 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 },
             )
             self.assertEqual(complete["state"]["next_step"], None)
+
+    async def test_relative_mob_policy_waits_for_matched_heartbeat(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="heartbeat-gated-mob", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            object_id = 20_001
+
+            def broadcast(reference_x: int, target_x: int, stance: int):
+                return MobMovementBroadcast(
+                    object_id=object_id,
+                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    reference_x=reference_x,
+                    reference_y=-200,
+                    commands=(
+                        MobMovementCommand.absolute(
+                            position_x=target_x,
+                            position_y=-200,
+                            velocity_x=50,
+                            velocity_y=0,
+                            foothold_id=7,
+                            stance=stance,
+                            duration_ms=1_080,
+                        ),
+                    ),
+                )
+
+            first_broadcast = broadcast(100, 150, 2)
+            second_broadcast = broadcast(150, 200, 4)
+            first_plan = fixture_mob_movement_broadcast_plan(
+                first_broadcast,
+                previous_x=100,
+                previous_y=-200,
+                previous_foothold_id=7,
+                previous_stance=3,
+                target_x=150,
+                target_y=-200,
+                target_foothold_id=7,
+                target_stance=2,
+                source_server_frame_index=10,
+            )
+            second_plan = fixture_mob_movement_broadcast_plan(
+                second_broadcast,
+                previous_x=150,
+                previous_y=-200,
+                previous_foothold_id=7,
+                previous_stance=2,
+                target_x=200,
+                target_y=-200,
+                target_foothold_id=7,
+                target_stance=4,
+                source_server_frame_index=11,
+            )
+            follow_up_plan = MobMovementBroadcastSequencePlan(
+                steps=(second_plan,),
+                max_steps=2,
+                usable_displacements=1,
+                ambiguous_displacements=0,
+                shortest_sequence_count=1,
+            )
+            relative_policy = MobMovementRelativeDecisionPolicy(
+                decision_count=1,
+                max_steps=2,
+                displacement_x=50,
+                displacement_y=0,
+                foothold_id=7,
+            )
+            runtime_protocol = {
+                "world_heartbeat": {
+                    "probes_sent": 0,
+                    "responses_observed": 0,
+                    "pending": 0,
+                },
+                "mob_movement_broadcast": {
+                    "policy_trigger": {
+                        "mode": "matched_heartbeat",
+                        "matched_events_observed": 0,
+                        "decisions_started": 0,
+                        "decisions_completed": 0,
+                        "events_ignored_after_completion": 0,
+                    }
+                },
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            post_transcript_server_frames=(
+                                first_broadcast.to_bytes(),
+                            ),
+                            mob_movement_broadcast_plans=(first_plan,),
+                            mob_movement_follow_up_policy=relative_policy,
+                            mob_movement_evidence_transcript=source,
+                            mob_movement_policy_trigger="matched_heartbeat",
+                            hold_open_seconds=0.2,
+                            world_heartbeat_interval_seconds=0.05,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            with patch(
+                "maple_server.gameplay.plan_composed_mob_movement_broadcasts",
+                return_value=follow_up_plan,
+            ) as planner:
+                server = await asyncio.start_server(
+                    accept, "127.0.0.1", 0
+                )
+                port = server.sockets[0].getsockname()[1]
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1", port
+                )
+                self.assertEqual(
+                    await reader.readexactly(len(greeting + captured_frame)),
+                    greeting + captured_frame,
+                )
+                first_wire = await reader.readexactly(
+                    len(first_broadcast.to_bytes()) + 4
+                )
+                first_iv = shuffle_iv(server_iv)
+                self.assertEqual(
+                    MobMovementBroadcast.parse(
+                        crypt_payload(first_wire[4:], first_iv)
+                    ),
+                    first_broadcast,
+                )
+                with self.assertRaises(TimeoutError):
+                    await asyncio.wait_for(reader.read(1), timeout=0.02)
+                self.assertEqual(
+                    runtime_protocol["mob_movement_broadcast"][
+                        "packets_sent"
+                    ],
+                    1,
+                )
+                planner.assert_not_called()
+
+                heartbeat_wire = await reader.readexactly(6)
+                heartbeat_iv = shuffle_iv(first_iv)
+                self.assertEqual(
+                    HeartbeatProbe.parse(
+                        crypt_payload(heartbeat_wire[4:], heartbeat_iv)
+                    ),
+                    HeartbeatProbe(),
+                )
+                response = HeartbeatResponse(
+                    opaque_token=b"policy!!"
+                ).to_bytes()
+                writer.write(
+                    encode_frame_header(len(response), client_iv, 300)
+                    + crypt_payload(response, client_iv)
+                )
+                await writer.drain()
+
+                follow_wire = await reader.readexactly(
+                    len(second_broadcast.to_bytes()) + 4
+                )
+                follow_iv = shuffle_iv(heartbeat_iv)
+                self.assertEqual(
+                    MobMovementBroadcast.parse(
+                        crypt_payload(follow_wire[4:], follow_iv)
+                    ),
+                    second_broadcast,
+                )
+                planner.assert_called_once()
+                writer.close()
+                await writer.wait_closed()
+                await asyncio.gather(*tasks)
+                server.close()
+                await server.wait_closed()
+
+            movement_metrics = runtime_protocol["mob_movement_broadcast"]
+            self.assertEqual(movement_metrics["packets_sent"], 2)
+            self.assertEqual(movement_metrics["state"]["phase"], "complete")
+            trigger_metrics = movement_metrics["policy_trigger"]
+            self.assertEqual(trigger_metrics["matched_events_observed"], 1)
+            self.assertEqual(trigger_metrics["decisions_started"], 1)
+            self.assertEqual(trigger_metrics["decisions_completed"], 1)
+            self.assertEqual(
+                trigger_metrics["events_ignored_after_completion"], 0
+            )
 
     async def test_replay_generates_typed_mob_acknowledgement_during_hold_open(
         self,

@@ -756,6 +756,24 @@ total, the client rendered the final endpoint, and the independent fold
 validated all five broadcasts/twenty-five commands with four approximately
 three-second gaps and 6/6 heartbeats.
 
+`--mob-movement-policy-trigger matched-heartbeat` makes each relative
+follow-up wait for a client opcode `23` that matches an outstanding periodic
+server opcode `10`; it therefore also requires
+`--world-heartbeat-interval-seconds`. One match starts at most one decision.
+The initial movement is still sent normally, the authorized decision's first
+packet is immediate, and the movement-step delay applies only between its
+remaining packets. Safe `policy_trigger` API counters report matched events,
+started/completed decisions, and events ignored after completion.
+
+A browser-free real-client run with five-second heartbeats and one-second
+movement pacing again reached `785 -> 833 -> 881 -> 929 -> 977 -> 1025`.
+Heartbeat response frames `78` and `83` immediately preceded movement frames
+`79` and `84`; the four movement gaps were 5.326966, 1.000527, 3.999752, and
+1.000549 seconds. The valid transcript contains five broadcasts, twenty-five
+type-`0` commands, and 21/21 matched heartbeats. Runtime finished two gated
+decisions and ignored one later matched event after completion; the HTTP API
+remains read-only.
+
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
 `23`. The client responds 0.65-90.91 ms later (20.76 ms average). The fold

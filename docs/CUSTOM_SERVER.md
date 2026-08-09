@@ -943,6 +943,38 @@ broadcasts, twenty-five type-`0` commands, and 6/6 matched heartbeats. The four
 movement gaps are 3.011704, 3.000499, 3.008745, and 3.001274 seconds, matching
 the dedicated three-second pace.
 
+Relative decisions may instead wait for a modeled live event:
+
+```text
+--mob-movement-relative-policy '2:2:96:0:635'
+--mob-movement-policy-trigger matched-heartbeat
+--world-heartbeat-interval-seconds 5
+--mob-movement-step-delay-seconds 1
+```
+
+`matched-heartbeat` requires both a relative policy and periodic world
+heartbeats. One response is matched only when an outstanding server opcode
+`10` probe exists, and each match can start at most one still-pending policy
+decision. It does not gate the initial movement packet. The first packet of an
+authorized decision is sent immediately; `--mob-movement-step-delay-seconds`
+still paces later packets inside that decision. The read-only API exposes
+`mode`, `matched_events_observed`, `decisions_started`,
+`decisions_completed`, and `events_ignored_after_completion` under
+`protocol.mob_movement_broadcast.policy_trigger`.
+
+The real-client heartbeat-gated run reached an observable intermediate state
+after its first match: decision 2 was active at `(881,-2677)`, with `2/3`
+known packets sent, while the trigger counters were one event, one decision
+started, and zero decisions completed. It ultimately reached `(1025,-2677)`
+with all three decisions and five packets complete. Transcript
+`generated_mob_heartbeat_policy_visual_20260809/1786299984499719895_replay_12857.jsonl`
+folds validly with no warnings through
+`785 -> 833 -> 881 -> 929 -> 977 -> 1025`, twenty-five type-`0` commands, and
+21/21 matched heartbeats. The four movement gaps are 5.326966, 1.000527,
+3.999752, and 1.000549 seconds: frames `78 -> 79` and `83 -> 84` show each
+heartbeat response immediately preceding a new decision, while the roughly
+one-second gaps are the configured pace within each two-packet decision.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
