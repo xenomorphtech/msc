@@ -22,6 +22,8 @@ from maple_server.gameplay import (  # noqa: E402
     plan_inventory_quantity_update,
     plan_initial_player_hp_rewrite,
     plan_final_field_npc_state_replay,
+    mob_hp_bounds_for_percentage,
+    predict_mob_health_percentage_range,
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
@@ -2142,9 +2144,17 @@ class GameplayStateFoldTest(unittest.TestCase):
                 + b"\x00" * 9
             ),
         ).to_bytes()
-        health_payload = MobHealthPercentageUpdate(
+        initial_health_payload = MobHealthPercentageUpdate(
             object_id=MOB_OBJECT_ID,
-            health_percentage=75,
+            health_percentage=100,
+        ).to_bytes()
+        first_health_payload = MobHealthPercentageUpdate(
+            object_id=MOB_OBJECT_ID,
+            health_percentage=20,
+        ).to_bytes()
+        second_health_payload = MobHealthPercentageUpdate(
+            object_id=MOB_OBJECT_ID,
+            health_percentage=0,
         ).to_bytes()
 
         frames = (
@@ -2159,21 +2169,43 @@ class GameplayStateFoldTest(unittest.TestCase):
             ),
             PlainFrame(
                 index=1,
-                direction_index=0,
+                direction_index=1,
                 timestamp_ns=1_010_000_000,
+                direction="server_to_client",
+                wire_offset=len(spawn_payload),
+                wire_length=len(initial_health_payload),
+                plaintext=initial_health_payload,
+            ),
+            PlainFrame(
+                index=2,
+                direction_index=0,
+                timestamp_ns=1_020_000_000,
                 direction="client_to_server",
                 wire_offset=0,
                 wire_length=len(attack_payload),
                 plaintext=attack_payload,
             ),
             PlainFrame(
-                index=2,
-                direction_index=1,
-                timestamp_ns=1_110_000_000,
+                index=3,
+                direction_index=2,
+                timestamp_ns=1_120_000_000,
                 direction="server_to_client",
-                wire_offset=len(spawn_payload),
-                wire_length=len(health_payload),
-                plaintext=health_payload,
+                wire_offset=len(spawn_payload) + len(initial_health_payload),
+                wire_length=len(first_health_payload),
+                plaintext=first_health_payload,
+            ),
+            PlainFrame(
+                index=4,
+                direction_index=3,
+                timestamp_ns=1_130_000_000,
+                direction="server_to_client",
+                wire_offset=(
+                    len(spawn_payload)
+                    + len(initial_health_payload)
+                    + len(first_health_payload)
+                ),
+                wire_length=len(second_health_payload),
+                plaintext=second_health_payload,
             ),
         )
         observations = tuple(fold.consume(frame) for frame in frames)
@@ -2181,20 +2213,139 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(fold.state.client_attack_damage_actions, 1)
         self.assertEqual(fold.state.client_attack_damage_entries, 2)
         self.assertEqual(fold.state.client_attack_damage_total, 81)
-        self.assertEqual(fold.state.client_attack_health_matches, 1)
+        self.assertEqual(fold.state.client_attack_zero_damage_entries, 0)
+        self.assertEqual(fold.state.client_attack_health_matches, 2)
+        self.assertEqual(fold.state.client_attack_health_predictions, 2)
+        self.assertEqual(
+            fold.state.client_attack_health_prediction_matches, 2
+        )
+        self.assertEqual(
+            fold.state.client_attack_health_prediction_mismatches, 0
+        )
+        self.assertEqual(
+            fold.state.client_attack_health_predictions_by_template,
+            {210_100: 2},
+        )
         self.assertEqual(fold.state.client_attack_effects_cleared, 0)
         self.assertEqual(fold.state.pending_client_attack_effects, 0)
-        self.assertEqual(fold.state.last_client_attack_health_response_ms, 100.0)
-        self.assertEqual(fold.state.max_client_attack_health_response_ms, 100.0)
-        health_details = observations[-1].details
-        self.assertTrue(health_details["matched_client_attack"])
-        self.assertEqual(health_details["client_attack_frame"], 1)
-        self.assertEqual(health_details["submitted_damage_values"], [40, 41])
-        self.assertEqual(health_details["submitted_damage_total"], 81)
         self.assertEqual(
-            health_details["submitted_high_bit_markers"], [True, False]
+            fold.state.last_client_attack_health_response_ms, 110.0
         )
-        self.assertEqual(health_details["client_attack_response_ms"], 100.0)
+        self.assertEqual(
+            fold.state.max_client_attack_health_response_ms, 110.0
+        )
+        first_health_details = observations[-2].details
+        second_health_details = observations[-1].details
+        self.assertTrue(first_health_details["matched_client_attack"])
+        self.assertEqual(first_health_details["client_attack_frame"], 2)
+        self.assertEqual(first_health_details["submitted_hit_index"], 0)
+        self.assertEqual(first_health_details["submitted_damage"], 40)
+        self.assertEqual(
+            first_health_details["predicted_health_percentage_min"], 20
+        )
+        self.assertEqual(
+            first_health_details["predicted_health_percentage_max"], 20
+        )
+        self.assertTrue(first_health_details["health_prediction_matches"])
+        self.assertEqual(first_health_details["predicted_hp_min"], 10)
+        self.assertEqual(first_health_details["predicted_hp_max"], 10)
+        self.assertEqual(first_health_details["health_prediction_hp_delta"], 0)
+        self.assertEqual(second_health_details["submitted_hit_index"], 1)
+        self.assertEqual(second_health_details["submitted_damage"], 41)
+        self.assertEqual(
+            second_health_details["submitted_damage_values"], [40, 41]
+        )
+        self.assertEqual(second_health_details["submitted_damage_total"], 81)
+        self.assertEqual(
+            second_health_details["submitted_high_bit_markers"], [True, False]
+        )
+        self.assertEqual(
+            second_health_details["client_attack_response_ms"], 110.0
+        )
+
+    def test_predicts_floor_percentage_from_reference_mob_hp(self) -> None:
+        self.assertEqual(mob_hp_bounds_for_percentage(40, 67), (27, 27))
+        self.assertEqual(
+            predict_mob_health_percentage_range(
+                max_hp=40,
+                previous_percentage=67,
+                damage=17,
+            ),
+            (25, 25),
+        )
+        self.assertEqual(
+            predict_mob_health_percentage_range(
+                max_hp=300,
+                previous_percentage=78,
+                damage=19,
+            ),
+            (71, 72),
+        )
+
+    def test_zero_damage_hit_needs_no_health_response(self) -> None:
+        fold = GameplayStateFold()
+        payloads = (
+            MobEnterField(
+                object_id=MOB_OBJECT_ID,
+                spawn=fixture_mob_spawn(),
+            ).to_bytes(),
+            MobHealthPercentageUpdate(
+                object_id=MOB_OBJECT_ID,
+                health_percentage=100,
+            ).to_bytes(),
+            ClientAttackAction(
+                opcode=52,
+                local_object_index=7,
+                variant=18,
+                client_token=987_654_324,
+                control_value=807_666,
+                opaque_common_state=b"state",
+                value_1=3,
+                value_2=MOB_OBJECT_ID,
+                opaque_suffix=(
+                    b"\x06"
+                    + b"\x00" * 13
+                    + struct.pack("<II", 0, 19)
+                    + b"\x00" * 9
+                ),
+            ).to_bytes(),
+            MobHealthPercentageUpdate(
+                object_id=MOB_OBJECT_ID,
+                health_percentage=62,
+            ).to_bytes(),
+        )
+        directions = (
+            "server_to_client",
+            "server_to_client",
+            "client_to_server",
+            "server_to_client",
+        )
+        observations = tuple(
+            fold.consume(
+                PlainFrame(
+                    index=index,
+                    direction_index=index,
+                    timestamp_ns=1_000_000_000 + index * 10_000_000,
+                    direction=direction,
+                    wire_offset=0,
+                    wire_length=len(payload),
+                    plaintext=payload,
+                )
+            )
+            for index, (direction, payload) in enumerate(
+                zip(directions, payloads, strict=True)
+            )
+        )
+
+        self.assertEqual(fold.state.client_attack_damage_entries, 2)
+        self.assertEqual(fold.state.client_attack_zero_damage_entries, 1)
+        self.assertEqual(fold.state.client_attack_health_matches, 1)
+        self.assertEqual(fold.state.pending_client_attack_effects, 0)
+        self.assertEqual(observations[-1].details["submitted_hit_index"], 1)
+        self.assertEqual(observations[-1].details["submitted_damage"], 19)
+        self.assertTrue(
+            observations[-1].details["health_prediction_matches"]
+        )
 
     def test_derives_typed_item_pickup_response_from_separate_evidence(
         self,
@@ -3041,9 +3192,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.client_attack_damage_high_bit_markers, 2
         )
+        self.assertEqual(analysis.state.client_attack_zero_damage_entries, 0)
         self.assertEqual(analysis.state.client_attack_health_matches, 0)
+        self.assertEqual(analysis.state.client_attack_health_predictions, 0)
         self.assertEqual(analysis.state.client_attack_effects_cleared, 0)
-        self.assertEqual(analysis.state.pending_client_attack_effects, 2)
+        self.assertEqual(analysis.state.pending_client_attack_effects, 3)
         self.assertEqual(analysis.state.server_attack_relays, 2)
         self.assertEqual(
             analysis.state.server_attack_relays_by_opcode, {218: 1, 219: 1}
@@ -3168,8 +3321,12 @@ class GameplayStateFoldTest(unittest.TestCase):
             "client_damage_entries:3 client_damage_actions:2 "
             "client_damage_total:121 "
             "client_damage_range:40..41 client_damage_high_bits:2 "
-            "client_health_matches:0 cleared_client_effects:0 "
-            "pending_client_effects:2",
+            "client_zero_damage_entries:0 client_health_matches:0 "
+            "client_health_predictions:0 "
+            "client_health_prediction_matches:0 "
+            "client_health_prediction_mismatches:0 "
+            "client_health_prediction_one_hp_differences:0 "
+            "cleared_client_effects:0 pending_client_effects:3",
             report,
         )
         self.assertIn(

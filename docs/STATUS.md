@@ -107,11 +107,18 @@
   id at the capture-correlated offset; all such ids are known mob templates.
   Targeted `50`/`52` suffixes now expose 646 damage words after a fixed 14-byte
   prefix: stream `126` contributes 420 (`1..42`, total `6964`) and stream `92`
-  contributes 226 (`0..49`, total `4864`). The fold correlates 380 and 110 of
-  those submissions with the next same-lifecycle opcode-`293` update, clears
-  the remaining 14 and three at lifecycle boundaries, and finishes with zero
-  pending effects. Reports alias targets and redact client tokens while
-  keeping control/value and target prefix/tail roles neutral.
+  contributes 226 (`0..49`, total `4864`). Each nonzero word is now an
+  individual pending hit: the fold correlates all 399 and 208 opcode-`293`
+  responses, clears 21 and 11 terminal hits at lifecycle boundaries, skips the
+  seven zero-damage stream-`92` entries, and finishes with zero pending effects.
+  Reports alias targets and redact client tokens while keeping control/value
+  and target prefix/tail roles neutral.
+- The official client's WZJS-v5 mob records provide `info/maxHP` for all 11
+  templates attacked in the references. Opcode `293` is modeled as floor
+  integer percentage, yielding an authoritative current-HP interval and a
+  bounded next-percentage prediction per correlated hit. Stream `92` matches
+  161/161 predictions exactly; stream `126` matches 203/209, with all six
+  differences exactly one HP after `0.389..0.460`-second response delays.
 - Server opcodes `218`/`219` now have capture-bounded attack-relay envelopes:
   opcode, aliased player object id, a packed target-count/hit-count nibble, and
   repeated mob-id/hit-action/damage arrays. Stream `126` adds 41/99 relays,
@@ -126,8 +133,9 @@
   facing flags, speed, mastery, and projectile id; their four-byte tails decode
   as signed attack positions and are compared with prior remote-player
   positions in fold telemetry. Relay-tag/unknown/auxiliary roles, the damage
-  high-bit marker, client target prefix/tail fields, and mob maximum-HP mapping
-  remain neutral, so combat generation/replay stays disabled.
+  high-bit marker, client target prefix/tail fields, and the source of six
+  delayed one-HP prediction differences remain neutral, so combat generation/
+  replay stays disabled.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

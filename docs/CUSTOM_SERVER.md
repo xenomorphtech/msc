@@ -80,8 +80,10 @@ transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
 `--fail-on-invalid`: 25,597 observations are full, 43,954 partial, 1,549
-unknown-but-lossless, and none invalid. The 12 remaining warnings are state
-correlations, not shape failures. The opcode-`158` stage-`0` variant keeps its
+unknown-but-lossless, and none invalid. The original 12 warnings are state
+correlations, not shape failures. The combat model adds one aggregate warning
+for six delayed predictions that differ by one HP, so the current total is 13.
+The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
 
 Player movement appears as decoded opcode-`182` submissions and opcode-`202`
@@ -131,9 +133,10 @@ Client opcodes `50`/`52`/`54` now fold into one attack-action model. Stream
 variants and every opcode-`54` action carry a capture-correlated mob target;
 safe output aliases it and omits client tokens. Targeted `50`/`52` suffixes
 also expose 646 damage words across both captures after a fixed opaque prefix.
-The state fold accumulates them per mob and matches 490 submissions to the next
-same-lifecycle opcode-`293` percentage update, emitting damage arrays and
-response timing while leaving no pending effects. Server opcodes `218`/`219`
+The state fold treats every nonzero word as one hit, matches all 607 opcode-
+`293` responses, clears 32 terminal hits at lifecycle boundaries, and skips
+seven zero-damage words while leaving no pending effects. Server opcodes
+`218`/`219`
 likewise fold as 140 and 43 attack relays, with aliased actors and packed
 target/hit counts. Their bodies expose 194 target records and 254 damage words,
 with aliased mobs and a neutral high-bit marker; active mobs also accumulate
@@ -142,9 +145,12 @@ relays now expose conditional skill id, display/facing/speed/mastery fields,
 projectile id, and a signed position; the fold compares that position with the
 actor's prior movement state. All 42 opcode-`218` relays expose the common
 metadata fields, with 37 full mastery/auxiliary forms and five strictly checked
-short all-zero target placeholders. Relay tag/unknown/auxiliary roles, damage
-high bit, client target prefix/tail fields, and mob maximum-HP mapping are still
-not established well enough for the custom server to generate or replay combat.
+short all-zero target placeholders. Official-client max HP for the 11 attacked
+templates allows exact floor-percentage prediction for 364/370 testable hits;
+the other six differ by exactly one HP after delayed responses. Relay tag/
+unknown/auxiliary roles, damage high bit, client target prefix/tail fields, and
+those delayed differences are still not established well enough for the custom
+server to generate or replay combat.
 
 ## Replay the login capture locally
 
@@ -662,7 +668,8 @@ project's own `README.md` for all options.
   map, inventory, progression, and client liveness matched the prediction.
 - The gameplay analyzer now emits typed local/remote player movement records
   and folds their endpoints instead of reporting opcodes `182` and `202` as
-  unknown packets. Both PCAP world streams validate without warnings.
+  unknown packets. Those movement families add no validation warnings in
+  either PCAP world stream.
 - The analyzer now structurally decodes life movement opcodes `47`/`217`,
   folds command and client-tail distributions, redacts the client token, and
   validates all 2,932 packets from stream `126` without a shape failure.
@@ -682,9 +689,11 @@ project's own `README.md` for all options.
   254 damage words. The 141 ranged relays additionally type skill/projectile/
   animation metadata and signed positions; all 42 close-range relays type their
   common/full metadata and short placeholder distinction. The extended client
-  suffixes add 646 typed damage words and 490 request-to-health matches with no
-  pending effects after lifecycle cleanup. Unresolved semantic roles and HP
-  mapping remain out of generation and replay.
+  suffixes add 646 typed damage words and 607 per-hit health matches with no
+  pending effects after lifecycle cleanup. Official-client max HP predicts
+  364/370 testable health transitions exactly and bounds the other six to a
+  one-HP difference. Unresolved semantic roles and the delayed differences
+  remain out of generation and replay.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

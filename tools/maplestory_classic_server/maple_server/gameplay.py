@@ -60,6 +60,59 @@ from .packets import (
 from .transcript import Transcript
 
 
+# Version-specific info/maxHP values extracted from the official client's WZJS
+# mob bundle.  The table is intentionally limited to templates attacked in the
+# two repository reference captures; unknown templates remain unpredicted.
+REFERENCE_MOB_MAX_HP: dict[int, int] = {
+    100_100: 8,
+    100_101: 15,
+    120_100: 20,
+    130_100: 40,
+    130_101: 40,
+    210_100: 50,
+    1_110_100: 250,
+    1_130_100: 300,
+    1_210_100: 75,
+    1_210_102: 80,
+    9_300_018: 8,
+}
+
+
+def mob_hp_bounds_for_percentage(
+    max_hp: int, health_percentage: int
+) -> tuple[int, int]:
+    """Return integer HP bounds for the observed floor-percentage byte."""
+
+    if max_hp <= 0:
+        raise ValueError("mob max HP must be positive")
+    if not 0 <= health_percentage <= 100:
+        raise ValueError("mob health percentage must be between 0 and 100")
+    lower = (health_percentage * max_hp + 99) // 100
+    upper = min(
+        max_hp,
+        (((health_percentage + 1) * max_hp + 99) // 100) - 1,
+    )
+    return lower, upper
+
+
+def predict_mob_health_percentage_range(
+    *, max_hp: int, previous_percentage: int, damage: int
+) -> tuple[int, int]:
+    """Bound the next floor-percentage byte after one submitted hit."""
+
+    if damage < 0:
+        raise ValueError("mob damage must not be negative")
+    previous_min_hp, previous_max_hp = mob_hp_bounds_for_percentage(
+        max_hp, previous_percentage
+    )
+    remaining_min_hp = max(0, previous_min_hp - damage)
+    remaining_max_hp = max(0, previous_max_hp - damage)
+    return (
+        remaining_min_hp * 100 // max_hp,
+        remaining_max_hp * 100 // max_hp,
+    )
+
+
 class GameplayPhase(str, Enum):
     CONNECTED = "connected"
     ENTRY_REQUESTED = "entry_requested"
@@ -85,6 +138,9 @@ class MobEntity:
     y: int = 0
     stance: int = 0
     health_percentage: int | None = None
+    max_hp: int | None = None
+    health_hp_min: int | None = None
+    health_hp_max: int | None = None
     client_attack_submitted_hits: int = 0
     client_attack_submitted_damage: int = 0
     client_attack_submitted_high_bit_markers: int = 0
@@ -161,9 +217,10 @@ class PendingItemPickup:
 
 
 @dataclass(frozen=True)
-class PendingClientAttack:
+class PendingClientAttackHit:
     request_frame_index: int
     request_timestamp_ns: int
+    hit_index: int
     damage_values: tuple[int, ...]
     high_bit_markers: tuple[bool, ...]
 
@@ -405,7 +462,15 @@ class GameplayGameState:
     client_attack_damage_min: int | None = None
     client_attack_damage_max: int | None = None
     client_attack_damage_high_bit_markers: int = 0
+    client_attack_zero_damage_entries: int = 0
     client_attack_health_matches: int = 0
+    client_attack_health_predictions: int = 0
+    client_attack_health_prediction_matches: int = 0
+    client_attack_health_prediction_mismatches: int = 0
+    client_attack_health_one_hp_differences: int = 0
+    client_attack_health_predictions_by_template: Counter[int] = field(
+        default_factory=Counter
+    )
     client_attack_effects_cleared: int = 0
     pending_client_attack_effects: int = 0
     last_client_attack_health_response_ms: float | None = None
@@ -1255,6 +1320,9 @@ class GameplayAnalysis:
                 "y": entity.y,
                 "stance": entity.stance,
                 "health_percentage": entity.health_percentage,
+                "max_hp": entity.max_hp,
+                "health_hp_min": entity.health_hp_min,
+                "health_hp_max": entity.health_hp_max,
                 "client_attack_submitted_hits": (
                     entity.client_attack_submitted_hits
                 ),
@@ -1767,8 +1835,26 @@ class GameplayAnalysis:
                 "client_attack_damage_high_bit_markers": (
                     self.state.client_attack_damage_high_bit_markers
                 ),
+                "client_attack_zero_damage_entries": (
+                    self.state.client_attack_zero_damage_entries
+                ),
                 "client_attack_health_matches": (
                     self.state.client_attack_health_matches
+                ),
+                "client_attack_health_predictions": (
+                    self.state.client_attack_health_predictions
+                ),
+                "client_attack_health_prediction_matches": (
+                    self.state.client_attack_health_prediction_matches
+                ),
+                "client_attack_health_prediction_mismatches": (
+                    self.state.client_attack_health_prediction_mismatches
+                ),
+                "client_attack_health_prediction_one_hp_differences": (
+                    self.state.client_attack_health_one_hp_differences
+                ),
+                "client_attack_health_predictions_by_template": dict(
+                    self.state.client_attack_health_predictions_by_template
                 ),
                 "client_attack_effects_cleared": (
                     self.state.client_attack_effects_cleared
@@ -2008,7 +2094,7 @@ class GameplayStateFold:
         self._pending_item_uses: deque[PendingItemUse] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._pending_client_attacks: dict[
-            int, deque[PendingClientAttack]
+            int, deque[PendingClientAttackHit]
         ] = {}
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
@@ -2144,20 +2230,29 @@ class GameplayStateFold:
                 self.state.client_attack_targets_for_known_mobs += 1
             else:
                 self.state.client_attack_targets_for_unknown_mobs += 1
+            zero_damage_entries = 0
             if isinstance(action, ClientAttackAction):
                 self.state.client_attack_damage_actions += 1
                 pending = self._pending_client_attacks.setdefault(
                     target_object_id, deque()
                 )
-                pending.append(
-                    PendingClientAttack(
+                pending_hits = tuple(
+                    PendingClientAttackHit(
                         request_frame_index=frame.index,
                         request_timestamp_ns=frame.timestamp_ns,
+                        hit_index=hit_index,
                         damage_values=damage_values,
                         high_bit_markers=high_bit_markers,
                     )
+                    for hit_index, damage in enumerate(damage_values)
+                    if damage != 0
                 )
-                self.state.pending_client_attack_effects += 1
+                pending.extend(pending_hits)
+                zero_damage_entries = len(damage_values) - len(pending_hits)
+                self.state.client_attack_zero_damage_entries += (
+                    zero_damage_entries
+                )
+                self.state.pending_client_attack_effects += len(pending_hits)
                 target_entity = self.state.mobs.get(target_object_id)
                 if target_entity is not None:
                     target_entity.client_attack_submitted_hits += len(
@@ -2179,6 +2274,7 @@ class GameplayStateFold:
                             target_object_id, ()
                         )
                     ),
+                    "zero_damage_entries": zero_damage_entries,
                 }
             )
             identifiers["target_object_id"] = target_object_id
@@ -4072,6 +4168,7 @@ class GameplayStateFold:
                 x=entered.spawn.x,
                 y=entered.spawn.y,
                 stance=entered.spawn.stance,
+                max_hp=REFERENCE_MOB_MAX_HP.get(entered.spawn.template_id),
             )
             self.state.mob_templates[entered.object_id] = (
                 entered.spawn.template_id
@@ -4583,23 +4680,30 @@ class GameplayStateFold:
                 ):
                     self.state.mob_health_increases += 1
                 entity.health_percentage = update.health_percentage
+                if entity.max_hp is not None:
+                    (
+                        entity.health_hp_min,
+                        entity.health_hp_max,
+                    ) = mob_hp_bounds_for_percentage(
+                        entity.max_hp, update.health_percentage
+                    )
             self.state.mob_health_percentage_updates += 1
             if update.health_percentage == 0:
                 self.state.mob_health_zero_updates += 1
             pending_queue = self._pending_client_attacks.get(update.object_id)
-            pending_attack = pending_queue.popleft() if pending_queue else None
+            pending_hit = pending_queue.popleft() if pending_queue else None
             if pending_queue is not None and not pending_queue:
                 del self._pending_client_attacks[update.object_id]
             correlation_details: dict[str, object] = {
-                "matched_client_attack": pending_attack is not None,
+                "matched_client_attack": pending_hit is not None,
             }
-            if pending_attack is not None:
+            if pending_hit is not None:
                 self.state.pending_client_attack_effects -= 1
                 self.state.client_attack_health_matches += 1
                 response_ms = round(
                     (
                         frame.timestamp_ns
-                        - pending_attack.request_timestamp_ns
+                        - pending_hit.request_timestamp_ns
                     )
                     / 1e6,
                     3,
@@ -4609,23 +4713,98 @@ class GameplayStateFold:
                     self.state.max_client_attack_health_response_ms or 0.0,
                     response_ms,
                 )
+                submitted_damage = pending_hit.damage_values[
+                    pending_hit.hit_index
+                ]
+                submitted_high_bit_marker = pending_hit.high_bit_markers[
+                    pending_hit.hit_index
+                ]
                 correlation_details.update(
                     {
                         "client_attack_frame": (
-                            pending_attack.request_frame_index
+                            pending_hit.request_frame_index
                         ),
                         "client_attack_response_ms": response_ms,
+                        "submitted_hit_index": pending_hit.hit_index,
+                        "submitted_hit_count": len(
+                            pending_hit.damage_values
+                        ),
+                        "submitted_damage": submitted_damage,
+                        "submitted_high_bit_marker": (
+                            submitted_high_bit_marker
+                        ),
                         "submitted_damage_values": list(
-                            pending_attack.damage_values
+                            pending_hit.damage_values
                         ),
                         "submitted_damage_total": sum(
-                            pending_attack.damage_values
+                            pending_hit.damage_values
                         ),
                         "submitted_high_bit_markers": list(
-                            pending_attack.high_bit_markers
+                            pending_hit.high_bit_markers
+                        ),
+                        "remaining_health_effects_for_target": len(
+                            pending_queue or ()
                         ),
                     }
                 )
+                if (
+                    entity is not None
+                    and entity.max_hp is not None
+                    and previous_percentage is not None
+                ):
+                    expected_min, expected_max = (
+                        predict_mob_health_percentage_range(
+                            max_hp=entity.max_hp,
+                            previous_percentage=previous_percentage,
+                            damage=submitted_damage,
+                        )
+                    )
+                    previous_min_hp, previous_max_hp = (
+                        mob_hp_bounds_for_percentage(
+                            entity.max_hp, previous_percentage
+                        )
+                    )
+                    predicted_min_hp = max(
+                        0, previous_min_hp - submitted_damage
+                    )
+                    predicted_max_hp = max(
+                        0, previous_max_hp - submitted_damage
+                    )
+                    prediction_matches = (
+                        expected_min
+                        <= update.health_percentage
+                        <= expected_max
+                    )
+                    if entity.health_hp_max is None:
+                        hp_delta = None
+                    elif entity.health_hp_max < predicted_min_hp:
+                        hp_delta = entity.health_hp_max - predicted_min_hp
+                    elif entity.health_hp_min > predicted_max_hp:
+                        hp_delta = entity.health_hp_min - predicted_max_hp
+                    else:
+                        hp_delta = 0
+                    combat_state = self.state
+                    combat_state.client_attack_health_predictions += 1
+                    combat_state.client_attack_health_predictions_by_template[
+                        entity.spawn.template_id
+                    ] += 1
+                    if prediction_matches:
+                        combat_state.client_attack_health_prediction_matches += 1
+                    else:
+                        combat_state.client_attack_health_prediction_mismatches += 1
+                        if hp_delta is not None and abs(hp_delta) == 1:
+                            combat_state.client_attack_health_one_hp_differences += 1
+                    correlation_details.update(
+                        {
+                            "mob_max_hp": entity.max_hp,
+                            "predicted_hp_min": predicted_min_hp,
+                            "predicted_hp_max": predicted_max_hp,
+                            "predicted_health_percentage_min": expected_min,
+                            "predicted_health_percentage_max": expected_max,
+                            "health_prediction_matches": prediction_matches,
+                            "health_prediction_hp_delta": hp_delta,
+                        }
+                    )
             details = {
                 "entity": alias,
                 "known_entity": entity is not None,
@@ -4634,6 +4813,15 @@ class GameplayStateFold:
                 "field_epoch": self.state.field_epoch,
                 **correlation_details,
             }
+            if entity is not None:
+                details.update(
+                    {
+                        "template_id": entity.spawn.template_id,
+                        "mob_max_hp": entity.max_hp,
+                        "health_hp_min": entity.health_hp_min,
+                        "health_hp_max": entity.health_hp_max,
+                    }
+                )
             self._event(
                 frame,
                 "mob_health_percentage_updated",
@@ -4697,6 +4885,31 @@ class GameplayStateFold:
     def finish(
         self, last_frame: PlainFrame | None, *, transport_closed: bool
     ) -> None:
+        accounted_client_damage_entries = (
+            self.state.client_attack_zero_damage_entries
+            + self.state.client_attack_health_matches
+            + self.state.client_attack_effects_cleared
+            + self.state.pending_client_attack_effects
+        )
+        if (
+            accounted_client_damage_entries
+            != self.state.client_attack_damage_entries
+        ):
+            self.issues.append(
+                "client attack hit accounting mismatch: "
+                f"decoded {self.state.client_attack_damage_entries}, "
+                f"accounted {accounted_client_damage_entries}"
+            )
+        if self.state.client_attack_health_prediction_mismatches:
+            one_hp_differences = (
+                self.state.client_attack_health_one_hp_differences
+            )
+            self.warnings.append(
+                f"{self.state.client_attack_health_prediction_mismatches} "
+                "client attack hit/HP-percentage correlations disagreed with "
+                "the reference mob max-HP model; "
+                f"{one_hp_differences} differed by exactly one HP"
+            )
         if self.state.unmatched_movement_acknowledgements:
             self.warnings.append(
                 f"{self.state.unmatched_movement_acknowledgements} movement "
@@ -5665,8 +5878,18 @@ def render_gameplay_analysis(
             f"{state.client_attack_damage_max} "
             "client_damage_high_bits:"
             f"{state.client_attack_damage_high_bit_markers} "
+            "client_zero_damage_entries:"
+            f"{state.client_attack_zero_damage_entries} "
             "client_health_matches:"
             f"{state.client_attack_health_matches} "
+            "client_health_predictions:"
+            f"{state.client_attack_health_predictions} "
+            "client_health_prediction_matches:"
+            f"{state.client_attack_health_prediction_matches} "
+            "client_health_prediction_mismatches:"
+            f"{state.client_attack_health_prediction_mismatches} "
+            "client_health_prediction_one_hp_differences:"
+            f"{state.client_attack_health_one_hp_differences} "
             "cleared_client_effects:"
             f"{state.client_attack_effects_cleared} "
             "pending_client_effects:"

@@ -804,11 +804,41 @@ stores current/previous percentages and emits `mob_health_percentage_updated`.
 A zero value does not itself remove the entity: membership still changes only
 on the separate opcode-`280` leave packet.
 
-When a targeted client opcode-`50`/`52` request is pending for the same mob,
-the event also carries that request's frame, decoded damage array, and response
-time. This is an observed request/result correlation, not a claim that the
-percentage delta came only from those damage words; concurrent actors and
-integer percentage rounding still prevent an exact maximum-HP derivation.
+When targeted client opcode `50`/`52` damage is pending for the same mob, each
+nonzero damage word is one pending hit. One opcode-`293` packet consumes one
+hit in order and adds the request frame, hit index/count, selected damage word,
+complete damage array, and response time to the event. Zero-damage words do not
+need an update. This accounts for all 399 stream-`126` health packets and all
+208 stream-`92` packets; lifecycle removal clears 21 and 11 terminal hits,
+respectively, and both folds finish with no pending effects.
+
+For the 11 templates actually attacked in the two references, the model uses
+version-specific `info/maxHP` values extracted from the official client's
+`json_27ed12ab55c4464e7db01cade1a2e593.bundle` WZJS-v5 records:
+
+| template | max HP | template | max HP |
+|---:|---:|---:|---:|
+| `100100` | 8 | `100101` | 15 |
+| `120100` | 20 | `130100` | 40 |
+| `130101` | 40 | `210100` | 50 |
+| `1110100` | 250 | `1130100` | 300 |
+| `1210100` | 75 | `1210102` | 80 |
+| `9300018` | 8 |  |  |
+
+The authoritative byte uses integer floor percentage:
+
+```text
+health_percentage = floor(current_hp * 100 / max_hp)
+```
+
+Therefore one percentage maps to a bounded integer-HP interval rather than an
+exact value. The fold stores that interval on the mob and, when a previous
+sample exists, subtracts the correlated hit from both bounds to predict the
+next percentage range. Stream `92` matches all 161 testable predictions; floor
+also explains seven cases that ceil/nearest quantization cannot represent.
+Stream `126` matches 203/209 exactly. The six outliers are each exactly one HP
+from the predicted interval and have response delays of `0.389..0.460`
+seconds, so they are reported as semantic warnings instead of invalid shapes.
 
 ## Player movement (`client 182`, `server 202`)
 
@@ -1064,11 +1094,12 @@ round-trip byte-for-byte.
 
 The fold emits `client_attack_submitted`, aliases the mob target, distinguishes
 currently active from previously known targets, and records per-mob damage/hit
-totals. Each targeted opcode-`50`/`52` submission is queued for that mob. The
-next opcode-`293` update consumes the pending request and reports its frame,
-damage array, and response time. Stream `126` has 380 such matches and clears
-14 unmatched requests at mob/field lifecycle boundaries; stream `92` has 110
-matches and clears three. Both finish with zero pending effects. The fold does
+totals. Each nonzero opcode-`50`/`52` damage word is queued separately. The
+following same-mob opcode-`293` updates consume those hits in order, including
+both responses to a two-hit action; terminal hits can instead be cleared by
+opcode `280` or a field transition. Stream `126` correlates 399 hit responses
+and clears 21 terminal hits. Stream `92` correlates 208, clears 11, and skips
+seven zero-damage words. Both finish with zero pending effects. The fold does
 not expose client tokens or raw target ids.
 
 ## Attack relays (`server 218` and `219`)
@@ -1163,10 +1194,12 @@ magnitudes plus a neutral high-bit marker. Active mob entities accumulate the
 observed relay hit/damage totals without replacing the authoritative opcode-
 `293` health percentage. Raw ids and raw body bytes remain hidden. These
 captures validate action-to-health/leave correlations and damage array
-boundaries. Relay-tag/unknown/auxiliary roles, the damage high bit, client
-target prefix/tail fields, and mob maximum HP remain insufficient to predict
-the next percentage update. The custom server therefore does not yet generate
-or replay attacks.
+boundaries. Client-side max HP now predicts 364/370 testable percentage
+transitions exactly and bounds the remaining six to a one-HP difference.
+Relay-tag/unknown/auxiliary roles, the damage high bit, client target
+prefix/tail fields, and the cause of those delayed one-HP differences remain
+unresolved. The custom server therefore does not yet generate or replay
+attacks.
 
 ## `58880` exchange
 
@@ -1227,7 +1260,9 @@ full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 12,976 full, 21,604 partial,
 627 unknown, and zero invalid; stream `114` remains 16/14/46/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
-modifications; its 12 remaining warnings are cross-packet state correlations.
+modifications; its 13 remaining warnings are cross-packet state correlations:
+12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed
+combat predictions that differ by one HP.
 
 Primary captures live in:
 

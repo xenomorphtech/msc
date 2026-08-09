@@ -330,7 +330,7 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcodes `50`/`52`: capture-bounded attack-action envelopes with exact
   variant/suffix lengths, redacted client tokens, and an aliased mob target in
   extended variants, plus typed per-hit damage words between bounded opaque
-  target prefix/tail regions,
+  target prefix/tail regions; each nonzero word becomes one pending hit effect,
 - client opcode `54`: exact 24-byte attack action whose third trailing u32 is
   an aliased mob target; the other numeric roles remain neutral,
 - client opcode `217`: neutral compact and counted record-set envelopes with
@@ -365,7 +365,9 @@ The gameplay fold currently models these capture-backed boundaries:
   one-byte auxiliary fields,
 - server opcode `293`: exact object-id plus one-byte mob-health percentage;
   zero is retained as state and does not replace the separate leave packet;
-  pending client attacks add request-frame/damage/timing correlation,
+  pending client hits add request-frame/hit-index/damage/timing correlation,
+  while reference max HP yields authoritative integer-HP bounds and a predicted
+  next percentage range,
 - server opcodes `218`/`219`: attack-relay envelopes with an aliased player
   object id, packed target/hit counts, and typed mob/hit-action/damage arrays;
   opcode `219` additionally exposes its conditional skill id, display/facing/
@@ -691,13 +693,23 @@ word per hit and an opcode-specific 8/9-byte opaque tail. Stream `126` exposes
 and suffix boundaries round-trip, while control/value and target prefix/tail
 roles remain neutral.
 
-The fold queues each targeted `50`/`52` submission by mob and matches it to the
-next opcode-`293` health update in the same lifecycle. It finds 380 matches in
-stream `126` and 110 in stream `92`; the remaining 14 and three submissions
-are cleared by mob/field lifecycle boundaries, leaving no pending effect. The
-health-update event carries the request frame, submitted damage array, and
-response time. This validates request-to-effect ordering without treating the
-percentage delta as an exact maximum-HP equation.
+The fold queues each nonzero damage word from targeted `50`/`52` submissions
+as an individual hit effect for that mob. Each opcode-`293` update consumes one
+hit, so multi-hit actions produce multiple correlations; zero-damage words need
+no response. Stream `126` matches all 399 health packets and clears 21 terminal
+hits at mob/field lifecycle boundaries. Stream `92` matches all 208 health
+packets, clears 11 terminal hits, and accounts for seven zero-damage words.
+Both finish with no pending hit. Health events carry the action frame, hit
+index, damage array, selected damage word, and response time.
+
+For the 11 mob templates attacked in these captures, `REFERENCE_MOB_MAX_HP`
+contains the official client's version-specific WZJS `info/maxHP` values. The
+fold interprets opcode `293` as `floor(current_hp * 100 / max_hp)`, retains the
+corresponding integer-HP interval, and predicts the next interval after each
+correlated hit. Stream `92` validates all 161 transitions with a prior health
+sample exactly. Stream `126` validates 203 of 209 exactly; the other six differ
+by one HP, all with response delays of `0.389..0.460` seconds. These remain
+explicit semantic warnings rather than packet-shape failures.
 
 Server opcodes `218` and `219` form the corresponding capture-bounded attack
 relay family. Their prefix is opcode, player object id, and one packed byte;
@@ -735,8 +747,8 @@ with a previously observed remote-player position; common vertical deltas are
 roughly 22-28 pixels, while larger deltas follow stale movement broadcasts.
 The fold emits both positions and their deltas as validation evidence. Relay-
 tag/unknown/auxiliary roles, the damage high bit, client target prefix/tail
-fields, and mob maximum-HP mapping still prevent safe combat generation or
-replay.
+fields, and the six delayed one-HP prediction differences still prevent safe
+combat generation or replay.
 
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
@@ -846,8 +858,10 @@ planned/sent packet counts, and the predicted fold delta. When reactive mob
 movement acknowledgements are enabled,
 `protocol.mob_movement_acknowledgements` reports the identifier-free derived
 policy, its full-capture evidence, observed submissions, sent responses, and
-rejections. Other
-methods are rejected with `405`; unknown paths return `404`. The API
+rejections. Per-hit combat prediction counters remain offline-analysis output
+from `analyze-gameplay --json`; they are not exposed in runtime status while
+combat generation/replay is disabled. Other methods are rejected with `405`;
+unknown paths return `404`. The API
 deliberately has no remote binding or mutating route: startup rejects
 non-loopback addresses, so the current local-only threat model relies on
 OS/namespace access rather than application authentication. Add authentication
@@ -1006,5 +1020,10 @@ It intentionally cannot launch an authenticated official session.
     five short all-zero target placeholders, and enforce that short-form target
     invariant during parse and re-encoding.
 38. Decode all 646 targeted client damage words, fold their per-mob totals, and
-    correlate 490 opcode-`50`/`52` submissions with following opcode-`293`
-    health updates while clearing unmatched requests at lifecycle boundaries.
+    establish an initial action-level set of 490 opcode-`50`/`52` to opcode-
+    `293`/lifecycle correlations.
+39. Refine attack correlation to one effect per nonzero damage word, account
+    for all 607 opcode-`293` responses and 32 terminal hits, recover the 11
+    referenced mob max-HP values from the official WZJS bundle, and validate
+    364/370 bounded next-percentage predictions exactly with the six remaining
+    observations differing by one HP.
