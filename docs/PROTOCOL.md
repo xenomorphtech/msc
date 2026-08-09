@@ -1120,6 +1120,25 @@ decision's internal pace. The transcript remains valid with exact
 `785 -> 833 -> 881 -> 929 -> 977 -> 1025` continuity, five broadcasts,
 twenty-five type-`0` commands, and 21/21 matched heartbeats.
 
+A second event mode consumes the existing typed mob-controller protocol rather
+than the heartbeat. `served-mob-movement` accepts only an opcode `207`
+submission that the capture-derived acknowledgement policy validates for a
+known active mob. The server first drains its typed opcode `283` response and
+only then starts one pending relative decision. A rejected submission has no
+scheduling effect. While no accepted event exists, explicit `awaiting_event`
+telemetry distinguishes the gate from capture-backed path planning. Again,
+this changes packet order and policy only, not the `207`, `283`, or `282` wire
+shapes.
+
+In the real-client proof, the initial opcode `282` ended at `833` in frame
+`77`; authentic sequence-`1` opcode `207` arrived in frame `78`, its matched
+opcode `283` was frame `79`, and the newly authorized opcode `282` packets were
+frames `80` and `81`. They ended at `881` and `929`, with 0.008418 seconds from
+the initial broadcast to the first gated broadcast and 1.000714 seconds inside
+the composed decision. The valid fold reports three broadcasts/fifteen
+type-`0` commands, one submitted/acknowledged/matched movement, zero pending or
+unmatched movement, and 4/4 independently matched heartbeats.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

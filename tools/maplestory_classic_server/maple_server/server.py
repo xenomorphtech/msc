@@ -485,14 +485,15 @@ async def replay_connection(
     if mob_movement_policy_trigger not in {
         "immediate",
         "matched_heartbeat",
+        "served_mob_movement",
     }:
         raise ValueError("unknown mob movement policy trigger")
     if (
-        mob_movement_policy_trigger == "matched_heartbeat"
+        mob_movement_policy_trigger != "immediate"
         and mob_movement_follow_up_policy is None
     ):
         raise ValueError(
-            "matched-heartbeat movement trigger requires a relative policy"
+            "event-driven movement trigger requires a relative policy"
         )
     if (
         mob_movement_policy_trigger == "matched_heartbeat"
@@ -501,6 +502,14 @@ async def replay_connection(
         raise ValueError(
             "matched-heartbeat movement trigger requires periodic world "
             "heartbeats"
+        )
+    if (
+        mob_movement_policy_trigger == "served_mob_movement"
+        and mob_movement_acknowledgement_policy is None
+    ):
+        raise ValueError(
+            "served-mob-movement trigger requires reactive movement "
+            "acknowledgements"
         )
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
@@ -1085,6 +1094,62 @@ async def replay_connection(
                 )
                 packets_sent_this_call += 1
 
+        async def observe_movement_policy_trigger_event() -> None:
+            if movement_policy_trigger_metrics is not None:
+                movement_policy_trigger_metrics["awaiting_event"] = False
+                movement_policy_trigger_metrics[
+                    "matched_events_observed"
+                ] = int(
+                    movement_policy_trigger_metrics.get(
+                        "matched_events_observed", 0
+                    )
+                ) + 1
+            if (
+                isinstance(
+                    movement_schedule,
+                    MobMovementBroadcastDecisionQueue,
+                )
+                and not movement_schedule.complete
+            ):
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics[
+                        "decisions_started"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "decisions_started", 0
+                        )
+                    ) + 1
+                decisions_completed_before = (
+                    movement_schedule.decisions_completed
+                )
+                await send_movement_follow_up_decisions(
+                    decision_limit=1,
+                    delay_before_first_packet=False,
+                )
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics[
+                        "decisions_completed"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "decisions_completed", 0
+                        )
+                    ) + (
+                        movement_schedule.decisions_completed
+                        - decisions_completed_before
+                    )
+                    movement_policy_trigger_metrics["awaiting_event"] = (
+                        movement_schedule.has_unplanned_decision
+                    )
+            elif movement_policy_trigger_metrics is not None:
+                movement_policy_trigger_metrics["awaiting_event"] = False
+                movement_policy_trigger_metrics[
+                    "events_ignored_after_completion"
+                ] = int(
+                    movement_policy_trigger_metrics.get(
+                        "events_ignored_after_completion", 0
+                    )
+                ) + 1
+
         post_transcript_plaintexts = (
             tuple(pending_opcode_replies) + post_transcript_server_frames
         )
@@ -1129,6 +1194,16 @@ async def replay_connection(
             if is_movement_plaintext:
                 if mob_movement_policy_trigger == "immediate":
                     await send_movement_follow_up_decisions()
+                elif (
+                    movement_policy_trigger_metrics is not None
+                    and isinstance(
+                        movement_schedule,
+                        MobMovementBroadcastDecisionQueue,
+                    )
+                ):
+                    movement_policy_trigger_metrics["awaiting_event"] = (
+                        movement_schedule.has_unplanned_decision
+                    )
 
         for plaintext in post_transcript_replies:
             if remaining_opcode_replies:
@@ -1228,64 +1303,7 @@ async def replay_connection(
                             max(float(prior_max or 0.0), round_trip_ms), 3
                         )
                     if mob_movement_policy_trigger == "matched_heartbeat":
-                        if movement_policy_trigger_metrics is not None:
-                            movement_policy_trigger_metrics[
-                                "matched_events_observed"
-                            ] = (
-                                int(
-                                    movement_policy_trigger_metrics.get(
-                                        "matched_events_observed", 0
-                                    )
-                                )
-                                + 1
-                            )
-                        if (
-                            isinstance(
-                                movement_schedule,
-                                MobMovementBroadcastDecisionQueue,
-                            )
-                            and not movement_schedule.complete
-                        ):
-                            if movement_policy_trigger_metrics is not None:
-                                movement_policy_trigger_metrics[
-                                    "decisions_started"
-                                ] = (
-                                    int(
-                                        movement_policy_trigger_metrics.get(
-                                            "decisions_started", 0
-                                        )
-                                    )
-                                    + 1
-                                )
-                            decisions_completed_before = (
-                                movement_schedule.decisions_completed
-                            )
-                            await send_movement_follow_up_decisions(
-                                decision_limit=1,
-                                delay_before_first_packet=False,
-                            )
-                            if movement_policy_trigger_metrics is not None:
-                                movement_policy_trigger_metrics[
-                                    "decisions_completed"
-                                ] = int(
-                                    movement_policy_trigger_metrics.get(
-                                        "decisions_completed", 0
-                                    )
-                                ) + (
-                                    movement_schedule.decisions_completed
-                                    - decisions_completed_before
-                                )
-                        elif movement_policy_trigger_metrics is not None:
-                            movement_policy_trigger_metrics[
-                                "events_ignored_after_completion"
-                            ] = (
-                                int(
-                                    movement_policy_trigger_metrics.get(
-                                        "events_ignored_after_completion", 0
-                                    )
-                                )
-                                + 1
-                            )
+                        await observe_movement_policy_trigger_event()
                 if (
                     opcode == 185
                     and item_pickup_response_policy is not None
@@ -1529,6 +1547,11 @@ async def replay_connection(
                         mob_acknowledgement_metrics["state"] = (
                             mob_movement_acknowledgement_policy.safe_dict()
                         )
+                    if (
+                        mob_movement_policy_trigger
+                        == "served_mob_movement"
+                    ):
+                        await observe_movement_policy_trigger_event()
                 if opcode in remaining_opcode_replies:
                     await send_reactive_plaintexts(
                         opcode,
@@ -2775,11 +2798,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     replay.add_argument(
         "--mob-movement-policy-trigger",
-        choices=("immediate", "matched-heartbeat"),
+        choices=(
+            "immediate",
+            "matched-heartbeat",
+            "served-mob-movement",
+        ),
         default="immediate",
         help=(
-            "start each relative-policy decision immediately or after one "
-            "matched periodic heartbeat response"
+            "start each relative-policy decision immediately, after one "
+            "matched periodic heartbeat response, or after one accepted "
+            "mob-movement submission is acknowledged"
         ),
     )
     replay.add_argument(
@@ -3635,7 +3663,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             and mob_movement_follow_up_policy is None
         ):
             raise ValueError(
-                "--mob-movement-policy-trigger matched-heartbeat requires "
+                "event-driven --mob-movement-policy-trigger requires "
                 "--mob-movement-relative-policy"
             )
         if (
@@ -3645,6 +3673,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
             raise ValueError(
                 "matched-heartbeat movement policy trigger requires "
                 "--world-heartbeat-interval-seconds"
+            )
+        if (
+            mob_movement_policy_trigger == "served_mob_movement"
+            and mob_movement_acknowledgement_policy is None
+        ):
+            raise ValueError(
+                "served-mob-movement movement policy trigger requires "
+                "--reactive-mob-movement-acknowledgements"
             )
         if (
             (
@@ -3829,6 +3865,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             )
             runtime_protocol["mob_movement_broadcast"]["policy_trigger"] = {
                 "mode": mob_movement_policy_trigger,
+                "awaiting_event": False,
                 "matched_events_observed": 0,
                 "decisions_started": 0,
                 "decisions_completed": 0,

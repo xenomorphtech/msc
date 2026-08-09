@@ -958,7 +958,7 @@ heartbeats. One response is matched only when an outstanding server opcode
 decision. It does not gate the initial movement packet. The first packet of an
 authorized decision is sent immediately; `--mob-movement-step-delay-seconds`
 still paces later packets inside that decision. The read-only API exposes
-`mode`, `matched_events_observed`, `decisions_started`,
+`mode`, `awaiting_event`, `matched_events_observed`, `decisions_started`,
 `decisions_completed`, and `events_ignored_after_completion` under
 `protocol.mob_movement_broadcast.policy_trigger`.
 
@@ -974,6 +974,35 @@ folds validly with no warnings through
 3.999752, and 1.000549 seconds: frames `78 -> 79` and `83 -> 84` show each
 heartbeat response immediately preceding a new decision, while the roughly
 one-second gaps are the configured pace within each two-packet decision.
+
+For a client-originated gameplay event instead of liveness, use:
+
+```text
+--reactive-mob-movement-acknowledgements
+--mob-movement-relative-policy '1:2:96:0:635'
+--mob-movement-policy-trigger served-mob-movement
+```
+
+This mode requires the typed reactive acknowledgement policy. A client opcode
+`207` authorizes one decision only after its object/template/field checks pass
+and the generated opcode `283` acknowledgement drains. Unknown or rejected
+submissions do not trigger movement. While a relative decision is pending but
+no qualifying event has arrived, `policy_trigger.awaiting_event` is true even
+though the underlying decision queue describes its next unplanned target as
+`planning`.
+
+The bounded real-client proof injected both the typed spawn and controller
+assignment for a template-`100100` snail. One authentic sequence-`1`
+submission was accepted and acknowledged, then one `(+96,0)` decision moved
+the server model from `833` through `881` to `929`. The live API completed
+`3/3` packets with one event/decision and `awaiting_event:false`; periodic
+heartbeats advanced independently. Transcript
+`generated_mob_served_movement_policy_complete_20260809/1786300928969365966_replay_12857.jsonl`
+is valid with no warnings. Frames `78 -> 79 -> 80` are the submission,
+matched acknowledgement, and first generated movement packet; frame `81`
+finishes the decision 1.000714 seconds later. The fold reports three known
+broadcasts, fifteen type-`0` commands, one matched movement pair, no pending or
+unmatched movement, and 4/4 matched heartbeats.
 
 ## Historical synthetic staging experiment
 

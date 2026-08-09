@@ -763,7 +763,8 @@ server opcode `10`; it therefore also requires
 The initial movement is still sent normally, the authorized decision's first
 packet is immediate, and the movement-step delay applies only between its
 remaining packets. Safe `policy_trigger` API counters report matched events,
-started/completed decisions, and events ignored after completion.
+started/completed decisions, events ignored after completion, and whether a
+pending decision is currently `awaiting_event`.
 
 A browser-free real-client run with five-second heartbeats and one-second
 movement pacing again reached `785 -> 833 -> 881 -> 929 -> 977 -> 1025`.
@@ -773,6 +774,22 @@ Heartbeat response frames `78` and `83` immediately preceded movement frames
 type-`0` commands, and 21/21 matched heartbeats. Runtime finished two gated
 decisions and ignored one later matched event after completion; the HTTP API
 remains read-only.
+
+`--mob-movement-policy-trigger served-mob-movement` is the client-originated
+alternative. It requires `--reactive-mob-movement-acknowledgements`; one
+opcode-`207` submission starts one decision only after the modeled policy
+accepts it and its opcode-`283` acknowledgement drains. Rejected submissions
+do not authorize movement. The API uses `awaiting_event` to distinguish this
+state from an active capture-backed planning call.
+
+In the browser-free live proof, the initial movement was frame `77`, the real
+client's sequence-`1` submission was frame `78`, its matched acknowledgement
+was frame `79`, and the gated movement packets were frames `80`/`81`. The
+server reached `833 -> 881 -> 929`; the internal packet gap was 1.000714
+seconds. The valid transcript contains three broadcasts/fifteen type-`0`
+commands, one submitted/acknowledged/matched movement with nothing pending,
+and 4/4 independently matched heartbeats. Runtime completed one gated decision
+and cleared `awaiting_event`; HTTP remains read-only.
 
 The heartbeat direction is established by capture order, not opcode frequency:
 in every sustained stream-`92` pair, server opcode `10` precedes client opcode
