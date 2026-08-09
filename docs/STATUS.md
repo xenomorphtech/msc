@@ -52,8 +52,10 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  25,597 full, 43,132 partial, 2,371 unknown-but-lossless, and zero invalid
-  packet observations. Twelve state-correlation warnings remain.
+  25,597 full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 12,976 full, 21,604 partial,
+  627 unknown, and zero invalid; stream `114` reports 16/14/46/0. Twelve
+  long-corpus state-correlation warnings remain.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,
@@ -99,11 +101,17 @@
   corpus, while the outer byte fields remain zero. The primary value is not
   monotonic, so the fold exposes neutral distributions rather than retaining
   the shape manifest's tentative `client_tick` name.
-- Client opcode `54` now has an exact 24-byte record with one u32 control value,
-  two flag bytes, and four more u32 values. All 120 stream-`126` and 31
-  stream-`92` packets round-trip. The fold records flag/value distributions and
-  bounded ranges but does not apply an effect because the numeric roles remain
-  unproven.
+- Client opcodes `50`/`52`/`54` now fold as one attack-action family. Stream
+  `126` contributes 552/130/120 packets and stream `92` contributes 0/128/31.
+  Extended `50`/`52` variants and every opcode-`54` action carry a mob object
+  id at the capture-correlated offset; all such ids are known mob templates.
+  Reports alias targets and redact client tokens while keeping control/value
+  fields and variant suffixes opaque.
+- Server opcodes `218`/`219` now have capture-bounded attack-relay envelopes:
+  opcode, aliased player object id, a packed target-count/hit-count nibble, and
+  an opaque body constrained to observed total lengths. Stream `126` adds
+  41/99 relays and stream `92` adds 1/42. Exact damage fields are not yet
+  decoded, so combat generation/replay remains disabled.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

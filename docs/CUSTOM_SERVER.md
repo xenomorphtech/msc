@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 25,597 observations are full, 43,132 partial, 2,371
+`--fail-on-invalid`: 25,597 observations are full, 43,954 partial, 1,549
 unknown-but-lossless, and none invalid. The 12 remaining warnings are state
 correlations, not shape failures. The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
@@ -102,7 +102,7 @@ length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
 counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
 packets across all three observed variants, all with exact round trips.
 Together, these latest modeled families leave the long-corpus totals at 25,597
-full, 43,132 partial, 2,371 unknown-but-lossless, and zero invalid.
+full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a
@@ -126,10 +126,13 @@ stream-`92` instances round-trip. Reports expose only numeric distributions;
 the 32-bit field takes two discrete, non-monotonic values, so it remains
 neutral rather than using the shape manifest's tentative `client_tick` label.
 
-Client opcode `54` now uses an exact 24-byte codec for its u32/u8/u8 plus four
-u32 fields. The analyzer round-trips all 120 stream-`126` and 31 stream-`92`
-instances and reports flag/tail distributions and numeric ranges. No gameplay
-effect is assigned to the still-neutral values.
+Client opcodes `50`/`52`/`54` now fold into one attack-action model. Stream
+`126` has 802 actions and stream `92` has 159. Extended opcode-`50`/`52`
+variants and every opcode-`54` action carry a capture-correlated mob target;
+safe output aliases it and omits client tokens. Server opcodes `218`/`219`
+likewise fold as 140 and 43 attack relays, with aliased actors and packed
+target/hit counts. Their remaining bodies and exact damage fields stay opaque,
+so the custom server validates but does not generate or replay combat yet.
 
 ## Replay the login capture locally
 
@@ -661,8 +664,10 @@ project's own `README.md` for all options.
   full shape coverage and explicit unmatched/pending telemetry.
 - Client opcode `101` now folds all 219 sustained-capture packets into neutral
   five-field distributions with exact byte consumption and round trips.
-- Client opcode `54` now folds all 151 sustained-capture packets into neutral
-  flag/value distributions and ranges with exact byte consumption.
+- Client opcodes `50`/`52`/`54` now fold 961 sustained-capture attack actions
+  with aliased mob targets where present; server opcodes `218`/`219` fold 183
+  attack relays with packed target/hit counts. Opaque damage bodies remain out
+  of generation and replay.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

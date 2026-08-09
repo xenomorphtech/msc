@@ -988,9 +988,42 @@ The codec and fold therefore preserve the exact numeric boundaries under
 neutral names, emit value distributions and events, and classify the family as
 partial semantic coverage.
 
-## Client opcode `54` neutral numeric record
+## Attack actions (`client 50`, `52`, and `54`)
 
-The client packet is exactly 24 bytes:
+Client opcodes `50` and `52` share this exact prefix:
+
+```text
+uint16 opcode = 50 or 52
+uint8  local_object_index
+uint8  variant
+uint32 client_token                 # redacted from safe reports
+uint32 control_value                # neutral role
+byte[5] opaque_common_state
+uint32 value_1                      # neutral role
+uint32 value_2                      # mob object id in extended variants
+byte[variant_suffix_length] opaque_suffix
+```
+
+The accepted capture-bounded variants are:
+
+```text
+opcode  variant  suffix bytes  total bytes  target in value_2
+50      1        0             25           no
+50      17       26            51           yes
+52      1        1             26           no
+52      2        1             26           no
+52      17       27            52           yes
+52      18       31            56           yes
+```
+
+Stream `126` contains 552 opcode-`50` actions (264 variant `1`, 288 variant
+`17`) and 130 opcode-`52` actions (16/8/80/26 variants `1/2/17/18`). Stream
+`92` contains 128 opcode-`52` actions (15 variant `2`, 113 variant `18`). Every
+extended action's `value_2` is a known mob object id. The opaque extended
+suffix begins with byte `06` in these captures, but its inner fields are not
+yet assigned roles.
+
+Opcode `54` is an exact 24-byte member of the same action family:
 
 ```text
 uint16 opcode = 54
@@ -999,22 +1032,51 @@ uint8  flag_1
 uint8  flag_2
 uint32 value_1
 uint32 value_2
-uint32 value_3
+uint32 target_object_id             # offset 16
 uint32 tail_value
 ```
 
-Stream `126` contains 120 packets. Its flag pair is always `255:0`, and
-`tail_value` is zero 57 times and one 63 times. The control value is unique in
-every packet and ranges from `364201` to `3341793`; `value_1` has 12 observed
-values, `value_2` has eight, and `value_3` ranges from `2333245` to `2545094`.
-Stream `92` adds 31 packets: 30 use flag pair `255:0`, one uses `0:0`, and its
-tail distribution is 16 zero/15 one. Stream `114` has none.
+All 120 stream-`126` and 31 stream-`92` opcode-`54` packets carry a known mob
+object id at offset 16. This replaces the earlier neutral `value_3`
+interpretation. Across stream `126`, targeted opcode-`50`, opcode-`52`, and
+opcode-`54` actions are followed by same-mob health or leave traffic often
+enough to establish the attack-action family; stream `92` independently
+confirms the targeted opcode-`52` shape. All 961 actions consume exactly and
+round-trip byte-for-byte.
 
-All 151 packets consume exactly and re-encode byte-for-byte. The codec retains
-the manifest's numeric widths but uses neutral field names; the fold emits
-per-packet events, compact distributions, and numeric ranges without applying
-an unproven gameplay effect. The family therefore remains partial semantic
-coverage.
+The fold emits `client_attack_submitted`, aliases the mob target, distinguishes
+currently active from previously known targets, and retains only packet counts,
+opcode/variant shapes, and identifier-safe fields in normal reports. It does
+not expose client tokens or raw target ids.
+
+## Attack relays (`server 218` and `219`)
+
+Both server families use this capture-bounded envelope:
+
+```text
+uint16 opcode = 218 or 219
+uint32 player_object_id             # aliased in safe reports
+uint8  packed_counts
+byte[remaining_length] opaque_body
+
+target_count = packed_counts >> 4
+hit_count    = packed_counts & 0x0f
+```
+
+Opcode `218` has observed total lengths `18`, `22`, and `27`; opcode `219` has
+lengths `22`, `26`, `31`, `35`, `39`, `44`, `53`, and `62`. Stream `126`
+contains 41 opcode-`218` and 99 opcode-`219` relays. Stream `92` contains one
+and 42. Every prefix object id is a player object id observed somewhere in the
+same capture. The nibble split is supported by the manifest's packed
+attack-count prefix and by body-length scaling, but the bodies remain partial
+semantic coverage.
+
+The fold emits `server_attack_relay_received`, aliases the actor, records the
+packed target/hit distributions, and preserves the body losslessly without
+printing it. These captures validate action-to-health/leave correlations, not
+the exact damage-number encoding. The custom server therefore does not yet
+generate or replay attacks: doing so would claim semantics that the opaque
+client suffixes and relay bodies have not established.
 
 ## `58880` exchange
 
@@ -1071,8 +1133,10 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 25,597
-full, 43,132 partial, 2,371 unknown-but-lossless, and zero invalid packet
-observations. The fold reaches level `10` and reports no unknown inventory-slot
+full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 12,976 full, 21,604 partial,
+627 unknown, and zero invalid; stream `114` remains 16/14/46/0. The long fold
+reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 
 Primary captures live in:

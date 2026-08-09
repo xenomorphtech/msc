@@ -2942,18 +2942,141 @@ class FieldDropRemoval:
 
 
 @dataclass(frozen=True)
-class ClientOpcode54Record:
+class ClientAttackAction:
+    opcode: int
+    local_object_index: int
+    variant: int
+    client_token: int
+    control_value: int
+    opaque_common_state: bytes
+    value_1: int
+    value_2: int
+    opaque_suffix: bytes
+
+    _SUFFIX_LENGTHS = {
+        50: {1: 0, 17: 26},
+        52: {1: 1, 2: 1, 17: 27, 18: 31},
+    }
+
+    @property
+    def target_object_id(self) -> int | None:
+        if (self.opcode, self.variant) in {
+            (50, 17),
+            (52, 17),
+            (52, 18),
+        }:
+            return self.value_2
+        return None
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientAttackAction":
+        reader = PacketReader(payload, packet_name="client_attack_action")
+        opcode = reader.u16("opcode")
+        suffix_lengths = cls._SUFFIX_LENGTHS.get(opcode)
+        if suffix_lengths is None:
+            raise PacketShapeError(
+                f"client attack opcode is {opcode}, expected 50 or 52"
+            )
+        local_object_index = reader.u8("local_object_index")
+        variant = reader.u8("variant")
+        suffix_length = suffix_lengths.get(variant)
+        if suffix_length is None:
+            expected = ", ".join(str(value) for value in suffix_lengths)
+            raise PacketShapeError(
+                f"client opcode-{opcode} variant is {variant}, "
+                f"expected one of {expected}"
+            )
+        action = cls(
+            opcode=opcode,
+            local_object_index=local_object_index,
+            variant=variant,
+            client_token=reader.u32("client_token"),
+            control_value=reader.u32("control_value"),
+            opaque_common_state=reader.bytes(5, "opaque_common_state"),
+            value_1=reader.u32("value_1"),
+            value_2=reader.u32("value_2"),
+            opaque_suffix=reader.bytes(suffix_length, "opaque_suffix"),
+        )
+        reader.finish()
+        return action
+
+    def safe_dict(self) -> dict[str, object]:
+        details: dict[str, object] = {
+            "local_object_index": self.local_object_index,
+            "variant": self.variant,
+            "client_token_bytes": 4,
+            "control_value": self.control_value,
+            "opaque_common_state_bytes": len(self.opaque_common_state),
+            "value_1": self.value_1,
+            "has_target": self.target_object_id is not None,
+            "opaque_suffix_bytes": len(self.opaque_suffix),
+        }
+        if self.target_object_id is None:
+            details["value_2"] = self.value_2
+        return details
+
+    def to_bytes(self) -> bytes:
+        suffix_lengths = self._SUFFIX_LENGTHS.get(self.opcode)
+        if suffix_lengths is None:
+            raise PacketShapeError(
+                f"client attack opcode is {self.opcode}, expected 50 or 52"
+            )
+        suffix_length = suffix_lengths.get(self.variant)
+        if suffix_length is None:
+            expected = ", ".join(str(value) for value in suffix_lengths)
+            raise PacketShapeError(
+                f"client opcode-{self.opcode} variant is {self.variant}, "
+                f"expected one of {expected}"
+            )
+        if len(self.opaque_common_state) != 5:
+            raise PacketShapeError(
+                "client attack common state must contain exactly 5 bytes"
+            )
+        if len(self.opaque_suffix) != suffix_length:
+            raise PacketShapeError(
+                f"client opcode-{self.opcode} variant {self.variant} suffix "
+                f"needs {suffix_length} bytes, got {len(self.opaque_suffix)}"
+            )
+        for name, value, maximum in (
+            ("local_object_index", self.local_object_index, 0xFF),
+            ("client_token", self.client_token, 0xFFFF_FFFF),
+            ("control_value", self.control_value, 0xFFFF_FFFF),
+            ("value_1", self.value_1, 0xFFFF_FFFF),
+            ("value_2", self.value_2, 0xFFFF_FFFF),
+        ):
+            if not 0 <= value <= maximum:
+                raise PacketShapeError(
+                    f"client attack {name} must fit in "
+                    f"u{maximum.bit_length()}"
+                )
+        return (
+            struct.pack(
+                "<HBBII",
+                self.opcode,
+                self.local_object_index,
+                self.variant,
+                self.client_token,
+                self.control_value,
+            )
+            + self.opaque_common_state
+            + struct.pack("<II", self.value_1, self.value_2)
+            + self.opaque_suffix
+        )
+
+
+@dataclass(frozen=True)
+class ClientOpcode54AttackAction:
     control_value: int
     flag_1: int
     flag_2: int
     value_1: int
     value_2: int
-    value_3: int
+    target_object_id: int
     tail_value: int
     opcode: int = 54
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ClientOpcode54Record":
+    def parse(cls, payload: bytes) -> "ClientOpcode54AttackAction":
         reader = PacketReader(payload, packet_name="client_opcode_54")
         _expect_opcode(reader, 54)
         record = cls(
@@ -2962,7 +3085,7 @@ class ClientOpcode54Record:
             flag_2=reader.u8("flag_2"),
             value_1=reader.u32("value_1"),
             value_2=reader.u32("value_2"),
-            value_3=reader.u32("value_3"),
+            target_object_id=reader.u32("target_object_id"),
             tail_value=reader.u32("tail_value"),
         )
         reader.finish()
@@ -2975,7 +3098,6 @@ class ClientOpcode54Record:
             "flag_2": self.flag_2,
             "value_1": self.value_1,
             "value_2": self.value_2,
-            "value_3": self.value_3,
             "tail_value": self.tail_value,
         }
 
@@ -2986,7 +3108,7 @@ class ClientOpcode54Record:
             ("flag_2", self.flag_2, 0xFF),
             ("value_1", self.value_1, 0xFFFF_FFFF),
             ("value_2", self.value_2, 0xFFFF_FFFF),
-            ("value_3", self.value_3, 0xFFFF_FFFF),
+            ("target_object_id", self.target_object_id, 0xFFFF_FFFF),
             ("tail_value", self.tail_value, 0xFFFF_FFFF),
         ):
             if not 0 <= value <= maximum:
@@ -3002,8 +3124,88 @@ class ClientOpcode54Record:
             self.flag_2,
             self.value_1,
             self.value_2,
-            self.value_3,
+            self.target_object_id,
             self.tail_value,
+        )
+
+
+@dataclass(frozen=True)
+class ServerAttackRelay:
+    object_id: int
+    packed_counts: int
+    opaque_body: bytes
+    opcode: int
+
+    _TOTAL_LENGTHS = {
+        218: {18, 22, 27},
+        219: {22, 26, 31, 35, 39, 44, 53, 62},
+    }
+
+    @property
+    def target_count(self) -> int:
+        return self.packed_counts >> 4
+
+    @property
+    def hit_count(self) -> int:
+        return self.packed_counts & 0x0F
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerAttackRelay":
+        reader = PacketReader(payload, packet_name="server_attack_relay")
+        opcode = reader.u16("opcode")
+        total_lengths = cls._TOTAL_LENGTHS.get(opcode)
+        if total_lengths is None:
+            raise PacketShapeError(
+                f"server attack relay opcode is {opcode}, expected 218 or 219"
+            )
+        if len(payload) not in total_lengths:
+            expected = ", ".join(str(value) for value in sorted(total_lengths))
+            raise PacketShapeError(
+                f"server opcode-{opcode} attack relay has {len(payload)} bytes, "
+                f"expected one of {expected}"
+            )
+        relay = cls(
+            opcode=opcode,
+            object_id=reader.u32("object_id"),
+            packed_counts=reader.u8("packed_counts"),
+            opaque_body=reader.bytes(reader.remaining, "opaque_body"),
+        )
+        reader.finish()
+        return relay
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "target_count": self.target_count,
+            "hit_count": self.hit_count,
+            "opaque_body_bytes": len(self.opaque_body),
+        }
+
+    def to_bytes(self) -> bytes:
+        total_lengths = self._TOTAL_LENGTHS.get(self.opcode)
+        if total_lengths is None:
+            raise PacketShapeError(
+                f"server attack relay opcode is {self.opcode}, "
+                "expected 218 or 219"
+            )
+        total_length = 7 + len(self.opaque_body)
+        if total_length not in total_lengths:
+            expected = ", ".join(str(value) for value in sorted(total_lengths))
+            raise PacketShapeError(
+                f"server opcode-{self.opcode} attack relay has {total_length} "
+                f"bytes, expected one of {expected}"
+            )
+        for name, value, maximum in (
+            ("object_id", self.object_id, 0xFFFF_FFFF),
+            ("packed_counts", self.packed_counts, 0xFF),
+        ):
+            if not 0 <= value <= maximum:
+                raise PacketShapeError(
+                    f"server attack relay {name} must fit in "
+                    f"u{maximum.bit_length()}"
+                )
+        return (
+            struct.pack("<HIB", self.opcode, self.object_id, self.packed_counts)
+            + self.opaque_body
         )
 
 

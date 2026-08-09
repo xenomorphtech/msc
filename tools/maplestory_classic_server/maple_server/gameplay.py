@@ -14,10 +14,11 @@ from .gamestate import (
 )
 from .packets import (
     CharacterStatUpdate,
+    ClientAttackAction,
     ClientOpcode101Record,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
-    ClientOpcode54Record,
+    ClientOpcode54AttackAction,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -50,6 +51,7 @@ from .packets import (
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    ServerAttackRelay,
     ServerOpcode426Notification,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
@@ -372,23 +374,26 @@ class GameplayGameState:
     pending_opcode_426_notifications: int = 0
     last_opcode_426_round_trip_ms: float | None = None
     max_opcode_426_round_trip_ms: float | None = None
-    client_opcode_54_packets: int = 0
-    client_opcode_54_flag_pairs: Counter[str] = field(
+    client_attack_actions: int = 0
+    client_attack_actions_by_opcode: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_54_value_1_values: Counter[int] = field(
+    client_attack_shapes: Counter[str] = field(default_factory=Counter)
+    client_attack_targeted_actions: int = 0
+    client_attack_untargeted_actions: int = 0
+    client_attack_targets_for_active_mobs: int = 0
+    client_attack_targets_for_known_mobs: int = 0
+    client_attack_targets_for_unknown_mobs: int = 0
+    server_attack_relays: int = 0
+    server_attack_relays_by_opcode: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_54_value_2_values: Counter[int] = field(
+    server_attack_target_counts: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_54_tail_values: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_opcode_54_control_min: int | None = None
-    client_opcode_54_control_max: int | None = None
-    client_opcode_54_value_3_min: int | None = None
-    client_opcode_54_value_3_max: int | None = None
+    server_attack_hit_counts: Counter[int] = field(default_factory=Counter)
+    server_attack_relays_for_known_players: int = 0
+    server_attack_relays_for_unknown_players: int = 0
     client_opcode_101_packets: int = 0
     client_opcode_101_header_values: Counter[int] = field(
         default_factory=Counter
@@ -1615,32 +1620,43 @@ class GameplayAnalysis:
                 "max_opcode_426_round_trip_ms": (
                     self.state.max_opcode_426_round_trip_ms
                 ),
-                "client_opcode_54_packets": (
-                    self.state.client_opcode_54_packets
+                "client_attack_actions": self.state.client_attack_actions,
+                "client_attack_actions_by_opcode": dict(
+                    self.state.client_attack_actions_by_opcode
                 ),
-                "client_opcode_54_flag_pairs": dict(
-                    self.state.client_opcode_54_flag_pairs
+                "client_attack_shapes": dict(
+                    self.state.client_attack_shapes
                 ),
-                "client_opcode_54_value_1_values": dict(
-                    self.state.client_opcode_54_value_1_values
+                "client_attack_targeted_actions": (
+                    self.state.client_attack_targeted_actions
                 ),
-                "client_opcode_54_value_2_values": dict(
-                    self.state.client_opcode_54_value_2_values
+                "client_attack_untargeted_actions": (
+                    self.state.client_attack_untargeted_actions
                 ),
-                "client_opcode_54_tail_values": dict(
-                    self.state.client_opcode_54_tail_values
+                "client_attack_targets_for_active_mobs": (
+                    self.state.client_attack_targets_for_active_mobs
                 ),
-                "client_opcode_54_control_min": (
-                    self.state.client_opcode_54_control_min
+                "client_attack_targets_for_known_mobs": (
+                    self.state.client_attack_targets_for_known_mobs
                 ),
-                "client_opcode_54_control_max": (
-                    self.state.client_opcode_54_control_max
+                "client_attack_targets_for_unknown_mobs": (
+                    self.state.client_attack_targets_for_unknown_mobs
                 ),
-                "client_opcode_54_value_3_min": (
-                    self.state.client_opcode_54_value_3_min
+                "server_attack_relays": self.state.server_attack_relays,
+                "server_attack_relays_by_opcode": dict(
+                    self.state.server_attack_relays_by_opcode
                 ),
-                "client_opcode_54_value_3_max": (
-                    self.state.client_opcode_54_value_3_max
+                "server_attack_target_counts": dict(
+                    self.state.server_attack_target_counts
+                ),
+                "server_attack_hit_counts": dict(
+                    self.state.server_attack_hit_counts
+                ),
+                "server_attack_relays_for_known_players": (
+                    self.state.server_attack_relays_for_known_players
+                ),
+                "server_attack_relays_for_unknown_players": (
+                    self.state.server_attack_relays_for_unknown_players
                 ),
                 "client_opcode_101_packets": (
                     self.state.client_opcode_101_packets
@@ -1812,6 +1828,69 @@ class GameplayStateFold:
         if final_position is not None:
             details["final_x"], details["final_y"] = final_position
         return details
+
+    def _fold_client_attack(
+        self,
+        frame: PlainFrame,
+        action: ClientAttackAction | ClientOpcode54AttackAction,
+    ) -> PacketObservation:
+        target_object_id = action.target_object_id
+        self.state.client_attack_actions += 1
+        self.state.client_attack_actions_by_opcode[action.opcode] += 1
+        if isinstance(action, ClientAttackAction):
+            shape = f"{action.opcode}:variant={action.variant}"
+        else:
+            shape = f"54:flags={action.flag_1}:{action.flag_2}"
+        self.state.client_attack_shapes[shape] += 1
+
+        details: dict[str, object] = {
+            **action.safe_dict(),
+            "opcode": action.opcode,
+            "shape": shape,
+            "field_epoch": self.state.field_epoch,
+        }
+        identifiers: dict[str, object] = {}
+        if target_object_id is None:
+            self.state.client_attack_untargeted_actions += 1
+        else:
+            self.state.client_attack_targeted_actions += 1
+            target_alias = self._alias(
+                self._mob_aliases, target_object_id, "mob"
+            )
+            active_target = target_object_id in self.state.mobs
+            known_target = target_object_id in self.state.mob_templates
+            if active_target:
+                self.state.client_attack_targets_for_active_mobs += 1
+            if known_target:
+                self.state.client_attack_targets_for_known_mobs += 1
+            else:
+                self.state.client_attack_targets_for_unknown_mobs += 1
+            details.update(
+                {
+                    "target": target_alias,
+                    "active_target": active_target,
+                    "known_target": known_target,
+                }
+            )
+            identifiers["target_object_id"] = target_object_id
+
+        self._event(
+            frame,
+            "client_attack_submitted",
+            details=details,
+            identifiers=identifiers,
+        )
+        return self._observation(
+            frame,
+            kind="client_attack_action",
+            coverage=ShapeCoverage.PARTIAL,
+            parsed=action,
+            details=details,
+            issues=(
+                "attack target role is capture-correlated; control, value, "
+                "and opaque body roles remain uninterpreted",
+            ),
+        )
 
     def _event(
         self,
@@ -2363,54 +2442,13 @@ class GameplayStateFold:
                 details=details,
                 issues=("heartbeat response token remains opaque",),
             )
+        if opcode in {50, 52}:
+            return self._fold_client_attack(
+                frame, ClientAttackAction.parse(payload)
+            )
         if opcode == 54:
-            record = ClientOpcode54Record.parse(payload)
-            self.state.client_opcode_54_packets += 1
-            flag_pair = f"{record.flag_1}:{record.flag_2}"
-            self.state.client_opcode_54_flag_pairs[flag_pair] += 1
-            self.state.client_opcode_54_value_1_values[record.value_1] += 1
-            self.state.client_opcode_54_value_2_values[record.value_2] += 1
-            self.state.client_opcode_54_tail_values[record.tail_value] += 1
-            self.state.client_opcode_54_control_min = min(
-                self.state.client_opcode_54_control_min
-                if self.state.client_opcode_54_control_min is not None
-                else record.control_value,
-                record.control_value,
-            )
-            self.state.client_opcode_54_control_max = max(
-                self.state.client_opcode_54_control_max
-                if self.state.client_opcode_54_control_max is not None
-                else record.control_value,
-                record.control_value,
-            )
-            self.state.client_opcode_54_value_3_min = min(
-                self.state.client_opcode_54_value_3_min
-                if self.state.client_opcode_54_value_3_min is not None
-                else record.value_3,
-                record.value_3,
-            )
-            self.state.client_opcode_54_value_3_max = max(
-                self.state.client_opcode_54_value_3_max
-                if self.state.client_opcode_54_value_3_max is not None
-                else record.value_3,
-                record.value_3,
-            )
-            details = {
-                **record.safe_dict(),
-                "field_epoch": self.state.field_epoch,
-            }
-            self._event(
-                frame,
-                "client_opcode_54_submitted",
-                details=details,
-            )
-            return self._observation(
-                frame,
-                kind="client_opcode_54_record",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=record,
-                details=details,
-                issues=("client opcode-54 field roles remain neutral",),
+            return self._fold_client_attack(
+                frame, ClientOpcode54AttackAction.parse(payload)
             )
         if opcode == 101:
             record = ClientOpcode101Record.parse(payload)
@@ -3958,6 +3996,44 @@ class GameplayStateFold:
                 parsed=acknowledgement,
                 details=details,
             )
+        if opcode in {218, 219}:
+            relay = ServerAttackRelay.parse(payload)
+            actor_alias = self._alias(
+                self._player_aliases, relay.object_id, "player"
+            )
+            known_actor = relay.object_id in self.state.observed_players
+            self.state.server_attack_relays += 1
+            self.state.server_attack_relays_by_opcode[relay.opcode] += 1
+            self.state.server_attack_target_counts[relay.target_count] += 1
+            self.state.server_attack_hit_counts[relay.hit_count] += 1
+            if known_actor:
+                self.state.server_attack_relays_for_known_players += 1
+            else:
+                self.state.server_attack_relays_for_unknown_players += 1
+            details = {
+                **relay.safe_dict(),
+                "opcode": relay.opcode,
+                "actor": actor_alias,
+                "known_actor": known_actor,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_attack_relay_received",
+                details=details,
+                identifiers={"object_id": relay.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="server_attack_relay",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=relay,
+                details=details,
+                issues=(
+                    "packed target/hit counts are capture-correlated; attack "
+                    "relay body remains uninterpreted",
+                ),
+            )
         if opcode == 293:
             update = MobHealthPercentageUpdate.parse(payload)
             alias = self._alias(self._mob_aliases, update.object_id, "mob")
@@ -4717,17 +4793,20 @@ def render_gameplay_analysis(
     client_opcode_13_message_types = json.dumps(
         dict(sorted(state.client_opcode_13_messages_by_type.items()))
     )
-    client_opcode_54_flag_pairs = json.dumps(
-        dict(sorted(state.client_opcode_54_flag_pairs.items()))
+    client_attack_opcodes = json.dumps(
+        dict(sorted(state.client_attack_actions_by_opcode.items()))
     )
-    client_opcode_54_value_1_values = json.dumps(
-        dict(sorted(state.client_opcode_54_value_1_values.items()))
+    client_attack_shapes = json.dumps(
+        dict(sorted(state.client_attack_shapes.items()))
     )
-    client_opcode_54_value_2_values = json.dumps(
-        dict(sorted(state.client_opcode_54_value_2_values.items()))
+    server_attack_opcodes = json.dumps(
+        dict(sorted(state.server_attack_relays_by_opcode.items()))
     )
-    client_opcode_54_tail_values = json.dumps(
-        dict(sorted(state.client_opcode_54_tail_values.items()))
+    server_attack_target_counts = json.dumps(
+        dict(sorted(state.server_attack_target_counts.items()))
+    )
+    server_attack_hit_counts = json.dumps(
+        dict(sorted(state.server_attack_hit_counts.items()))
     )
     client_opcode_101_header_values = json.dumps(
         dict(sorted(state.client_opcode_101_header_values.items()))
@@ -4974,15 +5053,25 @@ def render_gameplay_analysis(
             f"max_rtt_ms:{state.max_opcode_426_round_trip_ms}"
         ),
         (
-            f"client_opcode_54=packets:{state.client_opcode_54_packets} "
-            f"flag_pairs:{client_opcode_54_flag_pairs} "
-            f"value_1_values:{client_opcode_54_value_1_values} "
-            f"value_2_values:{client_opcode_54_value_2_values} "
-            f"tail_values:{client_opcode_54_tail_values} "
-            f"control_range:{state.client_opcode_54_control_min}.."
-            f"{state.client_opcode_54_control_max} "
-            f"value_3_range:{state.client_opcode_54_value_3_min}.."
-            f"{state.client_opcode_54_value_3_max}"
+            f"combat=client_actions:{state.client_attack_actions} "
+            f"client_opcodes:{client_attack_opcodes} "
+            f"client_shapes:{client_attack_shapes} "
+            f"targeted:{state.client_attack_targeted_actions} "
+            f"untargeted:{state.client_attack_untargeted_actions} "
+            "active_mob_targets:"
+            f"{state.client_attack_targets_for_active_mobs} "
+            "known_mob_targets:"
+            f"{state.client_attack_targets_for_known_mobs} "
+            "unknown_mob_targets:"
+            f"{state.client_attack_targets_for_unknown_mobs} "
+            f"server_relays:{state.server_attack_relays} "
+            f"server_opcodes:{server_attack_opcodes} "
+            f"target_counts:{server_attack_target_counts} "
+            f"hit_counts:{server_attack_hit_counts} "
+            "known_player_relays:"
+            f"{state.server_attack_relays_for_known_players} "
+            "unknown_player_relays:"
+            f"{state.server_attack_relays_for_unknown_players}"
         ),
         (
             f"client_opcode_101=packets:{state.client_opcode_101_packets} "

@@ -284,10 +284,12 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 25,597 full,
-43,132 partial, 2,371 unknown, and zero invalid packet observations. PCAP
+43,954 partial, 1,549 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata.
+metadata. Stream `92` independently passes with 12,976 full, 21,604 partial,
+627 unknown, and zero invalid observations; short stream `114` remains 16 full,
+14 partial, 46 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -325,8 +327,11 @@ The gameplay fold currently models these capture-backed boundaries:
   envelopes whose bodies remain opaque and are omitted from safe reports,
 - client opcode `101`: exact 11-byte five-value record whose numeric widths and
   distributions are typed while all field roles remain neutral,
-- client opcode `54`: exact 24-byte record with a neutral 32-bit control value,
-  two flag bytes, four additional 32-bit values, and bounded distributions,
+- client opcodes `50`/`52`: capture-bounded attack-action envelopes with exact
+  variant/suffix lengths, redacted client tokens, and an aliased mob target in
+  extended variants,
+- client opcode `54`: exact 24-byte attack action whose third trailing u32 is
+  an aliased mob target; the other numeric roles remain neutral,
 - client opcode `217`: neutral compact and counted record-set envelopes with
   capture-bounded format-`0`/`2` record widths; opaque bytes remain redacted,
   and no effect or replay behavior is inferred,
@@ -359,6 +364,8 @@ The gameplay fold currently models these capture-backed boundaries:
   one-byte auxiliary fields,
 - server opcode `293`: exact object-id plus one-byte mob-health percentage;
   zero is retained as state and does not replace the separate leave packet,
+- server opcodes `218`/`219`: attack-relay envelopes with an aliased player
+  object id, packed target/hit counts, and capture-bounded opaque bodies,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
@@ -664,14 +671,25 @@ pair seven times. Every packet consumes exactly and round-trips. Because the
 `client_tick` label is not retained; the fold emits neutral numeric
 distributions and partial semantic coverage.
 
-Client opcode `54` is an exact 24-byte numeric record after the opcode:
-`u32, u8, u8, u32, u32, u32, u32`. Stream `126` has 120 packets and stream
-`92` has 31; stream `114` has none. Every long-stream flag pair is `255:0`,
-while stream `92` adds one `0:0`; the final value is always `0` or `1`.
-Control values are unique per packet and the remaining values span multiple
-domains, so their roles stay neutral. All 151 packets consume exactly and
-round-trip, and the fold reports flag/value distributions plus control and
-third-value ranges without applying an unproven gameplay effect.
+Client opcodes `50`, `52`, and `54` are a capture-correlated attack-action
+family. Stream `126` contains 552 opcode-`50`, 130 opcode-`52`, and 120
+opcode-`54` actions; stream `92` adds 128 opcode-`52` and 31 opcode-`54`
+actions. The extended `50`/`52` variants place a known mob object id at offset
+21, and every opcode-`54` packet places one at offset 16. The fold aliases that
+target, distinguishes active/previously-known/unknown mobs, redacts client
+tokens, and emits one `client_attack_submitted` event per action. Exact variant
+and suffix boundaries round-trip, but control/value fields and the suffix body
+remain opaque.
+
+Server opcodes `218` and `219` form the corresponding capture-bounded attack
+relay family. Their prefix is opcode, player object id, and one packed byte;
+the high nibble is the target count and the low nibble is the hit count. Stream
+`126` contains 41/99 relays and stream `92` contains 1/42. Every actor id is a
+player id known somewhere in its capture. The fold reports arrival-time player
+correlation and aliased actors while preserving opaque bodies of the observed
+total lengths. Health/leave correlations support the attack interpretation,
+but exact damage fields remain unknown, so the server does not yet generate or
+replay these packets.
 
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
@@ -925,5 +943,8 @@ It intentionally cannot launch an authenticated official session.
     sustained-capture instances, and keep its non-monotonic 32-bit field
     neutral instead of preserving an unsupported `client_tick` interpretation.
 33. Bound client opcode `54` as a fixed seven-value record, validate all 151
-    sustained-capture packets, and emit structural distributions without
-    assigning roles to its varying numeric fields.
+    sustained-capture packets, and recover its third trailing u32 as the mob
+    target while leaving the other numeric roles neutral.
+34. Correlate client opcodes `50`/`52`/`54` with mob targets, bound server
+    attack relays `218`/`219`, fold identifier-safe combat events and packed
+    count distributions, and leave damage/replay semantics explicitly opaque.

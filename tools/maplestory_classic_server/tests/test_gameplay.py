@@ -26,10 +26,11 @@ from maple_server.gameplay import (  # noqa: E402
 )
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
+    ClientAttackAction,
     ClientOpcode101Record,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
-    ClientOpcode54Record,
+    ClientOpcode54AttackAction,
     CompactFieldTransition,
     FieldDropRemoval,
     FieldDropSpawn,
@@ -71,6 +72,7 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    ServerAttackRelay,
     ServerOpcode426Notification,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
@@ -445,7 +447,7 @@ def fixture_gameplay_transcript(
     compact_transition: bool = False,
     initial_snapshot: bool = False,
     player_movement: bool = False,
-    opcode_54_records: bool = False,
+    attack_actions: bool = False,
     opcode_101_records: bool = False,
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
@@ -890,29 +892,91 @@ def fixture_gameplay_transcript(
             "server_to_client",
             MobLeaveField(object_id=MOB_OBJECT_ID, reason=0).to_bytes(),
         )
-    if opcode_54_records:
+    if attack_actions:
         append(
             "client_to_server",
-            ClientOpcode54Record(
+            ClientAttackAction(
+                opcode=50,
+                local_object_index=7,
+                variant=1,
+                client_token=987_654_321,
+                control_value=364_200,
+                opaque_common_state=b"state",
+                value_1=1,
+                value_2=0,
+                opaque_suffix=b"",
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientAttackAction(
+                opcode=50,
+                local_object_index=7,
+                variant=17,
+                client_token=987_654_322,
+                control_value=364_201,
+                opaque_common_state=b"state",
+                value_1=1,
+                value_2=MOB_OBJECT_ID,
+                opaque_suffix=b"\x06" + b"\x00" * 25,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientAttackAction(
+                opcode=52,
+                local_object_index=7,
+                variant=2,
+                client_token=987_654_323,
+                control_value=807_665,
+                opaque_common_state=b"state",
+                value_1=3,
+                value_2=0,
+                opaque_suffix=b"\x00",
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientAttackAction(
+                opcode=52,
+                local_object_index=7,
+                variant=18,
+                client_token=987_654_324,
+                control_value=807_666,
+                opaque_common_state=b"state",
+                value_1=3,
+                value_2=MOB_OBJECT_ID,
+                opaque_suffix=b"\x06" + b"\x00" * 30,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientOpcode54AttackAction(
                 control_value=364_201,
                 flag_1=255,
                 flag_2=0,
                 value_1=1,
                 value_2=100_100,
-                value_3=2_333_245,
+                target_object_id=MOB_OBJECT_ID,
                 tail_value=1,
             ).to_bytes(),
         )
         append(
-            "client_to_server",
-            ClientOpcode54Record(
-                control_value=807_666,
-                flag_1=0,
-                flag_2=0,
-                value_1=3,
-                value_2=130_100,
-                value_3=4_447_306,
-                tail_value=0,
+            "server_to_client",
+            ServerAttackRelay(
+                opcode=218,
+                object_id=PLAYER_OBJECT_ID,
+                packed_counts=0x11,
+                opaque_body=b"\x00" * 20,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            ServerAttackRelay(
+                opcode=219,
+                object_id=PLAYER_OBJECT_ID,
+                packed_counts=0x12,
+                opaque_body=b"\x00" * 32,
             ).to_bytes(),
         )
     if opcode_101_records:
@@ -1749,15 +1813,49 @@ class GameplayPacketShapeTest(unittest.TestCase):
             secondary_value=0,
             tail_value=0,
         )
-        opcode_54_record = ClientOpcode54Record(
+        opcode_54_record = ClientOpcode54AttackAction(
             control_value=364_201,
             flag_1=255,
             flag_2=0,
             value_1=1,
             value_2=100_100,
-            value_3=2_333_245,
+            target_object_id=MOB_OBJECT_ID,
             tail_value=1,
         )
+        client_attack_actions = [
+            ClientAttackAction(
+                opcode=opcode,
+                local_object_index=7,
+                variant=variant,
+                client_token=987_654_321,
+                control_value=364_201,
+                opaque_common_state=b"state",
+                value_1=1,
+                value_2=MOB_OBJECT_ID if variant >= 17 else 0,
+                opaque_suffix=b"\x00" * suffix_length,
+            )
+            for opcode, variant, suffix_length in (
+                (50, 1, 0),
+                (50, 17, 26),
+                (52, 1, 1),
+                (52, 2, 1),
+                (52, 17, 27),
+                (52, 18, 31),
+            )
+        ]
+        server_attack_relays = [
+            ServerAttackRelay(
+                opcode=opcode,
+                object_id=PLAYER_OBJECT_ID,
+                packed_counts=0x12,
+                opaque_body=b"\x00" * (total_length - 7),
+            )
+            for opcode, total_lengths in (
+                (218, (18, 22, 27)),
+                (219, (22, 26, 31, 35, 39, 44, 53, 62)),
+            )
+            for total_length in total_lengths
+        ]
         fixed_envelope = Opcode13Type1Envelope(opaque_payload=b"fixed123")
         variable_envelope = Opcode13Envelope(
             message_type=6,
@@ -1784,18 +1882,37 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         self.assertEqual(len(opcode_101_record.to_bytes()), 11)
         self.assertEqual(
-            ClientOpcode54Record.parse(opcode_54_record.to_bytes()),
+            ClientOpcode54AttackAction.parse(opcode_54_record.to_bytes()),
             opcode_54_record,
         )
         self.assertEqual(len(opcode_54_record.to_bytes()), 24)
+        for attack_action in client_attack_actions:
+            self.assertEqual(
+                ClientAttackAction.parse(attack_action.to_bytes()),
+                attack_action,
+            )
+        for attack_relay in server_attack_relays:
+            self.assertEqual(
+                ServerAttackRelay.parse(attack_relay.to_bytes()),
+                attack_relay,
+            )
+        self.assertEqual(server_attack_relays[3].target_count, 1)
+        self.assertEqual(server_attack_relays[3].hit_count, 2)
+        self.assertNotIn("object_id", server_attack_relays[3].safe_dict())
+        with self.assertRaisesRegex(PacketShapeError, "suffix needs 26 bytes"):
+            replace(
+                client_attack_actions[1], opaque_suffix=b"\x00" * 25
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "expected one of"):
+            replace(server_attack_relays[0], opaque_body=b"\x00" * 12).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "flag_1 must fit"):
-            ClientOpcode54Record(
+            ClientOpcode54AttackAction(
                 control_value=364_201,
                 flag_1=256,
                 flag_2=0,
                 value_1=1,
                 value_2=100_100,
-                value_3=2_333_245,
+                target_object_id=MOB_OBJECT_ID,
                 tail_value=1,
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "tail_value must fit"):
@@ -2548,7 +2665,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
                 player_movement=True,
-                opcode_54_records=True,
+                attack_actions=True,
                 opcode_101_records=True,
                 opcode_13_messages=True,
                 opcode_217_records=True,
@@ -2639,42 +2756,74 @@ class GameplayStateFoldTest(unittest.TestCase):
             "opcode=309 kind=opcode_309_acknowledgement coverage=full",
             report,
         )
-        self.assertEqual(analysis.state.client_opcode_54_packets, 2)
+        self.assertEqual(analysis.state.client_attack_actions, 5)
         self.assertEqual(
-            analysis.state.client_opcode_54_flag_pairs,
-            {"255:0": 1, "0:0": 1},
+            analysis.state.client_attack_actions_by_opcode,
+            {50: 2, 52: 2, 54: 1},
         )
         self.assertEqual(
-            analysis.state.client_opcode_54_value_1_values, {1: 1, 3: 1}
+            analysis.state.client_attack_shapes,
+            {
+                "50:variant=1": 1,
+                "50:variant=17": 1,
+                "52:variant=2": 1,
+                "52:variant=18": 1,
+                "54:flags=255:0": 1,
+            },
+        )
+        self.assertEqual(analysis.state.client_attack_targeted_actions, 3)
+        self.assertEqual(analysis.state.client_attack_untargeted_actions, 2)
+        self.assertEqual(
+            analysis.state.client_attack_targets_for_active_mobs, 3
         )
         self.assertEqual(
-            analysis.state.client_opcode_54_value_2_values,
-            {100_100: 1, 130_100: 1},
+            analysis.state.client_attack_targets_for_known_mobs, 3
         )
         self.assertEqual(
-            analysis.state.client_opcode_54_tail_values, {0: 1, 1: 1}
+            analysis.state.client_attack_targets_for_unknown_mobs, 0
         )
-        self.assertEqual(analysis.state.client_opcode_54_control_min, 364_201)
-        self.assertEqual(analysis.state.client_opcode_54_control_max, 807_666)
+        self.assertEqual(analysis.state.server_attack_relays, 2)
         self.assertEqual(
-            analysis.state.client_opcode_54_value_3_min, 2_333_245
+            analysis.state.server_attack_relays_by_opcode, {218: 1, 219: 1}
+        )
+        self.assertEqual(analysis.state.server_attack_target_counts, {1: 2})
+        self.assertEqual(analysis.state.server_attack_hit_counts, {1: 1, 2: 1})
+        self.assertEqual(
+            analysis.state.server_attack_relays_for_known_players, 2
         )
         self.assertEqual(
-            analysis.state.client_opcode_54_value_3_max, 4_447_306
+            analysis.state.server_attack_relays_for_unknown_players, 0
         )
         self.assertIn(
-            'client_opcode_54=packets:2 flag_pairs:{"0:0": 1, "255:0": 1} '
-            'value_1_values:{"1": 1, "3": 1} '
-            'value_2_values:{"100100": 1, "130100": 1} '
-            'tail_values:{"0": 1, "1": 1} '
-            'control_range:364201..807666 '
-            'value_3_range:2333245..4447306',
+            'combat=client_actions:5 client_opcodes:{"50": 2, "52": 2, '
+            '"54": 1}',
             report,
         )
         self.assertIn(
-            "opcode=54 kind=client_opcode_54_record coverage=partial",
+            "opcode=50 kind=client_attack_action coverage=partial",
             report,
         )
+        self.assertIn(
+            "opcode=52 kind=client_attack_action coverage=partial",
+            report,
+        )
+        self.assertIn(
+            "opcode=54 kind=client_attack_action coverage=partial",
+            report,
+        )
+        self.assertIn(
+            "opcode=218 kind=server_attack_relay coverage=partial",
+            report,
+        )
+        self.assertIn(
+            "opcode=219 kind=server_attack_relay coverage=partial",
+            report,
+        )
+        self.assertIn("kind=client_attack_submitted", report)
+        self.assertIn("kind=server_attack_relay_received", report)
+        self.assertNotIn("987654321", report)
+        self.assertNotIn(str(MOB_OBJECT_ID), report)
+        self.assertNotIn(str(PLAYER_OBJECT_ID), report)
         self.assertEqual(analysis.state.client_opcode_101_packets, 2)
         self.assertEqual(
             analysis.state.client_opcode_101_header_values, {0: 2}
