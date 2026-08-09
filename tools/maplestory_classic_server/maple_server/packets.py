@@ -2942,6 +2942,62 @@ class FieldDropRemoval:
 
 
 @dataclass(frozen=True)
+class ClientOpcode101Record:
+    header_value: int
+    primary_value: int
+    flag_value: int
+    secondary_value: int
+    tail_value: int
+    opcode: int = 101
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode101Record":
+        reader = PacketReader(payload, packet_name="client_opcode_101")
+        _expect_opcode(reader, 101)
+        record = cls(
+            header_value=reader.u8("header_value"),
+            primary_value=reader.u32("primary_value"),
+            flag_value=reader.u8("flag_value"),
+            secondary_value=reader.u16("secondary_value"),
+            tail_value=reader.u8("tail_value"),
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "header_value": self.header_value,
+            "primary_value": self.primary_value,
+            "flag_value": self.flag_value,
+            "secondary_value": self.secondary_value,
+            "tail_value": self.tail_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        for name, value, maximum in (
+            ("header_value", self.header_value, 0xFF),
+            ("primary_value", self.primary_value, 0xFFFF_FFFF),
+            ("flag_value", self.flag_value, 0xFF),
+            ("secondary_value", self.secondary_value, 0xFFFF),
+            ("tail_value", self.tail_value, 0xFF),
+        ):
+            if not 0 <= value <= maximum:
+                raise PacketShapeError(
+                    f"client opcode-101 {name} must fit in "
+                    f"u{maximum.bit_length()}"
+                )
+        return struct.pack(
+            "<HBIBHB",
+            self.opcode,
+            self.header_value,
+            self.primary_value,
+            self.flag_value,
+            self.secondary_value,
+            self.tail_value,
+        )
+
+
+@dataclass(frozen=True)
 class ClientOpcode217RecordSet:
     opaque_prefix: bytes
     record_format: int | None = None

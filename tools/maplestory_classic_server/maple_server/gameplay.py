@@ -14,6 +14,7 @@ from .gamestate import (
 )
 from .packets import (
     CharacterStatUpdate,
+    ClientOpcode101Record,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
     CompactFieldTransition,
@@ -370,6 +371,22 @@ class GameplayGameState:
     pending_opcode_426_notifications: int = 0
     last_opcode_426_round_trip_ms: float | None = None
     max_opcode_426_round_trip_ms: float | None = None
+    client_opcode_101_packets: int = 0
+    client_opcode_101_header_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_101_primary_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_101_flag_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_101_secondary_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_101_tail_values: Counter[int] = field(
+        default_factory=Counter
+    )
     client_opcode_13_messages: int = 0
     client_opcode_13_messages_by_type: Counter[int] = field(
         default_factory=Counter
@@ -1580,6 +1597,24 @@ class GameplayAnalysis:
                 "max_opcode_426_round_trip_ms": (
                     self.state.max_opcode_426_round_trip_ms
                 ),
+                "client_opcode_101_packets": (
+                    self.state.client_opcode_101_packets
+                ),
+                "client_opcode_101_header_values": dict(
+                    self.state.client_opcode_101_header_values
+                ),
+                "client_opcode_101_primary_values": dict(
+                    self.state.client_opcode_101_primary_values
+                ),
+                "client_opcode_101_flag_values": dict(
+                    self.state.client_opcode_101_flag_values
+                ),
+                "client_opcode_101_secondary_values": dict(
+                    self.state.client_opcode_101_secondary_values
+                ),
+                "client_opcode_101_tail_values": dict(
+                    self.state.client_opcode_101_tail_values
+                ),
                 "client_opcode_13_messages": (
                     self.state.client_opcode_13_messages
                 ),
@@ -2282,6 +2317,41 @@ class GameplayStateFold:
                 parsed=response,
                 details=details,
                 issues=("heartbeat response token remains opaque",),
+            )
+        if opcode == 101:
+            record = ClientOpcode101Record.parse(payload)
+            self.state.client_opcode_101_packets += 1
+            self.state.client_opcode_101_header_values[
+                record.header_value
+            ] += 1
+            self.state.client_opcode_101_primary_values[
+                record.primary_value
+            ] += 1
+            self.state.client_opcode_101_flag_values[
+                record.flag_value
+            ] += 1
+            self.state.client_opcode_101_secondary_values[
+                record.secondary_value
+            ] += 1
+            self.state.client_opcode_101_tail_values[
+                record.tail_value
+            ] += 1
+            details = {
+                **record.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_101_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_101_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=details,
+                issues=("client opcode-101 field roles remain neutral",),
             )
         if opcode == 13 and len(payload) >= 3:
             message_type = payload[2]
@@ -4553,6 +4623,21 @@ def render_gameplay_analysis(
     client_opcode_13_message_types = json.dumps(
         dict(sorted(state.client_opcode_13_messages_by_type.items()))
     )
+    client_opcode_101_header_values = json.dumps(
+        dict(sorted(state.client_opcode_101_header_values.items()))
+    )
+    client_opcode_101_primary_values = json.dumps(
+        dict(sorted(state.client_opcode_101_primary_values.items()))
+    )
+    client_opcode_101_flag_values = json.dumps(
+        dict(sorted(state.client_opcode_101_flag_values.items()))
+    )
+    client_opcode_101_secondary_values = json.dumps(
+        dict(sorted(state.client_opcode_101_secondary_values.items()))
+    )
+    client_opcode_101_tail_values = json.dumps(
+        dict(sorted(state.client_opcode_101_tail_values.items()))
+    )
     client_opcode_217_record_formats = json.dumps(
         dict(sorted(state.client_opcode_217_records_by_format.items()))
     )
@@ -4781,6 +4866,14 @@ def render_gameplay_analysis(
             f"pending:{state.pending_opcode_426_notifications} "
             f"last_rtt_ms:{state.last_opcode_426_round_trip_ms} "
             f"max_rtt_ms:{state.max_opcode_426_round_trip_ms}"
+        ),
+        (
+            f"client_opcode_101=packets:{state.client_opcode_101_packets} "
+            f"header_values:{client_opcode_101_header_values} "
+            f"primary_values:{client_opcode_101_primary_values} "
+            f"flag_values:{client_opcode_101_flag_values} "
+            f"secondary_values:{client_opcode_101_secondary_values} "
+            f"tail_values:{client_opcode_101_tail_values}"
         ),
         (
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "

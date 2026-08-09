@@ -963,6 +963,31 @@ notification/acknowledgement relationship, records matched/unmatched/pending
 counts and round-trip times, and keeps the higher-level purpose distinct from
 the separately modeled opcode-`10`/`23` heartbeat.
 
+## Client opcode `101` neutral numeric record
+
+The client packet is exactly 11 bytes:
+
+```text
+uint16 opcode = 101
+uint8  header_value
+uint32 primary_value
+uint8  flag_value
+uint16 secondary_value
+uint8  tail_value
+```
+
+Stream `126` contains 146 records. Header, flag, and tail are zero throughout;
+`(primary_value, secondary_value)` is `(20,3)` in 113 packets and
+`(0x0a000014,0)` in 33. Stream `92` contains another 73 records: `(20,5)` in
+66 and the same alternate `(0x0a000014,0)` in seven. Stream `114` contains
+none. All 219 packets consume exactly and re-encode byte-for-byte.
+
+The shape manifest tentatively labeled the 32-bit field `client_tick`, but its
+two discrete, non-monotonic values do not support that semantic interpretation.
+The codec and fold therefore preserve the exact numeric boundaries under
+neutral names, emit value distributions and events, and classify the family as
+partial semantic coverage.
+
 ## `58880` exchange
 
 The client sent a stable HTTP/1.1 request:
@@ -1018,7 +1043,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 25,597
-full, 42,866 partial, 2,637 unknown-but-lossless, and zero invalid packet
+full, 43,012 partial, 2,491 unknown-but-lossless, and zero invalid packet
 observations. The fold reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 

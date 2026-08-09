@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  25,597 full, 42,866 partial, 2,637 unknown-but-lossless, and zero invalid
+  25,597 full, 43,012 partial, 2,491 unknown-but-lossless, and zero invalid
   packet observations. Twelve state-correlation warnings remain.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
@@ -93,6 +93,12 @@
   Pinned handler code independently constructs opcode `309` in response to
   `426`. The higher-level purpose remains neutral and distinct from heartbeat
   opcodes `10`/`23`.
+- Client opcode `101` now has an exact 11-byte, five-value numeric shape.
+  Stream `126` contributes 146 packets and stream `92` another 73; all consume
+  exactly and round-trip. Only two primary/secondary pairs occur in each
+  corpus, while the outer byte fields remain zero. The primary value is not
+  monotonic, so the fold exposes neutral distributions rather than retaining
+  the shape manifest's tentative `client_tick` name.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

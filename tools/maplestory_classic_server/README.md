@@ -284,7 +284,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 25,597 full,
-42,866 partial, 2,637 unknown, and zero invalid packet observations. PCAP
+43,012 partial, 2,491 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata.
@@ -323,6 +323,8 @@ The gameplay fold currently models these capture-backed boundaries:
   neutral flag/tail values,
 - client opcode `13`: neutral fixed type-`1` and length-prefixed type-`6`/`13`
   envelopes whose bodies remain opaque and are omitted from safe reports,
+- client opcode `101`: exact 11-byte five-value record whose numeric widths and
+  distributions are typed while all field roles remain neutral,
 - client opcode `217`: neutral compact and counted record-set envelopes with
   capture-bounded format-`0`/`2` record widths; opaque bytes remain redacted,
   and no effect or replay behavior is inferred,
@@ -649,6 +651,17 @@ packet when `426` arrives. The fold emits full-coverage events plus last/max
 round-trip telemetry, while the still-unknown higher-level purpose remains
 neutral.
 
+Client opcode `101` is an exact 11-byte numeric record: one byte, one
+little-endian 32-bit value, one byte, one little-endian 16-bit value, and a
+final byte after the opcode. Stream `126` has 146 packets and stream `92` has
+73; stream `114` has none. The outer bytes and flag are always zero. In stream
+`126`, the `(primary, secondary)` pairs are `(20,3)` 113 times and
+`(0x0a000014,0)` 33 times; stream `92` uses `(20,5)` 66 times and the alternate
+pair seven times. Every packet consumes exactly and round-trips. Because the
+32-bit value is two discrete, non-monotonic values, the earlier tentative
+`client_tick` label is not retained; the fold emits neutral numeric
+distributions and partial semantic coverage.
+
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
 injected sessions both reached `active` with nine NPCs. The injected fold had
@@ -897,3 +910,6 @@ It intentionally cannot launch an authenticated official session.
 31. Type the empty server opcode-`426` notification and client opcode-`309`
     acknowledgement, prove one-for-one temporal matching in every reference
     world stream, and retain a neutral name for their higher-level purpose.
+32. Bound client opcode `101` as a fixed five-value record, validate all 219
+    sustained-capture instances, and keep its non-monotonic 32-bit field
+    neutral instead of preserving an unsupported `client_tick` interpretation.

@@ -26,6 +26,7 @@ from maple_server.gameplay import (  # noqa: E402
 )
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
+    ClientOpcode101Record,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
     CompactFieldTransition,
@@ -443,6 +444,7 @@ def fixture_gameplay_transcript(
     compact_transition: bool = False,
     initial_snapshot: bool = False,
     player_movement: bool = False,
+    opcode_101_records: bool = False,
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
     opcode_426_acknowledgement: bool = False,
@@ -885,6 +887,27 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             MobLeaveField(object_id=MOB_OBJECT_ID, reason=0).to_bytes(),
+        )
+    if opcode_101_records:
+        append(
+            "client_to_server",
+            ClientOpcode101Record(
+                header_value=0,
+                primary_value=20,
+                flag_value=0,
+                secondary_value=3,
+                tail_value=0,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientOpcode101Record(
+                header_value=0,
+                primary_value=0x0A00_0014,
+                flag_value=0,
+                secondary_value=0,
+                tail_value=0,
+            ).to_bytes(),
         )
     if opcode_13_messages:
         append(
@@ -1692,6 +1715,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
         response = HeartbeatResponse(opaque_token=b"response")
         notification = ServerOpcode426Notification()
         acknowledgement = ClientOpcode309Acknowledgement()
+        opcode_101_record = ClientOpcode101Record(
+            header_value=0,
+            primary_value=0x0A00_0014,
+            flag_value=0,
+            secondary_value=0,
+            tail_value=0,
+        )
         fixed_envelope = Opcode13Type1Envelope(opaque_payload=b"fixed123")
         variable_envelope = Opcode13Envelope(
             message_type=6,
@@ -1712,6 +1742,19 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ),
             acknowledgement,
         )
+        self.assertEqual(
+            ClientOpcode101Record.parse(opcode_101_record.to_bytes()),
+            opcode_101_record,
+        )
+        self.assertEqual(len(opcode_101_record.to_bytes()), 11)
+        with self.assertRaisesRegex(PacketShapeError, "tail_value must fit"):
+            ClientOpcode101Record(
+                header_value=0,
+                primary_value=20,
+                flag_value=0,
+                secondary_value=3,
+                tail_value=256,
+            ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode426Notification.parse(
                 notification.to_bytes() + b"\x00"
@@ -2454,6 +2497,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
                 player_movement=True,
+                opcode_101_records=True,
                 opcode_13_messages=True,
                 opcode_217_records=True,
                 opcode_426_acknowledgement=True,
@@ -2541,6 +2585,34 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "opcode=309 kind=opcode_309_acknowledgement coverage=full",
+            report,
+        )
+        self.assertEqual(analysis.state.client_opcode_101_packets, 2)
+        self.assertEqual(
+            analysis.state.client_opcode_101_header_values, {0: 2}
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_101_primary_values,
+            {20: 1, 0x0A00_0014: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_101_flag_values, {0: 2}
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_101_secondary_values, {0: 1, 3: 1}
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_101_tail_values, {0: 2}
+        )
+        self.assertIn(
+            'client_opcode_101=packets:2 header_values:{"0": 2} '
+            'primary_values:{"20": 1, "167772180": 1} '
+            'flag_values:{"0": 2} secondary_values:{"0": 1, "3": 1} '
+            'tail_values:{"0": 2}',
+            report,
+        )
+        self.assertIn(
+            "opcode=101 kind=client_opcode_101_record coverage=partial",
             report,
         )
         self.assertNotIn("variable-thirteen", report)
