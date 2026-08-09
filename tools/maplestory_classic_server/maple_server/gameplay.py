@@ -39,6 +39,8 @@ from .packets import (
     MobSpawnData,
     NpcSpawn,
     NpcStateUpdate,
+    Opcode13Envelope,
+    Opcode13Type1Envelope,
     PacketShapeError,
     PlayerMovementBroadcast,
     PlayerMovementPath,
@@ -358,6 +360,11 @@ class GameplayGameState:
     pending_heartbeat_probes: int = 0
     last_heartbeat_round_trip_ms: float | None = None
     max_heartbeat_round_trip_ms: float | None = None
+    client_opcode_13_messages: int = 0
+    client_opcode_13_messages_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_13_opaque_bytes: int = 0
     bootstrap_acknowledgements: int = 0
     pending_movements: int = 0
     termination_received: bool = False
@@ -1532,6 +1539,15 @@ class GameplayAnalysis:
                 "max_heartbeat_round_trip_ms": (
                     self.state.max_heartbeat_round_trip_ms
                 ),
+                "client_opcode_13_messages": (
+                    self.state.client_opcode_13_messages
+                ),
+                "client_opcode_13_messages_by_type": dict(
+                    self.state.client_opcode_13_messages_by_type
+                ),
+                "client_opcode_13_opaque_bytes": (
+                    self.state.client_opcode_13_opaque_bytes
+                ),
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
                 ),
@@ -2162,6 +2178,40 @@ class GameplayStateFold:
                 parsed=response,
                 details=details,
                 issues=("heartbeat response token remains opaque",),
+            )
+        if opcode == 13 and len(payload) >= 3:
+            message_type = payload[2]
+            if message_type == 1:
+                message = Opcode13Type1Envelope.parse(payload)
+            elif message_type in {6, 13}:
+                message = Opcode13Envelope.parse(payload)
+            else:
+                return self._observation(
+                    frame,
+                    kind=f"client_opcode_{opcode}",
+                    coverage=ShapeCoverage.UNKNOWN,
+                )
+            opaque_bytes = len(message.opaque_payload)
+            self.state.client_opcode_13_messages += 1
+            self.state.client_opcode_13_messages_by_type[message_type] += 1
+            self.state.client_opcode_13_opaque_bytes += opaque_bytes
+            details = {
+                "message_type": message_type,
+                "opaque_payload_bytes": opaque_bytes,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_13_message_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_13_message",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=message,
+                details=details,
+                issues=("client opcode-13 payload remains opaque",),
             )
         return self._observation(
             frame,
@@ -4325,6 +4375,9 @@ def render_gameplay_analysis(
     life_movement_tail_markers = json.dumps(
         dict(sorted(state.life_movement_tail_markers.items()))
     )
+    client_opcode_13_message_types = json.dumps(
+        dict(sorted(state.client_opcode_13_messages_by_type.items()))
+    )
     player_stat_masks = json.dumps(
         {
             f"0x{mask:08x}": count
@@ -4538,6 +4591,11 @@ def render_gameplay_analysis(
             f"pending:{state.pending_heartbeat_probes} "
             f"last_rtt_ms:{state.last_heartbeat_round_trip_ms} "
             f"max_rtt_ms:{state.max_heartbeat_round_trip_ms}"
+        ),
+        (
+            f"client_opcode_13=messages:{state.client_opcode_13_messages} "
+            f"message_types:{client_opcode_13_message_types} "
+            f"opaque_bytes:{state.client_opcode_13_opaque_bytes}"
         ),
         f"packet_shapes={json.dumps(dict(sorted(packet_counts.items())))}",
         f"events={json.dumps(dict(sorted(event_counts.items())))}",

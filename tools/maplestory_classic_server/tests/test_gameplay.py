@@ -59,6 +59,8 @@ from maple_server.packets import (  # noqa: E402
     MobSpawnData,
     NpcSpawn,
     NpcStateUpdate,
+    Opcode13Envelope,
+    Opcode13Type1Envelope,
     PacketShapeError,
     PlayerMovementBroadcast,
     PlayerMovementCommand,
@@ -438,6 +440,7 @@ def fixture_gameplay_transcript(
     compact_transition: bool = False,
     initial_snapshot: bool = False,
     player_movement: bool = False,
+    opcode_13_messages: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
     item_use: bool = False,
@@ -877,6 +880,25 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             MobLeaveField(object_id=MOB_OBJECT_ID, reason=0).to_bytes(),
+        )
+    if opcode_13_messages:
+        append(
+            "client_to_server",
+            Opcode13Type1Envelope(opaque_payload=b"fixed123").to_bytes(),
+        )
+        append(
+            "client_to_server",
+            Opcode13Envelope(
+                message_type=6,
+                opaque_payload=b"variable-six",
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            Opcode13Envelope(
+                message_type=13,
+                opaque_payload=b"variable-thirteen",
+            ).to_bytes(),
         )
     append("server_to_client", HeartbeatProbe().to_bytes())
     append(
@@ -1595,14 +1617,34 @@ class GameplayPacketShapeTest(unittest.TestCase):
             WorldSessionTermination.parse(termination.to_bytes()), termination
         )
 
-    def test_heartbeat_probe_and_response_round_trip(self) -> None:
+    def test_transport_envelopes_and_heartbeat_round_trip(self) -> None:
         probe = HeartbeatProbe()
         response = HeartbeatResponse(opaque_token=b"response")
+        fixed_envelope = Opcode13Type1Envelope(opaque_payload=b"fixed123")
+        variable_envelope = Opcode13Envelope(
+            message_type=6,
+            opaque_payload=b"variable",
+        )
 
         self.assertEqual(HeartbeatProbe.parse(probe.to_bytes()), probe)
         self.assertEqual(
             HeartbeatResponse.parse(response.to_bytes()), response
         )
+        self.assertEqual(
+            Opcode13Type1Envelope.parse(fixed_envelope.to_bytes()),
+            fixed_envelope,
+        )
+        self.assertEqual(
+            Opcode13Envelope.parse(variable_envelope.to_bytes()),
+            variable_envelope,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "needs 8 opaque bytes"):
+            Opcode13Type1Envelope(opaque_payload=b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "expected 1"):
+            Opcode13Type1Envelope(
+                opaque_payload=b"fixed123",
+                message_type=2,
+            ).to_bytes()
 
 
 class GameplayStateFoldTest(unittest.TestCase):
@@ -2324,7 +2366,10 @@ class GameplayStateFoldTest(unittest.TestCase):
 
     def test_text_report_can_emit_events_and_packet_shapes(self) -> None:
         analysis = analyze_gameplay_transcript(
-            fixture_gameplay_transcript(player_movement=True)
+            fixture_gameplay_transcript(
+                player_movement=True,
+                opcode_13_messages=True,
+            )
         )
 
         report = render_gameplay_analysis(
@@ -2351,6 +2396,22 @@ class GameplayStateFoldTest(unittest.TestCase):
             "opcode=47 kind=life_movement_submission coverage=partial",
             report,
         )
+        self.assertEqual(analysis.state.client_opcode_13_messages, 3)
+        self.assertEqual(
+            analysis.state.client_opcode_13_messages_by_type,
+            {1: 1, 6: 1, 13: 1},
+        )
+        self.assertEqual(analysis.state.client_opcode_13_opaque_bytes, 37)
+        self.assertIn(
+            'client_opcode_13=messages:3 message_types:{"1": 1, "6": 1, '
+            '"13": 1} opaque_bytes:37',
+            report,
+        )
+        self.assertIn(
+            "opcode=13 kind=client_opcode_13_message coverage=partial",
+            report,
+        )
+        self.assertNotIn("variable-thirteen", report)
         self.assertNotIn("123456", report)
         self.assertIn(
             "movement_ack_policy=flag_matches:1 flag_mismatches:0",

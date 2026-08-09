@@ -477,6 +477,42 @@ class Opcode13Ack:
 
 
 @dataclass(frozen=True)
+class Opcode13Type1Envelope:
+    opaque_payload: bytes
+    message_type: int = 1
+    opcode: int = 13
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "Opcode13Type1Envelope":
+        reader = PacketReader(payload, packet_name="opcode_13_type_1_envelope")
+        _expect_opcode(reader, 13)
+        message_type = reader.u8("message_type")
+        if message_type != 1:
+            raise PacketShapeError(
+                f"opcode_13_type_1_envelope.message_type is {message_type}, "
+                "expected 1"
+            )
+        opaque_payload = reader.bytes(8, "opaque_payload")
+        reader.finish()
+        return cls(opaque_payload=opaque_payload)
+
+    def to_bytes(self) -> bytes:
+        if self.message_type != 1:
+            raise PacketShapeError(
+                f"opcode-13 fixed envelope type is {self.message_type}, "
+                "expected 1"
+            )
+        if len(self.opaque_payload) != 8:
+            raise PacketShapeError(
+                "opcode-13 type-1 envelope needs 8 opaque bytes, got "
+                f"{len(self.opaque_payload)}"
+            )
+        return struct.pack(
+            "<HB", self.opcode, self.message_type
+        ) + self.opaque_payload
+
+
+@dataclass(frozen=True)
 class Opcode13Envelope:
     message_type: int
     opaque_payload: bytes

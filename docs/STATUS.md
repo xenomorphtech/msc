@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  24,999 full, 40,959 partial, 5,142 unknown-but-lossless, and zero invalid
+  24,999 full, 41,929 partial, 4,172 unknown-but-lossless, and zero invalid
   packet observations. Twelve state-correlation warnings remain.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
@@ -74,6 +74,11 @@
   client-tail variants and additional command tags. The fold emits redacted
   events and command/tail distributions; opaque command bodies and field roles
   keep the family at partial semantic coverage.
+- Client opcode `13` is now decoded on world connections using the same neutral
+  family as login. Stream `126` has 970 exact 11-byte type-`1` envelopes;
+  stream `92` has 446 type-`1`, 104 length-prefixed type-`6`, and five
+  length-prefixed type-`13` envelopes. Every packet round-trips, while the fold
+  exposes only message-type/body-size counts and keeps all bodies opaque.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

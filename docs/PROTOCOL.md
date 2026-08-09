@@ -82,12 +82,17 @@ plaintext `0d0000`. That is enough for the client to continue into the login
 controller. It is a local-server behavior, not a claim that the official NGS
 proof has been reproduced.
 
-Opcode `13` has three bounded envelopes in the observed sessions:
+Opcode `13` has four bounded envelopes in the observed sessions:
 
 ```text
 acknowledgment (3 bytes)
 uint16 opcode = 13
 uint8  result
+
+fixed client type-1 envelope (11 bytes)
+uint16 opcode = 13
+uint8  message_type = 1
+byte[8] opaque body
 
 opaque envelope (7 + payload_length bytes)
 uint16 opcode = 13
@@ -115,6 +120,13 @@ decoder deliberately uses the neutral `opcode_13_envelope` name. Length
 prefixes and exact packet boundaries remain validated. Direct placeholder
 launches also emit a fully decoded type-`15` status message containing “Please
 check the network connection status.”
+
+The world-session gameplay fold uses the same neutral family. Stream `92`
+contains 446 fixed type-`1` envelopes, 104 type-`6` length-prefixed envelopes,
+and five type-`13` length-prefixed envelopes. Stream `126` contains 970 fixed
+type-`1` envelopes. Every packet consumes exactly and round-trips byte-for-byte;
+the fold emits type and opaque-byte counts without exposing any body. The
+payload meanings remain partial rather than being labeled as security traffic.
 
 The captured server frame at index `3` is a second opcode-`0` message with
 plaintext result byte `2`. It is the direct source of the replayed
@@ -945,7 +957,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 24,999
-full, 40,959 partial, 5,142 unknown-but-lossless, and zero invalid packet
+full, 41,929 partial, 4,172 unknown-but-lossless, and zero invalid packet
 observations. The fold reaches level `10` and reports no unknown inventory-slot
 modifications; its 12 remaining warnings are cross-packet state correlations.
 

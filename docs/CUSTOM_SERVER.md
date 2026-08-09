@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 24,999 observations are full, 40,959 partial, 5,142
+`--fail-on-invalid`: 24,999 observations are full, 41,929 partial, 4,172
 unknown-but-lossless, and none invalid. The 12 remaining warnings are state
 correlations, not shape failures. The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
@@ -94,9 +94,15 @@ The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
 submissions and 347 server broadcasts, all consuming exactly; stream `92`
 exercises all fixed client-tail variants. Command bytes and neutral control/
-tail roles remain opaque, so these packets are partial rather than full. With
-this family folded, the long-corpus totals are 24,999 full, 40,959 partial,
-5,142 unknown-but-lossless, and zero invalid observations.
+tail roles remain opaque, so these packets are partial rather than full.
+
+Client opcode `13` is shared with the login protocol but persists in gameplay.
+The analyzer now accepts the exact 11-byte type-`1` shape and the existing
+length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
+counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
+packets across all three observed variants, all with exact round trips.
+Together, these latest modeled families leave the long-corpus totals at 24,999
+full, 41,929 partial, 4,172 unknown-but-lossless, and zero invalid.
 
 ## Replay the login capture locally
 
@@ -618,6 +624,8 @@ project's own `README.md` for all options.
 - The analyzer now structurally decodes life movement opcodes `47`/`217`,
   folds command and client-tail distributions, redacts the client token, and
   validates all 2,932 packets from stream `126` without a shape failure.
+- World-session opcode `13` now uses the neutral fixed/length-prefixed envelope
+  decoder, accounting for all 970 long-corpus packets without exposing bodies.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

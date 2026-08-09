@@ -284,7 +284,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 24,999 full,
-40,959 partial, 5,142 unknown, and zero invalid packet observations. PCAP
+41,929 partial, 4,172 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata.
@@ -321,6 +321,8 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `41`: masked player-stat deltas for level, job, STR, DEX, INT,
   LUK, current/max HP and MP, AP, SP, EXP, and 64-bit mesos, plus bounded
   neutral flag/tail values,
+- client opcode `13`: neutral fixed type-`1` and length-prefixed type-`6`/`13`
+  envelopes whose bodies remain opaque and are omitted from safe reports,
 - client opcode `47`: structurally exact life-movement relay with local object
   index, redacted client token, neutral control value, fixed-width command
   stream, capture-bounded tail variant, marker, and start/end coordinates,
@@ -452,6 +454,14 @@ long-corpus packets consume exactly and round-trip. Command tags `0..22` and
 client tail tags `17/18/21/24` have capture-derived fixed widths; their field
 roles, the client control value, and the tail marker remain neutral, so reports
 classify the family as partial semantic coverage and omit the token value.
+
+Client opcode `13` also continues on the world connection. The fixed type-`1`
+variant is exactly 11 bytes: opcode, discriminator, and eight opaque bytes.
+Types `6` and `13` carry a 32-bit byte count followed by that many opaque
+bytes. Stream `92` has 446 type-`1`, 104 type-`6`, and five type-`13` packets;
+stream `126` has 970 type-`1` packets. Every envelope round-trips exactly. The
+fold records type/body-size distributions and emits redacted events without
+assigning a security meaning to the body.
 
 Server opcode `41` now folds stat deltas instead of remaining an unknown
 packet. The stable prefix is a one-byte request flag and 32-bit mask. Observed
@@ -851,3 +861,6 @@ It intentionally cannot launch an authenticated official session.
 28. Bound and round-trip client opcode `47` and server opcode `217` life
     movement, fold command/tail distributions into identifier-safe events,
     and validate all 2,932 long-corpus packets without assigning opaque roles.
+29. Reuse the neutral opcode-`13` family on world sessions, add its fixed
+    type-`1` envelope, and validate all 970 long-corpus instances plus the
+    type-`1`/`6`/`13` variants in stream `92` without exposing their bodies.
