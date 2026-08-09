@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 126 tests.
+The last run passed all 137 tests.
 
 ## Inspect and compare captures
 
@@ -151,8 +151,9 @@ the other six differ by exactly one HP after delayed responses. All six have no
 intervening modeled relay hit and infer authoritative-minus-submitted damage
 `+1` five times and `-1` once. Relay tag/unknown/auxiliary roles, damage high
 bit, client target prefix/tail fields, and those delayed differences are still
-not established well enough for the custom server to generate or replay
-combat.
+not established well enough for the custom server to reproduce captured attack
+relays or official authority adjustments. The narrower exact-HP responder
+documented below is restricted to custom-server-owned mob state.
 
 ## Replay the login capture locally
 
@@ -525,6 +526,80 @@ own; the next experiment must isolate the remaining client eligibility state
 instead of treating a generated response as proof that the client accepted
 the drop.
 
+## Reactive mob-health validation
+
+The custom server can now own a deliberately exact subset of combat state. The
+following proven run kept stream `114` open, injected a typed snail spawn copied
+from stream `92` at the folded player position, and enabled reactive health:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --reactive-mob-health-responses \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=633:-2677:0:0' \
+  --post-transcript-start-delay-seconds 2 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_mob_health_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 3600
+```
+
+The `mob-spawn` transform first parses a validated opcode-`279` packet. It
+changes only signed `x/y` and, when provided, the two uint16 foothold fields.
+The proof preserved template `100100`, initialized it at its referenced `8/8`
+HP, and exposed it as `mob:runtime:1` rather than leaking its wire object id.
+
+Physical evdev key `29` sent directly through nested Wayland produced one real
+opcode-`52` variant-`18` action with damage `[27,32]`. The first hit changed
+`8 -> 0`; the second was already terminal. The server sent opcode `293` with
+percentage `0`, then opcode `280` reason `1`, and removed the mob. Runtime
+status recorded one observed/served request, zero rejections, two response
+packets, and `terminal_hits_skipped: 1`. The client stayed connected and kept
+answering generated heartbeats.
+
+The live transcript
+`reactive_mob_health_20260809/1786281154891058720_replay_12857.jsonl` folds
+validly to `active`: one attack, one matched zero-health effect, one leave,
+zero active mobs, and zero pending combat effects. Generated heartbeat replies
+continued; because this transcript is still being appended, a fold sampled
+between a probe and its response can transiently report one pending probe.
+This is a request/effect/lifecycle validation. It is not another next-
+percentage sample, because the injected spawn had no earlier opcode-`293`
+health observation.
+
+Query the read-only API from the listener's namespace:
+
+```sh
+sudo ip netns exec mapleproxy curl -s \
+  http://127.0.0.1:12858/api/v1/status
+```
+
+`protocol.mob_health_responses.state` contains aliased active mobs with exact
+current/max HP and percentage, source-evidence counts, and the deterministic
+damage/percentage/terminal rules. The parent object contains request and sent-
+packet counters plus `last_response` with damage, HP before/after, emitted
+percentages/opcodes, zero entries, skipped terminal hits, and removal. The API
+also reports the most recent safe `last_rejection`; rejected/untargeted attacks
+receive no modeled response but do not close the held-open connection. The API
+remains loopback-only and read-only; it needs no separate authentication under
+the current local namespace/OS access boundary.
+
+Captured official combat still has six delayed ±1 HP authority adjustments.
+The exact responder does not claim to reproduce those, does not synthesize
+opcodes `218`/`219`, and rejects unknown/inactive targets, ambiguous HP,
+missing damage, and high-bit damage rather than guessing.
+
 ## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
@@ -718,6 +793,15 @@ project's own `README.md` for all options.
 - Live owner-only and captured-shaped animated-drop probes both produced zero
   opcode-`185` requests, so runtime telemetry now treats owner equality as a
   modeled field relation rather than proof of pickup eligibility.
+- An opt-in reactive mob-health policy now adopts exact typed mob state and
+  emits per-hit opcode-`293` updates plus opcode-`280` reason `1` on death. A
+  real typed-snail injection received opcode-`52` damage `[27,32]`, produced
+  the predicted `[293,280]` response and `8 -> 0` lifecycle, folded validly,
+  and kept the client/heartbeat exchange active. Official ±1 HP authority
+  adjustments and attack-relay synthesis remain outside that exact policy.
+- Nested UI pointer input now stays on the Sway seat, and the checked-in
+  `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
+  Wayland for Unity raw input without `xdotool` or the host cursor.
 
 ## Next server milestone
 
@@ -730,7 +814,7 @@ Replace the remaining opaque replay portions with stateful handling:
    only after the real client emits opcode `185`.
 3. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
-4. Obtain a short final-field capture with a known mob and validate the typed
+4. Reuse the proven typed final-field mob injection to validate the existing
    movement-acknowledgement policy through the real client.
 5. Name the remaining neutral account, equipment, progression, and trailer
    fields only when independent captures or controlled effects support them.

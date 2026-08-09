@@ -845,6 +845,43 @@ an inferred authoritative-damage interval on every testable event. All six
 outliers have exact authoritative-minus-submitted deltas: five `+1`, one `-1`.
 None has an intervening modeled opcode-`218`/`219` hit for the target.
 
+### Generated custom-server mob-health response
+
+The opt-in runtime policy intentionally has a narrower contract than captured
+official combat. It requires an active mob with exact integer HP and a template
+whose max HP is in the referenced table above. A later typed opcode-`279`
+spawn initializes that mob at max HP; an opcode-`293` can be adopted only when
+its percentage maps to one exact integer HP. The policy accepts only targeted
+client opcode `50`/`52` actions with a decoded damage array and no high-bit
+damage marker.
+
+For each damage word, in packet order:
+
+```text
+damage == 0                 -> emit nothing
+current_hp == 0             -> skip this already-terminal hit
+otherwise                   -> current_hp = max(0, current_hp - damage)
+                               emit server 293 with
+                               floor(current_hp * 100 / max_hp)
+new current_hp == 0         -> after the 293, emit server 280 reason 1
+                               and remove the mob from active state
+```
+
+This exact rule is a custom-server state transition, not a claim that the six
+official ±1 HP adjustments have been explained. It also does not synthesize
+server attack relays `218`/`219`. Unknown or inactive targets, missing damage,
+ambiguous HP, and high-bit damage are counted as rejected and receive no
+modeled response; the held-open transport continues so ordinary untargeted
+swings do not disconnect the client.
+
+The real-client proof injected a typed template-`100100` spawn with `8/8` HP
+at the stream-`114` player position. The client submitted opcode `52`, variant
+`18`, with damage words `[27,32]`. The server predicted and emitted opcode
+`293` percentage `0`, then opcode `280` reason `1`; the second hit was skipped
+because the first was terminal. The observed fold contains one attack, one
+zero-health update, one leave, zero active mobs, and zero pending effects while
+the connection and generated heartbeat exchange remained active.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:

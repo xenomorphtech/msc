@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     GameplayStateFold,
+    MobHealthResponsePolicy,
     analyze_gameplay_transcript,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
@@ -2381,6 +2382,70 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(
             observations[-1].details["health_prediction_matches"]
         )
+
+    def test_reactive_mob_health_policy_adopts_typed_spawn(self) -> None:
+        policy = MobHealthResponsePolicy(mobs={}, field_epoch=1)
+        policy.apply_server_packet(
+            MobEnterField(
+                object_id=MOB_OBJECT_ID,
+                spawn=fixture_mob_spawn(),
+            ).to_bytes()
+        )
+
+        mob = policy.mobs[MOB_OBJECT_ID]
+        self.assertEqual(mob.template_id, 210_100)
+        self.assertEqual(mob.current_hp, 50)
+        self.assertEqual(mob.max_hp, 50)
+        safe_mob = policy.safe_dict()["active_mobs"][0]
+        self.assertEqual(safe_mob["entity"], "mob:runtime:1")
+
+        policy.apply_server_packet(
+            MobEnterField(
+                object_id=MOB_OBJECT_ID,
+                spawn=replace(fixture_mob_spawn(), template_id=999_998),
+            ).to_bytes()
+        )
+        self.assertNotIn(MOB_OBJECT_ID, policy.mobs)
+
+    def test_reactive_mob_health_policy_skips_post_terminal_hit(self) -> None:
+        policy = MobHealthResponsePolicy(mobs={}, field_epoch=1)
+        policy.apply_server_packet(
+            MobEnterField(
+                object_id=MOB_OBJECT_ID,
+                spawn=replace(fixture_mob_spawn(), template_id=100_100),
+            ).to_bytes()
+        )
+        attack = ClientAttackAction(
+            opcode=52,
+            local_object_index=7,
+            variant=18,
+            client_token=987_654_324,
+            control_value=807_666,
+            opaque_common_state=b"state",
+            value_1=3,
+            value_2=MOB_OBJECT_ID,
+            opaque_suffix=(
+                b"\x06"
+                + b"\x00" * 13
+                + struct.pack("<II", 27, 32)
+                + b"\x00" * 9
+            ),
+        )
+
+        response = policy.respond(attack)
+
+        self.assertEqual((response.hp_before, response.hp_after), (8, 0))
+        self.assertEqual(response.health_percentages, (0,))
+        self.assertEqual(response.terminal_hits_skipped, 1)
+        self.assertTrue(response.removed)
+        self.assertEqual(
+            [
+                int.from_bytes(packet[:2], "little")
+                for packet in response.plaintexts
+            ],
+            [293, 280],
+        )
+        self.assertNotIn(MOB_OBJECT_ID, policy.mobs)
 
     def test_derives_typed_item_pickup_response_from_separate_evidence(
         self,

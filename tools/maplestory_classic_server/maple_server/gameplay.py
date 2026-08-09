@@ -1276,6 +1276,186 @@ class MobMovementAcknowledgementPolicy:
         }
 
 
+@dataclass
+class ReactiveMobHealth:
+    alias: str
+    template_id: int
+    current_hp: int
+    max_hp: int
+
+
+@dataclass(frozen=True)
+class MobHealthResponsePlan:
+    target: str
+    template_id: int
+    damage_values: tuple[int, ...]
+    hp_before: int
+    hp_after: int
+    health_percentages: tuple[int, ...]
+    zero_damage_entries: int
+    terminal_hits_skipped: int
+    removed: bool
+    plaintexts: tuple[bytes, ...] = field(repr=False)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "target": self.target,
+            "template_id": self.template_id,
+            "damage_values": list(self.damage_values),
+            "hp_before": self.hp_before,
+            "hp_after": self.hp_after,
+            "health_percentages": list(self.health_percentages),
+            "zero_damage_entries": self.zero_damage_entries,
+            "terminal_hits_skipped": self.terminal_hits_skipped,
+            "removed": self.removed,
+            "server_opcodes": [
+                int.from_bytes(plaintext[:2], "little")
+                for plaintext in self.plaintexts
+            ],
+        }
+
+
+@dataclass
+class MobHealthResponsePolicy:
+    mobs: dict[int, ReactiveMobHealth] = field(repr=False)
+    field_epoch: int
+    source_health_predictions: int = 0
+    source_exact_health_predictions: int = 0
+    source_one_hp_differences: int = 0
+
+    def _next_alias(self) -> str:
+        used = {mob.alias for mob in self.mobs.values()}
+        index = 1
+        while f"mob:runtime:{index}" in used:
+            index += 1
+        return f"mob:runtime:{index}"
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "active_mobs": [
+                {
+                    "entity": mob.alias,
+                    "template_id": mob.template_id,
+                    "current_hp": mob.current_hp,
+                    "max_hp": mob.max_hp,
+                    "health_percentage": (
+                        mob.current_hp * 100 // mob.max_hp
+                    ),
+                }
+                for mob in sorted(
+                    self.mobs.values(), key=lambda candidate: candidate.alias
+                )
+            ],
+            "source_evidence": {
+                "health_predictions": self.source_health_predictions,
+                "exact_health_predictions": (
+                    self.source_exact_health_predictions
+                ),
+                "one_hp_differences": self.source_one_hp_differences,
+            },
+            "prediction": {
+                "damage_rule": "subtract_each_nonzero_submitted_damage_word",
+                "health_percentage_rule": "floor(current_hp*100/max_hp)",
+                "zero_damage_rule": "no_response",
+                "terminal_rule": "opcode_293_zero_then_opcode_280_reason_1",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 279:
+            entered = MobEnterField.parse(plaintext)
+            max_hp = REFERENCE_MOB_MAX_HP.get(entered.spawn.template_id)
+            if max_hp is None:
+                self.mobs.pop(entered.object_id, None)
+                return
+            prior = self.mobs.get(entered.object_id)
+            self.mobs[entered.object_id] = ReactiveMobHealth(
+                alias=prior.alias if prior is not None else self._next_alias(),
+                template_id=entered.spawn.template_id,
+                current_hp=max_hp,
+                max_hp=max_hp,
+            )
+        elif opcode == 293:
+            update = MobHealthPercentageUpdate.parse(plaintext)
+            mob = self.mobs.get(update.object_id)
+            if mob is None:
+                return
+            hp_min, hp_max = mob_hp_bounds_for_percentage(
+                mob.max_hp, update.health_percentage
+            )
+            if hp_min != hp_max:
+                raise ValueError(
+                    "reactive mob-health policy cannot adopt an ambiguous "
+                    "post-transcript HP percentage"
+                )
+            mob.current_hp = hp_min
+        elif opcode == 280:
+            left = MobLeaveField.parse(plaintext)
+            self.mobs.pop(left.object_id, None)
+
+    def respond(self, request: ClientAttackAction) -> MobHealthResponsePlan:
+        target_object_id = request.target_object_id
+        if target_object_id is None:
+            raise ValueError("client attack has no modeled mob target")
+        mob = self.mobs.get(target_object_id)
+        if mob is None:
+            raise ValueError("client attack target is not an active modeled mob")
+        if not request.damage_values:
+            raise ValueError("client attack has no decoded damage words")
+        if any(request.high_bit_markers):
+            raise ValueError("client attack uses an unmodeled damage high bit")
+
+        hp_before = mob.current_hp
+        health_updates: list[MobHealthPercentageUpdate] = []
+        zero_damage_entries = 0
+        terminal_hits_skipped = 0
+        for damage in request.damage_values:
+            if damage == 0:
+                zero_damage_entries += 1
+                continue
+            if mob.current_hp == 0:
+                terminal_hits_skipped += 1
+                continue
+            mob.current_hp = max(0, mob.current_hp - damage)
+            health_updates.append(
+                MobHealthPercentageUpdate(
+                    object_id=target_object_id,
+                    health_percentage=(
+                        mob.current_hp * 100 // mob.max_hp
+                    ),
+                )
+            )
+
+        removed = mob.current_hp == 0 and bool(health_updates)
+        plaintexts = tuple(update.to_bytes() for update in health_updates)
+        if removed:
+            plaintexts += (
+                MobLeaveField(
+                    object_id=target_object_id,
+                    reason=1,
+                ).to_bytes(),
+            )
+            del self.mobs[target_object_id]
+        return MobHealthResponsePlan(
+            target=mob.alias,
+            template_id=mob.template_id,
+            damage_values=request.damage_values,
+            hp_before=hp_before,
+            hp_after=mob.current_hp,
+            health_percentages=tuple(
+                update.health_percentage for update in health_updates
+            ),
+            zero_damage_entries=zero_damage_entries,
+            terminal_hits_skipped=terminal_hits_skipped,
+            removed=removed,
+            plaintexts=plaintexts,
+        )
+
+
 @dataclass(frozen=True)
 class GameplayAnalysis:
     source: str
@@ -5318,6 +5498,73 @@ def derive_mob_movement_acknowledgement_policy(
             state.movement_acknowledgement_zero_auxiliary_pairs
         ),
         pending_submissions=state.pending_movements,
+    )
+
+
+def derive_mob_health_response_policy(
+    transcript: Transcript,
+) -> MobHealthResponsePolicy:
+    """Build exact custom-server mob HP state from a validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    mismatches = state.client_attack_health_prediction_mismatches
+    if state.client_attack_health_one_hp_differences != mismatches:
+        raise ValueError(
+            "world transcript has combat HP differences larger than one HP"
+        )
+    if state.client_attack_mismatches_without_relays != mismatches:
+        raise ValueError(
+            "world transcript has combat HP mismatches with an intervening "
+            "modeled attack-relay hit"
+        )
+    if any(
+        delta not in {-1, 1}
+        for delta in state.client_attack_health_mismatch_damage_deltas
+    ):
+        raise ValueError(
+            "world transcript has an unsupported authoritative damage delta"
+        )
+
+    mobs: dict[int, ReactiveMobHealth] = {}
+    for object_id, entity in state.mobs.items():
+        if entity.max_hp is None:
+            continue
+        if entity.health_percentage is None:
+            current_hp = entity.max_hp
+        else:
+            if (
+                entity.health_hp_min is None
+                or entity.health_hp_max is None
+            ):
+                raise ValueError(
+                    f"{entity.alias} has no integer HP bounds"
+                )
+            if entity.health_hp_min != entity.health_hp_max:
+                raise ValueError(
+                    f"{entity.alias} has ambiguous final integer HP bounds"
+                )
+            current_hp = entity.health_hp_min
+        mobs[object_id] = ReactiveMobHealth(
+            alias=entity.alias,
+            template_id=entity.spawn.template_id,
+            current_hp=current_hp,
+            max_hp=entity.max_hp,
+        )
+    return MobHealthResponsePolicy(
+        mobs=mobs,
+        field_epoch=state.field_epoch,
+        source_health_predictions=(
+            state.client_attack_health_predictions
+        ),
+        source_exact_health_predictions=(
+            state.client_attack_health_prediction_matches
+        ),
+        source_one_hp_differences=(
+            state.client_attack_health_one_hp_differences
+        ),
     )
 
 

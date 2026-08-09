@@ -22,10 +22,12 @@ from .gamestate import (
 from .gameplay import (
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
+    MobHealthResponsePolicy,
     MobMovementAcknowledgementPolicy,
     analyze_gameplay_transcript,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
+    derive_mob_health_response_policy,
     derive_mob_movement_acknowledgement_policy,
     plan_current_hp_stat_update,
     plan_final_field_drop_owner_to_player_rewrite,
@@ -39,10 +41,12 @@ from .gameplay import (
 from .http_api import ServerRuntime, start_runtime_http_api
 from .packets import (
     ChannelTransitionResponse,
+    ClientAttackAction,
     FieldDropSpawn,
     HeartbeatProbe,
     ItemPickupRequest,
     ItemUseRequest,
+    MobEnterField,
     MobMovementSubmission,
     PacketShapeError,
     WorldHandoff,
@@ -378,6 +382,7 @@ async def replay_connection(
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
     ) = None,
+    mob_health_response_policy: MobHealthResponsePolicy | None = None,
     runtime_protocol: dict[str, object] | None = None,
 ) -> None:
     if hold_open_seconds < 0:
@@ -397,6 +402,11 @@ async def replay_connection(
     ):
         raise ValueError(
             "reactive mob movement acknowledgements require a positive "
+            "hold_open_seconds"
+        )
+    if mob_health_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive mob-health responses require a positive "
             "hold_open_seconds"
         )
     if item_use_response_policy is not None and hold_open_seconds <= 0:
@@ -445,6 +455,12 @@ async def replay_connection(
     ):
         raise ValueError(
             "client opcode 185 cannot use both captured and modeled replies"
+        )
+    if mob_health_response_policy is not None and any(
+        opcode in (client_opcode_replies or {}) for opcode in (50, 52)
+    ):
+        raise ValueError(
+            "client opcodes 50/52 cannot use both captured and modeled replies"
         )
     if (
         npc_state_replay_plaintext is not None
@@ -552,6 +568,17 @@ async def replay_connection(
         raise TypeError(
             "runtime mob_movement_acknowledgements telemetry must be a dictionary"
         )
+    mob_health_metrics = (
+        runtime_protocol.get("mob_health_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if mob_health_metrics is not None and not isinstance(
+        mob_health_metrics, dict
+    ):
+        raise TypeError(
+            "runtime mob_health_responses telemetry must be a dictionary"
+        )
     client_iv = (
         parse_handshake(transcript.server_bytes).first_iv
         if (
@@ -560,6 +587,7 @@ async def replay_connection(
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
+            or mob_health_response_policy is not None
         )
         else None
     )
@@ -618,6 +646,9 @@ async def replay_connection(
                 ),
                 "reactive_mob_movement_acknowledgements": (
                     mob_movement_acknowledgement_policy is not None
+                ),
+                "reactive_mob_health_responses": (
+                    mob_health_response_policy is not None
                 ),
             },
         )
@@ -730,6 +761,7 @@ async def replay_connection(
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
+            or mob_health_response_policy is not None
         )
         if needs_server_cipher:
             server_iv, server_version_mask = post_transcript_server_cipher_state(
@@ -778,6 +810,12 @@ async def replay_connection(
                 if item_use_metrics is not None:
                     item_use_metrics["state"] = (
                         item_use_response_policy.safe_dict()
+                    )
+            if mob_health_response_policy is not None:
+                mob_health_response_policy.apply_server_packet(plaintext)
+                if mob_health_metrics is not None:
+                    mob_health_metrics["state"] = (
+                        mob_health_response_policy.safe_dict()
                     )
             if (
                 npc_state_replay_plaintext is not None
@@ -1003,6 +1041,66 @@ async def replay_connection(
                         )
                         item_use_metrics["state"] = (
                             item_use_response_policy.safe_dict()
+                        )
+                if (
+                    opcode in {50, 52}
+                    and mob_health_response_policy is not None
+                ):
+                    attack = ClientAttackAction.parse(client_plaintext)
+                    if mob_health_metrics is not None:
+                        mob_health_metrics["requests_observed"] = (
+                            int(
+                                mob_health_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    try:
+                        response_plan = mob_health_response_policy.respond(
+                            attack
+                        )
+                    except ValueError as error:
+                        if mob_health_metrics is not None:
+                            mob_health_metrics["requests_rejected"] = (
+                                int(
+                                    mob_health_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            mob_health_metrics["last_rejection"] = str(error)
+                            mob_health_metrics["state"] = (
+                                mob_health_response_policy.safe_dict()
+                            )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_encrypted_frame(
+                            encrypt_next_server_frame(plaintext)
+                        )
+                    if mob_health_metrics is not None:
+                        mob_health_metrics["requests_served"] = (
+                            int(
+                                mob_health_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        mob_health_metrics["response_packets_sent"] = (
+                            int(
+                                mob_health_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        mob_health_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        mob_health_metrics["state"] = (
+                            mob_health_response_policy.safe_dict()
                         )
                 if (
                     opcode == 207
@@ -1434,8 +1532,50 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
             trailing=original.trailing,
             opcode=original.opcode,
         ).to_bytes()
+    if transform.startswith("mob-spawn="):
+        fields = transform.removeprefix("mob-spawn=").split(":")
+        if len(fields) not in {2, 4}:
+            raise argparse.ArgumentTypeError(
+                "mob-spawn transform must use X:Y or X:Y:FOOTHOLD:ORIGIN"
+            )
+        position_x, position_y = parse_i16_position(":".join(fields[:2]))
+        try:
+            original = MobEnterField.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap mob-spawn transform requires a validated mob-enter packet"
+            ) from error
+        foothold_id = original.spawn.foothold_id
+        origin_foothold_id = original.spawn.origin_foothold_id
+        if len(fields) == 4:
+            try:
+                foothold_id, origin_foothold_id = (
+                    int(value, 0) for value in fields[2:]
+                )
+            except ValueError as error:
+                raise argparse.ArgumentTypeError(
+                    "mob-spawn footholds must be integers"
+                ) from error
+            if not all(
+                0 <= value <= 0xFFFF
+                for value in (foothold_id, origin_foothold_id)
+            ):
+                raise argparse.ArgumentTypeError(
+                    "mob-spawn footholds must fit in uint16"
+                )
+        return MobEnterField(
+            object_id=original.object_id,
+            spawn=replace(
+                original.spawn,
+                x=position_x,
+                y=position_y,
+                foothold_id=foothold_id,
+                origin_foothold_id=origin_foothold_id,
+            ),
+        ).to_bytes()
     raise argparse.ArgumentTypeError(
-        "unknown pcap frame transform; use opcode=N or handoff=IPV4:PORT"
+        "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
+        "or mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
     )
 
 
@@ -2027,6 +2167,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reactive-mob-health-responses",
+        action="store_true",
+        help=(
+            "during hold-open, subtract decoded nonzero damage words from "
+            "exact modeled mob HP and emit typed opcode-293 health updates "
+            "plus opcode-280 removal on zero HP; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--send-after-transcript",
         dest="post_transcript_server_frames",
         action="append",
@@ -2540,6 +2689,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "requests_rejected": 0,
                 "response_packets_sent": 0,
                 "last_response": None,
+                "last_rejection": None,
             }
         if (
             arguments.item_pickup_evidence_transcript is not None
@@ -2605,6 +2755,24 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "submissions_observed": 0,
                 "responses_sent": 0,
                 "submissions_rejected": 0,
+            }
+        mob_health_response_policy = None
+        if arguments.reactive_mob_health_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-mob-health-responses requires "
+                    "--keep-world-open"
+                )
+            mob_health_response_policy = derive_mob_health_response_policy(
+                transcript
+            )
+            runtime_protocol["mob_health_responses"] = {
+                "state": mob_health_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
             }
         if arguments.validate_login_state or arguments.rewrite_handoff:
             analysis = analyze_login_transcript(transcript)
@@ -2748,6 +2916,13 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "--reactive-item-pickup-responses conflicts with a captured "
                 "client opcode 185 reply"
             )
+        if mob_health_response_policy is not None and any(
+            opcode in client_opcode_replies for opcode in (50, 52)
+        ):
+            raise ValueError(
+                "--reactive-mob-health-responses conflicts with captured "
+                "client opcode 50/52 replies"
+            )
         client_opcode_reply_delays = dict(arguments.client_opcode_reply_delays)
         if len(client_opcode_reply_delays) != len(
             arguments.client_opcode_reply_delays
@@ -2837,6 +3012,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
             ),
+            mob_health_response_policy=mob_health_response_policy,
             runtime_protocol=runtime_protocol,
         )
         runtime_config = {
@@ -2876,6 +3052,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "reactive_mob_movement_acknowledgements": (
                 arguments.reactive_mob_movement_acknowledgements
+            ),
+            "reactive_mob_health_responses": (
+                arguments.reactive_mob_health_responses
             ),
             "dropped_server_frame_indices": sorted(dropped_server_frames),
         }

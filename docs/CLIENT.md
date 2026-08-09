@@ -53,11 +53,23 @@ cd /home/sdancer/ms
 python tools/maplestory_classic_server/tools/launch_local_game.py --restart
 ```
 
+If automatic compositor discovery is ambiguous, pin the nested endpoints (the
+successful 2026-08-09 local run required this explicit form):
+
+```sh
+python tools/maplestory_classic_server/tools/launch_local_game.py --restart \
+  --display :1 \
+  --sway-socket /run/user/1000/sway-ipc.1000.195243.sock
+```
+
 The launcher discovers the active nested Sway socket and its wlroots Xwayland
 display, verifies that login port `12082` and world port `12857` are listening
 inside `mapleproxy`, starts/verifies `maplestory-audio-mute.service`,
 cold-restarts only this Wine prefix when `--restart` is requested, and focuses
 the new window through Sway.
+Discovery is the default, not a requirement; `--display` and `--sway-socket`
+are the deterministic fallback because those endpoint numbers can change after
+a compositor restart.
 It uses the four local placeholder arguments and never reads or prints an
 authenticated launch ticket. Run without `--restart` to make an existing game
 process a hard error instead of stopping it.
@@ -216,6 +228,25 @@ SWAYSOCK=$nested_sway_socket swaymsg 'seat seat0 cursor release button1'
 The Sway PID/socket is not stable across compositor restarts; list
 `/run/user/1000/sway-ipc.*.sock` and identify the one whose output is
 `X11-1`. Coordinates above are in that nested output's coordinate space.
+
+For keyboard input, use the repository helper so Unity receives a physical
+evdev scan code through the nested compositor's virtual-keyboard protocol:
+
+```sh
+cd /home/sdancer/ms
+XDG_RUNTIME_DIR=/run/user/1000 \
+WAYLAND_DISPLAY=wayland-2 \
+python tools/maplestory_classic_server/tools/send_wayland_evdev_key.py \
+  leftctrl --hold-ms 100
+```
+
+The helper builds and caches its small C client from the checked-in Wayland
+protocol definition. It accepts names such as `escape`, `leftctrl`, `insert`,
+and the arrow keys, or a numeric Linux evdev code. It neither connects to X11
+nor moves the host cursor. This matters for MapleStory's Unity raw-input path:
+named keys sent by `wtype` mapped Escape, Left Ctrl, and Insert to the same
+synthetic scan code in the live client, whereas evdev codes `1` and `29`
+correctly produced Escape and Left Ctrl.
 
 ## Wine graphics selection
 

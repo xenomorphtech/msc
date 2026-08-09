@@ -749,8 +749,35 @@ with a previously observed remote-player position; common vertical deltas are
 roughly 22-28 pixels, while larger deltas follow stale movement broadcasts.
 The fold emits both positions and their deltas as validation evidence. Relay-
 tag/unknown/auxiliary roles, the damage high bit, client target prefix/tail
-fields, and the six delayed one-HP prediction differences still prevent safe
-combat generation or replay.
+fields, and the six delayed one-HP prediction differences still prevent a
+claim that captured official combat relays or authority adjustments can be
+reproduced exactly.
+
+The custom server does have a narrower opt-in mob-health responder for state it
+owns. `--reactive-mob-health-responses` derives exact active HP where possible,
+adopts later typed opcode-`279` spawns whose template has a referenced max HP,
+and handles targeted client opcode `50`/`52` during hold-open. Each nonzero,
+non-high-bit damage word subtracts from integer HP in order and emits one typed
+opcode-`293` floor-percentage update. Zero damage emits nothing; damage after
+HP reaches zero in the same multi-hit action is skipped. A transition to zero
+emits opcode `293` with percentage `0`, then opcode `280` with leave reason `1`,
+and removes the mob from mutable state. Unknown/inactive targets, absent damage
+arrays, ambiguous adopted HP, and high-bit damage are rejected rather than
+guessed.
+
+For a controlled final-field target, a typed opcode-`279` PCAP source supports
+`?mob-spawn=X:Y` or `?mob-spawn=X:Y:FOOTHOLD:ORIGIN`. This rewrites only the
+validated signed position and optional foothold fields while preserving the
+captured object/template/remaining spawn shape. The live proof used stream
+`114`, injected stream-`92` frame `563` (template `100100`, max HP `8`) at the
+player position, and received a real opcode-`52` variant-`18` attack with
+damage `[27,32]`. The responder emitted opcodes `[293,280]`: the first hit
+produced `8 -> 0`, the already-terminal second hit was skipped, and the client
+remained active with generated heartbeats. The observed transcript folds
+validly with one attack, one zero-health update, one leave, no active mob, and
+no pending hit effect. This validates the modeled request/effect/lifecycle;
+because the injected spawn had no preceding opcode-`293` sample, it is not an
+additional offline next-percentage prediction sample.
 
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
@@ -860,9 +887,18 @@ planned/sent packet counts, and the predicted fold delta. When reactive mob
 movement acknowledgements are enabled,
 `protocol.mob_movement_acknowledgements` reports the identifier-free derived
 policy, its full-capture evidence, observed submissions, sent responses, and
-rejections. Per-hit combat prediction counters remain offline-analysis output
-from `analyze-gameplay --json`; they are not exposed in runtime status while
-combat generation/replay is disabled. Other methods are rejected with `405`;
+rejections. When reactive mob-health responses are enabled,
+`protocol.mob_health_responses.state` reports field epoch, aliased active mobs,
+template/current/max HP, floor percentage, capture-evidence counters, and the
+exact response rules. The parent object reports observed/served/rejected
+requests, response packets sent, and the last identifier-free response plan,
+including submitted damage, HP before/after, percentages, skipped zero or
+already-terminal hits, removal, and emitted opcode numbers. A safe
+`last_rejection` explains the most recent no-response decision without closing
+the held-open connection. The six official
+one-HP differences remain visible in offline `analyze-gameplay --json`
+evidence; runtime generation applies the documented exact custom-server rule.
+Other methods are rejected with `405`;
 unknown paths return `404`. The API
 deliberately has no remote binding or mutating route: startup rejects
 non-loopback addresses, so the current local-only threat model relies on
@@ -912,12 +948,37 @@ cd /home/sdancer/ms
 python tools/maplestory_classic_server/tools/launch_local_game.py --restart
 ```
 
+If discovery is ambiguous, pass the known nested endpoints explicitly:
+
+```sh
+python tools/maplestory_classic_server/tools/launch_local_game.py --restart \
+  --display :1 \
+  --sway-socket /run/user/1000/sway-ipc.1000.195243.sock
+```
+
 The script discovers nested Sway/Xwayland, checks both namespace listeners,
 requires the Maple-only audio mute service to be active, launches the local
 placeholder argument tuple, waits for a Maple window whose PID belongs to the
 newly live client process set, and focuses that exact Sway container. This keeps
 stale Xwayland Maple nodes from satisfying launch readiness.
 It intentionally cannot launch an authenticated official session.
+The socket/display values are not stable across compositor restarts; the
+explicit flags are a deterministic fallback when automatic selection finds
+zero or multiple candidates.
+
+Pointer input should use `swaymsg -s SOCKET 'seat seat0 cursor ...'` against
+the nested compositor. For Unity raw keyboard input, send a physical evdev code
+directly to that Wayland seat:
+
+```sh
+XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-2 \
+python tools/maplestory_classic_server/tools/send_wayland_evdev_key.py \
+  leftctrl --hold-ms 100
+```
+
+The helper builds/caches its checked-in C client and does not use X11 or move
+the main desktop cursor. It was required because named `wtype` events did not
+preserve distinct Unity scan codes in this setup.
 
 ## Current implementation steps
 
@@ -1033,3 +1094,9 @@ It intentionally cannot launch an authenticated official session.
     record attack-relay hits between submission and response. All six long-
     stream mismatches have no intervening modeled relay and exact authoritative-
     minus-submitted damage deltas `{-1: 1, +1: 5}`.
+41. Add an opt-in exact-HP mob responder, typed opcode-`279` spawn-position
+    transform, runtime API telemetry, and encrypted request/response tests.
+42. Inject a typed `100100` mob into the real stream-`114` field, receive a
+    two-hit opcode-`52`, emit the predicted zero-health/leave sequence, fold
+    the resulting transcript validly, and preserve active heartbeats. Retain a
+    separate boundary around unresolved official ±1 HP authority adjustments.

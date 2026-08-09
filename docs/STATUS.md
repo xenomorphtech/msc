@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 126 tests.
+- The custom-server suite currently passes all 137 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -54,8 +54,9 @@
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   25,597 full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 12,976 full, 21,604 partial,
-  627 unknown, and zero invalid; stream `114` reports 16/14/46/0. Twelve
-  long-corpus state-correlation warnings remain.
+  627 unknown, and zero invalid; stream `114` reports 16/14/46/0. Thirteen
+  long-corpus state-correlation warnings remain: the prior 12 plus one
+  aggregate warning for six one-HP combat prediction differences.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,
@@ -136,8 +137,17 @@
   as signed attack positions and are compared with prior remote-player
   positions in fold telemetry. Relay-tag/unknown/auxiliary roles, the damage
   high-bit marker, client target prefix/tail fields, and the source of six
-  delayed one-HP prediction differences remain neutral, so combat generation/
-  replay stays disabled.
+  delayed one-HP prediction differences remain neutral, so captured attack-
+  relay generation and official authority-adjustment replay stay disabled.
+- `--reactive-mob-health-responses` now provides a narrower exact transition
+  for custom-server-owned state. It adopts typed opcode-`279` spawns for known
+  max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits
+  floor-percentage opcode `293`, and emits opcode `280` reason `1` on zero HP.
+  A typed stream-`92` snail injected into the held-open stream-`114` field
+  received real damage `[27,32]`; the server produced `[293,280]`, folded one
+  matched zero-health effect and leave with no pending hits, and retained the
+  active client/heartbeat exchange. The policy explicitly does not synthesize
+  attack relays or claim to reproduce the six official ±1 HP adjustments.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups
@@ -219,8 +229,13 @@
   only PipeWire nodes named `Maplestory_Classic.exe` across relaunches.
 - `tools/maplestory_classic_server/tools/launch_local_game.py` now provides the
   repeatable browser/CDP/NGM-free local launch. It discovers nested
-  Sway/Xwayland, verifies both namespace listeners and the audio service, optionally
-  cold-restarts the Wine prefix, and focuses the new window through Sway.
+  Sway/Xwayland or accepts explicit socket/display pins, verifies both namespace
+  listeners and the audio service, optionally cold-restarts the Wine prefix,
+  and focuses the new window through Sway.
+- Nested pointer actions use the Sway seat rather than `xdotool`. The new
+  `send_wayland_evdev_key.py` helper builds a small checked-in virtual-keyboard
+  client and sends physical evdev codes directly to the nested Wayland seat;
+  this preserves Unity raw scan codes without moving the host cursor.
 
 ## Proxy result
 
@@ -316,6 +331,16 @@ stream-`92` world replay on port `12857`. The login transcript folds validly to
 and 19,753 server bytes. The security exchange is required and its ordering,
 not the mere presence of opcode `23`, was the missing completion condition.
 
+The same browser-free login path now reaches a stateful held-open world with a
+typed injected mob. Direct nested-Wayland Left Ctrl produced a real two-hit
+opcode-`52`; exact custom-server HP predicted `8 -> 0`, sent zero-health and
+leave packets, and the observed fold matched that action/effect/lifecycle while
+remaining `active`. `GET /api/v1/status` exposes the policy under
+`protocol.mob_health_responses`: its mutable state is nested under `state`, and
+the parent carries observed/served/rejected counts, response-packet count, and
+the last identifier-free response plan. The HTTP listener remains read-only
+and loopback-only, using namespace/OS access as its current security boundary.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
@@ -330,6 +355,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.
+4. Reuse the proven typed mob injection to exercise the derived opcode-`283`
+   movement acknowledgement policy through the real client.
 
 ## Useful proof artifacts
 

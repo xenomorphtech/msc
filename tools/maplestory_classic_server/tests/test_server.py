@@ -42,7 +42,9 @@ from maple_server.gameplay import (  # noqa: E402
     InventoryItemEntity,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
+    MobHealthResponsePolicy,
     MobMovementAcknowledgementPolicy,
+    ReactiveMobHealth,
     analyze_gameplay_transcript,
 )
 from maple_server.protocol import (  # noqa: E402
@@ -55,6 +57,7 @@ from maple_server.protocol import (  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     ChannelTransitionResponse,
     CharacterStatUpdate,
+    ClientAttackAction,
     FieldDropRemoval,
     FieldDropSpawn,
     HeartbeatProbe,
@@ -63,10 +66,14 @@ from maple_server.packets import (  # noqa: E402
     InventoryModification,
     ItemPickupRequest,
     ItemUseRequest,
+    MobEnterField,
+    MobHealthPercentageUpdate,
+    MobLeaveField,
     MobMovementAcknowledgement,
     MobMovementCommand,
     MobMovementPath,
     MobMovementSubmission,
+    MobSpawnData,
     NpcStateUpdate,
     PickupGainNotice,
     WorldHandoff,
@@ -488,6 +495,23 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertTrue(arguments.reactive_mob_movement_acknowledgements)
 
+    def test_replay_parser_accepts_reactive_mob_health_responses(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--hold-open-seconds",
+                "600",
+                "--keep-world-open",
+                "--reactive-mob-health-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_mob_health_responses)
+
     def test_parse_server_frame_patch(self) -> None:
         self.assertEqual(parse_server_frame_patch("3=0000ff"), (3, b"\x00\x00\xff"))
 
@@ -549,6 +573,36 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(str(parsed.address), "127.0.0.1")
         self.assertEqual(parsed.port, 12857)
         self.assertEqual(parsed.character_id, 1234)
+
+    def test_pcap_plaintext_reference_can_rewrite_typed_mob_spawn(self) -> None:
+        original = MobEnterField(
+            object_id=20_001,
+            spawn=MobSpawnData(
+                spawn_marker=1,
+                template_id=100_100,
+                opaque_status=b"\x00" * 22,
+                x=82,
+                y=234,
+                stance=3,
+                foothold_id=258,
+                origin_foothold_id=213,
+                spawn_effect=-1,
+                opaque_tail=b"\x00" * 4,
+            ),
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@92:0?mob-spawn=633:-2677:0:0"
+            )
+        parsed = MobEnterField.parse(payload)
+        self.assertEqual(parsed.object_id, 20_001)
+        self.assertEqual(parsed.spawn.template_id, 100_100)
+        self.assertEqual((parsed.spawn.x, parsed.spawn.y), (633, -2677))
+        self.assertEqual(parsed.spawn.foothold_id, 0)
+        self.assertEqual(parsed.spawn.origin_foothold_id, 0)
 
     def test_parse_zero_filled_frame_with_selector(self) -> None:
         self.assertEqual(
@@ -1646,6 +1700,156 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks)
             server.close()
             await server.wait_closed()
+
+    async def test_replay_responds_to_modeled_mob_damage_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-mob-health", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            object_id = 20_001
+            policy = MobHealthResponsePolicy(
+                mobs={
+                    object_id: ReactiveMobHealth(
+                        alias="mob:1",
+                        template_id=210_100,
+                        current_hp=50,
+                        max_hp=50,
+                    )
+                },
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "mob_health_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            hold_open_seconds=0.2,
+                            mob_health_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            attack = ClientAttackAction(
+                opcode=52,
+                local_object_index=1,
+                variant=18,
+                client_token=987_654_321,
+                control_value=0,
+                opaque_common_state=b"state",
+                value_1=3,
+                value_2=object_id,
+                opaque_suffix=(
+                    b"\x06"
+                    + b"\x00" * 13
+                    + struct.pack("<II", 40, 10)
+                    + b"\x00" * 9
+                ),
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(attack), client_iv, 300)
+                + crypt_payload(attack, client_iv)
+            )
+            await writer.drain()
+
+            response_iv = shuffle_iv(server_iv)
+            first_wire = await reader.readexactly(11)
+            first_update = MobHealthPercentageUpdate.parse(
+                crypt_payload(first_wire[4:], response_iv)
+            )
+            self.assertEqual(first_update.object_id, object_id)
+            self.assertEqual(first_update.health_percentage, 20)
+            response_iv = shuffle_iv(response_iv)
+            second_wire = await reader.readexactly(11)
+            second_update = MobHealthPercentageUpdate.parse(
+                crypt_payload(second_wire[4:], response_iv)
+            )
+            self.assertEqual(second_update.health_percentage, 0)
+            response_iv = shuffle_iv(response_iv)
+            leave_wire = await reader.readexactly(11)
+            leave = MobLeaveField.parse(
+                crypt_payload(leave_wire[4:], response_iv)
+            )
+            self.assertEqual(leave.object_id, object_id)
+            self.assertEqual(leave.reason, 1)
+
+            untargeted_attack = ClientAttackAction(
+                opcode=52,
+                local_object_index=1,
+                variant=2,
+                client_token=987_654_322,
+                control_value=0,
+                opaque_common_state=b"state",
+                value_1=3,
+                value_2=0,
+                opaque_suffix=b"\x00",
+            ).to_bytes()
+            next_client_iv = shuffle_iv(client_iv)
+            writer.write(
+                encode_frame_header(len(untargeted_attack), next_client_iv, 300)
+                + crypt_payload(untargeted_attack, next_client_iv)
+            )
+            await writer.drain()
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(reader.read(1), timeout=0.02)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            metrics = runtime_protocol["mob_health_responses"]
+            self.assertEqual(metrics["requests_observed"], 2)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 1)
+            self.assertEqual(metrics["response_packets_sent"], 3)
+            self.assertEqual(
+                metrics["last_response"]["server_opcodes"], [293, 293, 280]
+            )
+            self.assertEqual(
+                metrics["last_rejection"],
+                "client attack has no modeled mob target",
+            )
+            self.assertEqual(metrics["state"]["active_mobs"], [])
+            self.assertNotIn(object_id, policy.mobs)
 
     async def test_replay_generates_typed_mob_acknowledgement_during_hold_open(
         self,
