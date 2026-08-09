@@ -16,6 +16,7 @@ from .packets import (
     CharacterStatUpdate,
     CompactFieldTransition,
     FieldDropRemoval,
+    FieldDropSpawn,
     FieldLoadStage,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
@@ -80,6 +81,12 @@ class ObservedPlayerEntity:
     y: int
 
 
+@dataclass
+class FieldDropEntity:
+    alias: str
+    spawn: FieldDropSpawn = field(repr=False)
+
+
 @dataclass(frozen=True)
 class InventoryItemEntity:
     slot: int
@@ -108,6 +115,8 @@ CAPTURED_ITEM_USE_EFFECTS: dict[int, tuple[str, str, int]] = {
     2_000_014: ("current_mp", "max_mp", 80),
 }
 
+STACK_INVENTORY_TYPES = {"use": 2, "setup": 3, "etc": 4}
+
 
 @dataclass
 class PendingItemUse:
@@ -125,6 +134,8 @@ class PendingItemPickup:
     request_frame_index: int
     request_timestamp_ns: int
     request: ItemPickupRequest
+    expected_drop_kind: str | None
+    expected_value: int | None
     effect: dict[str, object] | None = None
     result_confirmed: bool = False
 
@@ -211,6 +222,9 @@ class GameplayGameState:
     observed_players: dict[int, ObservedPlayerEntity] = field(
         default_factory=dict, repr=False
     )
+    field_drops: dict[int, FieldDropEntity] = field(
+        default_factory=dict, repr=False
+    )
     packets_by_direction: Counter[str] = field(default_factory=Counter)
     plaintext_bytes_by_direction: Counter[str] = field(default_factory=Counter)
     npc_spawns: int = 0
@@ -270,8 +284,25 @@ class GameplayGameState:
     item_pickup_removal_matches: int = 0
     item_pickup_removal_mismatches: int = 0
     pending_item_pickups: int = 0
+    item_pickup_known_drops: int = 0
+    item_pickup_unknown_drops: int = 0
+    item_pickup_spawn_result_matches: int = 0
+    item_pickup_spawn_result_mismatches: int = 0
+    item_pickup_item_effects_by_template: dict[
+        int, set[tuple[str, int]]
+    ] = field(default_factory=dict, repr=False)
+    field_drop_spawn_packets: int = 0
+    field_drop_spawns: int = 0
+    field_drop_refreshes: int = 0
+    field_drop_refresh_mismatches: int = 0
+    field_drop_spawns_by_mode: Counter[int] = field(default_factory=Counter)
+    field_drop_spawns_by_kind: Counter[str] = field(default_factory=Counter)
+    field_drop_spawns_with_known_source_mob: int = 0
+    field_drop_spawns_with_unknown_source_mob: int = 0
     field_drop_removals: int = 0
     field_drop_removals_by_reason: Counter[int] = field(default_factory=Counter)
+    field_drop_removals_for_known_drop: int = 0
+    field_drop_removals_for_unknown_drop: int = 0
     movement_submissions: int = 0
     movement_submissions_for_unknown_mobs: int = 0
     movement_submissions_with_unknown_template: int = 0
@@ -351,6 +382,44 @@ class InitialPlayerHpReplayPlan:
                 "map_id": "unchanged",
                 "inventory": "unchanged",
                 "progression": "unchanged",
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class FinalFieldDropPositionReplayPlan:
+    server_frame_index: int
+    drop_alias: str
+    item_id: int
+    original_position_x: int
+    original_position_y: int
+    rewritten_position_x: int
+    rewritten_position_y: int
+    field_epoch: int
+    replacement: FieldDropSpawn = field(repr=False)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "server_frame_index": self.server_frame_index,
+            "drop": self.drop_alias,
+            "item_id": self.item_id,
+            "original_position": {
+                "x": self.original_position_x,
+                "y": self.original_position_y,
+            },
+            "rewritten_position": {
+                "x": self.rewritten_position_x,
+                "y": self.rewritten_position_y,
+            },
+            "field_epoch": self.field_epoch,
+            "prediction": {
+                "active_field_drop_count_delta": 0,
+                "drop_template": "unchanged",
+                "drop_ownership": "unchanged",
+                "drop_position": "rewritten",
+                "inventory": "unchanged",
+                "player_position": "unchanged",
                 "phase": "unchanged",
             },
         }
@@ -609,6 +678,218 @@ class ItemUseResponsePolicy:
 
 
 @dataclass(frozen=True)
+class ItemPickupResponsePlan:
+    request: ItemPickupRequest = field(repr=False)
+    drop_alias: str
+    inventory: str
+    slot: int
+    item_id: int
+    quantity_before: int
+    quantity_delta: int
+    quantity_after: int
+    inventory_update: InventoryChangeSet = field(repr=False)
+    gain_notice: PickupGainNotice = field(repr=False)
+    removal: FieldDropRemoval = field(repr=False)
+
+    @property
+    def plaintexts(self) -> tuple[bytes, bytes, bytes]:
+        return (
+            self.inventory_update.to_bytes(),
+            self.gain_notice.to_bytes(),
+            self.removal.to_bytes(),
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "drop": self.drop_alias,
+            "inventory": self.inventory,
+            "slot": self.slot,
+            "item_id": self.item_id,
+            "quantity_before": self.quantity_before,
+            "quantity_delta": self.quantity_delta,
+            "quantity_after": self.quantity_after,
+            "removal_reason": self.removal.reason,
+            "server_opcodes": [
+                self.inventory_update.opcode,
+                self.gain_notice.opcode,
+                self.removal.opcode,
+            ],
+        }
+
+
+@dataclass
+class ItemPickupResponsePolicy:
+    inventory_items: dict[str, dict[int, InventoryItemEntity]] = field(
+        repr=False
+    )
+    active_drops: dict[int, FieldDropEntity] = field(repr=False)
+    validated_item_effects: dict[int, tuple[str, int]] = field(repr=False)
+    field_epoch: int
+    source_item_pickup_requests: int = 0
+    source_spawn_result_matches: int = 0
+    source_effect_matches: int = 0
+    source_removal_matches: int = 0
+
+    def _matching_stack(
+        self, drop: FieldDropEntity
+    ) -> tuple[str, InventoryItemEntity, int]:
+        effect = self.validated_item_effects.get(drop.spawn.value)
+        if effect is None:
+            raise ValueError(
+                f"item template {drop.spawn.value} has no deterministic "
+                "captured pickup effect"
+            )
+        inventory, quantity_delta = effect
+        matches = tuple(
+            item
+            for item in self.inventory_items.get(inventory, {}).values()
+            if item.item_id == drop.spawn.value
+        )
+        if len(matches) != 1:
+            raise ValueError(
+                f"item template {drop.spawn.value} has {len(matches)} "
+                f"matching {inventory} stacks; exactly one is required"
+            )
+        return inventory, matches[0], quantity_delta
+
+    def safe_dict(self) -> dict[str, object]:
+        modeled_drops: list[dict[str, object]] = []
+        for entity in sorted(
+            self.active_drops.values(), key=lambda candidate: candidate.alias
+        ):
+            try:
+                inventory, item, quantity_delta = self._matching_stack(entity)
+            except ValueError:
+                continue
+            modeled_drops.append(
+                {
+                    "drop": entity.alias,
+                    "kind": entity.spawn.kind_name,
+                    "item_id": entity.spawn.value,
+                    "inventory": inventory,
+                    "slot": item.slot,
+                    "quantity": item.quantity,
+                    "pickup_quantity": quantity_delta,
+                }
+            )
+        return {
+            "field_epoch": self.field_epoch,
+            "modeled_drops": modeled_drops,
+            "source_evidence": {
+                "requests": self.source_item_pickup_requests,
+                "spawn_result_matches": self.source_spawn_result_matches,
+                "effect_matches": self.source_effect_matches,
+                "removal_matches": self.source_removal_matches,
+            },
+            "prediction": {
+                "server_opcodes": [39, 49, 312],
+                "inventory_quantity_delta": "captured_template_quantity",
+                "gain_notice": "captured_template_kind_and_quantity",
+                "field_drop_removal_reason": 5,
+                "active_field_drop_count_delta": -1,
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 39:
+            return
+        change_set = InventoryChangeSet.parse(plaintext)
+        inventory_names = {
+            inventory_type: name
+            for name, inventory_type in STACK_INVENTORY_TYPES.items()
+        }
+        for modification in change_set.modifications:
+            inventory = inventory_names.get(modification.inventory_type)
+            if inventory is None:
+                continue
+            items = self.inventory_items.setdefault(inventory, {})
+            if modification.operation == InventoryModification.ADD:
+                if modification.item is None:
+                    raise PacketShapeError(
+                        "item-pickup policy saw add without an item"
+                    )
+                added = InventoryItemEntity.from_initial(modification.item)
+                items[added.slot] = added
+            elif (
+                modification.operation
+                == InventoryModification.UPDATE_QUANTITY
+            ):
+                item = items.get(modification.slot)
+                if item is None:
+                    raise ValueError(
+                        f"item-pickup policy has no {inventory} slot "
+                        f"{modification.slot}"
+                    )
+                items[modification.slot] = replace(
+                    item, quantity=modification.quantity
+                )
+            else:
+                items.pop(modification.slot, None)
+
+    def respond(self, request: ItemPickupRequest) -> ItemPickupResponsePlan:
+        if request.field_epoch != self.field_epoch:
+            raise ValueError(
+                f"item-pickup request field epoch {request.field_epoch} does "
+                f"not match modeled epoch {self.field_epoch}"
+            )
+        drop = self.active_drops.get(request.drop_object_id)
+        if drop is None:
+            raise ValueError("item-pickup request references an unknown active drop")
+        if drop.spawn.drop_kind != FieldDropSpawn.ITEM:
+            raise ValueError("reactive mesos pickup responses are not modeled")
+        if drop.spawn.owner_value_1 != drop.spawn.owner_value_2:
+            raise ValueError("active drop has unequal capture-neutral owner values")
+        inventory, item, quantity_delta = self._matching_stack(drop)
+        if item.quantity is None:
+            raise ValueError("item-pickup target stack has no quantity")
+        quantity_after = item.quantity + quantity_delta
+        if not 1 <= quantity_after <= 0xFFFF:
+            raise ValueError("item-pickup target stack cannot accept the item")
+        inventory_update = InventoryChangeSet(
+            update_flag=0,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.UPDATE_QUANTITY,
+                    inventory_type=STACK_INVENTORY_TYPES[inventory],
+                    slot=item.slot,
+                    quantity=quantity_after,
+                ),
+            ),
+        )
+        gain_notice = PickupGainNotice(
+            result_flag=0,
+            kind=PickupGainNotice.ITEM,
+            item_id=drop.spawn.value,
+            quantity=quantity_delta,
+        )
+        removal = FieldDropRemoval(
+            reason=5,
+            drop_object_id=request.drop_object_id,
+            actor_id=drop.spawn.owner_value_1,
+            trailing_value=0,
+        )
+        plan = ItemPickupResponsePlan(
+            request=request,
+            drop_alias=drop.alias,
+            inventory=inventory,
+            slot=item.slot,
+            item_id=item.item_id,
+            quantity_before=item.quantity,
+            quantity_delta=quantity_delta,
+            quantity_after=quantity_after,
+            inventory_update=inventory_update,
+            gain_notice=gain_notice,
+            removal=removal,
+        )
+        self.apply_server_packet(inventory_update.to_bytes())
+        self.active_drops.pop(request.drop_object_id)
+        return plan
+
+
+@dataclass(frozen=True)
 class MobMovementAcknowledgementPolicy:
     status_values_by_template: dict[int, int]
     observations_by_template: dict[int, int]
@@ -749,6 +1030,22 @@ class GameplayAnalysis:
             if show_identifiers:
                 record["object_id"] = object_id
             observed_players.append(record)
+        field_drops: list[dict[str, object]] = []
+        for object_id, entity in sorted(
+            self.state.field_drops.items(), key=lambda item: item[1].alias
+        ):
+            spawn = entity.spawn
+            record = {"drop": entity.alias, **spawn.safe_dict()}
+            if show_identifiers:
+                record.update(
+                    {
+                        "drop_object_id": object_id,
+                        "owner_value_1": spawn.owner_value_1,
+                        "owner_value_2": spawn.owner_value_2,
+                        "source_mob_object_id": spawn.source_mob_object_id,
+                    }
+                )
+            field_drops.append(record)
         entry_character_id: int | str | None = None
         if self.state.entry_character_id is not None:
             entry_character_id = (
@@ -842,6 +1139,8 @@ class GameplayAnalysis:
                     self.state.observed_players
                 ),
                 "observed_remote_players": observed_players,
+                "active_field_drop_count": len(self.state.field_drops),
+                "field_drops": field_drops,
                 "active_npc_count": len(self.state.npcs),
                 "npcs": npcs,
                 "active_mob_count": len(self.state.mobs),
@@ -972,9 +1271,55 @@ class GameplayAnalysis:
                     self.state.item_pickup_removal_mismatches
                 ),
                 "pending_item_pickups": self.state.pending_item_pickups,
+                "item_pickup_known_drops": self.state.item_pickup_known_drops,
+                "item_pickup_unknown_drops": (
+                    self.state.item_pickup_unknown_drops
+                ),
+                "item_pickup_spawn_result_matches": (
+                    self.state.item_pickup_spawn_result_matches
+                ),
+                "item_pickup_spawn_result_mismatches": (
+                    self.state.item_pickup_spawn_result_mismatches
+                ),
+                "item_pickup_item_effects_by_template": {
+                    str(item_id): [
+                        {
+                            "inventory": inventory,
+                            "quantity_delta": quantity_delta,
+                        }
+                        for inventory, quantity_delta in sorted(effects)
+                    ]
+                    for item_id, effects in sorted(
+                        self.state.item_pickup_item_effects_by_template.items()
+                    )
+                },
+                "field_drop_spawn_packets": self.state.field_drop_spawn_packets,
+                "field_drop_spawns": self.state.field_drop_spawns,
+                "field_drop_refreshes": self.state.field_drop_refreshes,
+                "field_drop_refresh_mismatches": (
+                    self.state.field_drop_refresh_mismatches
+                ),
+                "field_drop_spawns_by_mode": dict(
+                    self.state.field_drop_spawns_by_mode
+                ),
+                "field_drop_spawns_by_kind": dict(
+                    self.state.field_drop_spawns_by_kind
+                ),
+                "field_drop_spawns_with_known_source_mob": (
+                    self.state.field_drop_spawns_with_known_source_mob
+                ),
+                "field_drop_spawns_with_unknown_source_mob": (
+                    self.state.field_drop_spawns_with_unknown_source_mob
+                ),
                 "field_drop_removals": self.state.field_drop_removals,
                 "field_drop_removals_by_reason": dict(
                     self.state.field_drop_removals_by_reason
+                ),
+                "field_drop_removals_for_known_drop": (
+                    self.state.field_drop_removals_for_known_drop
+                ),
+                "field_drop_removals_for_unknown_drop": (
+                    self.state.field_drop_removals_for_unknown_drop
                 ),
                 "movement_submissions": self.state.movement_submissions,
                 "movement_submissions_for_unknown_mobs": (
@@ -1433,6 +1778,11 @@ class GameplayStateFold:
             alias = self._alias(
                 self._drop_aliases, request.drop_object_id, "drop"
             )
+            drop = self.state.field_drops.get(request.drop_object_id)
+            if drop is None:
+                self.state.item_pickup_unknown_drops += 1
+            else:
+                self.state.item_pickup_known_drops += 1
             epoch_matches = request.field_epoch == self.state.field_epoch
             self.state.item_pickup_requests += 1
             if request.optional_proof:
@@ -1452,14 +1802,27 @@ class GameplayStateFold:
                     request_frame_index=frame.index,
                     request_timestamp_ns=frame.timestamp_ns,
                     request=request,
+                    expected_drop_kind=(
+                        drop.spawn.kind_name if drop is not None else None
+                    ),
+                    expected_value=(
+                        drop.spawn.value if drop is not None else None
+                    ),
                 )
             )
             self.state.pending_item_pickups += 1
             details: dict[str, object] = {
                 **request.safe_dict(),
                 "drop": alias,
+                "known_drop": drop is not None,
                 "field_epoch_matches": epoch_matches,
             }
+            if drop is not None:
+                details["predicted_result_kind"] = drop.spawn.kind_name
+                if drop.spawn.drop_kind == FieldDropSpawn.ITEM:
+                    details["predicted_item_id"] = drop.spawn.value
+                else:
+                    details["predicted_mesos_amount"] = drop.spawn.value
             self._event(
                 frame,
                 "item_pickup_requested",
@@ -2000,6 +2363,42 @@ class GameplayStateFold:
                         )
                 else:
                     result_matches = notice.result_flag == 0 and effect is None
+                if notice.kind == PickupGainNotice.ITEM:
+                    spawn_matches_notice = (
+                        pending.expected_drop_kind == "item"
+                        and pending.expected_value == notice.item_id
+                    )
+                elif notice.kind == PickupGainNotice.MESOS:
+                    spawn_matches_notice = (
+                        pending.expected_drop_kind == "mesos"
+                        and pending.expected_value == notice.mesos_amount
+                    )
+                else:
+                    spawn_matches_notice = (
+                        pending.expected_drop_kind == "item"
+                        and pending.expected_value == notice.special_value
+                    )
+                if spawn_matches_notice:
+                    self.state.item_pickup_spawn_result_matches += 1
+                else:
+                    self.state.item_pickup_spawn_result_mismatches += 1
+                if (
+                    result_matches
+                    and spawn_matches_notice
+                    and notice.kind == PickupGainNotice.ITEM
+                    and notice.item_id is not None
+                    and effect is not None
+                    and isinstance(effect.get("inventory"), str)
+                    and isinstance(effect.get("quantity_delta"), int)
+                ):
+                    self.state.item_pickup_item_effects_by_template.setdefault(
+                        notice.item_id, set()
+                    ).add(
+                        (
+                            effect["inventory"],
+                            effect["quantity_delta"],
+                        )
+                    )
                 pending.result_confirmed = True
                 alias = self._alias(
                     self._drop_aliases,
@@ -2012,6 +2411,7 @@ class GameplayStateFold:
                         "request_frame": pending.request_frame_index,
                         "effect": effect,
                         "effect_matches_notice": result_matches,
+                        "spawn_matches_notice": spawn_matches_notice,
                         "response_ms": round(
                             (
                                 frame.timestamp_ns
@@ -2050,6 +2450,89 @@ class GameplayStateFold:
                     "semantics remain neutral",
                 ),
             )
+        if opcode == 311:
+            spawn = FieldDropSpawn.parse(payload)
+            alias = self._alias(
+                self._drop_aliases, spawn.drop_object_id, "drop"
+            )
+            existing = self.state.field_drops.get(spawn.drop_object_id)
+            refresh_matches = (
+                existing is not None
+                and replace(
+                    existing.spawn,
+                    spawn_mode=spawn.spawn_mode,
+                )
+                == spawn
+            )
+            self.state.field_drop_spawn_packets += 1
+            self.state.field_drop_spawns_by_mode[spawn.spawn_mode] += 1
+            if existing is None:
+                self.state.field_drop_spawns += 1
+                self.state.field_drop_spawns_by_kind[spawn.kind_name] += 1
+                event_kind = "field_drop_spawned"
+            else:
+                self.state.field_drop_refreshes += 1
+                event_kind = "field_drop_refreshed"
+                if not refresh_matches:
+                    self.state.field_drop_refresh_mismatches += 1
+                    self.warnings.append(
+                        f"field-drop refresh for {alias} changed fields beyond "
+                        "the spawn mode"
+                    )
+            source_mob_alias: str | None = None
+            source_mob_known: bool | None = None
+            if spawn.source_mob_object_id:
+                source_mob_alias = self._alias(
+                    self._mob_aliases,
+                    spawn.source_mob_object_id,
+                    "mob",
+                )
+                source_mob_known = (
+                    spawn.source_mob_object_id in self.state.mob_templates
+                )
+                if source_mob_known:
+                    self.state.field_drop_spawns_with_known_source_mob += 1
+                else:
+                    self.state.field_drop_spawns_with_unknown_source_mob += 1
+            self.state.field_drops[spawn.drop_object_id] = FieldDropEntity(
+                alias=alias,
+                spawn=spawn,
+            )
+            details: dict[str, object] = {
+                **spawn.safe_dict(),
+                "drop": alias,
+                "new_drop": existing is None,
+                "refresh_matches_prior": refresh_matches,
+                "source_mob": source_mob_alias,
+                "source_mob_known": source_mob_known,
+                "field_epoch": self.state.field_epoch,
+            }
+            identifiers: dict[str, object] = {
+                "drop_object_id": spawn.drop_object_id,
+                "owner_value_1": spawn.owner_value_1,
+                "owner_value_2": spawn.owner_value_2,
+            }
+            if spawn.source_mob_object_id:
+                identifiers["source_mob_object_id"] = (
+                    spawn.source_mob_object_id
+                )
+            self._event(
+                frame,
+                event_kind,
+                details=details,
+                identifiers=identifiers,
+            )
+            return self._observation(
+                frame,
+                kind="field_drop_spawn",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=spawn,
+                details=details,
+                issues=(
+                    "drop spawn-mode, ownership values/flag, expiration, and "
+                    "final-flag roles remain neutral",
+                ),
+            )
         if opcode == 312 and len(payload) in {7, 11, 15}:
             removal = FieldDropRemoval.parse(payload)
             alias = self._alias(
@@ -2059,6 +2542,9 @@ class GameplayStateFold:
                 self._alias(self._player_aliases, removal.actor_id, "player")
                 if removal.actor_id is not None
                 else None
+            )
+            active_drop = self.state.field_drops.pop(
+                removal.drop_object_id, None
             )
             pending = next(
                 (
@@ -2071,10 +2557,15 @@ class GameplayStateFold:
             )
             self.state.field_drop_removals += 1
             self.state.field_drop_removals_by_reason[removal.reason] += 1
+            if active_drop is None:
+                self.state.field_drop_removals_for_unknown_drop += 1
+            else:
+                self.state.field_drop_removals_for_known_drop += 1
             details: dict[str, object] = {
                 **removal.safe_dict(),
                 "drop": alias,
                 "actor": actor_alias,
+                "known_active_drop": active_drop is not None,
                 "matched_pickup_request": pending is not None,
                 "field_epoch": self.state.field_epoch,
             }
@@ -2161,6 +2652,7 @@ class GameplayStateFold:
             )
             cleared_npcs = len(self.state.npcs)
             cleared_mobs = len(self.state.mobs)
+            cleared_drops = len(self.state.field_drops)
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -2172,6 +2664,7 @@ class GameplayStateFold:
             self.state.mobs.clear()
             self.state.mob_templates.clear()
             self.state.observed_players.clear()
+            self.state.field_drops.clear()
             self.state.player_x = None
             self.state.player_y = None
             self._drop_aliases.clear()
@@ -2186,6 +2679,7 @@ class GameplayStateFold:
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
                 "cleared_npcs": cleared_npcs,
                 "cleared_mobs": cleared_mobs,
+                "cleared_drops": cleared_drops,
                 "variant": (
                     "compact_transition"
                     if transition is not None
@@ -2883,6 +3377,7 @@ class GameplayStateFold:
                     "phase": self.state.phase.value,
                     "active_npcs": len(self.state.npcs),
                     "active_mobs": len(self.state.mobs),
+                    "active_field_drops": len(self.state.field_drops),
                     "pending_movements": self.state.pending_movements,
                     "pending_heartbeat_probes": (
                         self.state.pending_heartbeat_probes
@@ -2994,6 +3489,100 @@ def derive_item_use_response_policy(
     )
 
 
+def derive_item_pickup_response_policy(
+    transcript: Transcript,
+    *,
+    evidence_transcript: Transcript | None = None,
+) -> ItemPickupResponsePolicy:
+    """Build a conservative pickup responder from replay and capture evidence."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    evidence = (
+        analysis
+        if evidence_transcript is None or evidence_transcript is transcript
+        else analyze_gameplay_transcript(evidence_transcript)
+    )
+    if not evidence.valid:
+        raise ValueError("item-pickup evidence failed packet/state validation")
+    evidence_state = evidence.state
+    if (
+        evidence_state.item_pickup_effect_mismatches
+        or evidence_state.item_pickup_spawn_result_mismatches
+        or evidence_state.item_pickup_removal_mismatches
+        or evidence_state.item_pickup_unknown_drops
+        or evidence_state.pending_item_pickups
+    ):
+        raise ValueError(
+            "item-pickup evidence has unresolved request/response correlations"
+        )
+    ambiguous_effects = {
+        item_id: sorted(effects)
+        for item_id, effects in (
+            evidence_state.item_pickup_item_effects_by_template.items()
+        )
+        if len(effects) != 1
+    }
+    if ambiguous_effects:
+        raise ValueError(
+            "item-pickup effects are not deterministic for templates "
+            f"{ambiguous_effects}"
+        )
+    validated_item_effects = {
+        item_id: next(iter(effects))
+        for item_id, effects in (
+            evidence_state.item_pickup_item_effects_by_template.items()
+        )
+    }
+    if not validated_item_effects:
+        raise ValueError("item-pickup evidence has no validated item effects")
+    inventory_items = {
+        inventory: {item.slot: item for item in items}
+        for inventory, items in analysis.state.inventory_items.items()
+        if inventory in STACK_INVENTORY_TYPES
+    }
+    eligible_drops: dict[int, FieldDropEntity] = {}
+    for object_id, entity in analysis.state.field_drops.items():
+        spawn = entity.spawn
+        effect = validated_item_effects.get(spawn.value)
+        if (
+            spawn.drop_kind != FieldDropSpawn.ITEM
+            or effect is None
+            or spawn.owner_value_1 != spawn.owner_value_2
+        ):
+            continue
+        inventory, quantity_delta = effect
+        if quantity_delta <= 0:
+            continue
+        matching_stacks = tuple(
+            item
+            for item in inventory_items.get(inventory, {}).values()
+            if item.item_id == spawn.value
+            and item.quantity is not None
+            and item.quantity + quantity_delta <= 0xFFFF
+        )
+        if len(matching_stacks) == 1:
+            eligible_drops[object_id] = entity
+    if not eligible_drops:
+        raise ValueError(
+            "world transcript has no active item drop with a uniquely modeled "
+            "captured inventory effect"
+        )
+    return ItemPickupResponsePolicy(
+        inventory_items=inventory_items,
+        active_drops=eligible_drops,
+        validated_item_effects=validated_item_effects,
+        field_epoch=analysis.state.field_epoch,
+        source_item_pickup_requests=evidence_state.item_pickup_requests,
+        source_spawn_result_matches=(
+            evidence_state.item_pickup_spawn_result_matches
+        ),
+        source_effect_matches=evidence_state.item_pickup_effect_matches,
+        source_removal_matches=evidence_state.item_pickup_removal_matches,
+    )
+
+
 def derive_mob_movement_acknowledgement_policy(
     transcript: Transcript,
 ) -> MobMovementAcknowledgementPolicy:
@@ -3066,6 +3655,67 @@ def derive_mob_movement_acknowledgement_policy(
             state.movement_acknowledgement_zero_auxiliary_pairs
         ),
         pending_submissions=state.pending_movements,
+    )
+
+
+def plan_final_field_drop_position_rewrite(
+    transcript: Transcript,
+    position_x: int,
+    position_y: int,
+) -> FinalFieldDropPositionReplayPlan:
+    """Move one typed final field-load drop without changing its identity."""
+
+    for name, value in (("x", position_x), ("y", position_y)):
+        if not -0x8000 <= value <= 0x7FFF:
+            raise ValueError(f"rewritten drop position {name} must fit in i16")
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    active_drops = tuple(analysis.state.field_drops.items())
+    if len(active_drops) != 1:
+        raise ValueError(
+            "world transcript final field must contain exactly one active drop"
+        )
+    drop_object_id, entity = active_drops[0]
+    spawn = entity.spawn
+    if (
+        spawn.spawn_mode != FieldDropSpawn.FIELD_LOAD_MODE
+        or spawn.drop_kind != FieldDropSpawn.ITEM
+    ):
+        raise ValueError(
+            "final active drop must use the captured field-load item variant"
+        )
+    observation = next(
+        (
+            candidate
+            for candidate in reversed(analysis.observations)
+            if isinstance(candidate.parsed, FieldDropSpawn)
+            and candidate.parsed.drop_object_id == drop_object_id
+        ),
+        None,
+    )
+    if observation is None:
+        raise ValueError("final active drop has no typed spawn observation")
+    replacement = replace(
+        spawn,
+        position_x=position_x,
+        position_y=position_y,
+    )
+    payload = replacement.to_bytes()
+    if len(payload) != observation.length:
+        raise ValueError("drop position rewrite unexpectedly changed packet length")
+    if FieldDropSpawn.parse(payload) != replacement:
+        raise ValueError("drop position rewrite failed packet round-trip validation")
+    return FinalFieldDropPositionReplayPlan(
+        server_frame_index=observation.direction_index,
+        drop_alias=entity.alias,
+        item_id=spawn.value,
+        original_position_x=spawn.position_x,
+        original_position_y=spawn.position_y,
+        rewritten_position_x=position_x,
+        rewritten_position_y=position_y,
+        field_epoch=analysis.state.field_epoch,
+        replacement=replacement,
     )
 
 
@@ -3154,8 +3804,7 @@ def plan_inventory_quantity_update(
     analysis = analyze_gameplay_transcript(transcript)
     if not analysis.valid:
         raise ValueError("world transcript failed packet/state validation")
-    inventory_types = {"use": 2, "setup": 3, "etc": 4}
-    inventory_type = inventory_types.get(inventory)
+    inventory_type = STACK_INVENTORY_TYPES.get(inventory)
     if inventory_type is None:
         raise ValueError("inventory quantity update requires use, setup, or etc")
     if not 1 <= slot <= 0x7FFF:
@@ -3344,7 +3993,13 @@ def render_gameplay_analysis(
             f"extended:{state.item_pickup_extended_requests} "
             f"epoch_matches:{state.item_pickup_field_epoch_matches} "
             f"epoch_mismatches:{state.item_pickup_field_epoch_mismatches} "
+            f"known_drops:{state.item_pickup_known_drops} "
+            f"unknown_drops:{state.item_pickup_unknown_drops} "
             f"results:{state.item_pickup_results} "
+            "spawn_result_matches:"
+            f"{state.item_pickup_spawn_result_matches} "
+            "spawn_result_mismatches:"
+            f"{state.item_pickup_spawn_result_mismatches} "
             f"effect_matches:{state.item_pickup_effect_matches} "
             f"effect_mismatches:{state.item_pickup_effect_mismatches} "
             "inferred_mesos_baselines:"
@@ -3353,6 +4008,19 @@ def render_gameplay_analysis(
             f"removal_mismatches:{state.item_pickup_removal_mismatches} "
             f"field_removals:{state.field_drop_removals} "
             f"pending:{state.pending_item_pickups}"
+        ),
+        (
+            f"field_drops=active:{len(state.field_drops)} "
+            f"packets:{state.field_drop_spawn_packets} "
+            f"spawned:{state.field_drop_spawns} "
+            f"refreshed:{state.field_drop_refreshes} "
+            f"refresh_mismatches:{state.field_drop_refresh_mismatches} "
+            "known_source_mob:"
+            f"{state.field_drop_spawns_with_known_source_mob} "
+            "unknown_source_mob:"
+            f"{state.field_drop_spawns_with_unknown_source_mob} "
+            f"removed_known:{state.field_drop_removals_for_known_drop} "
+            f"removed_unknown:{state.field_drop_removals_for_unknown_drop}"
         ),
         (
             f"progression=skills:{len(state.skill_levels)} "

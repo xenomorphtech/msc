@@ -374,18 +374,57 @@ and 20/20 matched heartbeat pairs.
 ## Pickup request/effect validation
 
 The gameplay analyzer now decodes the complete capture-observed pickup chain:
-client opcode `185`, the positive opcode-`39` inventory or opcode-`41` mesos
-effect, server opcode `49`, and server opcode `312`. Stream `92` contains 54
-requests (48 base plus six with a 12-byte opaque proof), 54 short result
-records, and 100 field-drop removals. All records round-trip. Exact drop-id
-correlation yields 24 item, 29 mesos, and one special result; all 54 effects
-and all 54 local removals match with zero pending requests. Reports use
-field-local `drop:N` aliases and do not print runtime drop or actor ids.
+server opcode `311`, client opcode `185`, the positive opcode-`39` inventory or
+opcode-`41` mesos effect, server opcode `49`, and server opcode `312`. Stream
+`92` contains 125 spawns for 66 unique drops, 54 requests (48 base plus six
+with a 12-byte opaque proof), 54 short result records, and 100 removals. All
+records round-trip. Fifty-nine drops have an exact mode-`1`/mode-`0` refresh
+pair and seven are mode-`2` field-load items. Every pickup request names a
+known active spawn; all 54 result values and all 54 local removals match that
+spawn, with zero pending requests. Reports use field-local `drop:N` aliases and
+do not print runtime drop, owner, source-mob, or actor ids.
 
-This is currently a validation/folding boundary, not a live generator. Stream
-`114` has no safe field drop left at hold-open, so a real-client replay first
-needs a typed opcode-`311` spawn model. Until then the server deliberately does
-not synthesize a drop id, validation token, or opaque proof.
+Stream `114` ends with one active mode-`2` drop: item template `4000004` at
+`(-863,-1742)`. The final folded player position is `(633,-2677)`, and Etc
+slot `7` contains the same item at quantity `74`. Stream `92` independently
+proves four pickups of template `4000004`, each as an Etc quantity delta of one,
+an item gain notice quantity of one, and a reason-`5` removal whose actor equals
+the spawn's two captured owner values.
+
+The replay now has two typed controls for a real pickup A/B:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/Downloads/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --rewrite-final-field-drop-position 633:-2677 \
+  --reactive-item-pickup-responses \
+  --item-pickup-evidence-tcp-stream 92 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_item_pickup \
+  --timing-scale 1 \
+  --hold-open-seconds 300
+```
+
+The rewrite changes only the typed coordinates in the 38-byte captured spawn;
+the drop id, item template, ownership-neutral fields, expiration, and flags are
+preserved and round-trip. The reactive policy accepts only the known active
+drop, current field epoch, deterministic captured template effect, and exactly
+one existing stack with capacity. It predicts and emits opcode `39` (`74 ->
+75`), opcode `49` (item `4000004`, quantity `1`), and opcode `312` (reason `5`)
+in that order, then removes the drop from mutable server state. Mesos, special,
+new-slot, ambiguous-stack, and unknown-template cases remain rejected. The
+client still supplies its own validation token; the server does not synthesize
+or assign semantics to it.
 
 ## Historical synthetic staging experiment
 
@@ -543,6 +582,14 @@ project's own `README.md` for all options.
   exact stack decrements plus potion stat effects. A reactive live request
   produced the predicted red-potion `2 -> 1` and HP `50 -> 100` effects, with
   zero mismatches and continued heartbeats.
+- All 125 stream-`92` opcode-`311` packets round-trip and fold into 66 drop
+  lifecycles. All 54 pickup requests, gain values, effects, and local removals
+  correlate with an active spawn; stream `114` ends with one modeled active
+  item drop rather than none.
+- The typed stream-`114` pickup plan resolves `drop:1`, item `4000004`, Etc
+  slot `7`, quantity `74`, and the four matching stream-`92` effects. Its
+  position rewrite round-trips at the same 38-byte width, and encrypted replay
+  tests produce the predicted opcodes `39,49,312` and mutable `74 -> 75` state.
 
 ## Next server milestone
 
@@ -550,9 +597,9 @@ Replace the remaining opaque replay portions with stateful handling:
 
 1. Decode the inner 167 bytes of each character-list response record and emit
    it from typed player state.
-2. Decode opcode-`311` field-drop spawn and use the modeled opcode-`185` chain
-   for a controlled real-client pickup A/B; continue with equipment and
-   interaction captures.
+2. Run the typed opcode-`311`/opcode-`185` controlled real-client pickup A/B,
+   compare the observed inventory/removal fold with the `74 -> 75` prediction,
+   then continue with equipment and interaction captures.
 3. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
 4. Obtain a short final-field capture with a known mob and validate the typed

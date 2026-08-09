@@ -20,12 +20,15 @@ from .gamestate import (
     render_login_analysis,
 )
 from .gameplay import (
+    ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobMovementAcknowledgementPolicy,
     analyze_gameplay_transcript,
+    derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
     plan_current_hp_stat_update,
+    plan_final_field_drop_position_rewrite,
     plan_final_field_npc_state_replay,
     plan_initial_player_hp_rewrite,
     plan_inventory_quantity_update,
@@ -36,6 +39,7 @@ from .http_api import ServerRuntime, start_runtime_http_api
 from .packets import (
     ChannelTransitionResponse,
     HeartbeatProbe,
+    ItemPickupRequest,
     ItemUseRequest,
     MobMovementSubmission,
     PacketShapeError,
@@ -367,6 +371,7 @@ async def replay_connection(
     npc_state_replay_plaintext: bytes | None = None,
     player_stat_update_plaintext: bytes | None = None,
     inventory_quantity_update_plaintext: bytes | None = None,
+    item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
     item_use_response_policy: ItemUseResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
@@ -395,6 +400,10 @@ async def replay_connection(
     if item_use_response_policy is not None and hold_open_seconds <= 0:
         raise ValueError(
             "reactive item-use responses require a positive hold_open_seconds"
+        )
+    if item_pickup_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive item-pickup responses require a positive hold_open_seconds"
         )
     if initial_delay_seconds < 0:
         raise ValueError("initial_delay_seconds cannot be negative")
@@ -427,6 +436,13 @@ async def replay_connection(
     ):
         raise ValueError(
             "client opcode 80 cannot use both captured and modeled replies"
+        )
+    if (
+        item_pickup_response_policy is not None
+        and 185 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 185 cannot use both captured and modeled replies"
         )
     if (
         npc_state_replay_plaintext is not None
@@ -512,6 +528,17 @@ async def replay_connection(
     )
     if item_use_metrics is not None and not isinstance(item_use_metrics, dict):
         raise TypeError("runtime item_use_responses telemetry must be a dictionary")
+    item_pickup_metrics = (
+        runtime_protocol.get("item_pickup_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if item_pickup_metrics is not None and not isinstance(
+        item_pickup_metrics, dict
+    ):
+        raise TypeError(
+            "runtime item_pickup_responses telemetry must be a dictionary"
+        )
     mob_acknowledgement_metrics = (
         runtime_protocol.get("mob_movement_acknowledgements")
         if runtime_protocol is not None
@@ -528,6 +555,7 @@ async def replay_connection(
         if (
             client_opcode_replies
             or world_heartbeat_interval_seconds is not None
+            or item_pickup_response_policy is not None
             or item_use_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
         )
@@ -697,6 +725,7 @@ async def replay_connection(
             or pending_opcode_replies
             or remaining_opcode_replies
             or world_heartbeat_interval_seconds is not None
+            or item_pickup_response_policy is not None
             or item_use_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
         )
@@ -736,6 +765,12 @@ async def replay_connection(
                 if gap_delay_seconds > 0:
                     await asyncio.sleep(gap_delay_seconds)
             await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+            if item_pickup_response_policy is not None:
+                item_pickup_response_policy.apply_server_packet(plaintext)
+                if item_pickup_metrics is not None:
+                    item_pickup_metrics["state"] = (
+                        item_pickup_response_policy.safe_dict()
+                    )
             if item_use_response_policy is not None:
                 item_use_response_policy.apply_server_packet(plaintext)
                 if item_use_metrics is not None:
@@ -866,6 +901,66 @@ async def replay_connection(
                         heartbeat_metrics["max_round_trip_ms"] = round(
                             max(float(prior_max or 0.0), round_trip_ms), 3
                         )
+                if (
+                    opcode == 185
+                    and item_pickup_response_policy is not None
+                ):
+                    request = ItemPickupRequest.parse(client_plaintext)
+                    if item_pickup_metrics is not None:
+                        item_pickup_metrics["requests_observed"] = (
+                            int(
+                                item_pickup_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    try:
+                        response_plan = item_pickup_response_policy.respond(
+                            request
+                        )
+                    except ValueError:
+                        if item_pickup_metrics is not None:
+                            item_pickup_metrics["requests_rejected"] = (
+                                int(
+                                    item_pickup_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                        raise
+                    for plaintext in response_plan.plaintexts:
+                        await send_encrypted_frame(
+                            encrypt_next_server_frame(plaintext)
+                        )
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if item_pickup_metrics is not None:
+                        item_pickup_metrics["requests_served"] = (
+                            int(
+                                item_pickup_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        item_pickup_metrics["response_packets_sent"] = (
+                            int(
+                                item_pickup_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        item_pickup_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        item_pickup_metrics["state"] = (
+                            item_pickup_response_policy.safe_dict()
+                        )
                 if opcode == 80 and item_use_response_policy is not None:
                     request = ItemUseRequest.parse(client_plaintext)
                     if item_use_metrics is not None:
@@ -885,6 +980,10 @@ async def replay_connection(
                         await send_encrypted_frame(
                             encrypt_next_server_frame(plaintext)
                         )
+                        if item_pickup_response_policy is not None:
+                            item_pickup_response_policy.apply_server_packet(
+                                plaintext
+                            )
                     if item_use_metrics is not None:
                         item_use_metrics["requests_served"] = (
                             int(item_use_metrics.get("requests_served", 0)) + 1
@@ -1218,6 +1317,21 @@ def parse_non_negative_int(specification: str) -> int:
     if value < 0:
         raise argparse.ArgumentTypeError("value cannot be negative")
     return value
+
+
+def parse_i16_position(specification: str) -> tuple[int, int]:
+    parts = specification.split(":")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("position must use X:Y")
+    try:
+        position_x, position_y = (int(part, 0) for part in parts)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "position coordinates must be integers"
+        ) from error
+    if not all(-0x8000 <= value <= 0x7FFF for value in (position_x, position_y)):
+        raise argparse.ArgumentTypeError("position coordinates must fit in i16")
+    return position_x, position_y
 
 
 def parse_inventory_quantity_update(
@@ -1774,6 +1888,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--rewrite-final-field-drop-position",
+        type=parse_i16_position,
+        metavar="X:Y",
+        help=(
+            "rewrite only the typed position of the final field's sole active "
+            "field-load item drop"
+        ),
+    )
+    replay.add_argument(
         "--emit-current-hp-update",
         type=int,
         metavar="HP",
@@ -1853,6 +1976,34 @@ def build_parser() -> argparse.ArgumentParser:
             "during hold-open, validate opcode-80 potion requests against the "
             "modeled Use inventory and emit typed opcode-39/opcode-41 effects; "
             "requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-item-pickup-responses",
+        action="store_true",
+        help=(
+            "during hold-open, validate opcode-185 requests against active "
+            "drops and captured item-effect evidence, then emit typed "
+            "opcode-39/opcode-49/opcode-312 responses; requires "
+            "--keep-world-open"
+        ),
+    )
+    item_pickup_evidence = replay.add_mutually_exclusive_group()
+    item_pickup_evidence.add_argument(
+        "--item-pickup-evidence-transcript",
+        type=Path,
+        help=(
+            "derive item-pickup result quantities and inventory targets from "
+            "a separate validated world transcript"
+        ),
+    )
+    item_pickup_evidence.add_argument(
+        "--item-pickup-evidence-tcp-stream",
+        type=parse_non_negative_int,
+        metavar="STREAM",
+        help=(
+            "derive item-pickup evidence from another TCP stream in the "
+            "replay --pcap"
         ),
     )
     replay.add_argument(
@@ -2379,6 +2530,50 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "response_packets_sent": 0,
                 "last_response": None,
             }
+        if (
+            arguments.item_pickup_evidence_transcript is not None
+            or arguments.item_pickup_evidence_tcp_stream is not None
+        ) and not arguments.reactive_item_pickup_responses:
+            raise ValueError(
+                "item-pickup evidence options require "
+                "--reactive-item-pickup-responses"
+            )
+        item_pickup_response_policy = None
+        if arguments.reactive_item_pickup_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-item-pickup-responses requires "
+                    "--keep-world-open"
+                )
+            item_pickup_evidence_transcript = None
+            if arguments.item_pickup_evidence_transcript is not None:
+                item_pickup_evidence_transcript = Transcript.load(
+                    arguments.item_pickup_evidence_transcript
+                )
+            elif arguments.item_pickup_evidence_tcp_stream is not None:
+                if arguments.pcap is None:
+                    raise ValueError(
+                        "--item-pickup-evidence-tcp-stream requires --pcap"
+                    )
+                item_pickup_evidence_transcript = load_pcap_tcp_stream(
+                    arguments.pcap,
+                    arguments.item_pickup_evidence_tcp_stream,
+                    tshark=arguments.tshark,
+                )
+            item_pickup_response_policy = (
+                derive_item_pickup_response_policy(
+                    transcript,
+                    evidence_transcript=item_pickup_evidence_transcript,
+                )
+            )
+            runtime_protocol["item_pickup_responses"] = {
+                **item_pickup_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+            }
         mob_movement_acknowledgement_policy = None
         if arguments.reactive_mob_movement_acknowledgements:
             if not arguments.keep_world_open:
@@ -2430,6 +2625,32 @@ async def async_main(arguments: argparse.Namespace) -> None:
             transcript = drop_normalized_client_frames(
                 transcript, set(arguments.drop_client_frame)
             )
+        field_drop_position_replay_plan = None
+        if arguments.rewrite_final_field_drop_position is not None:
+            position_x, position_y = (
+                arguments.rewrite_final_field_drop_position
+            )
+            field_drop_position_replay_plan = (
+                plan_final_field_drop_position_rewrite(
+                    transcript,
+                    position_x,
+                    position_y,
+                )
+            )
+            frame_index = field_drop_position_replay_plan.server_frame_index
+            if frame_index in server_frame_patches:
+                raise ValueError(
+                    f"server frame {frame_index} is set by both "
+                    "--server-frame-patch and "
+                    "--rewrite-final-field-drop-position"
+                )
+            server_frame_patches[frame_index] = (
+                field_drop_position_replay_plan.replacement.to_bytes()
+            )
+            runtime_protocol["final_field_drop_position_rewrite"] = {
+                **field_drop_position_replay_plan.safe_dict(),
+                "frames_patched": 1,
+            }
         initial_hp_replay_plan = None
         if arguments.rewrite_initial_current_hp is not None:
             initial_hp_replay_plan = plan_initial_player_hp_rewrite(
@@ -2462,6 +2683,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
             raise ValueError(
                 "--reactive-mob-movement-acknowledgements conflicts with "
                 "a captured client opcode 207 reply"
+            )
+        if (
+            item_pickup_response_policy is not None
+            and 185 in client_opcode_replies
+        ):
+            raise ValueError(
+                "--reactive-item-pickup-responses conflicts with a captured "
+                "client opcode 185 reply"
             )
         client_opcode_reply_delays = dict(arguments.client_opcode_reply_delays)
         if len(client_opcode_reply_delays) != len(
@@ -2547,6 +2776,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             inventory_quantity_update_plaintext=(
                 inventory_quantity_update_plaintext
             ),
+            item_pickup_response_policy=item_pickup_response_policy,
             item_use_response_policy=item_use_response_policy,
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
@@ -2569,12 +2799,21 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "rewrite_initial_current_hp": (
                 arguments.rewrite_initial_current_hp
             ),
+            "rewrite_final_field_drop_position": (
+                arguments.rewrite_final_field_drop_position
+            ),
             "emit_current_hp_update": arguments.emit_current_hp_update,
             "emit_inventory_quantity_update": (
                 arguments.emit_inventory_quantity_update
             ),
             "reactive_item_use_responses": (
                 arguments.reactive_item_use_responses
+            ),
+            "reactive_item_pickup_responses": (
+                arguments.reactive_item_pickup_responses
+            ),
+            "item_pickup_evidence_tcp_stream": (
+                arguments.item_pickup_evidence_tcp_stream
             ),
             "reactive_mob_movement_acknowledgements": (
                 arguments.reactive_mob_movement_acknowledgements

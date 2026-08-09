@@ -513,6 +513,69 @@ responses changed the visible inventory from `2` to `1` and the HUD from HP
 request, one matching inventory response, one matching stat effect, zero
 mismatches/pending requests, and 20 matched heartbeat pairs.
 
+## Field-drop spawn (`server 311`)
+
+Server opcode `311` creates or refreshes one field drop. Stream `92` contains
+125 packets and 66 unique `(field_epoch, drop_object_id)` pairs. Fifty-nine
+drops appear as an otherwise byte-identical mode-`1` then mode-`0` pair; seven
+item drops use the shorter mode-`2` field-load form. All 125 packets parse and
+re-encode byte-for-byte.
+
+The shared prefix is:
+
+```text
+uint16 opcode = 311
+uint8  spawn_mode                     # observed 0, 1, or 2
+uint32 drop_object_id
+uint8  drop_kind                      # 0 item, 1 mesos
+uint32 value                          # item template or mesos amount
+uint32 owner_value_1                  # role remains neutral
+uint32 owner_value_2                  # equal to owner_value_1 in all 125
+uint8  ownership_flag                 # zero in all 125
+int16  position_x
+int16  position_y
+uint32 source_mob_object_id
+```
+
+Modes `0` and `1` then carry the animation source and duration:
+
+```text
+int16  source_x
+int16  source_y
+uint16 animation_duration_ms          # 450 in all 118 animated records
+if drop_kind == 0: int64 expiration_ticks
+uint8  final_flag                     # one in all animated records
+```
+
+That produces 44-byte item records and 36-byte mesos records. Every nonzero
+source mob resolves to a field-local mob template retained after that mob's
+leave/death packet; none is an unmodeled object. Mode `2` is observed only for
+items and omits the animation fields:
+
+```text
+int64 expiration_ticks
+uint8 final_flag                      # zero in all seven field-load records
+```
+
+The resulting field-load item record is 38 bytes. Every captured item
+expiration is `150842304000000000`. The fold assigns `drop:N` aliases, treats
+mode `0` as a refresh of its matching mode-`1` record, retains active drops by
+field epoch, removes them on opcode `312`, and clears them on a field reset.
+Spawn mode, owner values/flag, expiration, and final-flag semantics remain
+neutral even though their packet boundaries are exact.
+
+All 54 stream-`92` opcode-`185` requests reference a currently active modeled
+drop. The following opcode-`49` value matches the spawn value in all 54 cases:
+24 item results, 29 mesos results, and the one special result whose value is
+the spawning item template. All 54 local reason-`5` removals also name that
+same active drop; their actor equals both captured owner values and their tail
+is zero. This establishes the complete spawn/request/effect/result/removal
+chain without assigning a security meaning to the client validation token.
+
+Stream `114` ends with one active mode-`2` item drop: template `4000004` at
+`(-863,-1742)`. The final folded local-player position is `(633,-2677)`, and
+the Etc inventory contains the same template in slot `7`, quantity `74`.
+
 ## Item pickup (`client 185` -> `server 39/41`, `server 49`, `server 312`)
 
 The capture-validated client request has a 23-byte base form and a 35-byte
@@ -583,6 +646,15 @@ actors. All 54 local removals follow a matching opcode-`49` result and leave no
 pending pickup. Request-to-removal latency is 27.829-111.964 ms, averaging
 79.723 ms. The behavioral meaning of the reason, actor, validation-token, and
 optional-proof fields remains deliberately neutral.
+
+For state-driven replay, a separate validated evidence transcript supplies the
+deterministic item effect. Stream `92` proves template `4000004` four times as
+an Etc quantity delta of one and an item gain notice quantity of one. The
+reactive policy therefore accepts only a known active item drop, the current
+field epoch, a deterministic captured template effect, and exactly one
+existing stack with capacity. It emits opcodes `39`, `49`, and `312` in that
+order and removes the drop from mutable state. Mesos pickups, special results,
+new-slot insertion, ambiguous stacks, and unknown templates remain rejected.
 
 ## Character stat deltas (`server 41`)
 

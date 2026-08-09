@@ -204,6 +204,37 @@ python -m maple_server replay \
   --hold-open-seconds 300
 ```
 
+`--rewrite-final-field-drop-position X:Y` changes only the typed position in
+the final field's sole active mode-`2` item-drop packet. Pair it with
+`--reactive-item-pickup-responses` to handle a real client opcode-`185`
+request from modeled state. Pickup quantities and inventory targets must come
+from validated evidence in the replay itself or from
+`--item-pickup-evidence-transcript`; when replaying a PCAP, another stream in
+that file can be selected with `--item-pickup-evidence-tcp-stream`. The policy
+serves only a known active item drop with a matching epoch and a unique
+existing stack, then emits opcodes `39`, `49`, and `312`:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /path/to/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --rewrite-final-field-drop-position 633:-2677 \
+  --reactive-item-pickup-responses \
+  --item-pickup-evidence-tcp-stream 92 \
+  --world-heartbeat-interval-seconds 10 \
+  --hold-open-seconds 300
+```
+
+The source stream's final drop is template `4000004`, Etc slot `7` already
+contains quantity `74`, and stream `92` independently proves four pickups of
+that template as an Etc delta/gain quantity of one. The server never invents a
+drop id or validation token: it preserves the captured drop id, while the
+official client supplies its own token in the request.
+
 Validate a login capture and fold it into typed game state without printing
 account or character identifiers:
 
@@ -254,6 +285,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `185`: 23-byte and 35-byte item-pickup requests containing the
   folded field epoch, client tick, position, aliased drop id, neutral validation
   token, and optional 12-byte proof,
+- server opcode `311`: 44-byte animated item, 36-byte animated mesos, and
+  38-byte field-load item drop spawns; the fold tracks mode-`1`/mode-`0`
+  refresh pairs, source mobs, ownership-neutral fields, and active lifecycle,
 - server opcode `49`: the three pickup-result variants for item quantity, mesos
   amount, and a still-neutral special value,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
@@ -434,10 +468,13 @@ effect/result checks and all 54 removals match, with no pending requests. The
 actor-plus-tail records; 54 of the last group are the local correlated pickups
 and 11 belong to other actors. Actor and reason roles remain neutral.
 
-A live pickup replay is intentionally deferred: short stream `114` does not
-leave a modeled field drop available after replay. Generating one safely first
-requires the opcode-`311` field-drop spawn shape, so the server does not invent
-a runtime object id or validation token from adjacency alone.
+Opcode `311` closes the previously missing boundary. Stream `92` contains 125
+spawn packets for 66 unique drops: 59 exact mode-`1`/mode-`0` pairs and seven
+mode-`2` field-load items. Every one of the 54 pickup requests names a known
+active spawn, every result value matches that spawn, and every local removal
+closes the same drop. Stream `114` actually retains one mode-`2` item drop at
+hold-open; the typed rewrite can move it from `(-863,-1742)` to the final
+player position `(633,-2677)` without changing its captured identity.
 
 All 12,100 movement submissions now validate through the command-stream
 boundary: 40,090 commands total, comprising 39,282 type-`0` commands with
@@ -605,6 +642,14 @@ When reactive item-use responses are enabled, `protocol.item_use_responses`
 reports modeled potion slots and stats, observed/served/rejected request
 counts, response packet count, last response, and the current predicted
 inventory/stat state.
+When the final drop position is rewritten,
+`protocol.final_field_drop_position_rewrite` reports its alias/template,
+original and rewritten coordinates, field epoch, server-frame index, patch
+count, and predicted unchanged state. When reactive pickup responses are
+enabled, `protocol.item_pickup_responses` reports the eligible aliased drops,
+captured correlation evidence, observed/served/rejected request counts,
+response packet count, last identifier-free response, and current mutable
+inventory/drop state.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
 planned/sent packet counts, and the predicted fold delta. When reactive mob
@@ -731,3 +776,9 @@ It intentionally cannot launch an authenticated official session.
 24. Decode client opcode `80`, correlate all 17 captured potion requests with
     exact quantity/stat effects, serve the request reactively, and confirm the
     predicted live red-potion quantity `2 -> 1` and HP `50 -> 100` effects.
+25. Decode server opcode `311`, round-trip all 125 long-stream records, fold 66
+    drop lifecycles, and prove all 54 pickup values/removals against an active
+    spawn while retaining ownership/security fields as neutral.
+26. Derive a guarded item-pickup responder from stream `92`, rewrite only the
+    final stream-`114` drop position, and compare the predicted Etc quantity
+    `74 -> 75` plus drop removal in a controlled real-client A/B.

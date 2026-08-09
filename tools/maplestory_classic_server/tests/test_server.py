@@ -24,6 +24,7 @@ from maple_server.server import (  # noqa: E402
     parse_client_opcode_reply,
     parse_client_opcode_reply_delays,
     parse_client_opcode_result_rewrite,
+    parse_i16_position,
     parse_inventory_quantity_update,
     parse_server_opcode_byte_rewrite,
     parse_server_frame_patch,
@@ -37,7 +38,9 @@ from maple_server.server import (  # noqa: E402
     rewrite_channel_transition_world_from_selection,
 )
 from maple_server.gameplay import (  # noqa: E402
+    FieldDropEntity,
     InventoryItemEntity,
+    ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobMovementAcknowledgementPolicy,
     analyze_gameplay_transcript,
@@ -52,16 +55,20 @@ from maple_server.protocol import (  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     ChannelTransitionResponse,
     CharacterStatUpdate,
+    FieldDropRemoval,
+    FieldDropSpawn,
     HeartbeatProbe,
     HeartbeatResponse,
     InventoryChangeSet,
     InventoryModification,
+    ItemPickupRequest,
     ItemUseRequest,
     MobMovementAcknowledgement,
     MobMovementCommand,
     MobMovementPath,
     MobMovementSubmission,
     NpcStateUpdate,
+    PickupGainNotice,
     WorldHandoff,
     WorldSelection,
 )
@@ -417,6 +424,32 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertTrue(arguments.reactive_item_use_responses)
+
+    def test_replay_parser_accepts_typed_item_pickup_options(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--pcap",
+                "111.pcapng",
+                "--tcp-stream",
+                "114",
+                "--rewrite-final-field-drop-position",
+                "633:-2677",
+                "--reactive-item-pickup-responses",
+                "--item-pickup-evidence-tcp-stream",
+                "92",
+            ]
+        )
+
+        self.assertEqual(
+            arguments.rewrite_final_field_drop_position,
+            (633, -2677),
+        )
+        self.assertTrue(arguments.reactive_item_pickup_responses)
+        self.assertEqual(arguments.item_pickup_evidence_tcp_stream, 92)
+        self.assertEqual(parse_i16_position("0x10:-0x20"), (16, -32))
 
     def test_replay_parser_accepts_world_heartbeat_interval(self) -> None:
         arguments = build_parser().parse_args(
@@ -1258,6 +1291,146 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(metrics["response_packets_sent"], 2)
             self.assertEqual(policy.use_items[15].quantity, 1)
             self.assertEqual(policy.current_hp, 100)
+
+    async def test_replay_responds_to_modeled_item_pickup_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-item-pickup", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            drop_object_id = 40_004
+            spawn = FieldDropSpawn(
+                spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+                drop_object_id=drop_object_id,
+                drop_kind=FieldDropSpawn.ITEM,
+                value=4_010_003,
+                owner_value_1=300_001,
+                owner_value_2=300_001,
+                ownership_flag=0,
+                position_x=633,
+                position_y=-2677,
+                source_mob_object_id=0,
+                expiration_ticks=150_842_304_000_000_000,
+                final_flag=0,
+            )
+            policy = ItemPickupResponsePolicy(
+                inventory_items={
+                    "etc": {
+                        7: InventoryItemEntity(
+                            slot=7,
+                            record_type=2,
+                            item_id=4_010_003,
+                            cash_item=False,
+                            expires_at_ticks=150_842_304_000_000_000,
+                            quantity=74,
+                        )
+                    }
+                },
+                active_drops={
+                    drop_object_id: FieldDropEntity(
+                        alias="drop:1",
+                        spawn=spawn,
+                    )
+                },
+                validated_item_effects={4_010_003: ("etc", 1)},
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "item_pickup_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            hold_open_seconds=0.2,
+                            item_pickup_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = ItemPickupRequest(
+                control_value=0,
+                field_epoch=1,
+                client_tick=502_040,
+                position_x=633,
+                position_y=-2677,
+                drop_object_id=drop_object_id,
+                item_validation_token=1_352_639_939,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+
+            next_server_iv = shuffle_iv(server_iv)
+            inventory_wire = await reader.readexactly(14)
+            inventory_update = InventoryChangeSet.parse(
+                crypt_payload(inventory_wire[4:], next_server_iv)
+            )
+            self.assertEqual(inventory_update.modifications[0].quantity, 75)
+            next_server_iv = shuffle_iv(next_server_iv)
+            notice_wire = await reader.readexactly(16)
+            notice = PickupGainNotice.parse(
+                crypt_payload(notice_wire[4:], next_server_iv)
+            )
+            self.assertEqual((notice.item_id, notice.quantity), (4_010_003, 1))
+            next_server_iv = shuffle_iv(next_server_iv)
+            removal_wire = await reader.readexactly(19)
+            removal = FieldDropRemoval.parse(
+                crypt_payload(removal_wire[4:], next_server_iv)
+            )
+            self.assertEqual(removal.reason, 5)
+            self.assertEqual(removal.actor_id, 300_001)
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            metrics = runtime_protocol["item_pickup_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 3)
+            self.assertEqual(policy.inventory_items["etc"][7].quantity, 75)
+            self.assertEqual(policy.active_drops, {})
 
     async def test_replay_delays_before_and_between_post_transcript_frames(
         self,

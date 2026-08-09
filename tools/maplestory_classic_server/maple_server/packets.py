@@ -2441,6 +2441,224 @@ class PickupGainNotice:
 
 
 @dataclass(frozen=True)
+class FieldDropSpawn:
+    """Server field-drop entry in an animated or field-load variant."""
+
+    spawn_mode: int
+    drop_object_id: int
+    drop_kind: int
+    value: int
+    owner_value_1: int
+    owner_value_2: int
+    ownership_flag: int
+    position_x: int
+    position_y: int
+    source_mob_object_id: int
+    source_x: int | None = None
+    source_y: int | None = None
+    animation_duration_ms: int | None = None
+    expiration_ticks: int | None = None
+    final_flag: int = 0
+    opcode: int = 311
+
+    ITEM = 0
+    MESOS = 1
+    KIND_NAMES = {ITEM: "item", MESOS: "mesos"}
+    ANIMATED_MODES = {0, 1}
+    FIELD_LOAD_MODE = 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FieldDropSpawn":
+        reader = PacketReader(payload, packet_name="field_drop_spawn")
+        _expect_opcode(reader, 311)
+        spawn_mode = reader.u8("spawn_mode")
+        if spawn_mode not in cls.ANIMATED_MODES | {cls.FIELD_LOAD_MODE}:
+            raise PacketShapeError(
+                f"field_drop_spawn mode {spawn_mode} is not capture-modeled"
+            )
+        drop_object_id = reader.u32("drop_object_id")
+        drop_kind = reader.u8("drop_kind")
+        if drop_kind not in cls.KIND_NAMES:
+            raise PacketShapeError(
+                f"field_drop_spawn kind {drop_kind} is not capture-modeled"
+            )
+        value = reader.u32("value")
+        owner_value_1 = reader.u32("owner_value_1")
+        owner_value_2 = reader.u32("owner_value_2")
+        ownership_flag = reader.u8("ownership_flag")
+        position_x = reader.i16("position_x")
+        position_y = reader.i16("position_y")
+        source_mob_object_id = reader.u32("source_mob_object_id")
+        source_x: int | None = None
+        source_y: int | None = None
+        animation_duration_ms: int | None = None
+        if spawn_mode in cls.ANIMATED_MODES:
+            source_x = reader.i16("source_x")
+            source_y = reader.i16("source_y")
+            animation_duration_ms = reader.u16("animation_duration_ms")
+        elif drop_kind != cls.ITEM:
+            raise PacketShapeError(
+                "field-load drop spawn is only modeled for item records"
+            )
+        expiration_ticks = (
+            reader.i64("expiration_ticks") if drop_kind == cls.ITEM else None
+        )
+        final_flag = reader.u8("final_flag")
+        reader.finish()
+        return cls(
+            spawn_mode=spawn_mode,
+            drop_object_id=drop_object_id,
+            drop_kind=drop_kind,
+            value=value,
+            owner_value_1=owner_value_1,
+            owner_value_2=owner_value_2,
+            ownership_flag=ownership_flag,
+            position_x=position_x,
+            position_y=position_y,
+            source_mob_object_id=source_mob_object_id,
+            source_x=source_x,
+            source_y=source_y,
+            animation_duration_ms=animation_duration_ms,
+            expiration_ticks=expiration_ticks,
+            final_flag=final_flag,
+        )
+
+    @property
+    def kind_name(self) -> str:
+        return self.KIND_NAMES[self.drop_kind]
+
+    @property
+    def item_id(self) -> int | None:
+        return self.value if self.drop_kind == self.ITEM else None
+
+    @property
+    def mesos_amount(self) -> int | None:
+        return self.value if self.drop_kind == self.MESOS else None
+
+    @property
+    def animated(self) -> bool:
+        return self.spawn_mode in self.ANIMATED_MODES
+
+    def safe_dict(self) -> dict[str, int | str | bool | None]:
+        details: dict[str, int | str | bool | None] = {
+            "spawn_mode": self.spawn_mode,
+            "variant": "animated" if self.animated else "field_load",
+            "kind": self.kind_name,
+            "owner_values_equal": self.owner_value_1 == self.owner_value_2,
+            "ownership_flag": self.ownership_flag,
+            "position_x": self.position_x,
+            "position_y": self.position_y,
+            "source_mob_present": bool(self.source_mob_object_id),
+            "source_x": self.source_x,
+            "source_y": self.source_y,
+            "animation_duration_ms": self.animation_duration_ms,
+            "expiration_ticks": self.expiration_ticks,
+            "final_flag": self.final_flag,
+        }
+        if self.drop_kind == self.ITEM:
+            details["item_id"] = self.value
+        else:
+            details["mesos_amount"] = self.value
+        return details
+
+    def to_bytes(self) -> bytes:
+        if self.spawn_mode not in self.ANIMATED_MODES | {self.FIELD_LOAD_MODE}:
+            raise PacketShapeError(
+                f"field-drop spawn mode {self.spawn_mode} is unsupported"
+            )
+        if self.drop_kind not in self.KIND_NAMES:
+            raise PacketShapeError(
+                f"field-drop spawn kind {self.drop_kind} is unsupported"
+            )
+        for name, value, maximum in (
+            ("drop object id", self.drop_object_id, 0xFFFF_FFFF),
+            ("value", self.value, 0xFFFF_FFFF),
+            ("owner value 1", self.owner_value_1, 0xFFFF_FFFF),
+            ("owner value 2", self.owner_value_2, 0xFFFF_FFFF),
+            ("ownership flag", self.ownership_flag, 0xFF),
+            ("source mob object id", self.source_mob_object_id, 0xFFFF_FFFF),
+            ("final flag", self.final_flag, 0xFF),
+        ):
+            if not 0 <= value <= maximum:
+                raise PacketShapeError(f"field-drop {name} is out of range")
+        for name, value in (
+            ("position x", self.position_x),
+            ("position y", self.position_y),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(f"field-drop {name} must fit in i16")
+        body = struct.pack(
+            "<HBIBIIIBhhI",
+            self.opcode,
+            self.spawn_mode,
+            self.drop_object_id,
+            self.drop_kind,
+            self.value,
+            self.owner_value_1,
+            self.owner_value_2,
+            self.ownership_flag,
+            self.position_x,
+            self.position_y,
+            self.source_mob_object_id,
+        )
+        if self.animated:
+            if (
+                self.source_x is None
+                or self.source_y is None
+                or self.animation_duration_ms is None
+            ):
+                raise PacketShapeError(
+                    "animated field-drop spawn requires source position and duration"
+                )
+            for name, value in (
+                ("source x", self.source_x),
+                ("source y", self.source_y),
+            ):
+                if not -0x8000 <= value <= 0x7FFF:
+                    raise PacketShapeError(f"field-drop {name} must fit in i16")
+            if not 0 <= self.animation_duration_ms <= 0xFFFF:
+                raise PacketShapeError(
+                    "field-drop animation duration must fit in u16"
+                )
+            body += struct.pack(
+                "<hhH",
+                self.source_x,
+                self.source_y,
+                self.animation_duration_ms,
+            )
+        elif any(
+            value is not None
+            for value in (
+                self.source_x,
+                self.source_y,
+                self.animation_duration_ms,
+            )
+        ):
+            raise PacketShapeError(
+                "field-load drop spawn cannot carry animation fields"
+            )
+        if self.drop_kind == self.ITEM:
+            if self.expiration_ticks is None:
+                raise PacketShapeError(
+                    "item field-drop spawn requires expiration ticks"
+                )
+            if not -(1 << 63) <= self.expiration_ticks < (1 << 63):
+                raise PacketShapeError(
+                    "field-drop expiration ticks must fit in i64"
+                )
+            body += struct.pack("<q", self.expiration_ticks)
+        elif self.expiration_ticks is not None:
+            raise PacketShapeError(
+                "mesos field-drop spawn cannot carry expiration ticks"
+            )
+        if self.spawn_mode == self.FIELD_LOAD_MODE and self.drop_kind != self.ITEM:
+            raise PacketShapeError(
+                "field-load drop spawn is only modeled for item records"
+            )
+        return body + struct.pack("<B", self.final_flag)
+
+
+@dataclass(frozen=True)
 class FieldDropRemoval:
     """Server field-drop removal in one of the three capture-observed widths."""
 
