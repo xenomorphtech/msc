@@ -348,6 +348,18 @@ Baseline generation appears under
 inventory group/item counts, skill count, progression shape/variant,
 original/emitted/max HP, prediction, and patch count.
 
+The 2026-08-09 browser-free baseline run used
+`--generate-initial-field-snapshot` with stream `114`. Runtime status reported
+server frame `3`, one patch, nine inventory groups/54 items, six skills,
+`keyed_properties` variant `2`, and HP `50/222 -> 50/222`. The client entered
+map `101000000` and rendered level `12`, HP `50/222`, MP `97/342`, and EXP
+`1464`. The open observed transcript at
+`downloads/maple_custom_server_observed/initial_field_emitter_live_20260809/world/1786310643434685295_replay_12857.jsonl`
+independently folded validly to `active` with identical player, inventory, and
+progression state and 7/7 generated heartbeat pairs matched. This establishes
+the unchanged emitter as a real client-accepted generator, separately from the
+controlled HP mutation below.
+
 ## Typed post-transcript HP update validation
 
 Opcode `41` is the captured player-stat delta family. The model decodes the

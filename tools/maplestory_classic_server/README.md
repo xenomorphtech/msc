@@ -477,6 +477,16 @@ slots, a seven-byte neutral variant header, and the compact trailer. It reports
 `progression_typed: true` and `progression_shape: compact`; the complete packet
 re-emits byte-for-byte.
 
+The unmodified generator was also exercised through the real client with
+stream `114`. Runtime status reported frame `3`, one patch, nine inventory
+groups/54 items, six skills, `keyed_properties` variant `2`, and predicted HP
+`50/222 -> 50/222`. The client entered the field and displayed level `12`, HP
+`50/222`, MP `97/342`, and EXP `1464`. The concurrently recorded world
+transcript independently folded validly to `active` with identical player,
+inventory, and progression state and 7/7 matched heartbeats. This validates
+the no-mutation generator path through encryption and the client parser, not
+only offline byte equality.
+
 The typed HP rewrite was validated through the real client using stream `114`.
 The planner predicted HP `1/222` with map, inventory, progression, and phase
 unchanged. The client entered the field and displayed `HP 1 / 222`; analysis of

@@ -539,6 +539,15 @@ original/emitted/max HP, prediction, and `frames_patched`. The existing HP
 option performs its bounded mutation through the same generator and exposes
 the fields under `protocol.initial_player_hp_rewrite`.
 
+The baseline generator has also crossed the real-client boundary. In the
+2026-08-09 stream-`114` run, runtime status reported server frame `3`, one
+patch, nine inventory groups/54 items, six skills, keyed-property variant `2`,
+and unchanged HP `50/222`. The client rendered level `12`, HP `50/222`, MP
+`97/342`, and EXP `1464`. Its simultaneously captured transcript folds validly
+to `active` with those values, the same inventory/progression state, and 7/7
+matched generated heartbeats. Therefore the exact re-emission is accepted by
+the live encrypted client path as well as by the offline round-trip checks.
+
 The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server
 clock without replacing the initial player-stat model.

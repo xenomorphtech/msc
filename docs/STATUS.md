@@ -178,6 +178,13 @@
   identifier-free inventory/progression telemetry through
   `protocol.initial_field_snapshot_emitter`. The HP rewrite is a compatibility
   mutation over this same emitter.
+- A browser-free real-client stream-`114` run validated the unchanged emitter
+  end to end. Runtime status reported frame `3`, one patch, nine groups/54
+  items, six skills, keyed-property variant `2`, and HP `50/222 -> 50/222`.
+  The client entered the field with the predicted level, HP, MP, and EXP; the
+  live transcript
+  `initial_field_emitter_live_20260809/world/1786310643434685295_replay_12857.jsonl`
+  folds validly to `active` with identical state and 7/7 matched heartbeats.
 - `--rewrite-initial-current-hp` now performs a validated, same-length typed
   mutation of only the large opcode-`157` player HP field. A real stream-`114`
   replay changed captured HP `50/222` to `1/222`; the client entered the field
