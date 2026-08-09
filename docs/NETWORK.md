@@ -126,6 +126,10 @@ preserve that variable through both `sudo` calls.
 Capture directories are mode `0700`; transcripts are mode `0600`. JSONL data
 records contain timestamps, direction, and base64 payload. They can include
 session tickets or identifiers even though proxy credentials are not recorded.
+Custom replay transcripts may additionally contain bounded `runtime_event`
+annotations for identifier-free scheduler decisions. These records are not
+network payloads; their close record reports written/dropped counts and the
+gameplay analyzer warns when any annotations were dropped.
 
 The successful reference `/home/sdancer/ms/111.pcapng` is read directly
 with `tshark` by the custom server. It remains untracked by Git. TCP stream

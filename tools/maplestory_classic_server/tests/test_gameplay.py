@@ -3088,6 +3088,96 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("actor_id", str(safe["events"]))
         self.assertNotIn("actor_id", str(safe["packets"]))
 
+    def test_folds_safe_runtime_annotations_into_ordered_events(self) -> None:
+        transcript = fixture_gameplay_transcript()
+        close_event = transcript.events[-1]
+        annotated_close = replace(
+            close_event,
+            metadata={
+                "runtime_events_written": 1,
+                "runtime_events_dropped": 2,
+            },
+        )
+        runtime_event = TranscriptEvent(
+            event="runtime_event",
+            timestamp_ns=close_event.timestamp_ns,
+            metadata={
+                "kind": "mob_movement_policy_trigger_rejected",
+                "details": {
+                    "trigger": "matched_heartbeat",
+                    "reason": "cooldown",
+                    "cooldown_remaining_seconds": 3.5,
+                },
+            },
+        )
+        annotated = Transcript(
+            path=Path("annotated-gameplay.jsonl"),
+            events=(
+                *transcript.events[:-1],
+                runtime_event,
+                annotated_close,
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(annotated)
+
+        self.assertTrue(analysis.valid)
+        event = next(
+            event
+            for event in analysis.events
+            if event.kind == "mob_movement_policy_trigger_rejected"
+        )
+        self.assertEqual(event.direction, "runtime")
+        self.assertEqual(event.frame_index, analysis.decoded.frames[-1].index)
+        self.assertEqual(event.details["reason"], "cooldown")
+        self.assertEqual(
+            [event.index for event in analysis.events],
+            list(range(len(analysis.events))),
+        )
+        self.assertIn(
+            "mob_movement_policy_trigger_rejected",
+            str(analysis.safe_dict()["events"]),
+        )
+        self.assertTrue(
+            any(
+                "transcript dropped 2 runtime event annotations" in warning
+                for warning in analysis.warnings
+            )
+        )
+
+        invalid_annotation = replace(
+            runtime_event,
+            metadata={"kind": "invalid kind", "details": {}},
+        )
+        invalid_close = replace(
+            close_event,
+            metadata={"runtime_events_written": -1},
+        )
+        invalid_analysis = analyze_gameplay_transcript(
+            replace(
+                annotated,
+                events=(
+                    *transcript.events[:-1],
+                    invalid_annotation,
+                    invalid_close,
+                ),
+            )
+        )
+        self.assertFalse(invalid_analysis.valid)
+        self.assertTrue(
+            any(
+                "runtime transcript event kind" in issue
+                for issue in invalid_analysis.issues
+            )
+        )
+        self.assertTrue(
+            any(
+                "runtime_events_written must be a non-negative integer"
+                in issue
+                for issue in invalid_analysis.issues
+            )
+        )
+
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
 

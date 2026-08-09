@@ -911,7 +911,7 @@ async def replay_connection(
         if transcript_directory is not None
         else None
     )
-    error: str | None = None
+    connection_error: str | None = None
 
     async def read_live_frame() -> tuple[bytes, int | None, bytes]:
         nonlocal client_iv
@@ -1166,6 +1166,20 @@ async def replay_connection(
 
         movement_policy_cooldown_until = 0.0
 
+        def record_movement_policy_runtime_event(
+            kind: str,
+            details: dict[str, object],
+        ) -> None:
+            if observed is None:
+                return
+            observed.runtime_event(
+                kind,
+                {
+                    "trigger": mob_movement_policy_trigger,
+                    **details,
+                },
+            )
+
         async def observe_movement_policy_trigger_event() -> None:
             nonlocal movement_policy_cooldown_until
             now = asyncio.get_running_loop().time()
@@ -1184,6 +1198,14 @@ async def replay_connection(
                         "matched_events_observed", 0
                     )
                 ) + 1
+            record_movement_policy_runtime_event(
+                "mob_movement_policy_trigger_observed",
+                {
+                    "cooldown_remaining_seconds": round(
+                        cooldown_remaining, 6
+                    ),
+                },
+            )
             if not isinstance(
                 movement_schedule,
                 MobMovementBroadcastDecisionQueue,
@@ -1200,6 +1222,15 @@ async def replay_connection(
                             "events_ignored_after_completion", 0
                         )
                     ) + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_trigger_ignored",
+                    {
+                        "reason": "decision_queue_complete",
+                        "cooldown_remaining_seconds": round(
+                            cooldown_remaining, 6
+                        ),
+                    },
+                )
                 return
             if cooldown_remaining > 0:
                 if movement_policy_trigger_metrics is not None:
@@ -1216,6 +1247,15 @@ async def replay_connection(
                             "events_rejected_by_cooldown", 0
                         )
                     ) + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_trigger_rejected",
+                    {
+                        "reason": "cooldown",
+                        "cooldown_remaining_seconds": round(
+                            cooldown_remaining, 6
+                        ),
+                    },
+                )
                 return
             if (
                 isinstance(
@@ -1232,8 +1272,16 @@ async def replay_connection(
                             "decisions_started", 0
                         )
                     ) + 1
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "decision_started"
                 decisions_completed_before = (
                     movement_schedule.decisions_completed
+                )
+                decision_index = movement_schedule.decisions_planned + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_decision_started",
+                    {"decision_index": decision_index},
                 )
                 await send_movement_follow_up_decisions(
                     decision_limit=1,
@@ -1256,6 +1304,15 @@ async def replay_connection(
                     movement_policy_trigger_metrics[
                         "last_event_outcome"
                     ] = "decision_completed"
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_decision_completed",
+                    {
+                        "decision_index": decision_index,
+                        "cooldown_seconds": (
+                            mob_movement_policy_cooldown_seconds
+                        ),
+                    },
+                )
                 movement_policy_cooldown_until = (
                     asyncio.get_running_loop().time()
                     + mob_movement_policy_cooldown_seconds
@@ -1697,11 +1754,11 @@ async def replay_connection(
                         client_plaintext,
                     )
     except Exception as exception:
-        error = f"{type(exception).__name__}: {exception}"
+        connection_error = f"{type(exception).__name__}: {exception}"
         raise
     finally:
         if observed is not None:
-            observed.close(error=error)
+            observed.close(error=connection_error)
         client_writer.close()
         await client_writer.wait_closed()
 

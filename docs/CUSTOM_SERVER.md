@@ -1004,6 +1004,26 @@ folds validly with no warnings through
 type-`0` commands, and 16/16 matched heartbeats. The live client remained
 connected throughout and kept answering probes.
 
+Recorded replays now preserve the scheduler side of that proof as safe
+`runtime_event` JSONL records. Each qualifying trigger records an observation,
+then a start/completion, cooldown rejection, or completed-queue ignore outcome.
+The records contain only trigger mode, decision index, reason, and bounded
+timing values; they do not contain object or account identifiers. The gameplay
+analyzer merges them into the normal timestamp-ordered event stream with
+`direction: runtime` and the preceding packet's frame index. Writers cap them
+at 16,384 per transcript, report written/dropped totals in the close record,
+and make any dropped annotations an analysis warning.
+
+The browser-free annotation proof is
+`generated_mob_policy_events_visual_20260809/1786304141212541434_replay_12857.jsonl`.
+Its emitted events align the first observation/start with heartbeat-response
+frame `78`, decision-`2` completion with movement frame `80`, three rejections
+with frames `82`/`84`/`86` and exact remaining durations
+`4.006931`/`2.007733`/`0.006772`, the re-armed start with frame `88`, and
+decision-`3` completion with frame `90`. The fold is valid with no warnings,
+ends at `(1025,-2677)`, and contains five broadcasts/twenty-five commands plus
+15/15 matched heartbeats.
+
 For a client-originated gameplay event instead of liveness, use:
 
 ```text

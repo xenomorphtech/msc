@@ -68,7 +68,9 @@ it. Do not pass passwords directly on a command line.
 - `.env` contains raw credentials and must never be committed.
 - Protocol JSONL files may contain login tickets, session identifiers, or
   encrypted authentication payloads. Treat them as private even though proxy
-  credentials are not written into them.
+  credentials are not written into them. Custom replay `runtime_event`
+  annotations are deliberately identifier-free, but they share the same file
+  with packet data and do not make that transcript safe to publish.
 - Chromium's `/tmp/maple-proxied-login` profile contains authenticated browser
   state while it exists.
 - Packet captures (`.pcap`), strace logs, Wine logs, and screenshots can reveal

@@ -1139,6 +1139,24 @@ fold is valid with no warnings, exact
 `785 -> 833 -> 881 -> 929 -> 977 -> 1025` continuity, five broadcasts,
 twenty-five type-`0` commands, and 16/16 matched heartbeats.
 
+Because trigger acceptance is server policy rather than a Maple wire packet,
+observed replay JSONL can include a separate `runtime_event` record. Its
+nanosecond timestamp, safe kind, and JSON-safe details carry the trigger mode,
+decision index, outcome reason, and cooldown duration/remaining time. The
+gameplay analyzer orders these annotations alongside decoded packet events,
+marks their direction as `runtime`, and aligns each to the preceding packet
+frame without treating it as protocol bytes. The writer caps annotations at
+16,384 and places written/dropped counts in the close record; a nonzero drop
+count becomes an explicit analysis warning.
+
+The live annotation transcript directly emits observation/start events at
+response frame `78`, completion at movement frame `80`, cooldown rejections at
+frames `82`/`84`/`86`, re-arm/start at frame `88`, and final completion at
+frame `90`. The rejection records preserve exact remaining times
+`4.006931`, `2.007733`, and `0.006772` seconds. Its independent packet fold is
+valid and warning-free at `(1025,-2677)` with five broadcasts, twenty-five
+type-`0` commands, and 15/15 matched heartbeats.
+
 A second event mode consumes the existing typed mob-controller protocol rather
 than the heartbeat. `served-mob-movement` accepts only an opcode `207`
 submission that the capture-derived acknowledgement policy validates for a

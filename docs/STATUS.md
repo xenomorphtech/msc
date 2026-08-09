@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 151 tests.
+- The custom-server suite currently passes all 152 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -482,6 +482,17 @@ frames `89`/`90`. Runtime recorded two completed decisions and three cooldown
 rejections. The frozen transcript is valid with no warnings, ends at the
 predicted `(1025,-2677)`, and contains five broadcasts/twenty-five type-`0`
 commands plus 16/16 matched heartbeats. HTTP remains read-only.
+
+Replay transcripts now make policy decisions directly auditable. Bounded,
+JSON-safe `runtime_event` records capture trigger observations, decision
+starts/completions, cooldown rejections, and completed-queue ignores without
+identifiers. The gameplay analyzer merges them into its ordered event stream
+and aligns them with the preceding packet frame. The real-client proof records
+the first decision on frames `78`/`80`, three cooldown rejections on
+`82`/`84`/`86`, and re-arm/completion on `88`/`90`, including exact remaining
+cooldown values. Its packet and annotation fold is valid with no warnings at
+`(1025,-2677)`, five broadcasts/twenty-five commands, and 15/15 heartbeats.
+Writers cap annotations at 16,384 and surface any drops as analysis warnings.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.

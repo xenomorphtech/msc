@@ -791,6 +791,17 @@ were rejected during cooldown; response frame `88` re-armed movement frames
 rejections. The valid, warning-free transcript ends at `(1025,-2677)` with
 five broadcasts, twenty-five type-`0` commands, and 16/16 matched heartbeats.
 
+When transcript recording is enabled, the scheduler also writes identifier-free
+`runtime_event` annotations for trigger observations, decision
+starts/completions, cooldown rejections, and completed-queue ignores. The
+gameplay analyzer emits them in timestamp order with `direction: runtime` and
+the preceding packet frame index. The writer caps annotations at 16,384,
+stores written/dropped counts in the close record, and turns any drop into an
+analysis warning. In the live proof, frames `78`/`80` mark decision 2,
+`82`/`84`/`86` carry cooldown rejections with 4.006931/2.007733/0.006772
+seconds remaining, and `88`/`90` mark the re-armed decision 3. The independent
+fold is valid and warning-free at `(1025,-2677)` with 15/15 heartbeats.
+
 `--mob-movement-policy-trigger served-mob-movement` is the client-originated
 alternative. It requires `--reactive-mob-movement-acknowledgements`; one
 opcode-`207` submission starts one decision only after the modeled policy
@@ -1115,8 +1126,11 @@ python -m maple_server compare captures/session-one.jsonl captures/session-two.j
 ```
 
 Transcripts are JSONL files created with mode `0600`. Every data record has a
-nanosecond timestamp, direction, and base64 payload. Credentials are read from
-environment variables and are never stored in a transcript.
+nanosecond timestamp, direction, and base64 payload. Recorded replays may also
+contain bounded, JSON-safe `runtime_event` annotations; those records never
+stand in for wire bytes. Close records report written/dropped annotation
+counts, and the gameplay analyzer warns if the bound discarded any. Credentials
+are read from environment variables and are never stored in a transcript.
 
 ## Keep MapleStory audio muted
 

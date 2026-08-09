@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import Counter, deque
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -6091,6 +6092,62 @@ def world_session_termination_frame_index(transcript: Transcript) -> int:
     return termination.direction_index
 
 
+def _runtime_gameplay_events(
+    transcript: Transcript,
+    frames: tuple[PlainFrame, ...],
+    issues: list[str],
+) -> tuple[GameplayEvent, ...]:
+    frame_timestamps = [frame.timestamp_ns for frame in frames]
+    runtime_events: list[GameplayEvent] = []
+    for transcript_event in transcript.events:
+        if transcript_event.event != "runtime_event":
+            continue
+        metadata = transcript_event.metadata or {}
+        kind = metadata.get("kind")
+        details = metadata.get("details", {})
+        if (
+            not isinstance(kind, str)
+            or not kind
+            or not kind.replace("_", "").isalnum()
+        ):
+            issues.append(
+                "runtime transcript event kind must contain only letters, "
+                "digits, and underscores"
+            )
+            continue
+        if not isinstance(details, dict):
+            issues.append(
+                f"runtime transcript event {kind!r} details are not an object"
+            )
+            continue
+        try:
+            json.dumps(details)
+        except (TypeError, ValueError):
+            issues.append(
+                f"runtime transcript event {kind!r} details are not JSON-safe"
+            )
+            continue
+        preceding_position = (
+            bisect_right(frame_timestamps, transcript_event.timestamp_ns) - 1
+        )
+        frame_index = (
+            frames[preceding_position].index
+            if preceding_position >= 0
+            else -1
+        )
+        runtime_events.append(
+            GameplayEvent(
+                index=0,
+                timestamp_ns=transcript_event.timestamp_ns,
+                frame_index=frame_index,
+                direction="runtime",
+                kind=kind,
+                details=dict(details),
+            )
+        )
+    return tuple(runtime_events)
+
+
 def analyze_gameplay_transcript(transcript: Transcript) -> GameplayAnalysis:
     decoded = decode_transcript(transcript)
     fold = GameplayStateFold()
@@ -6100,12 +6157,43 @@ def analyze_gameplay_transcript(transcript: Transcript) -> GameplayAnalysis:
         decoded.frames[-1] if decoded.frames else None,
         transport_closed=transport_closed,
     )
+    events = [
+        *fold.events,
+        *_runtime_gameplay_events(transcript, decoded.frames, fold.issues),
+    ]
+    dropped_runtime_events = 0
+    for transcript_event in transcript.events:
+        if transcript_event.event != "close":
+            continue
+        close_metadata = transcript_event.metadata or {}
+        for count_name in (
+            "runtime_events_written",
+            "runtime_events_dropped",
+        ):
+            count = close_metadata.get(count_name, 0)
+            if type(count) is not int or count < 0:
+                fold.issues.append(
+                    f"transcript close {count_name} must be a "
+                    "non-negative integer"
+                )
+                continue
+            if count_name == "runtime_events_dropped":
+                dropped_runtime_events += count
+    if dropped_runtime_events:
+        fold.warnings.append(
+            f"transcript dropped {dropped_runtime_events} runtime event "
+            "annotations after reaching its bound"
+        )
+    events.sort(key=lambda event: event.timestamp_ns)
+    indexed_events = tuple(
+        replace(event, index=index) for index, event in enumerate(events)
+    )
     return GameplayAnalysis(
         source=str(transcript.path),
         decoded=decoded,
         state=fold.state,
         observations=observations,
-        events=tuple(fold.events),
+        events=indexed_events,
         transport_closed=transport_closed,
         issues=tuple(fold.issues),
         warnings=tuple(fold.warnings),

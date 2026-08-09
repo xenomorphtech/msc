@@ -259,14 +259,39 @@ class TranscriptTest(unittest.TestCase):
                 directory,
                 label="login:10282",
                 metadata={"upstream_port": 10282},
+                max_runtime_events=1,
             )
             writer.data("client_to_server", b"hello")
             writer.data("server_to_client", b"world")
+            writer.runtime_event(
+                "policy_decision",
+                {"decision_index": 2, "outcome": "started"},
+            )
+            writer.runtime_event("policy_decision", {"decision_index": 3})
+            with self.assertRaises(ValueError):
+                writer.runtime_event("unsafe", {"raw": b"identifier"})
             writer.close()
 
             transcript = Transcript.load(writer.path)
             self.assertEqual(transcript.client_bytes, b"hello")
             self.assertEqual(transcript.server_bytes, b"world")
+            self.assertEqual(transcript.events[3].event, "runtime_event")
+            self.assertEqual(
+                transcript.events[3].metadata,
+                {
+                    "kind": "policy_decision",
+                    "details": {
+                        "decision_index": 2,
+                        "outcome": "started",
+                    },
+                },
+            )
+            self.assertEqual(
+                transcript.events[-1].metadata["runtime_events_written"], 1
+            )
+            self.assertEqual(
+                transcript.events[-1].metadata["runtime_events_dropped"], 1
+            )
             self.assertEqual(writer.path.stat().st_mode & 0o777, 0o600)
 
     def test_common_edges(self) -> None:
@@ -2642,6 +2667,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.data("server_to_client", greeting + captured_frame)
             source_writer.close()
             source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
             object_id = 20_001
             template_id = 210_100
             controller = MobControllerChange(
@@ -2786,6 +2812,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             strict=False,
+                            transcript_directory=observed_directory,
                             post_transcript_server_frames=(
                                 controller,
                                 first_broadcast.to_bytes(),
@@ -3035,6 +3062,49 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 trigger_metrics["events_ignored_after_completion"], 0
+            )
+            observed_path = next(observed_directory.glob("*.jsonl"))
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(observed_path)
+            )
+            policy_events = [
+                event
+                for event in analysis.events
+                if event.kind.startswith("mob_movement_policy_")
+            ]
+            self.assertEqual(
+                [event.kind for event in policy_events],
+                [
+                    "mob_movement_policy_trigger_observed",
+                    "mob_movement_policy_decision_started",
+                    "mob_movement_policy_decision_completed",
+                    "mob_movement_policy_trigger_observed",
+                    "mob_movement_policy_trigger_rejected",
+                    "mob_movement_policy_trigger_observed",
+                    "mob_movement_policy_decision_started",
+                    "mob_movement_policy_decision_completed",
+                ],
+            )
+            self.assertTrue(
+                all(event.direction == "runtime" for event in policy_events)
+            )
+            self.assertEqual(
+                [
+                    event.details["decision_index"]
+                    for event in policy_events
+                    if event.kind
+                    == "mob_movement_policy_decision_completed"
+                ],
+                [2, 3],
+            )
+            rejected_event = next(
+                event
+                for event in policy_events
+                if event.kind == "mob_movement_policy_trigger_rejected"
+            )
+            self.assertEqual(rejected_event.details["reason"], "cooldown")
+            self.assertGreater(
+                rejected_event.details["cooldown_remaining_seconds"], 0
             )
 
     async def test_relative_mob_policy_waits_for_player_proximity_entry(
