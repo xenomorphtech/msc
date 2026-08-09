@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 116 tests.
+- The custom-server suite currently passes all 125 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -42,8 +42,17 @@
   SOCKS5 proxy. Its login stream contains 1,377 client bytes and 22,092 server
   bytes, followed by the expected `58880` exchange. The official account still
   receives the policy-restriction result before gameplay.
-- `/home/sdancer/Downloads/111.pcapng` supplies a separate successful
+- Repository-root `./111.pcapng` supplies a separate successful
   protocol-compatible reference: login stream `83` and world stream `92`.
+- Repository-root `./1-10FS.pcapng` supplies 55 minutes of level-1-to-10
+  gameplay on stream `126`. PCAP normalization trims its measured 14-byte
+  server and 28-byte client transport preludes before the ordinary Maple
+  greeting, then decrypts 71,100 frames. The fold now recognizes its
+  marker-`26` level-1 character/inventory snapshot, 36 total field epochs, 436
+  drop spawns, and all 197 pickup requests with known drops and matching
+  epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
+  bounded as partial; 49 strict-invalid variants remain across stat updates,
+  inventory changes, and NPC-spawn facing values.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups
@@ -102,7 +111,18 @@
   six extended), match their folded field epoch, inventory/mesos/special
   result, and exact drop-id removal. All 100 field-drop removals round-trip;
   the 54 local chains have zero effect/removal mismatches and zero pending
-  requests. A live A/B remains gated on decoding opcode-`311` drop spawn.
+  requests.
+- Server opcode `311` is typed across animated item/mesos, field-load item,
+  and field-load mesos variants. Stream `92` has 125 packets/66 drop
+  lifecycles; the level-1-to-10 corpus adds four exact 30-byte mode-`2` mesos
+  records. A guarded stream-`114` rewrite can change the final drop position
+  and/or make both neutral owner words equal the initial player id without
+  exposing identifiers through the runtime API.
+- The corresponding real-client owner/proximity hypothesis was falsified:
+  neither a mode-`2` owner rewrite nor a captured-shaped mode-`1`/mode-`0`
+  pair at the player position caused opcode `185`, despite verified pickup-key
+  binding and direct Wayland input. Runtime prediction now explicitly says
+  that owner equality requires additional client conditions.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -219,9 +239,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 1. Decode the captured opcode-`4` character-list inner records and generate the
    list from typed player state rather than replay bytes.
-2. Decode opcode-`311` field-drop spawn, then validate the modeled pickup chain
-   through a controlled real-client A/B; continue with equipment and
-   interaction requests.
+2. Use the owner/proximity negative controls to isolate the remaining
+   client-side drop eligibility condition; serve a reactive pickup only after
+   observing an authentic opcode-`185` request.
 3. Promote the complete initial opcode-`157` model from a safe one-field
    mutation to a generated field snapshot, then replace more finite replay
    frames with state-driven emitters.

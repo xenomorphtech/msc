@@ -150,6 +150,26 @@ def _assemble_source_stream(segments: tuple[TcpSegment, ...]) -> bytes:
     return bytes(assembled)
 
 
+def _maple_handshake_offset(data: bytes) -> int | None:
+    """Locate a bounded Maple greeting after an optional transport prelude."""
+
+    maximum_offset = min(max(0, len(data) - 6), 4096)
+    for offset in range(maximum_offset + 1):
+        try:
+            handshake = parse_handshake(data[offset:])
+        except ProtocolError:
+            continue
+        if (
+            0 < handshake.version < 10_000
+            and 0 < handshake.wire_length <= 256
+            and handshake.subversion.isprintable()
+            and len(handshake.first_iv) == 4
+            and len(handshake.second_iv) == 4
+        ):
+            return offset
+    return None
+
+
 def identify_maple_endpoints(
     segments: tuple[TcpSegment, ...]
 ) -> tuple[TcpEndpoint, TcpEndpoint]:
@@ -166,14 +186,12 @@ def identify_maple_endpoints(
             segment for segment in segments if segment.source == endpoint
         )
         try:
-            handshake = parse_handshake(_assemble_source_stream(source_segments))
-        except (ProtocolError, PcapError):
+            handshake_offset = _maple_handshake_offset(
+                _assemble_source_stream(source_segments)
+            )
+        except PcapError:
             continue
-        if (
-            0 < handshake.version < 10_000
-            and 0 < handshake.wire_length <= 256
-            and handshake.subversion.isprintable()
-        ):
+        if handshake_offset is not None:
             candidates.append(endpoint)
     if len(candidates) != 1:
         raise PcapError(
@@ -219,12 +237,49 @@ def transcript_from_tcp_segments(
     if not segments:
         raise PcapError("cannot construct a transcript from no TCP segments")
     client, server = identify_maple_endpoints(segments)
-    first_sequences = {
+    original_first_sequences = {
         endpoint: min(
             segment.sequence for segment in segments if segment.source == endpoint
         )
         for endpoint in (client, server)
     }
+    server_segments = tuple(
+        segment for segment in segments if segment.source == server
+    )
+    server_handshake_offset = _maple_handshake_offset(
+        _assemble_source_stream(server_segments)
+    )
+    if server_handshake_offset is None:
+        raise PcapError("identified Maple server has no bounded greeting")
+    first_sequences = dict(original_first_sequences)
+    if server_handshake_offset:
+        server_sequence = first_sequences[server] + server_handshake_offset
+        handshake_segment = next(
+            (
+                segment
+                for segment in sorted(
+                    server_segments, key=lambda item: item.timestamp_ns
+                )
+                if segment.sequence
+                <= server_sequence
+                < segment.sequence + len(segment.payload)
+            ),
+            None,
+        )
+        if handshake_segment is None:
+            raise PcapError("could not locate the Maple greeting TCP segment")
+        client_post_handshake = tuple(
+            segment
+            for segment in segments
+            if segment.source == client
+            and segment.timestamp_ns > handshake_segment.timestamp_ns
+        )
+        if not client_post_handshake:
+            raise PcapError("transport prelude has no post-greeting client data")
+        first_sequences[server] = server_sequence
+        first_sequences[client] = min(
+            segment.sequence for segment in client_post_handshake
+        )
     emitters = {
         endpoint: _ContiguousEmitter(first_sequences[endpoint])
         for endpoint in (client, server)
@@ -239,10 +294,22 @@ def transcript_from_tcp_segments(
                 "tcp_stream": tcp_stream,
                 "client_endpoint": str(client),
                 "server_endpoint": str(server),
+                "transport_prelude_bytes": {
+                    "client_to_server": (
+                        first_sequences[client]
+                        - original_first_sequences[client]
+                    ),
+                    "server_to_client": server_handshake_offset,
+                },
             },
         )
     ]
     for segment in sorted(segments, key=lambda item: item.timestamp_ns):
+        if (
+            segment.sequence + len(segment.payload)
+            <= first_sequences[segment.source]
+        ):
+            continue
         direction = (
             "client_to_server" if segment.source == client else "server_to_client"
         )

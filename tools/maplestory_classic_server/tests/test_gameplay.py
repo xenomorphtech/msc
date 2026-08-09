@@ -16,6 +16,7 @@ from maple_server.gameplay import (  # noqa: E402
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
     plan_current_hp_stat_update,
+    plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
     plan_inventory_quantity_update,
     plan_initial_player_hp_rewrite,
@@ -349,8 +350,8 @@ def fixture_initial_field_snapshot() -> InitialFieldSnapshot:
         sentinel_i64=-1,
         character_record_prefix=0,
         character=InitialCharacterSnapshot(
-            data_flags=302_104,
             character_id=CHARACTER_ID,
+            data_flags=4,
             name="player",
             gender=1,
             skin=0,
@@ -397,6 +398,7 @@ def fixture_gameplay_transcript(
     item_use: bool = False,
     item_pickup: bool = False,
     active_item_drop: bool = False,
+    active_item_drop_owner: int | None = None,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -435,8 +437,9 @@ def fixture_gameplay_transcript(
     append(
         "client_to_server",
         WorldEntryRequest(
+            entry_value=4,
             character_id=CHARACTER_ID,
-            opaque_ticket=b"sanitized-ticket".ljust(60, b"\x00"),
+            opaque_ticket=b"sanitized-ticket".ljust(56, b"\x00"),
         ).to_bytes(),
     )
     append(
@@ -720,16 +723,23 @@ def fixture_gameplay_transcript(
             ).to_bytes(),
         )
     if active_item_drop:
+        active_drop = fixture_field_drop_spawn(
+            spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+            drop_object_id=40_004,
+            drop_kind=FieldDropSpawn.ITEM,
+            value=4_010_003,
+            position_x=-863,
+            position_y=-1742,
+        )
+        if active_item_drop_owner is not None:
+            active_drop = replace(
+                active_drop,
+                owner_value_1=active_item_drop_owner,
+                owner_value_2=active_item_drop_owner,
+            )
         append(
             "server_to_client",
-            fixture_field_drop_spawn(
-                spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
-                drop_object_id=40_004,
-                drop_kind=FieldDropSpawn.ITEM,
-                value=4_010_003,
-                position_x=-863,
-                position_y=-1742,
-            ).to_bytes(),
+            active_drop.to_bytes(),
         )
     if player_movement:
         append(
@@ -867,6 +877,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "370102b70000000004093d00effe0300effe030000a1fc32f9"
                 "00000000008005bb46e6170200"
             ),
+            bytes.fromhex(
+                "370102170500000104000000a2d20200a2d2020000d2ff8b01"
+                "6191250001"
+            ),
         )
         spawns = tuple(FieldDropSpawn.parse(payload) for payload in spawn_payloads)
         self.assertEqual(
@@ -874,13 +888,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         self.assertEqual(
             tuple((spawn.spawn_mode, spawn.kind_name) for spawn in spawns),
-            ((1, "item"), (1, "mesos"), (2, "item")),
+            ((1, "item"), (1, "mesos"), (2, "item"), (2, "mesos")),
         )
         self.assertEqual(spawns[0].source_mob_object_id, 4_402_488)
         self.assertEqual(spawns[0].expiration_ticks, PERMANENT_ITEM_EXPIRATION)
         self.assertEqual(spawns[1].mesos_amount, 16)
         self.assertEqual(spawns[2].item_id, 4_000_004)
         self.assertFalse(spawns[2].animated)
+        self.assertEqual(spawns[3].mesos_amount, 4)
+        self.assertIsNone(spawns[3].expiration_ticks)
 
         gain_payloads = (
             bytes.fromhex("3100000013303d0001000000"),
@@ -1035,6 +1051,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
         encoded = snapshot.to_bytes()
 
         self.assertEqual(InitialFieldSnapshot.parse(encoded), snapshot)
+        self.assertEqual(snapshot.character.character_id, CHARACTER_ID)
+        self.assertEqual(snapshot.character.data_flags, 4)
         self.assertEqual(
             snapshot.typed_prefix_bytes,
             len(encoded) - len(snapshot.opaque_tail),
@@ -1066,8 +1084,49 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "marker"):
             replace(snapshot, marker=24).to_bytes()
+        marker_26 = replace(snapshot, marker=26)
+        self.assertEqual(
+            InitialFieldSnapshot.parse(marker_26.to_bytes()), marker_26
+        )
         with self.assertRaisesRegex(PacketShapeError, "tail"):
             replace(snapshot, opaque_tail=b"").to_bytes()
+
+    def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
+        stage = FieldLoadStage(
+            stage=0,
+            trailing=1,
+            opaque_tail=b"nine-byte",
+        )
+        update = NpcStateUpdate(
+            object_id=NPC_OBJECT_ID,
+            action=2,
+            parameter=3,
+            opaque_tail=b"capture-backed-tail",
+        )
+
+        self.assertEqual(FieldLoadStage.parse(stage.to_bytes()), stage)
+        self.assertEqual(NpcStateUpdate.parse(update.to_bytes()), update)
+        captured_stage = bytes.fromhex(
+            "9e0000000000010000002a00000001e8030000"
+        )
+        self.assertEqual(
+            FieldLoadStage.parse(captured_stage).to_bytes(), captured_stage
+        )
+
+    def test_world_entry_request_types_character_id_after_entry_value(self) -> None:
+        request = WorldEntryRequest(
+            entry_value=4,
+            character_id=CHARACTER_ID,
+            opaque_ticket=b"sanitized-ticket".ljust(56, b"\x00"),
+        )
+        encoded = request.to_bytes()
+
+        self.assertEqual(WorldEntryRequest.parse(encoded), request)
+        self.assertEqual(encoded[2:6], (4).to_bytes(4, "little"))
+        self.assertEqual(
+            encoded[6:10], CHARACTER_ID.to_bytes(4, "little")
+        )
+        self.assertEqual(len(encoded), 66)
 
     def test_compact_field_transition_round_trip(self) -> None:
         transition = fixture_compact_field_transition()
@@ -1415,6 +1474,33 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             plan.safe_dict()["prediction"]["drop_position"], "rewritten"
         )
+
+    def test_plans_identifier_free_final_field_drop_owner_rewrite(self) -> None:
+        foreign_owner = CHARACTER_ID + 1
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            inventory_changes=True,
+            active_item_drop=True,
+            active_item_drop_owner=foreign_owner,
+        )
+
+        plan = plan_final_field_drop_owner_to_player_rewrite(transcript)
+
+        self.assertEqual(plan.drop_alias, "drop:1")
+        self.assertEqual(plan.item_id, 4_010_003)
+        self.assertEqual(plan.replacement.owner_value_1, CHARACTER_ID)
+        self.assertEqual(plan.replacement.owner_value_2, CHARACTER_ID)
+        safe = plan.safe_dict()
+        self.assertEqual(
+            safe["prediction"]["drop_owner_fields"],
+            "match_initial_player",
+        )
+        self.assertEqual(
+            safe["prediction"]["pickup_eligibility"],
+            "requires_additional_client_conditions",
+        )
+        self.assertNotIn(str(CHARACTER_ID), str(safe))
+        self.assertNotIn(str(foreign_owner), str(safe))
 
     def test_generated_item_pickup_response_matches_gameplay_fold(self) -> None:
         evidence = fixture_gameplay_transcript(item_pickup=True)

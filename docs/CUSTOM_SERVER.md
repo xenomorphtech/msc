@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 116 tests.
+The last run passed all 125 tests.
 
 ## Inspect and compare captures
 
@@ -40,7 +40,7 @@ For PCAP or JSONL login logs, use the typed state fold instead:
 
 ```sh
 python -m maple_server analyze-login \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 83 \
   --packets \
   --fail-on-invalid
@@ -56,7 +56,7 @@ World logs use the corresponding gameplay fold:
 
 ```sh
 python -m maple_server analyze-gameplay \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 114 \
   --packets \
   --events \
@@ -66,6 +66,22 @@ python -m maple_server analyze-gameplay \
 It validates frame shapes and state invariants, emits typed field events, and
 folds the initial player/map/inventory/progression snapshot plus subsequent
 NPC, mob, movement, transition, termination, and heartbeat traffic.
+
+The repository-root level-1-to-10 corpus is stream `126`:
+
+```sh
+python -m maple_server analyze-gameplay \
+  --pcap /home/sdancer/ms/1-10FS.pcapng \
+  --tcp-stream 126
+```
+
+Normalization removes its measured 14-byte server and 28-byte client
+transport preludes before the Maple greeting. It then decrypts 71,100 frames,
+folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
+all 197 pickup requests against known drops and matching epochs. It is not yet
+strict-valid: 49 packet variants remain bounded to stat updates, inventory
+changes, and NPC-spawn facing values. The opcode-`158` stage-`0` variant keeps
+its neutral word `1` and nine-byte tail as partial semantic coverage.
 
 Player movement appears as decoded opcode-`182` submissions and opcode-`202`
 broadcasts. The short stream prints one local path ending at `(633,-2677)` and
@@ -128,7 +144,7 @@ ordered response sequence. Configure the capture-faithful waits with:
 
 ```text
 --drop-server-frame 4
---reply-on-client-opcode-from-pcap 6=/home/sdancer/Downloads/111.pcapng@83:13
+--reply-on-client-opcode-from-pcap 6=/home/sdancer/ms/111.pcapng@83:13
 --client-opcode-reply-delays 4=0,2.5
 --client-opcode-reply-delays 5=0,0,1.0
 --rewrite-channel-transition-world
@@ -201,7 +217,7 @@ sudo ip netns exec mapleproxy sudo -u sdancer python -m maple_server replay \
   --listen-host 0.0.0.0 \
   --listen-port 12857 \
   --no-strict \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 92 \
   --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/world
 ```
@@ -225,7 +241,7 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
   --http-api-host 127.0.0.1 \
   --http-api-port 12858 \
   --no-strict \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 114 \
   --keep-world-open \
   --world-heartbeat-interval-seconds 10 \
@@ -270,7 +286,7 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
   --http-api-host 127.0.0.1 \
   --http-api-port 12858 \
   --no-strict \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 114 \
   --keep-world-open \
   --world-heartbeat-interval-seconds 10 \
@@ -306,7 +322,7 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
   --http-api-host 127.0.0.1 \
   --http-api-port 12858 \
   --no-strict \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 114 \
   --keep-world-open \
   --world-heartbeat-interval-seconds 10 \
@@ -347,7 +363,7 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
   --http-api-host 127.0.0.1 \
   --http-api-port 12858 \
   --no-strict \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 114 \
   --keep-world-open \
   --world-heartbeat-interval-seconds 10 \
@@ -402,10 +418,11 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
   --http-api-host 127.0.0.1 \
   --http-api-port 12858 \
   --no-strict \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 114 \
   --keep-world-open \
   --rewrite-final-field-drop-position 633:-2677 \
+  --rewrite-final-field-drop-owner-to-player \
   --reactive-item-pickup-responses \
   --item-pickup-evidence-tcp-stream 92 \
   --world-heartbeat-interval-seconds 10 \
@@ -425,6 +442,23 @@ in that order, then removes the drop from mutable server state. Mesos, special,
 new-slot, ambiguous-stack, and unknown-template cases remain rejected. The
 client still supplies its own validation token; the server does not synthesize
 or assign semantics to it.
+
+The owner rewrite is a separate same-length typed patch. It validates exactly
+one initial player and one final field-load item, then changes only the two
+neutral owner words. `protocol.final_field_drop_owner_rewrite` exposes the
+aliased drop, item template, flag, frame/field epoch, patch count, and the
+identifier-free prediction fields `drop_owner_fields: match_initial_player`
+and `pickup_eligibility: requires_additional_client_conditions`.
+
+That conservative prediction follows the real-client result: rewriting the
+mode-`2` owner words did not produce opcode `185`, and neither did a second
+probe that sent a captured-shaped mode-`1`/mode-`0` pair at the final player
+position. The client stayed responsive, the pickup key binding and direct
+Wayland input were verified, and the reactive API recorded zero pickup
+requests. Owner equality and proximity are therefore not sufficient on their
+own; the next experiment must isolate the remaining client eligibility state
+instead of treating a generated response as proof that the client accepted
+the drop.
 
 ## Historical synthetic staging experiment
 
@@ -590,6 +624,9 @@ project's own `README.md` for all options.
   slot `7`, quantity `74`, and the four matching stream-`92` effects. Its
   position rewrite round-trips at the same 38-byte width, and encrypted replay
   tests produce the predicted opcodes `39,49,312` and mutable `74 -> 75` state.
+- Live owner-only and captured-shaped animated-drop probes both produced zero
+  opcode-`185` requests, so runtime telemetry now treats owner equality as a
+  modeled field relation rather than proof of pickup eligibility.
 
 ## Next server milestone
 
@@ -597,9 +634,9 @@ Replace the remaining opaque replay portions with stateful handling:
 
 1. Decode the inner 167 bytes of each character-list response record and emit
    it from typed player state.
-2. Run the typed opcode-`311`/opcode-`185` controlled real-client pickup A/B,
-   compare the observed inventory/removal fold with the `74 -> 75` prediction,
-   then continue with equipment and interaction captures.
+2. Isolate the additional client-side drop eligibility condition using the
+   now-falsified owner/proximity baseline, then run the reactive pickup effect
+   only after the real client emits opcode `185`.
 3. Expand the proven typed opcode-`157` mutation into a generated initial field
    snapshot, then replace subsequent capture frames with state-driven packets.
 4. Obtain a short final-field capture with a known mob and validate the typed

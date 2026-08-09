@@ -73,9 +73,10 @@ it. Do not pass passwords directly on a command line.
   state while it exists.
 - Packet captures (`.pcap`), strace logs, Wine logs, and screenshots can reveal
   endpoints, tokens, account identifiers, or window content.
-- `/home/sdancer/Downloads/111.pcapng` contains a successful account and
-  character session. It is consumed in place and must not be copied into the
-  repository or converted to a committed plaintext fixture.
+- Repository-root `./111.pcapng` contains a successful account and
+  character session; `./1-10FS.pcapng` contains a long gameplay session. They
+  are consumed in place, must remain untracked, and must not be converted to
+  committed plaintext fixtures.
 
 ## Safe capture analysis
 

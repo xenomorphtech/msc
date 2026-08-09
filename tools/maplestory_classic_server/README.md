@@ -205,7 +205,13 @@ python -m maple_server replay \
 ```
 
 `--rewrite-final-field-drop-position X:Y` changes only the typed position in
-the final field's sole active mode-`2` item-drop packet. Pair it with
+the final field's sole active mode-`2` item-drop packet.
+`--rewrite-final-field-drop-owner-to-player` independently rewrites only its
+two owner words to the character id validated between client opcode `8` and
+the initial snapshot. The two rewrites may be composed on the same frame. The
+owner rewrite does not assert pickup eligibility: live owner-only and
+captured-shaped animated-drop probes both produced zero opcode-`185` requests.
+Pair the position rewrite with
 `--reactive-item-pickup-responses` to handle a real client opcode-`185`
 request from modeled state. Pickup quantities and inventory targets must come
 from validated evidence in the replay itself or from
@@ -223,6 +229,7 @@ python -m maple_server replay \
   --tcp-stream 114 \
   --keep-world-open \
   --rewrite-final-field-drop-position 633:-2677 \
+  --rewrite-final-field-drop-owner-to-player \
   --reactive-item-pickup-responses \
   --item-pickup-evidence-tcp-stream 92 \
   --world-heartbeat-interval-seconds 10 \
@@ -234,6 +241,11 @@ contains quantity `74`, and stream `92` independently proves four pickups of
 that template as an Etc delta/gain quantity of one. The server never invents a
 drop id or validation token: it preserves the captured drop id, while the
 official client supplies its own token in the request.
+
+Runtime prediction for the owner patch reports
+`drop_owner_fields: match_initial_player` and
+`pickup_eligibility: requires_additional_client_conditions`; it never exposes
+the captured or rewritten numeric owner id.
 
 Validate a login capture and fold it into typed game state without printing
 account or character identifiers:
@@ -269,14 +281,25 @@ python -m maple_server analyze-gameplay \
   --fail-on-invalid
 ```
 
+Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
+`92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
+gameplay on stream `126`; omit `--fail-on-invalid` for that corpus while its
+remaining 49 capture variants are being modeled. PCAP normalization locates
+the Maple greeting after its 14-byte server and 28-byte client transport
+preludes and records the trimmed byte counts in transcript metadata.
+
 The gameplay fold currently models these capture-backed boundaries:
 
-- client opcode `8`: world-entry envelope (character id plus opaque ticket),
+- client opcode `8`: exact 66-byte world-entry envelope (`entry_value`,
+  character id, and 56-byte opaque ticket),
 - server opcode `157`: field snapshot/change envelope; the initial 4.4 KB
   variant has a typed 112-byte character/stat prefix plus bounded equipment,
   use, setup, etc, and cash inventory lists, while the repeated 95-byte compact
-  transition variant is fully bounded,
-- client opcode `158`: the complete `1 -> 2` field-load stage sequence,
+  transition variant is fully bounded; the level-1 corpus also validates a
+  marker-`26` initial character/inventory prefix with an opaque 172-byte
+  progression region,
+- client opcode `158`: the complete `1 -> 2` field-load stage sequence plus a
+  stage-`0` variant with neutral word `1` and a bounded nine-byte opaque tail,
 - server opcode `39`: inventory change sets with empty, add, stack-quantity,
   and remove operations plus lossless stack/cash item records,
 - client opcode `80`: a 12-byte Use-item request containing client tick, signed
@@ -285,9 +308,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `185`: 23-byte and 35-byte item-pickup requests containing the
   folded field epoch, client tick, position, aliased drop id, neutral validation
   token, and optional 12-byte proof,
-- server opcode `311`: 44-byte animated item, 36-byte animated mesos, and
-  38-byte field-load item drop spawns; the fold tracks mode-`1`/mode-`0`
-  refresh pairs, source mobs, ownership-neutral fields, and active lifecycle,
+- server opcode `311`: 44-byte animated item, 36-byte animated mesos, 38-byte
+  field-load item, and 30-byte field-load mesos drop spawns; the fold tracks
+  mode-`1`/mode-`0` refresh pairs, source mobs, ownership-neutral fields, and
+  active lifecycle,
 - server opcode `49`: the three pickup-result variants for item quantity, mesos
   amount, and a still-neutral special value,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
@@ -301,7 +325,8 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `202`: remote-player movement with an aliased object id, the
   same control value and command stream, and no client-only trailer,
 - server opcode `300`: complete 22-byte NPC spawn records,
-- server opcode `303`: complete 8-byte NPC state updates,
+- server opcode `303`: an 8-byte typed NPC state prefix plus a losslessly
+  preserved optional opaque tail,
 - server opcode `279`: mob-entry envelope with object id, template id,
   temporary-status block, position/stance/footholds, spawn effect, and tail,
 - server opcode `280`: complete object-id plus one-byte mob-leave record,
@@ -645,7 +670,11 @@ inventory/stat state.
 When the final drop position is rewritten,
 `protocol.final_field_drop_position_rewrite` reports its alias/template,
 original and rewritten coordinates, field epoch, server-frame index, patch
-count, and predicted unchanged state. When reactive pickup responses are
+count, and predicted unchanged state. When its owner words are rewritten,
+`protocol.final_field_drop_owner_rewrite` reports the alias/template,
+ownership flag, field epoch, server-frame index, patch count, redacted
+character identifiers, and the conservative pickup-eligibility prediction.
+When reactive pickup responses are
 enabled, `protocol.item_pickup_responses` reports the eligible aliased drops,
 captured correlation evidence, observed/served/rejected request counts,
 response packet count, last identifier-free response, and current mutable

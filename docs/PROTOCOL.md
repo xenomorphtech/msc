@@ -140,7 +140,7 @@ locale-`4` handshake and the same directional cipher masks (`3` client,
 ```sh
 cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m maple_server analyze-login \
-  --pcap /home/sdancer/Downloads/111.pcapng \
+  --pcap /home/sdancer/ms/111.pcapng \
   --tcp-stream 83 \
   --packets \
   --fail-on-invalid
@@ -313,6 +313,23 @@ The selected character ID must equal the handoff character ID. The replay's
 `?handoff=127.0.0.1:PORT` PCAP-frame transform changes only address and port
 after validating this shape.
 
+## World entry (`client opcode 8`)
+
+All three world references use the same exact 66-byte request boundary:
+
+```text
+uint16 opcode = 8
+uint32 entry_value                     # neutral; non-identity role
+uint32 character_id
+byte[56] opaque_ticket
+```
+
+The first `uint32` after the opcode was previously mislabeled as the character
+id. Cross-checking it against the large opcode-`157` snapshot in `111.pcapng`
+streams `92` and `114`, and against `1-10FS.pcapng` stream `126`, proves that
+the second word is the character id. The fold validates that equality while
+redacting both the identifier and ticket bytes from normal reports.
+
 ## Initial field snapshot (`server opcode 157`, large variant)
 
 The first opcode-`157` packet on each validated world connection contains a
@@ -331,8 +348,8 @@ uint16 reserved = 0
 uint32 opaque_session_value[3]
 int64  sentinel = -1
 uint8  character_record_prefix = 0
-uint32 character_data_flags
 uint32 character_id
+uint32 character_data_flags
 string character_name                 # uint16 count + UTF-16LE + zero byte
 uint8  gender
 uint8  skin
@@ -376,6 +393,14 @@ character-name code-unit count, but not the name text or raw character id. The
 gameplay fold checks the embedded character id against client opcode `8`, then
 seeds player, field, and inventory state and emits a `field_snapshot_received`
 event with variant `initial_character_snapshot`.
+
+The level-1 capture uses marker `26` rather than marker `23` but retains the
+same typed character and inventory grammar. Its 823-byte initial packet seeds
+character level `1`, job `0`, HP/MP maxima, and nine inventory groups. The
+537-byte inventory region round-trips; its following 172-byte progression
+region remains opaque because it does not use the longer marker-`23`
+progression/trailer grammar. Reports distinguish this with
+`snapshot_marker: 26` and `progression_typed: false`.
 
 The 1,422-byte continuation is also structurally complete:
 
@@ -519,7 +544,8 @@ Server opcode `311` creates or refreshes one field drop. Stream `92` contains
 125 packets and 66 unique `(field_epoch, drop_object_id)` pairs. Fifty-nine
 drops appear as an otherwise byte-identical mode-`1` then mode-`0` pair; seven
 item drops use the shorter mode-`2` field-load form. All 125 packets parse and
-re-encode byte-for-byte.
+re-encode byte-for-byte. The independent level-1-to-10 corpus adds four exact
+mode-`2` field-load mesos records.
 
 The shared prefix is:
 
@@ -549,18 +575,19 @@ uint8  final_flag                     # one in all animated records
 
 That produces 44-byte item records and 36-byte mesos records. Every nonzero
 source mob resolves to a field-local mob template retained after that mob's
-leave/death packet; none is an unmodeled object. Mode `2` is observed only for
-items and omits the animation fields:
+leave/death packet; none is an unmodeled object. Mode `2` omits the animation
+fields:
 
 ```text
-int64 expiration_ticks
+if drop_kind == 0: int64 expiration_ticks
 uint8 final_flag                      # zero in all seven field-load records
 ```
 
-The resulting field-load item record is 38 bytes. Every captured item
-expiration is `150842304000000000`. The fold assigns `drop:N` aliases, treats
-mode `0` as a refresh of its matching mode-`1` record, retains active drops by
-field epoch, removes them on opcode `312`, and clears them on a field reset.
+The resulting field-load item record is 38 bytes; a field-load mesos record is
+30 bytes. Every captured item expiration is `150842304000000000`. The fold
+assigns `drop:N` aliases, treats mode `0` as a refresh of its matching mode-`1`
+record, retains active drops by field epoch, removes them on opcode `312`, and
+clears them on a field reset.
 Spawn mode, owner values/flag, expiration, and final-flag semantics remain
 neutral even though their packet boundaries are exact.
 
@@ -575,6 +602,14 @@ chain without assigning a security meaning to the client validation token.
 Stream `114` ends with one active mode-`2` item drop: template `4000004` at
 `(-863,-1742)`. The final folded local-player position is `(633,-2677)`, and
 the Etc inventory contains the same template in slot `7`, quantity `74`.
+
+The owner fields are not a sufficient pickup switch. A typed live replay
+rewrote both final mode-`2` owner words to the initial player id, and a second
+probe sent a captured-shaped mode-`1`/mode-`0` pair at the player's position.
+The client remained healthy and direct input was verified, but neither probe
+emitted opcode `185`. Runtime status therefore reports only that the owner
+fields match the initial player and predicts that additional client conditions
+are required; it does not claim that the rewritten drop is pickup-eligible.
 
 ## Item pickup (`client 185` -> `server 39/41`, `server 49`, `server 312`)
 
@@ -772,6 +807,32 @@ not yet been decoded.
 
 ## Capture inventory
 
+The two repository-root PCAP references are deliberately kept outside Git:
+
+```text
+./111.pcapng       successful login (stream 83), long gameplay (92), short field (114)
+./1-10FS.pcapng    level 1 through 10 gameplay (stream 126)
+```
+
+`1-10FS.pcapng` stream `126` is a 55-minute protocol-`300` world session from
+`96.62.155.120:12324`. The transport prefixes 14 server bytes and 28 client
+bytes before the ordinary 33-byte Maple greeting; PCAP normalization locates
+the greeting, discards only those preludes, and records both byte counts in
+transcript metadata. The resulting session contains 71,100 decrypted frames
+(31,345 client and 39,755 server), one marker-`26` initial snapshot, 35 later
+field snapshots, 808 stat updates, 248 inventory change sets, 436 drop-spawn
+packets, and 197 pickup requests.
+
+All 197 pickup requests resolve to a known active drop, match their field
+epoch after the marker-`26` initial snapshot is folded, and target a final
+mode-`0` spawn whose two owner words equal the initial player id. The four
+mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
+`303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
+word `1` plus a nine-byte tail) are preserved and reported as partial semantic
+coverage. The remaining strict shape failures are bounded to 33 stat-delta
+variants, eight inventory-change variants, and eight NPC-spawn facing-value
+variants.
+
 Primary captures live in:
 
 ```text
@@ -809,8 +870,8 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
   bytes remain intentionally opaque/partial.
 - The 19-byte handoff and large initial world snapshot are structurally
   validated; equipment-specific metadata, keyed-property roles, parts of the
-  fixed trailer, and several one-time field bootstrap opcodes remain
-  semantically neutral.
+  fixed trailer, the marker-`26` 172-byte progression region, and several
+  one-time field bootstrap opcodes remain semantically neutral.
 - The purpose and required state for the TLS `5050` connection remain unknown.
 - The exact semantics of captured opcode-`0` result values other than the
   observed policy result `2` remain unknown.

@@ -426,6 +426,36 @@ class FinalFieldDropPositionReplayPlan:
 
 
 @dataclass(frozen=True)
+class FinalFieldDropOwnerReplayPlan:
+    server_frame_index: int
+    drop_alias: str
+    item_id: int
+    ownership_flag: int
+    field_epoch: int
+    replacement: FieldDropSpawn = field(repr=False)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "server_frame_index": self.server_frame_index,
+            "drop": self.drop_alias,
+            "item_id": self.item_id,
+            "ownership_flag": self.ownership_flag,
+            "field_epoch": self.field_epoch,
+            "character_identifiers": "redacted",
+            "prediction": {
+                "active_field_drop_count_delta": 0,
+                "drop_template": "unchanged",
+                "drop_owner_fields": "match_initial_player",
+                "drop_position": "unchanged",
+                "inventory": "unchanged_until_pickup",
+                "pickup_eligibility": "requires_additional_client_conditions",
+                "player_identity": "unchanged",
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
 class CurrentHpStatUpdateReplayPlan:
     update: CharacterStatUpdate = field(repr=False)
     original_current_hp: int
@@ -1625,10 +1655,15 @@ class GameplayStateFold:
                 self.issues.append("multiple world entry requests observed")
             self.state.entry_character_id = request.character_id
             self.state.phase = GameplayPhase.ENTRY_REQUESTED
+            entry_details = {
+                "character_id_present": True,
+                "entry_value_present": True,
+                "opaque_ticket_bytes": len(request.opaque_ticket),
+            }
             self._event(
                 frame,
                 "world_entry_requested",
-                details={"character_id_present": True, "opaque_ticket_bytes": 60},
+                details=entry_details,
                 identifiers={"character_id": request.character_id},
             )
             return self._observation(
@@ -1636,8 +1671,8 @@ class GameplayStateFold:
                 kind="world_entry_request",
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=request,
-                details={"character_id_present": True, "opaque_ticket_bytes": 60},
-                issues=("world entry ticket remains opaque",),
+                details=entry_details,
+                issues=("world entry value and ticket tail remain opaque",),
             )
         if opcode == 301:
             acknowledgement = WorldBootstrapAcknowledgement.parse(payload)
@@ -1657,6 +1692,27 @@ class GameplayStateFold:
             )
         if opcode == 158:
             stage = FieldLoadStage.parse(payload)
+            stage_details = {
+                "field_epoch": self.state.field_epoch,
+                "stage": stage.stage,
+                "opaque_tail_bytes": len(stage.opaque_tail),
+            }
+            if stage.stage == 0:
+                self._event(
+                    frame,
+                    "field_load_stage_observed",
+                    details=stage_details,
+                )
+                return self._observation(
+                    frame,
+                    kind="field_load_stage",
+                    coverage=ShapeCoverage.PARTIAL,
+                    parsed=stage,
+                    details=stage_details,
+                    issues=(
+                        "field-load stage-0 extended variant semantics remain opaque",
+                    ),
+                )
             if self.state.field_epoch == 0:
                 self.issues.append("field load stage arrived before a field snapshot")
             if stage.stage == 1:
@@ -1670,10 +1726,7 @@ class GameplayStateFold:
             self._event(
                 frame,
                 "field_load_stage_changed",
-                details={
-                    "field_epoch": self.state.field_epoch,
-                    "stage": stage.stage,
-                },
+                details=stage_details,
             )
             if stage.stage == 2:
                 self.state.phase = GameplayPhase.ACTIVE
@@ -1687,10 +1740,7 @@ class GameplayStateFold:
                 kind="field_load_stage",
                 coverage=ShapeCoverage.FULL,
                 parsed=stage,
-                details={
-                    "field_epoch": self.state.field_epoch,
-                    "stage": stage.stage,
-                },
+                details=stage_details,
             )
         if opcode == 80:
             request = ItemUseRequest.parse(payload)
@@ -2694,7 +2744,11 @@ class GameplayStateFold:
             if initial_snapshot is not None:
                 character = initial_snapshot.character
                 inventory = initial_snapshot.parse_inventory()
-                progression = initial_snapshot.parse_progression()
+                progression = (
+                    initial_snapshot.parse_progression()
+                    if initial_snapshot.marker == 23
+                    else None
+                )
                 self.state.initial_field_snapshots += 1
                 self.state.transition_sequence = None
                 self.state.map_id = character.map_id
@@ -2727,23 +2781,32 @@ class GameplayStateFold:
                     )
                     for group in inventory.groups
                 }
-                self.state.skill_levels = dict(progression.skill_levels)
-                self.state.string_property_code_units = {
-                    key: len(value.encode("utf-16-le")) // 2
-                    for key, value in progression.string_properties
-                }
-                self.state.timestamp_property_keys = tuple(
-                    key for key, _ in progression.timestamp_properties
-                )
-                self.state.saved_map_ids = progression.saved_map_ids
-                self.state.extended_property_code_units = {
-                    key: len(value.encode("utf-16-le")) // 2
-                    for key, value in progression.extended_properties
-                }
-                self.state.progression_variant = progression.variant
-                self.state.server_local_filetime_ticks = (
-                    progression.trailer.server_local_filetime_ticks
-                )
+                if progression is not None:
+                    self.state.skill_levels = dict(progression.skill_levels)
+                    self.state.string_property_code_units = {
+                        key: len(value.encode("utf-16-le")) // 2
+                        for key, value in progression.string_properties
+                    }
+                    self.state.timestamp_property_keys = tuple(
+                        key for key, _ in progression.timestamp_properties
+                    )
+                    self.state.saved_map_ids = progression.saved_map_ids
+                    self.state.extended_property_code_units = {
+                        key: len(value.encode("utf-16-le")) // 2
+                        for key, value in progression.extended_properties
+                    }
+                    self.state.progression_variant = progression.variant
+                    self.state.server_local_filetime_ticks = (
+                        progression.trailer.server_local_filetime_ticks
+                    )
+                else:
+                    self.state.skill_levels = {}
+                    self.state.string_property_code_units = {}
+                    self.state.timestamp_property_keys = ()
+                    self.state.saved_map_ids = ()
+                    self.state.extended_property_code_units = {}
+                    self.state.progression_variant = None
+                    self.state.server_local_filetime_ticks = None
                 if (
                     self.state.entry_character_id is not None
                     and character.character_id != self.state.entry_character_id
@@ -2757,6 +2820,7 @@ class GameplayStateFold:
                         "typed_prefix_bytes": initial_snapshot.typed_prefix_bytes,
                         "snapshot_tail_bytes": len(initial_snapshot.opaque_tail),
                         "character_data_flags": character.data_flags,
+                        "snapshot_marker": initial_snapshot.marker,
                         "character_name_code_units": (
                             len(character.name.encode("utf-16-le")) // 2
                         ),
@@ -2786,40 +2850,7 @@ class GameplayStateFold:
                             group.name: len(group.items)
                             for group in inventory.groups
                         },
-                        "skill_levels": dict(progression.skill_levels),
-                        "string_properties": [
-                            {
-                                "key": key,
-                                "value_code_units": (
-                                    len(value.encode("utf-16-le")) // 2
-                                ),
-                            }
-                            for key, value in progression.string_properties
-                        ],
-                        "timestamp_property_keys": [
-                            key for key, _ in progression.timestamp_properties
-                        ],
-                        "saved_map_ids": list(progression.saved_map_ids),
-                        "progression_variant": progression.variant,
-                        "extended_properties": [
-                            {
-                                "key": key,
-                                "value_code_units": (
-                                    len(value.encode("utf-16-le")) // 2
-                                ),
-                            }
-                            for key, value in progression.extended_properties
-                        ],
-                        "trailer_text_code_units": [
-                            len(value.encode("utf-16-le")) // 2
-                            for value in progression.trailer.opaque_texts
-                        ],
-                        "server_local_filetime_ticks": (
-                            progression.trailer.server_local_filetime_ticks
-                        ),
-                        "unknown_tail_u32": (
-                            progression.trailer.unknown_tail_u32
-                        ),
+                        "progression_typed": progression is not None,
                         "inventory_items": {
                             group.name: [
                                 {
@@ -2834,6 +2865,46 @@ class GameplayStateFold:
                         },
                     }
                 )
+                if progression is not None:
+                    details.update(
+                        {
+                            "skill_levels": dict(progression.skill_levels),
+                            "string_properties": [
+                                {
+                                    "key": key,
+                                    "value_code_units": (
+                                        len(value.encode("utf-16-le")) // 2
+                                    ),
+                                }
+                                for key, value in progression.string_properties
+                            ],
+                            "timestamp_property_keys": [
+                                key
+                                for key, _ in progression.timestamp_properties
+                            ],
+                            "saved_map_ids": list(progression.saved_map_ids),
+                            "progression_variant": progression.variant,
+                            "extended_properties": [
+                                {
+                                    "key": key,
+                                    "value_code_units": (
+                                        len(value.encode("utf-16-le")) // 2
+                                    ),
+                                }
+                                for key, value in progression.extended_properties
+                            ],
+                            "trailer_text_code_units": [
+                                len(value.encode("utf-16-le")) // 2
+                                for value in progression.trailer.opaque_texts
+                            ],
+                            "server_local_filetime_ticks": (
+                                progression.trailer.server_local_filetime_ticks
+                            ),
+                            "unknown_tail_u32": (
+                                progression.trailer.unknown_tail_u32
+                            ),
+                        }
+                    )
                 event_identifiers["character_id"] = character.character_id
             elif transition is None:
                 self.state.transition_sequence = None
@@ -2915,8 +2986,14 @@ class GameplayStateFold:
                     if transition is not None
                     else (
                         (
-                            "initial field snapshot equipment metadata and "
-                            "progression/trailer meanings remain partially opaque",
+                            (
+                                "initial field snapshot marker-26 progression "
+                                "region remains opaque"
+                                if initial_snapshot.marker == 26
+                                else "initial field snapshot equipment metadata "
+                                "and progression/trailer meanings remain "
+                                "partially opaque"
+                            ),
                         )
                         if initial_snapshot is not None
                         else ("field snapshot body remains opaque",)
@@ -2981,6 +3058,7 @@ class GameplayStateFold:
                 "known_entity": known_entity,
                 "action": update.action,
                 "parameter": update.parameter,
+                "opaque_tail_bytes": len(update.opaque_tail),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -2992,9 +3070,18 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="npc_state_update",
-                coverage=ShapeCoverage.FULL,
+                coverage=(
+                    ShapeCoverage.PARTIAL
+                    if update.opaque_tail
+                    else ShapeCoverage.FULL
+                ),
                 parsed=update,
                 details=details,
+                issues=(
+                    ("NPC state-update tail remains opaque",)
+                    if update.opaque_tail
+                    else ()
+                ),
             )
         if opcode == 202:
             broadcast = PlayerMovementBroadcast.parse(payload)
@@ -3714,6 +3801,84 @@ def plan_final_field_drop_position_rewrite(
         original_position_y=spawn.position_y,
         rewritten_position_x=position_x,
         rewritten_position_y=position_y,
+        field_epoch=analysis.state.field_epoch,
+        replacement=replacement,
+    )
+
+
+def plan_final_field_drop_owner_to_player_rewrite(
+    transcript: Transcript,
+) -> FinalFieldDropOwnerReplayPlan:
+    """Make the sole final field-load item drop belong to the typed player."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    snapshot_observations = tuple(
+        observation
+        for observation in analysis.observations
+        if isinstance(observation.parsed, InitialFieldSnapshot)
+    )
+    if len(snapshot_observations) != 1:
+        raise ValueError(
+            "world transcript must contain exactly one initial field snapshot"
+        )
+    player_character_id = (
+        snapshot_observations[0].parsed.character.character_id
+    )
+    if analysis.state.entry_character_id != player_character_id:
+        raise ValueError(
+            "initial player character id does not match the world entry request"
+        )
+
+    active_drops = tuple(analysis.state.field_drops.items())
+    if len(active_drops) != 1:
+        raise ValueError(
+            "world transcript final field must contain exactly one active drop"
+        )
+    drop_object_id, entity = active_drops[0]
+    spawn = entity.spawn
+    if (
+        spawn.spawn_mode != FieldDropSpawn.FIELD_LOAD_MODE
+        or spawn.drop_kind != FieldDropSpawn.ITEM
+    ):
+        raise ValueError(
+            "final active drop must use the captured field-load item variant"
+        )
+    if spawn.owner_value_1 != spawn.owner_value_2:
+        raise ValueError("final active drop owner values must match")
+    if spawn.ownership_flag != 0:
+        raise ValueError(
+            "final active drop must use the capture-validated ownership flag"
+        )
+    if spawn.owner_value_1 == player_character_id:
+        raise ValueError("final active drop already belongs to the initial player")
+    observation = next(
+        (
+            candidate
+            for candidate in reversed(analysis.observations)
+            if isinstance(candidate.parsed, FieldDropSpawn)
+            and candidate.parsed.drop_object_id == drop_object_id
+        ),
+        None,
+    )
+    if observation is None:
+        raise ValueError("final active drop has no typed spawn observation")
+    replacement = replace(
+        spawn,
+        owner_value_1=player_character_id,
+        owner_value_2=player_character_id,
+    )
+    payload = replacement.to_bytes()
+    if len(payload) != observation.length:
+        raise ValueError("drop owner rewrite unexpectedly changed packet length")
+    if FieldDropSpawn.parse(payload) != replacement:
+        raise ValueError("drop owner rewrite failed packet round-trip validation")
+    return FinalFieldDropOwnerReplayPlan(
+        server_frame_index=observation.direction_index,
+        drop_alias=entity.alias,
+        item_id=spawn.value,
+        ownership_flag=spawn.ownership_flag,
         field_epoch=analysis.state.field_epoch,
         replacement=replacement,
     )

@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import base64
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import functools
 from ipaddress import IPv4Address
 import os
@@ -28,6 +28,7 @@ from .gameplay import (
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
     plan_current_hp_stat_update,
+    plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
     plan_final_field_npc_state_replay,
     plan_initial_player_hp_rewrite,
@@ -38,6 +39,7 @@ from .gameplay import (
 from .http_api import ServerRuntime, start_runtime_http_api
 from .packets import (
     ChannelTransitionResponse,
+    FieldDropSpawn,
     HeartbeatProbe,
     ItemPickupRequest,
     ItemUseRequest,
@@ -1897,6 +1899,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--rewrite-final-field-drop-owner-to-player",
+        action="store_true",
+        help=(
+            "rewrite the equal owner words of the final field's sole active "
+            "field-load item drop to the validated initial player character; "
+            "composes with --rewrite-final-field-drop-position"
+        ),
+    )
+    replay.add_argument(
         "--emit-current-hp-update",
         type=int,
         metavar="HP",
@@ -2651,6 +2662,51 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 **field_drop_position_replay_plan.safe_dict(),
                 "frames_patched": 1,
             }
+        field_drop_owner_replay_plan = None
+        if arguments.rewrite_final_field_drop_owner_to_player:
+            field_drop_owner_replay_plan = (
+                plan_final_field_drop_owner_to_player_rewrite(transcript)
+            )
+            frame_index = field_drop_owner_replay_plan.server_frame_index
+            if frame_index in server_frame_patches:
+                if (
+                    field_drop_position_replay_plan is None
+                    or frame_index
+                    != field_drop_position_replay_plan.server_frame_index
+                ):
+                    raise ValueError(
+                        f"server frame {frame_index} is set by both an "
+                        "existing patch and "
+                        "--rewrite-final-field-drop-owner-to-player"
+                    )
+                current = FieldDropSpawn.parse(
+                    server_frame_patches[frame_index]
+                )
+                replacement = replace(
+                    current,
+                    owner_value_1=(
+                        field_drop_owner_replay_plan.replacement.owner_value_1
+                    ),
+                    owner_value_2=(
+                        field_drop_owner_replay_plan.replacement.owner_value_2
+                    ),
+                )
+            else:
+                replacement = field_drop_owner_replay_plan.replacement
+            replacement_payload = replacement.to_bytes()
+            if FieldDropSpawn.parse(replacement_payload) != replacement:
+                raise ValueError(
+                    "composed field-drop rewrite failed packet round-trip "
+                    "validation"
+                )
+            server_frame_patches[frame_index] = replacement_payload
+            runtime_protocol["final_field_drop_owner_rewrite"] = {
+                **field_drop_owner_replay_plan.safe_dict(),
+                "frames_patched": 1,
+                "composed_with_position_rewrite": (
+                    field_drop_position_replay_plan is not None
+                ),
+            }
         initial_hp_replay_plan = None
         if arguments.rewrite_initial_current_hp is not None:
             initial_hp_replay_plan = plan_initial_player_hp_rewrite(
@@ -2801,6 +2857,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "rewrite_final_field_drop_position": (
                 arguments.rewrite_final_field_drop_position
+            ),
+            "rewrite_final_field_drop_owner_to_player": (
+                arguments.rewrite_final_field_drop_owner_to_player
             ),
             "emit_current_hp_update": arguments.emit_current_hp_update,
             "emit_inventory_quantity_update": (

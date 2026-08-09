@@ -437,6 +437,7 @@ class TranscriptTest(unittest.TestCase):
                 "114",
                 "--rewrite-final-field-drop-position",
                 "633:-2677",
+                "--rewrite-final-field-drop-owner-to-player",
                 "--reactive-item-pickup-responses",
                 "--item-pickup-evidence-tcp-stream",
                 "92",
@@ -447,6 +448,7 @@ class TranscriptTest(unittest.TestCase):
             arguments.rewrite_final_field_drop_position,
             (633, -2677),
         )
+        self.assertTrue(arguments.rewrite_final_field_drop_owner_to_player)
         self.assertTrue(arguments.reactive_item_pickup_responses)
         self.assertEqual(arguments.item_pickup_evidence_tcp_stream, 92)
         self.assertEqual(parse_i16_position("0x10:-0x20"), (16, -32))

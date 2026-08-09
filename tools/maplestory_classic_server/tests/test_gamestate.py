@@ -340,6 +340,28 @@ class PcapInputTest(unittest.TestCase):
             transcript.events[0].metadata["server_endpoint"], str(server)
         )
 
+    def test_trims_transport_prelude_before_maple_handshake(self) -> None:
+        client = TcpEndpoint("192.0.2.10", 50000)
+        server = TcpEndpoint("198.51.100.20", 12324)
+        segments = (
+            TcpSegment(8, client, server, 1, b"pre!"),
+            TcpSegment(9, server, client, 1, b"hello"),
+            TcpSegment(10, server, client, 6, HANDSHAKE[:10]),
+            TcpSegment(11, client, server, 5, b"\x00\x00\x00\x00"),
+            TcpSegment(12, server, client, 16, HANDSHAKE[10:]),
+        )
+
+        transcript = transcript_from_tcp_segments(
+            "fixture-with-prelude.pcapng", 126, segments
+        )
+
+        self.assertEqual(transcript.server_bytes, HANDSHAKE)
+        self.assertEqual(transcript.client_bytes, b"\x00\x00\x00\x00")
+        self.assertEqual(
+            transcript.events[0].metadata["transport_prelude_bytes"],
+            {"client_to_server": 4, "server_to_client": 5},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

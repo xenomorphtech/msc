@@ -659,8 +659,9 @@ class WorldHandoff:
 
 @dataclass(frozen=True)
 class WorldEntryRequest:
-    """Observed world-session entry envelope; the inner ticket stays opaque."""
+    """Observed world-session entry envelope with a typed character id."""
 
+    entry_value: int
     character_id: int
     opaque_ticket: bytes
     opcode: int = 8
@@ -669,15 +670,31 @@ class WorldEntryRequest:
     def parse(cls, payload: bytes) -> "WorldEntryRequest":
         reader = PacketReader(payload, packet_name="world_entry_request")
         _expect_opcode(reader, 8)
+        entry_value = reader.u32("entry_value")
         character_id = reader.u32("character_id")
-        opaque_ticket = reader.bytes(60, "opaque_ticket")
+        opaque_ticket = reader.bytes(56, "opaque_ticket")
         reader.finish()
-        return cls(character_id=character_id, opaque_ticket=opaque_ticket)
+        if character_id == 0:
+            raise PacketShapeError("world entry character id cannot be zero")
+        return cls(
+            entry_value=entry_value,
+            character_id=character_id,
+            opaque_ticket=opaque_ticket,
+        )
 
     def to_bytes(self) -> bytes:
-        if len(self.opaque_ticket) != 60:
-            raise PacketShapeError("world entry ticket must contain exactly 60 bytes")
-        return struct.pack("<HI", self.opcode, self.character_id) + self.opaque_ticket
+        if not 0 <= self.entry_value <= 0xFFFF_FFFF:
+            raise PacketShapeError("world entry value must fit in u32")
+        if not 1 <= self.character_id <= 0xFFFF_FFFF:
+            raise PacketShapeError("world entry character id must fit in nonzero u32")
+        if len(self.opaque_ticket) != 56:
+            raise PacketShapeError("world entry ticket must contain exactly 56 bytes")
+        return (
+            struct.pack(
+                "<HII", self.opcode, self.entry_value, self.character_id
+            )
+            + self.opaque_ticket
+        )
 
 
 @dataclass(frozen=True)
@@ -707,8 +724,8 @@ class FieldSnapshotEnvelope:
 class InitialCharacterSnapshot:
     """Typed character-stat prefix embedded in the initial field snapshot."""
 
-    data_flags: int
     character_id: int
+    data_flags: int
     name: str
     gender: int
     skin: int
@@ -737,8 +754,8 @@ class InitialCharacterSnapshot:
     @classmethod
     def parse_from(cls, reader: PacketReader) -> "InitialCharacterSnapshot":
         snapshot = cls(
-            data_flags=reader.u32("character.data_flags"),
             character_id=reader.u32("character.character_id"),
+            data_flags=reader.u32("character.data_flags"),
             name=reader.utf16_string("character.name", trailing_byte=True),
             gender=reader.u8("character.gender"),
             skin=reader.u8("character.skin"),
@@ -786,7 +803,7 @@ class InitialCharacterSnapshot:
         try:
             return b"".join(
                 (
-                    struct.pack("<II", self.data_flags, self.character_id),
+                    struct.pack("<II", self.character_id, self.data_flags),
                     encode_utf16_string(self.name, trailing_byte=True),
                     struct.pack(
                         "<BBIIQBH",
@@ -1421,9 +1438,9 @@ class InitialFieldSnapshot:
         )
 
     def _validate(self) -> None:
-        if self.marker != 23:
+        if self.marker not in {23, 26}:
             raise PacketShapeError(
-                f"initial field snapshot marker is {self.marker}, expected 23"
+                f"initial field snapshot marker is {self.marker}, expected 23 or 26"
             )
         if self.reserved_flag != 0 or self.reserved_u16 != 0:
             raise PacketShapeError(
@@ -1679,6 +1696,7 @@ class NpcStateUpdate:
     object_id: int
     action: int
     parameter: int
+    opaque_tail: bytes = b""
     opcode: int = 303
 
     @classmethod
@@ -1688,13 +1706,19 @@ class NpcStateUpdate:
         object_id = reader.u32("object_id")
         action = reader.u8("action")
         parameter = reader.u8("parameter")
+        opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
         reader.finish()
-        return cls(object_id=object_id, action=action, parameter=parameter)
+        return cls(
+            object_id=object_id,
+            action=action,
+            parameter=parameter,
+            opaque_tail=opaque_tail,
+        )
 
     def to_bytes(self) -> bytes:
         return struct.pack(
             "<HIBB", self.opcode, self.object_id, self.action, self.parameter
-        )
+        ) + self.opaque_tail
 
 
 @dataclass(frozen=True)
@@ -2496,10 +2520,6 @@ class FieldDropSpawn:
             source_x = reader.i16("source_x")
             source_y = reader.i16("source_y")
             animation_duration_ms = reader.u16("animation_duration_ms")
-        elif drop_kind != cls.ITEM:
-            raise PacketShapeError(
-                "field-load drop spawn is only modeled for item records"
-            )
         expiration_ticks = (
             reader.i64("expiration_ticks") if drop_kind == cls.ITEM else None
         )
@@ -2650,10 +2670,6 @@ class FieldDropSpawn:
         elif self.expiration_ticks is not None:
             raise PacketShapeError(
                 "mesos field-drop spawn cannot carry expiration ticks"
-            )
-        if self.spawn_mode == self.FIELD_LOAD_MODE and self.drop_kind != self.ITEM:
-            raise PacketShapeError(
-                "field-load drop spawn is only modeled for item records"
             )
         return body + struct.pack("<B", self.final_flag)
 
@@ -3472,6 +3488,7 @@ class WorldBootstrapAcknowledgement:
 class FieldLoadStage:
     stage: int
     trailing: int = 0
+    opaque_tail: bytes = b""
     opcode: int = 158
 
     @classmethod
@@ -3480,23 +3497,51 @@ class FieldLoadStage:
         _expect_opcode(reader, 158)
         stage = reader.u32("stage")
         trailing = reader.u32("trailing")
+        opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
         reader.finish()
-        if stage not in {1, 2}:
+        if stage not in {0, 1, 2}:
             raise PacketShapeError(
-                f"field_load_stage.stage is {stage}, expected observed stage 1 or 2"
+                f"field_load_stage.stage is {stage}, expected observed stage 0, 1, or 2"
             )
-        if trailing != 0:
+        if stage == 0 and trailing != 1:
             raise PacketShapeError(
-                f"field_load_stage.trailing is {trailing}, expected 0"
+                f"field_load_stage stage-0 trailing is {trailing}, expected 1"
             )
-        return cls(stage=stage, trailing=trailing)
+        if stage in {1, 2} and trailing != 0:
+            raise PacketShapeError(
+                f"field_load_stage stage-{stage} trailing is {trailing}, expected 0"
+            )
+        if stage == 0 and len(opaque_tail) != 9:
+            raise PacketShapeError(
+                "field_load_stage stage 0 requires the observed 9-byte tail"
+            )
+        if stage in {1, 2} and opaque_tail:
+            raise PacketShapeError(
+                "field_load_stage stages 1 and 2 cannot carry an opaque tail"
+            )
+        return cls(stage=stage, trailing=trailing, opaque_tail=opaque_tail)
 
     def to_bytes(self) -> bytes:
-        if self.stage not in {1, 2}:
-            raise PacketShapeError("field load stage must be 1 or 2")
-        if self.trailing != 0:
-            raise PacketShapeError("field load trailing value must be zero")
-        return struct.pack("<HII", self.opcode, self.stage, self.trailing)
+        if self.stage not in {0, 1, 2}:
+            raise PacketShapeError("field load stage must be 0, 1, or 2")
+        if self.stage == 0 and self.trailing != 1:
+            raise PacketShapeError("field load stage-0 trailing value must be one")
+        if self.stage in {1, 2} and self.trailing != 0:
+            raise PacketShapeError(
+                "field load stage-1/stage-2 trailing value must be zero"
+            )
+        if self.stage == 0 and len(self.opaque_tail) != 9:
+            raise PacketShapeError(
+                "field load stage 0 requires the observed 9-byte tail"
+            )
+        if self.stage in {1, 2} and self.opaque_tail:
+            raise PacketShapeError(
+                "field load stages 1 and 2 cannot carry an opaque tail"
+            )
+        return (
+            struct.pack("<HII", self.opcode, self.stage, self.trailing)
+            + self.opaque_tail
+        )
 
 
 @dataclass(frozen=True)

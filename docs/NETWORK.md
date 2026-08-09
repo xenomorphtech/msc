@@ -127,9 +127,13 @@ Capture directories are mode `0700`; transcripts are mode `0600`. JSONL data
 records contain timestamps, direction, and base64 payload. They can include
 session tickets or identifiers even though proxy credentials are not recorded.
 
-The successful reference `/home/sdancer/Downloads/111.pcapng` is read directly
-with `tshark` by the custom server. It is not copied into the repository. TCP
-stream `83` is login and stream `92` is world/game.
+The successful reference `/home/sdancer/ms/111.pcapng` is read directly
+with `tshark` by the custom server. It remains untracked by Git. TCP stream
+`83` is login; streams `92` and `114` are world/game. The untracked
+`/home/sdancer/ms/1-10FS.pcapng` level-1-to-10 reference uses world stream
+`126`. That stream has a 14-byte server and 28-byte client transport prelude
+before the normal Maple handshake; endpoint discovery locates the greeting and
+normalization trims only those prefixes before frame decryption.
 
 ## Observed HTTP API
 
