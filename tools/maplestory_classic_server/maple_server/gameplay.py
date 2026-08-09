@@ -24,11 +24,18 @@ from .packets import (
     CompactInitialProgressionSnapshot,
     FieldDropRemoval,
     FieldDropSpawn,
+    FixedServerEmptyRecord,
+    FixedServerOpcode11Record,
+    FixedServerU16PairRecord,
+    FixedServerU16Record,
+    FixedServerU32Record,
+    FixedServerU8Record,
     FieldLoadStage,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
     InitialFieldSnapshot,
+    InitialCharacterContextRecord,
     InitialProgressionSnapshot,
     InitialInventoryItem,
     TypedInitialFieldSnapshot,
@@ -598,6 +605,11 @@ class GameplayGameState:
         default_factory=Counter
     )
     bootstrap_acknowledgements: int = 0
+    fixed_server_records: int = 0
+    fixed_server_records_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    initial_character_contexts: int = 0
     pending_movements: int = 0
     termination_received: bool = False
 
@@ -661,6 +673,51 @@ class FieldNpcSpawnReplayPlan:
             "prediction": {
                 "npc_spawn_events": len(self.frames),
                 "active_npc_state": "capture_equivalent",
+                "phase": "unchanged",
+            },
+        }
+
+
+FixedServerRecord = (
+    FixedServerEmptyRecord
+    | FixedServerOpcode11Record
+    | FixedServerU16PairRecord
+    | FixedServerU16Record
+    | FixedServerU32Record
+    | FixedServerU8Record
+    | InitialCharacterContextRecord
+)
+
+
+@dataclass(frozen=True)
+class FixedServerReplayFrame:
+    server_frame_index: int
+    record: FixedServerRecord = field(repr=False)
+    kind: str
+    details: tuple[tuple[str, object], ...]
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "server_frame_index": self.server_frame_index,
+            "opcode": self.record.opcode,
+            "kind": self.kind,
+            **dict(self.details),
+        }
+
+
+@dataclass(frozen=True)
+class FixedServerReplayPlan:
+    frames: tuple[FixedServerReplayFrame, ...]
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "emitter": "typed_fixed_server_record",
+            "frame_count": len(self.frames),
+            "opcodes": [frame.record.opcode for frame in self.frames],
+            "frames": [frame.safe_dict() for frame in self.frames],
+            "prediction": {
+                "fixed_server_record_events": len(self.frames),
+                "player_state": "unchanged",
                 "phase": "unchanged",
             },
         }
@@ -3110,6 +3167,15 @@ class GameplayAnalysis:
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
                 ),
+                "fixed_server_records": (
+                    self.state.fixed_server_records
+                ),
+                "fixed_server_records_by_opcode": dict(
+                    self.state.fixed_server_records_by_opcode
+                ),
+                "initial_character_contexts": (
+                    self.state.initial_character_contexts
+                ),
                 "termination_received": self.state.termination_received,
                 "transport_closed": self.transport_closed,
             },
@@ -5146,6 +5212,93 @@ class GameplayStateFold:
                         else ("field snapshot body remains opaque",)
                     )
                 ),
+            )
+        if opcode in {11, 24, 56, 58, 59, 96, 105, 178, 386, 388, 389}:
+            if opcode in FixedServerEmptyRecord.SUPPORTED_OPCODES:
+                fixed_record: FixedServerRecord = (
+                    FixedServerEmptyRecord.parse(payload)
+                )
+                details: dict[str, object] = {"shape": "empty"}
+            elif opcode in FixedServerU8Record.SUPPORTED_OPCODES:
+                fixed_record = FixedServerU8Record.parse(payload)
+                details = {
+                    "shape": "uint8",
+                    "value": fixed_record.value,
+                }
+            elif opcode == 56:
+                fixed_record = FixedServerU16Record.parse(payload)
+                details = {
+                    "shape": "uint16",
+                    "value": fixed_record.value,
+                }
+            elif opcode in FixedServerU32Record.SUPPORTED_OPCODES:
+                fixed_record = FixedServerU32Record.parse(payload)
+                details = {
+                    "shape": "uint32",
+                    "value": fixed_record.value,
+                }
+            elif opcode == 96:
+                fixed_record = FixedServerU16PairRecord.parse(payload)
+                details = {
+                    "shape": "uint16_pair",
+                    "values": [
+                        fixed_record.value_1,
+                        fixed_record.value_2,
+                    ],
+                }
+            elif opcode == 11:
+                fixed_record = FixedServerOpcode11Record.parse(payload)
+                details = {
+                    "shape": "reserved_uint32_uint8",
+                    "reserved_values_zero": True,
+                }
+            else:
+                fixed_record = InitialCharacterContextRecord.parse(payload)
+                character_matches = (
+                    self.state.entry_character_id == fixed_record.character_id
+                )
+                details = {
+                    "shape": "character_context",
+                    "context_flag": fixed_record.context_flag,
+                    "reserved_values_zero": True,
+                    "entry_character_match": character_matches,
+                }
+                self.state.initial_character_contexts += 1
+                if not character_matches:
+                    self.issues.append(
+                        "initial character context id does not match the world "
+                        "entry request"
+                    )
+            details["field_epoch"] = self.state.field_epoch
+            self.state.fixed_server_records += 1
+            self.state.fixed_server_records_by_opcode[opcode] += 1
+            kind = (
+                "initial_character_context"
+                if isinstance(
+                    fixed_record, InitialCharacterContextRecord
+                )
+                else "fixed_server_record"
+            )
+            identifiers = (
+                {"character_id": fixed_record.character_id}
+                if isinstance(
+                    fixed_record, InitialCharacterContextRecord
+                )
+                else {}
+            )
+            event_details = {"opcode": opcode, **details}
+            self._event(
+                frame,
+                f"{kind}_received",
+                details=event_details,
+                identifiers=identifiers,
+            )
+            return self._observation(
+                frame,
+                kind=kind,
+                coverage=ShapeCoverage.FULL,
+                parsed=fixed_record,
+                details=event_details,
             )
         if opcode == 300:
             spawn = NpcSpawn.parse(payload)
@@ -7789,6 +7942,62 @@ def plan_field_npc_spawn_replay(
     return FieldNpcSpawnReplayPlan(frames=tuple(frames))
 
 
+def plan_fixed_server_record_replay(
+    transcript: Transcript,
+) -> FixedServerReplayPlan:
+    """Materialize every capture-validated fixed-width neutral server record."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    record_types = (
+        FixedServerEmptyRecord,
+        FixedServerOpcode11Record,
+        FixedServerU16PairRecord,
+        FixedServerU16Record,
+        FixedServerU32Record,
+        FixedServerU8Record,
+        InitialCharacterContextRecord,
+    )
+    frames: list[FixedServerReplayFrame] = []
+    for observation in analysis.observations:
+        if observation.kind not in {
+            "fixed_server_record",
+            "initial_character_context",
+        }:
+            continue
+        record = observation.parsed
+        if not isinstance(record, record_types):
+            raise ValueError(
+                "fixed-server observation has no typed record"
+            )
+        payload = record.to_bytes()
+        if len(payload) != observation.length:
+            raise ValueError(
+                "typed fixed-server emitter changed packet length"
+            )
+        if type(record).parse(payload) != record:
+            raise ValueError(
+                "typed fixed-server emitter failed round-trip validation"
+            )
+        frames.append(
+            FixedServerReplayFrame(
+                server_frame_index=observation.direction_index,
+                record=record,
+                kind=observation.kind,
+                details=tuple(sorted(observation.details.items())),
+            )
+        )
+    if not frames:
+        raise ValueError("world transcript has no typed fixed-server frames")
+    frame_indices = [frame.server_frame_index for frame in frames]
+    if len(frame_indices) != len(set(frame_indices)):
+        raise ValueError(
+            "typed fixed-server frames contain duplicate server indices"
+        )
+    return FixedServerReplayPlan(frames=tuple(frames))
+
+
 def render_gameplay_analysis(
     analysis: GameplayAnalysis,
     *,
@@ -8016,6 +8225,11 @@ def render_gameplay_analysis(
             f"timestamp_properties:{len(state.timestamp_property_keys)} "
             f"extended_properties:{len(state.extended_property_code_units)} "
             f"variant:{state.progression_variant}"
+        ),
+        (
+            f"fixed_server_records=count:{state.fixed_server_records} "
+            f"by_opcode:{dict(state.fixed_server_records_by_opcode)} "
+            f"character_contexts:{state.initial_character_contexts}"
         ),
         (
             f"frames=client:{state.packets_by_direction['client_to_server']} "

@@ -152,6 +152,16 @@ python -m maple_server replay \
 Use `--rewrite-initial-current-hp 1` in place of the generation flag for the
 capture-validated controlled HP mutation.
 
+`--generate-fixed-server-records` regenerates every capture-validated member
+of the fixed-width server-record family at its original frame index. This
+currently covers opcodes `11`, `24`, `56`, `58`, `59`, `96`, `105`, `178`,
+`386`, `388`, and `389`. The planner folds the complete transcript, emits and
+reparses each typed record, verifies its original length and unique frame
+index, and rejects conflicts with explicit patches. Opcode `59` is tied to the
+selected character but runtime telemetry exposes only whether it matched, not
+the identifier. Add the flag to the command above; it composes with both the
+initial snapshot and NPC emitters.
+
 `--generate-field-npc-spawns` applies the same boundary to every fully typed
 opcode-`300` observation. It validates the complete fold, reconstructs each
 22-byte NPC spawn from its aliased entity state, reparses it, checks frame
@@ -381,6 +391,10 @@ The gameplay fold currently models these capture-backed boundaries:
   same control value and command stream, and no client-only trailer,
 - server opcode `217`: structurally exact life-movement broadcast with an
   aliased object id and the same fixed-width command stream as opcode `47`,
+- server opcodes `11`/`24`/`56`/`58`/`59`/`96`/`105`/`178`/`386`/`388`/`389`:
+  complete fixed-width neutral records, including a character-context record
+  whose identifier must match world entry; `--generate-fixed-server-records`
+  reconstructs every occurrence rather than assuming they are bootstrap-only,
 - server opcode `300`: complete 22-byte NPC spawn records whose facing field is
   preserved as the observed byte value rather than narrowed to a boolean;
   `--generate-field-npc-spawns` can reconstruct all such replay frames from
@@ -1114,6 +1128,11 @@ inventory group/item counts, skill count, progression shape/variant,
 original/emitted/max HP, prediction, and patch count. When initial player HP is
 rewritten, the same fields appear under
 `protocol.initial_player_hp_rewrite`.
+When fixed-width server records are generated,
+`protocol.fixed_server_record_emitter` reports every original frame index,
+opcode, neutral shape/value, field epoch, patch count, and the predicted
+unchanged player/phase state. Character ids are omitted; opcode `59` reports
+only its flag, zero-reserved invariant, and world-entry match.
 When NPC spawn frames are generated, `protocol.npc_spawn_emitter` reports the
 typed emitter, frame/patch count, represented field epochs, identifier-free
 alias/template/position/range records, and the predicted capture-equivalent

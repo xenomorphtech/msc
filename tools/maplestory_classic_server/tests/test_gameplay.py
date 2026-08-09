@@ -27,6 +27,7 @@ from maple_server.gameplay import (  # noqa: E402
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
+    plan_fixed_server_record_replay,
     plan_field_npc_spawn_replay,
     plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
@@ -51,11 +52,18 @@ from maple_server.packets import (  # noqa: E402
     CompactInitialProgressionSnapshot,
     FieldDropRemoval,
     FieldDropSpawn,
+    FixedServerEmptyRecord,
+    FixedServerOpcode11Record,
+    FixedServerU16PairRecord,
+    FixedServerU16Record,
+    FixedServerU32Record,
+    FixedServerU8Record,
     FieldLoadStage,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
     InitialCharacterSnapshot,
+    InitialCharacterContextRecord,
     InitialFieldTrailer,
     InitialFieldSnapshot,
     InitialInventoryItem,
@@ -164,6 +172,26 @@ def fixture_npc() -> NpcSpawn:
         range_left=-300,
         range_right=200,
         hidden=False,
+    )
+
+
+def fixture_fixed_server_records() -> tuple[object, ...]:
+    return (
+        FixedServerEmptyRecord(opcode=24),
+        FixedServerU8Record(opcode=105, value=0),
+        FixedServerOpcode11Record(reserved_u32=0, reserved_u8=0),
+        FixedServerU16PairRecord(value_1=6, value_2=17),
+        FixedServerEmptyRecord(opcode=178),
+        InitialCharacterContextRecord(
+            character_id=CHARACTER_ID,
+            context_flag=1,
+            reserved_u32s=(0, 0, 0),
+        ),
+        FixedServerU32Record(opcode=386, value=0),
+        FixedServerU32Record(opcode=389, value=0),
+        FixedServerU32Record(opcode=388, value=0xFDE04000),
+        FixedServerU16Record(value=0x1800),
+        FixedServerU8Record(opcode=58, value=1),
     )
 
 
@@ -1571,6 +1599,25 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 trailer=full_typed.progression.trailer,
             ).to_bytes()
 
+    def test_fixed_server_records_round_trip(self) -> None:
+        records = fixture_fixed_server_records()
+
+        for record in records:
+            encoded = record.to_bytes()
+            self.assertEqual(type(record).parse(encoded), record)
+
+        with self.assertRaisesRegex(PacketShapeError, "unsupported empty"):
+            FixedServerEmptyRecord(opcode=25).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "reserved values"):
+            FixedServerOpcode11Record(
+                reserved_u32=1,
+                reserved_u8=0,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "context flag"):
+            replace(records[5], context_flag=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "opcode must be 56"):
+            replace(records[9], opcode=57).to_bytes()
+
     def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
         stage = FieldLoadStage(
             stage=0,
@@ -2835,6 +2882,47 @@ class GameplayStateFoldTest(unittest.TestCase):
             safe["spawns"][0]["template_id"], fixture_npc().template_id
         )
         self.assertNotIn(str(NPC_OBJECT_ID), repr(safe))
+
+    def test_folds_and_plans_fixed_server_record_emission(self) -> None:
+        records = fixture_fixed_server_records()
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                record.to_bytes() for record in records
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+        plan = plan_fixed_server_record_replay(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.fixed_server_records, 11)
+        self.assertEqual(analysis.state.initial_character_contexts, 1)
+        self.assertEqual(
+            analysis.state.fixed_server_records_by_opcode,
+            {record.opcode: 1 for record in records},
+        )
+        self.assertEqual(len(plan.frames), 11)
+        self.assertEqual(
+            [frame.record.opcode for frame in plan.frames],
+            [record.opcode for record in records],
+        )
+        self.assertTrue(
+            all(
+                type(frame.record).parse(frame.record.to_bytes())
+                == frame.record
+                for frame in plan.frames
+            )
+        )
+        safe = plan.safe_dict()
+        self.assertEqual(safe["emitter"], "typed_fixed_server_record")
+        self.assertNotIn(str(CHARACTER_ID), repr(safe))
+        context = next(
+            frame
+            for frame in safe["frames"]
+            if frame["kind"] == "initial_character_context"
+        )
+        self.assertTrue(context["entry_character_match"])
 
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(

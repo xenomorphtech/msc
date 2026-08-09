@@ -360,6 +360,34 @@ progression state and 7/7 generated heartbeat pairs matched. This establishes
 the unchanged emitter as a real client-accepted generator, separately from the
 controlled HP mutation below.
 
+## Typed fixed-width server-record generation
+
+Add `--generate-fixed-server-records` to regenerate all fully modeled
+fixed-width server records at their captured frame indices. The supported
+opcodes are `11`, `24`, `56`, `58`, `59`, `96`, `105`, `178`, `386`, `388`,
+and `389`. The planner requires a valid gameplay fold, round-trips every typed
+record, preserves its packet length, rejects duplicate indices and explicit
+patch conflicts, and does not assume the records occur only during bootstrap.
+Both sustained reference streams contain a second opcode-`96` during later
+gameplay.
+
+For stream `114`, the flag replaces 11 server frames at indices
+`2,4,5,6,7,8,10,12,13,14,15`. It composes with
+`--generate-initial-field-snapshot` and `--generate-field-npc-spawns`.
+`protocol.fixed_server_record_emitter` exposes the frame/opcode sequence,
+neutral typed values, field epochs, patch count, and the predicted unchanged
+player/phase state. The opcode-`59` character id is excluded; status reports
+only its flag, zero-reserved invariant, and match against world entry.
+
+The 2026-08-09 browser-free live composition used all three emitters. The
+client entered map `101000000` and rendered level `12`, HP `50/222`, MP
+`97/342`, the expected NPCs, and the active field. The observed transcript at
+`downloads/maple_custom_server_observed/fixed_server_emitter_live_20260809/world/1786313433938476085_replay_12857.jsonl`
+folds validly to `active`, all 11 records at full coverage, one matching
+character context, nine active/spawned NPCs, and continuously paired
+heartbeats. This validates typed fixed-record serialization through the real
+encrypted client rather than only offline re-encoding.
+
 ## Typed NPC-spawn generation
 
 Add `--generate-field-npc-spawns` to the world replay command to regenerate

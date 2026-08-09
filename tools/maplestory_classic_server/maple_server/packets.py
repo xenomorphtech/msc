@@ -5216,6 +5216,238 @@ class MobMovementAcknowledgement:
 
 
 @dataclass(frozen=True)
+class FixedServerEmptyRecord:
+    opcode: int
+
+    SUPPORTED_OPCODES = {24, 178}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerEmptyRecord":
+        reader = PacketReader(payload, packet_name="fixed_server_empty_record")
+        record = cls(opcode=reader.u16("opcode"))
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported empty fixed-server opcode {self.opcode}"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
+class FixedServerU8Record:
+    opcode: int
+    value: int
+
+    SUPPORTED_OPCODES = {58, 105}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerU8Record":
+        reader = PacketReader(payload, packet_name="fixed_server_u8_record")
+        record = cls(opcode=reader.u16("opcode"), value=reader.u8("value"))
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported uint8 fixed-server opcode {self.opcode}"
+            )
+        if not 0 <= self.value <= 0xFF:
+            raise PacketShapeError("fixed-server uint8 value is out of range")
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack("<HB", self.opcode, self.value)
+
+
+@dataclass(frozen=True)
+class FixedServerU16Record:
+    value: int
+    opcode: int = 56
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerU16Record":
+        reader = PacketReader(payload, packet_name="fixed_server_u16_record")
+        _expect_opcode(reader, 56)
+        record = cls(value=reader.u16("value"))
+        reader.finish()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 56:
+            raise PacketShapeError("fixed-server uint16 opcode must be 56")
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<HH", self.opcode, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"fixed-server uint16 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class FixedServerU32Record:
+    opcode: int
+    value: int
+
+    SUPPORTED_OPCODES = {386, 388, 389}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerU32Record":
+        reader = PacketReader(payload, packet_name="fixed_server_u32_record")
+        record = cls(opcode=reader.u16("opcode"), value=reader.u32("value"))
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported uint32 fixed-server opcode {self.opcode}"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<HI", self.opcode, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"fixed-server uint32 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class FixedServerU16PairRecord:
+    value_1: int
+    value_2: int
+    opcode: int = 96
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerU16PairRecord":
+        reader = PacketReader(
+            payload, packet_name="fixed_server_u16_pair_record"
+        )
+        _expect_opcode(reader, 96)
+        record = cls(
+            value_1=reader.u16("value_1"),
+            value_2=reader.u16("value_2"),
+        )
+        reader.finish()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 96:
+            raise PacketShapeError("fixed-server uint16-pair opcode must be 96")
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<HHH", self.opcode, self.value_1, self.value_2)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"fixed-server uint16 pair is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class FixedServerOpcode11Record:
+    reserved_u32: int
+    reserved_u8: int
+    opcode: int = 11
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerOpcode11Record":
+        reader = PacketReader(payload, packet_name="fixed_server_opcode_11")
+        _expect_opcode(reader, 11)
+        record = cls(
+            reserved_u32=reader.u32("reserved_u32"),
+            reserved_u8=reader.u8("reserved_u8"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 11:
+            raise PacketShapeError("fixed-server reserved opcode must be 11")
+        if self.reserved_u32 != 0 or self.reserved_u8 != 0:
+            raise PacketShapeError(
+                "fixed-server opcode 11 reserved values must be zero"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack(
+            "<HIB",
+            self.opcode,
+            self.reserved_u32,
+            self.reserved_u8,
+        )
+
+
+@dataclass(frozen=True)
+class InitialCharacterContextRecord:
+    character_id: int
+    context_flag: int
+    reserved_u32s: tuple[int, int, int]
+    opcode: int = 59
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "InitialCharacterContextRecord":
+        reader = PacketReader(payload, packet_name="initial_character_context")
+        _expect_opcode(reader, 59)
+        record = cls(
+            character_id=reader.u32("character_id"),
+            context_flag=reader.u8("context_flag"),
+            reserved_u32s=(
+                reader.u32("reserved_u32_1"),
+                reader.u32("reserved_u32_2"),
+                reader.u32("reserved_u32_3"),
+            ),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 59:
+            raise PacketShapeError("initial character context opcode must be 59")
+        if self.context_flag != 1:
+            raise PacketShapeError(
+                "initial character context flag must match captured value one"
+            )
+        if self.reserved_u32s != (0, 0, 0):
+            raise PacketShapeError(
+                "initial character context reserved values must be zero"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<HIBIII",
+                self.opcode,
+                self.character_id,
+                self.context_flag,
+                *self.reserved_u32s,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"initial character context field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class WorldBootstrapAcknowledgement:
     opaque_value: int
     opcode: int = 301

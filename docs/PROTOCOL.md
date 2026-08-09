@@ -552,6 +552,50 @@ The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server
 clock without replacing the initial player-stat model.
 
+## Fixed-width neutral server records
+
+Three independent gameplay streams share a small fixed-width server-record
+family. Their complete grammars, including the two-byte opcode, are:
+
+```text
+opcode 24, 178:          uint16 opcode
+opcode 58, 105:          uint16 opcode; uint8 value
+opcode 56:               uint16 opcode; uint16 value
+opcode 386, 388, 389:    uint16 opcode; uint32 value
+opcode 96:               uint16 opcode; uint16 value_1; uint16 value_2
+opcode 11:               uint16 opcode; uint32 reserved=0; uint8 reserved=0
+opcode 59:               uint16 opcode; uint32 character_id; uint8 flag=1;
+                         uint32 reserved_1=0; uint32 reserved_2=0;
+                         uint32 reserved_3=0
+```
+
+Opcode `59` is the only member with an established state relationship: its
+character id equals the preceding world-entry character id in streams `92`,
+`114`, and `126`. Normal reports retain only the match boolean. The remaining
+values stay semantically neutral. In particular, stream `126` proves opcode
+`388` is not a reserved-zero record (`value=0xfde04000`). Variable-width
+opcodes `156` and `385` remain losslessly unknown and are not included in this
+family.
+
+The initial sequence contains one of each shape: 11 records total in short
+stream `114`. Streams `92` and `126` each contain a second opcode-`96` later in
+gameplay, so the fold and emitter are deliberately position-neutral. All 11
+stream-`114` records and all 12 records in each sustained stream parse at full
+coverage, round-trip exactly, update opcode counters, and emit
+`fixed_server_record_received` or `initial_character_context_received` events
+with the current field epoch.
+
+`--generate-fixed-server-records` materializes every typed observation,
+reparses it, preserves its original length and server-frame index, and rejects
+duplicates or explicit-patch conflicts. `GET /api/v1/status` exposes the safe
+plan under `protocol.fixed_server_record_emitter`; it includes neutral values,
+frame indices, field epochs, patch count, and an unchanged player/phase
+prediction, but no character id. A browser-free live stream-`114` run composed
+all 11 generated records with the typed initial snapshot and nine generated
+NPC spawns. The client reached and rendered map `101000000`; its independent
+transcript folds validly to `active` with matching player state, all 11 record
+shapes, nine NPCs, and paired heartbeat traffic.
+
 ## Inventory change sets (`server 39`)
 
 The capture-validated packet grammar is:

@@ -484,6 +484,20 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertTrue(arguments.generate_field_npc_spawns)
 
+    def test_replay_parser_accepts_typed_fixed_server_record_emitter(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--generate-fixed-server-records",
+            ]
+        )
+
+        self.assertTrue(arguments.generate_fixed_server_records)
+
     def test_replay_parser_accepts_typed_post_transcript_hp_update(self) -> None:
         arguments = build_parser().parse_args(
             [

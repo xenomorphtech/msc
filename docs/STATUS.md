@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  25,597 full, 43,954 partial, 1,549 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 12,976 full, 21,604 partial,
-  627 unknown, and zero invalid; stream `114` reports 16/14/46/0. Thirteen
+  25,609 full, 43,954 partial, 1,537 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 12,988 full, 21,604 partial,
+  615 unknown, and zero invalid; stream `114` reports 27/14/35/0. Thirteen
   long-corpus state-correlation warnings remain: the prior 12 plus one
   aggregate warning for six one-HP combat prediction differences.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
@@ -65,6 +65,19 @@
   and operation-`2` equip moves. All 256 change sets and 232 modifications
   decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
   spawns also validate after preserving the facing byte values `0/1/2/4/5`.
+- The common fixed-width server family now has complete typed codecs for
+  opcodes `11`, `24`, `56`, `58`, `59`, `96`, `105`, `178`, `386`, `388`, and
+  `389`. Stream `114` has 11 full records; streams `92` and `126` each have 12
+  because opcode `96` recurs later in gameplay. Opcode `59` matches world-entry
+  character state, and all other value roles remain neutral.
+- `--generate-fixed-server-records` reconstructs every such occurrence,
+  validates reparse/length/index/patch invariants, and exposes identifier-free
+  plans under `protocol.fixed_server_record_emitter`. A browser-free live run
+  composed its 11 stream-`114` frames with the initial snapshot and nine NPC
+  emitters; the client rendered map `101000000`, and transcript
+  `fixed_server_emitter_live_20260809/world/1786313433938476085_replay_12857.jsonl`
+  folds validly to `active`, one matching character context, nine NPCs, and
+  paired heartbeats.
 - `--generate-field-npc-spawns` now reconstructs every fully typed opcode-`300`
   frame from the folded aliased entity model. It validates exact 22-byte
   re-encoding, reparsing, frame uniqueness, and patch conflicts; runtime status
@@ -569,9 +582,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 1. Use the owner/proximity negative controls to isolate the remaining
    client-side drop eligibility condition; serve a reactive pickup only after
    observing an authentic opcode-`185` request.
-2. Promote the complete initial opcode-`157` model from a safe one-field
-   mutation to a generated field snapshot, then replace more finite replay
-   frames with state-driven emitters.
+2. Bound the variable-width opcode-`156` and `385` records adjacent to initial
+   field entry, then decide whether their capture variants support typed
+   state-driven emitters without importing position-dependent assumptions.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Add a bounded per-trigger event budget so repeated valid gameplay events
