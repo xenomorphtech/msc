@@ -804,6 +804,12 @@ stores current/previous percentages and emits `mob_health_percentage_updated`.
 A zero value does not itself remove the entity: membership still changes only
 on the separate opcode-`280` leave packet.
 
+When a targeted client opcode-`50`/`52` request is pending for the same mob,
+the event also carries that request's frame, decoded damage array, and response
+time. This is an observed request/result correlation, not a claim that the
+percentage delta came only from those damage words; concurrent actors and
+integer percentage rounding still prevent an exact maximum-HP derivation.
+
 ## Player movement (`client 182`, `server 202`)
 
 Local-player movement submissions have this capture-validated shape:
@@ -1001,7 +1007,16 @@ uint32 control_value                # neutral role
 byte[5] opaque_common_state
 uint32 value_1                      # neutral role
 uint32 value_2                      # mob object id in extended variants
-byte[variant_suffix_length] opaque_suffix
+if variant >> 4 == 1:
+  byte[14] opaque_target_prefix
+  repeat (variant & 0x0f):
+    uint32 raw_damage
+      damage_value = raw_damage & 0x7fffffff
+      high_bit_marker = raw_damage >> 31
+  byte[8] opaque_target_tail        # opcode 50
+  byte[9] opaque_target_tail        # opcode 52
+else:
+  byte[variant_suffix_length] opaque_suffix
 ```
 
 The accepted capture-bounded variants are:
@@ -1019,9 +1034,12 @@ opcode  variant  suffix bytes  total bytes  target in value_2
 Stream `126` contains 552 opcode-`50` actions (264 variant `1`, 288 variant
 `17`) and 130 opcode-`52` actions (16/8/80/26 variants `1/2/17/18`). Stream
 `92` contains 128 opcode-`52` actions (15 variant `2`, 113 variant `18`). Every
-extended action's `value_2` is a known mob object id. The opaque extended
-suffix begins with byte `06` in these captures, but its inner fields are not
-yet assigned roles.
+extended action's `value_2` is a known mob object id. The extended suffix
+decomposes exactly into the 14-byte prefix, one damage word per low-nibble hit,
+and the opcode-specific tail above. Stream `126` contains 420 damage words with
+low-31-bit magnitudes `1..42`, total `6964`, and stream `92` contains 226 with
+magnitudes `0..49`, total `4864`. No client damage word in either capture sets
+the high bit. Prefix and tail field roles remain neutral.
 
 Opcode `54` is an exact 24-byte member of the same action family:
 
@@ -1045,8 +1063,12 @@ confirms the targeted opcode-`52` shape. All 961 actions consume exactly and
 round-trip byte-for-byte.
 
 The fold emits `client_attack_submitted`, aliases the mob target, distinguishes
-currently active from previously known targets, and retains only packet counts,
-opcode/variant shapes, and identifier-safe fields in normal reports. It does
+currently active from previously known targets, and records per-mob damage/hit
+totals. Each targeted opcode-`50`/`52` submission is queued for that mob. The
+next opcode-`293` update consumes the pending request and reports its frame,
+damage array, and response time. Stream `126` has 380 such matches and clears
+14 unmatched requests at mob/field lifecycle boundaries; stream `92` has 110
+matches and clears three. Both finish with zero pending effects. The fold does
 not expose client tokens or raw target ids.
 
 ## Attack relays (`server 218` and `219`)
@@ -1142,9 +1164,9 @@ observed relay hit/damage totals without replacing the authoritative opcode-
 `293` health percentage. Raw ids and raw body bytes remain hidden. These
 captures validate action-to-health/leave correlations and damage array
 boundaries. Relay-tag/unknown/auxiliary roles, the damage high bit, client
-action suffixes, and mob maximum HP remain insufficient to predict the next
-percentage update. The custom server therefore does not yet generate or replay
-attacks.
+target prefix/tail fields, and mob maximum HP remain insufficient to predict
+the next percentage update. The custom server therefore does not yet generate
+or replay attacks.
 
 ## `58880` exchange
 

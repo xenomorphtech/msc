@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
+    GameplayStateFold,
     analyze_gameplay_transcript,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
@@ -24,6 +25,7 @@ from maple_server.gameplay import (  # noqa: E402
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
+from maple_server.gamestate import PlainFrame  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAttackAction,
@@ -954,7 +956,12 @@ def fixture_gameplay_transcript(
                 opaque_common_state=b"state",
                 value_1=1,
                 value_2=MOB_OBJECT_ID,
-                opaque_suffix=b"\x06" + b"\x00" * 25,
+                opaque_suffix=(
+                    b"\x06"
+                    + b"\x00" * 13
+                    + struct.pack("<I", 0x8000_0028)
+                    + b"\x00" * 8
+                ),
             ).to_bytes(),
         )
         append(
@@ -982,7 +989,12 @@ def fixture_gameplay_transcript(
                 opaque_common_state=b"state",
                 value_1=3,
                 value_2=MOB_OBJECT_ID,
-                opaque_suffix=b"\x06" + b"\x00" * 30,
+                opaque_suffix=(
+                    b"\x06"
+                    + b"\x00" * 13
+                    + struct.pack("<II", 0x8000_0028, 41)
+                    + b"\x00" * 9
+                ),
             ).to_bytes(),
         )
         append(
@@ -1946,11 +1958,35 @@ class GameplayPacketShapeTest(unittest.TestCase):
             opcode_54_record,
         )
         self.assertEqual(len(opcode_54_record.to_bytes()), 24)
+        client_attack_actions[-1] = replace(
+            client_attack_actions[-1],
+            opaque_suffix=(
+                b"\x06"
+                + b"\x00" * 13
+                + struct.pack("<II", 0x8000_0028, 41)
+                + b"\x00" * 9
+            ),
+        )
         for attack_action in client_attack_actions:
             self.assertEqual(
                 ClientAttackAction.parse(attack_action.to_bytes()),
                 attack_action,
             )
+        two_hit_client_attack = client_attack_actions[-1]
+        self.assertEqual(two_hit_client_attack.target_count, 1)
+        self.assertEqual(two_hit_client_attack.hit_count, 2)
+        self.assertEqual(two_hit_client_attack.damage_values, (40, 41))
+        self.assertEqual(
+            two_hit_client_attack.high_bit_markers, (True, False)
+        )
+        self.assertEqual(
+            two_hit_client_attack.safe_dict()["opaque_target_prefix_bytes"],
+            14,
+        )
+        self.assertEqual(
+            two_hit_client_attack.safe_dict()["opaque_target_tail_bytes"],
+            9,
+        )
         for attack_relay in server_attack_relays:
             self.assertEqual(
                 ServerAttackRelay.parse(attack_relay.to_bytes()),
@@ -2082,6 +2118,84 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
 
 class GameplayStateFoldTest(unittest.TestCase):
+    def test_correlates_client_damage_array_with_mob_health_update(
+        self,
+    ) -> None:
+        fold = GameplayStateFold()
+        spawn_payload = MobEnterField(
+            object_id=MOB_OBJECT_ID,
+            spawn=fixture_mob_spawn(),
+        ).to_bytes()
+        attack_payload = ClientAttackAction(
+            opcode=52,
+            local_object_index=7,
+            variant=18,
+            client_token=987_654_324,
+            control_value=807_666,
+            opaque_common_state=b"state",
+            value_1=3,
+            value_2=MOB_OBJECT_ID,
+            opaque_suffix=(
+                b"\x06"
+                + b"\x00" * 13
+                + struct.pack("<II", 0x8000_0028, 41)
+                + b"\x00" * 9
+            ),
+        ).to_bytes()
+        health_payload = MobHealthPercentageUpdate(
+            object_id=MOB_OBJECT_ID,
+            health_percentage=75,
+        ).to_bytes()
+
+        frames = (
+            PlainFrame(
+                index=0,
+                direction_index=0,
+                timestamp_ns=1_000_000_000,
+                direction="server_to_client",
+                wire_offset=0,
+                wire_length=len(spawn_payload),
+                plaintext=spawn_payload,
+            ),
+            PlainFrame(
+                index=1,
+                direction_index=0,
+                timestamp_ns=1_010_000_000,
+                direction="client_to_server",
+                wire_offset=0,
+                wire_length=len(attack_payload),
+                plaintext=attack_payload,
+            ),
+            PlainFrame(
+                index=2,
+                direction_index=1,
+                timestamp_ns=1_110_000_000,
+                direction="server_to_client",
+                wire_offset=len(spawn_payload),
+                wire_length=len(health_payload),
+                plaintext=health_payload,
+            ),
+        )
+        observations = tuple(fold.consume(frame) for frame in frames)
+
+        self.assertEqual(fold.state.client_attack_damage_actions, 1)
+        self.assertEqual(fold.state.client_attack_damage_entries, 2)
+        self.assertEqual(fold.state.client_attack_damage_total, 81)
+        self.assertEqual(fold.state.client_attack_health_matches, 1)
+        self.assertEqual(fold.state.client_attack_effects_cleared, 0)
+        self.assertEqual(fold.state.pending_client_attack_effects, 0)
+        self.assertEqual(fold.state.last_client_attack_health_response_ms, 100.0)
+        self.assertEqual(fold.state.max_client_attack_health_response_ms, 100.0)
+        health_details = observations[-1].details
+        self.assertTrue(health_details["matched_client_attack"])
+        self.assertEqual(health_details["client_attack_frame"], 1)
+        self.assertEqual(health_details["submitted_damage_values"], [40, 41])
+        self.assertEqual(health_details["submitted_damage_total"], 81)
+        self.assertEqual(
+            health_details["submitted_high_bit_markers"], [True, False]
+        )
+        self.assertEqual(health_details["client_attack_response_ms"], 100.0)
+
     def test_derives_typed_item_pickup_response_from_separate_evidence(
         self,
     ) -> None:
@@ -2919,6 +3033,17 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.client_attack_targets_for_unknown_mobs, 0
         )
+        self.assertEqual(analysis.state.client_attack_damage_actions, 2)
+        self.assertEqual(analysis.state.client_attack_damage_entries, 3)
+        self.assertEqual(analysis.state.client_attack_damage_total, 121)
+        self.assertEqual(analysis.state.client_attack_damage_min, 40)
+        self.assertEqual(analysis.state.client_attack_damage_max, 41)
+        self.assertEqual(
+            analysis.state.client_attack_damage_high_bit_markers, 2
+        )
+        self.assertEqual(analysis.state.client_attack_health_matches, 0)
+        self.assertEqual(analysis.state.client_attack_effects_cleared, 0)
+        self.assertEqual(analysis.state.pending_client_attack_effects, 2)
         self.assertEqual(analysis.state.server_attack_relays, 2)
         self.assertEqual(
             analysis.state.server_attack_relays_by_opcode, {218: 1, 219: 1}
@@ -3020,16 +3145,31 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.server_attack_damage_high_bit_markers, 2
         )
         active_mob = analysis.state.mobs[MOB_OBJECT_ID]
+        self.assertEqual(active_mob.client_attack_submitted_hits, 3)
+        self.assertEqual(active_mob.client_attack_submitted_damage, 121)
+        self.assertEqual(
+            active_mob.client_attack_submitted_high_bit_markers, 2
+        )
         self.assertEqual(active_mob.attack_relay_hits, 3)
         self.assertEqual(active_mob.attack_relay_damage, 121)
         self.assertEqual(active_mob.attack_relay_high_bit_markers, 2)
         self.assertEqual(active_mob.last_attack_hit_action, 6)
         safe_mob = analysis.safe_dict()["state"]["mobs"][0]
+        self.assertEqual(safe_mob["client_attack_submitted_hits"], 3)
+        self.assertEqual(safe_mob["client_attack_submitted_damage"], 121)
         self.assertEqual(safe_mob["attack_relay_hits"], 3)
         self.assertEqual(safe_mob["attack_relay_damage"], 121)
         self.assertIn(
             'combat=client_actions:5 client_opcodes:{"50": 2, "52": 2, '
             '"54": 1}',
+            report,
+        )
+        self.assertIn(
+            "client_damage_entries:3 client_damage_actions:2 "
+            "client_damage_total:121 "
+            "client_damage_range:40..41 client_damage_high_bits:2 "
+            "client_health_matches:0 cleared_client_effects:0 "
+            "pending_client_effects:2",
             report,
         )
         self.assertIn(

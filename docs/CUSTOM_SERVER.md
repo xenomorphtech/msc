@@ -129,18 +129,22 @@ neutral rather than using the shape manifest's tentative `client_tick` label.
 Client opcodes `50`/`52`/`54` now fold into one attack-action model. Stream
 `126` has 802 actions and stream `92` has 159. Extended opcode-`50`/`52`
 variants and every opcode-`54` action carry a capture-correlated mob target;
-safe output aliases it and omits client tokens. Server opcodes `218`/`219`
+safe output aliases it and omits client tokens. Targeted `50`/`52` suffixes
+also expose 646 damage words across both captures after a fixed opaque prefix.
+The state fold accumulates them per mob and matches 490 submissions to the next
+same-lifecycle opcode-`293` percentage update, emitting damage arrays and
+response timing while leaving no pending effects. Server opcodes `218`/`219`
 likewise fold as 140 and 43 attack relays, with aliased actors and packed
-target/hit counts. Their bodies now expose 194 target records and 254 damage
-words across both captures, with aliased mobs and a neutral high-bit marker;
-active mobs also accumulate relay hit/damage telemetry. All 141 opcode-`219`
+target/hit counts. Their bodies expose 194 target records and 254 damage words,
+with aliased mobs and a neutral high-bit marker; active mobs also accumulate
+relay hit/damage telemetry. All 141 opcode-`219`
 relays now expose conditional skill id, display/facing/speed/mastery fields,
 projectile id, and a signed position; the fold compares that position with the
 actor's prior movement state. All 42 opcode-`218` relays expose the common
 metadata fields, with 37 full mastery/auxiliary forms and five strictly checked
 short all-zero target placeholders. Relay tag/unknown/auxiliary roles, damage
-high bit, client suffixes, and mob maximum-HP mapping are still not established
-well enough for the custom server to generate or replay combat.
+high bit, client target prefix/tail fields, and mob maximum-HP mapping are still
+not established well enough for the custom server to generate or replay combat.
 
 ## Replay the login capture locally
 
@@ -677,8 +681,10 @@ project's own `README.md` for all options.
   attack relays with packed target/hit counts, 194 typed target records, and
   254 damage words. The 141 ranged relays additionally type skill/projectile/
   animation metadata and signed positions; all 42 close-range relays type their
-  common/full metadata and short placeholder distinction. Unresolved semantic
-  roles and HP mapping remain out of generation and replay.
+  common/full metadata and short placeholder distinction. The extended client
+  suffixes add 646 typed damage words and 490 request-to-health matches with no
+  pending effects after lifecycle cleanup. Unresolved semantic roles and HP
+  mapping remain out of generation and replay.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
   player state. A generated HP-mask packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.

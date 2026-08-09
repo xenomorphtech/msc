@@ -105,8 +105,13 @@
   `126` contributes 552/130/120 packets and stream `92` contributes 0/128/31.
   Extended `50`/`52` variants and every opcode-`54` action carry a mob object
   id at the capture-correlated offset; all such ids are known mob templates.
-  Reports alias targets and redact client tokens while keeping control/value
-  fields and variant suffixes opaque.
+  Targeted `50`/`52` suffixes now expose 646 damage words after a fixed 14-byte
+  prefix: stream `126` contributes 420 (`1..42`, total `6964`) and stream `92`
+  contributes 226 (`0..49`, total `4864`). The fold correlates 380 and 110 of
+  those submissions with the next same-lifecycle opcode-`293` update, clears
+  the remaining 14 and three at lifecycle boundaries, and finishes with zero
+  pending effects. Reports alias targets and redact client tokens while
+  keeping control/value and target prefix/tail roles neutral.
 - Server opcodes `218`/`219` now have capture-bounded attack-relay envelopes:
   opcode, aliased player object id, a packed target-count/hit-count nibble, and
   repeated mob-id/hit-action/damage arrays. Stream `126` adds 41/99 relays,
@@ -121,8 +126,8 @@
   facing flags, speed, mastery, and projectile id; their four-byte tails decode
   as signed attack positions and are compared with prior remote-player
   positions in fold telemetry. Relay-tag/unknown/auxiliary roles, the damage
-  high-bit marker, client suffixes, and mob maximum-HP mapping remain neutral,
-  so combat generation/replay stays disabled.
+  high-bit marker, client target prefix/tail fields, and mob maximum-HP mapping
+  remain neutral, so combat generation/replay stays disabled.
 - The first large opcode-`157` world packet now has a capture-validated typed
   112-byte character/stat prefix. Both streams `92` and `114` round-trip
   byte-for-byte. Their inventory tails now decode into five equipment groups

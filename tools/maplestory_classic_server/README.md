@@ -329,7 +329,8 @@ The gameplay fold currently models these capture-backed boundaries:
   distributions are typed while all field roles remain neutral,
 - client opcodes `50`/`52`: capture-bounded attack-action envelopes with exact
   variant/suffix lengths, redacted client tokens, and an aliased mob target in
-  extended variants,
+  extended variants, plus typed per-hit damage words between bounded opaque
+  target prefix/tail regions,
 - client opcode `54`: exact 24-byte attack action whose third trailing u32 is
   an aliased mob target; the other numeric roles remain neutral,
 - client opcode `217`: neutral compact and counted record-set envelopes with
@@ -363,7 +364,8 @@ The gameplay fold currently models these capture-backed boundaries:
   a one-byte boolean flag, 16-bit little-endian status/resource value, and two
   one-byte auxiliary fields,
 - server opcode `293`: exact object-id plus one-byte mob-health percentage;
-  zero is retained as state and does not replace the separate leave packet,
+  zero is retained as state and does not replace the separate leave packet;
+  pending client attacks add request-frame/damage/timing correlation,
 - server opcodes `218`/`219`: attack-relay envelopes with an aliased player
   object id, packed target/hit counts, and typed mob/hit-action/damage arrays;
   opcode `219` additionally exposes its conditional skill id, display/facing/
@@ -681,9 +683,21 @@ opcode-`54` actions; stream `92` adds 128 opcode-`52` and 31 opcode-`54`
 actions. The extended `50`/`52` variants place a known mob object id at offset
 21, and every opcode-`54` packet places one at offset 16. The fold aliases that
 target, distinguishes active/previously-known/unknown mobs, redacts client
-tokens, and emits one `client_attack_submitted` event per action. Exact variant
-and suffix boundaries round-trip, but control/value fields and the suffix body
-remain opaque.
+tokens, and emits one `client_attack_submitted` event per action. In a targeted
+`50`/`52` suffix, a 14-byte opaque target prefix is followed by one u32 damage
+word per hit and an opcode-specific 8/9-byte opaque tail. Stream `126` exposes
+420 client damage words (`1..42`, total `6964`) and stream `92` exposes 226
+(`0..49`, total `4864`); no client damage word sets the high bit. Exact variant
+and suffix boundaries round-trip, while control/value and target prefix/tail
+roles remain neutral.
+
+The fold queues each targeted `50`/`52` submission by mob and matches it to the
+next opcode-`293` health update in the same lifecycle. It finds 380 matches in
+stream `126` and 110 in stream `92`; the remaining 14 and three submissions
+are cleared by mob/field lifecycle boundaries, leaving no pending effect. The
+health-update event carries the request frame, submitted damage array, and
+response time. This validates request-to-effect ordering without treating the
+percentage delta as an exact maximum-HP equation.
 
 Server opcodes `218` and `219` form the corresponding capture-bounded attack
 relay family. Their prefix is opcode, player object id, and one packed byte;
@@ -720,8 +734,9 @@ all 99 stream-`126` positions and 30 of 42 stream-`92` positions can be compared
 with a previously observed remote-player position; common vertical deltas are
 roughly 22-28 pixels, while larger deltas follow stale movement broadcasts.
 The fold emits both positions and their deltas as validation evidence. Relay-
-tag/unknown/auxiliary roles, the damage high bit, client attack suffixes, and
-mob maximum-HP mapping still prevent safe combat generation or replay.
+tag/unknown/auxiliary roles, the damage high bit, client target prefix/tail
+fields, and mob maximum-HP mapping still prevent safe combat generation or
+replay.
 
 A live replay A/B used the short stream-`114` field and repeated its server
 frame `55`, an opcode-`303` update for an already spawned NPC. Baseline and
@@ -990,3 +1005,6 @@ It intentionally cannot launch an authenticated official session.
 37. Type all 42 opcode-`218` metadata prefixes, distinguish 37 full forms from
     five short all-zero target placeholders, and enforce that short-form target
     invariant during parse and re-encoding.
+38. Decode all 646 targeted client damage words, fold their per-mob totals, and
+    correlate 490 opcode-`50`/`52` submissions with following opcode-`293`
+    health updates while clearing unmatched requests at lifecycle boundaries.

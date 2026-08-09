@@ -85,6 +85,9 @@ class MobEntity:
     y: int = 0
     stance: int = 0
     health_percentage: int | None = None
+    client_attack_submitted_hits: int = 0
+    client_attack_submitted_damage: int = 0
+    client_attack_submitted_high_bit_markers: int = 0
     attack_relay_hits: int = 0
     attack_relay_damage: int = 0
     attack_relay_high_bit_markers: int = 0
@@ -155,6 +158,14 @@ class PendingItemPickup:
     expected_value: int | None
     effect: dict[str, object] | None = None
     result_confirmed: bool = False
+
+
+@dataclass(frozen=True)
+class PendingClientAttack:
+    request_frame_index: int
+    request_timestamp_ns: int
+    damage_values: tuple[int, ...]
+    high_bit_markers: tuple[bool, ...]
 
 
 @dataclass(frozen=True)
@@ -388,6 +399,17 @@ class GameplayGameState:
     client_attack_targets_for_active_mobs: int = 0
     client_attack_targets_for_known_mobs: int = 0
     client_attack_targets_for_unknown_mobs: int = 0
+    client_attack_damage_actions: int = 0
+    client_attack_damage_entries: int = 0
+    client_attack_damage_total: int = 0
+    client_attack_damage_min: int | None = None
+    client_attack_damage_max: int | None = None
+    client_attack_damage_high_bit_markers: int = 0
+    client_attack_health_matches: int = 0
+    client_attack_effects_cleared: int = 0
+    pending_client_attack_effects: int = 0
+    last_client_attack_health_response_ms: float | None = None
+    max_client_attack_health_response_ms: float | None = None
     server_attack_relays: int = 0
     server_attack_relays_by_opcode: Counter[int] = field(
         default_factory=Counter
@@ -1233,6 +1255,15 @@ class GameplayAnalysis:
                 "y": entity.y,
                 "stance": entity.stance,
                 "health_percentage": entity.health_percentage,
+                "client_attack_submitted_hits": (
+                    entity.client_attack_submitted_hits
+                ),
+                "client_attack_submitted_damage": (
+                    entity.client_attack_submitted_damage
+                ),
+                "client_attack_submitted_high_bit_markers": (
+                    entity.client_attack_submitted_high_bit_markers
+                ),
                 "attack_relay_hits": entity.attack_relay_hits,
                 "attack_relay_damage": entity.attack_relay_damage,
                 "attack_relay_high_bit_markers": (
@@ -1718,6 +1749,39 @@ class GameplayAnalysis:
                 "client_attack_targets_for_unknown_mobs": (
                     self.state.client_attack_targets_for_unknown_mobs
                 ),
+                "client_attack_damage_actions": (
+                    self.state.client_attack_damage_actions
+                ),
+                "client_attack_damage_entries": (
+                    self.state.client_attack_damage_entries
+                ),
+                "client_attack_damage_total": (
+                    self.state.client_attack_damage_total
+                ),
+                "client_attack_damage_min": (
+                    self.state.client_attack_damage_min
+                ),
+                "client_attack_damage_max": (
+                    self.state.client_attack_damage_max
+                ),
+                "client_attack_damage_high_bit_markers": (
+                    self.state.client_attack_damage_high_bit_markers
+                ),
+                "client_attack_health_matches": (
+                    self.state.client_attack_health_matches
+                ),
+                "client_attack_effects_cleared": (
+                    self.state.client_attack_effects_cleared
+                ),
+                "pending_client_attack_effects": (
+                    self.state.pending_client_attack_effects
+                ),
+                "last_client_attack_health_response_ms": (
+                    self.state.last_client_attack_health_response_ms
+                ),
+                "max_client_attack_health_response_ms": (
+                    self.state.max_client_attack_health_response_ms
+                ),
                 "server_attack_relays": self.state.server_attack_relays,
                 "server_attack_relays_by_opcode": dict(
                     self.state.server_attack_relays_by_opcode
@@ -1943,6 +2007,9 @@ class GameplayStateFold:
         self._pending_opcode_426_notifications: deque[int] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
+        self._pending_client_attacks: dict[
+            int, deque[PendingClientAttack]
+        ] = {}
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
 
@@ -2033,6 +2100,34 @@ class GameplayStateFold:
             "shape": shape,
             "field_epoch": self.state.field_epoch,
         }
+        damage_values = (
+            action.damage_values
+            if isinstance(action, ClientAttackAction)
+            else ()
+        )
+        high_bit_markers = (
+            action.high_bit_markers
+            if isinstance(action, ClientAttackAction)
+            else ()
+        )
+        if damage_values:
+            self.state.client_attack_damage_entries += len(damage_values)
+            self.state.client_attack_damage_total += sum(damage_values)
+            self.state.client_attack_damage_high_bit_markers += sum(
+                high_bit_markers
+            )
+            packet_min = min(damage_values)
+            packet_max = max(damage_values)
+            self.state.client_attack_damage_min = (
+                packet_min
+                if self.state.client_attack_damage_min is None
+                else min(self.state.client_attack_damage_min, packet_min)
+            )
+            self.state.client_attack_damage_max = (
+                packet_max
+                if self.state.client_attack_damage_max is None
+                else max(self.state.client_attack_damage_max, packet_max)
+            )
         identifiers: dict[str, object] = {}
         if target_object_id is None:
             self.state.client_attack_untargeted_actions += 1
@@ -2049,11 +2144,41 @@ class GameplayStateFold:
                 self.state.client_attack_targets_for_known_mobs += 1
             else:
                 self.state.client_attack_targets_for_unknown_mobs += 1
+            if isinstance(action, ClientAttackAction):
+                self.state.client_attack_damage_actions += 1
+                pending = self._pending_client_attacks.setdefault(
+                    target_object_id, deque()
+                )
+                pending.append(
+                    PendingClientAttack(
+                        request_frame_index=frame.index,
+                        request_timestamp_ns=frame.timestamp_ns,
+                        damage_values=damage_values,
+                        high_bit_markers=high_bit_markers,
+                    )
+                )
+                self.state.pending_client_attack_effects += 1
+                target_entity = self.state.mobs.get(target_object_id)
+                if target_entity is not None:
+                    target_entity.client_attack_submitted_hits += len(
+                        damage_values
+                    )
+                    target_entity.client_attack_submitted_damage += sum(
+                        damage_values
+                    )
+                    target_entity.client_attack_submitted_high_bit_markers += (
+                        sum(high_bit_markers)
+                    )
             details.update(
                 {
                     "target": target_alias,
                     "active_target": active_target,
                     "known_target": known_target,
+                    "pending_health_effects_for_target": len(
+                        self._pending_client_attacks.get(
+                            target_object_id, ()
+                        )
+                    ),
                 }
             )
             identifiers["target_object_id"] = target_object_id
@@ -2071,8 +2196,14 @@ class GameplayStateFold:
             parsed=action,
             details=details,
             issues=(
-                "attack target role is capture-correlated; control, value, "
-                "and opaque body roles remain uninterpreted",
+                (
+                    "attack target and damage-array roles are "
+                    "capture-correlated; control, value, and opaque target "
+                    "prefix/tail roles remain uninterpreted"
+                    if isinstance(action, ClientAttackAction)
+                    else "attack target role is capture-correlated; control, "
+                    "value, and opaque body roles remain uninterpreted"
+                ),
             ),
         )
 
@@ -3465,12 +3596,24 @@ class GameplayStateFold:
             self.state.pending_item_uses = 0
             self._pending_item_pickups.clear()
             self.state.pending_item_pickups = 0
+            cleared_client_attack_effects = sum(
+                len(pending)
+                for pending in self._pending_client_attacks.values()
+            )
+            self._pending_client_attacks.clear()
+            self.state.pending_client_attack_effects = 0
+            self.state.client_attack_effects_cleared += (
+                cleared_client_attack_effects
+            )
             details = {
                 "field_epoch": self.state.field_epoch,
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
                 "cleared_npcs": cleared_npcs,
                 "cleared_mobs": cleared_mobs,
                 "cleared_drops": cleared_drops,
+                "cleared_client_attack_effects": (
+                    cleared_client_attack_effects
+                ),
                 "variant": (
                     "compact_transition"
                     if transition is not None
@@ -3910,6 +4053,15 @@ class GameplayStateFold:
             entered = MobEnterField.parse(payload)
             alias = self._alias(self._mob_aliases, entered.object_id, "mob")
             existing = self.state.mobs.get(entered.object_id)
+            cleared_client_attack_effects = len(
+                self._pending_client_attacks.pop(entered.object_id, ())
+            )
+            self.state.pending_client_attack_effects -= (
+                cleared_client_attack_effects
+            )
+            self.state.client_attack_effects_cleared += (
+                cleared_client_attack_effects
+            )
             controller_level = (
                 existing.controller_level if existing is not None else 0
             )
@@ -3928,6 +4080,9 @@ class GameplayStateFold:
             details = {
                 "entity": alias,
                 "replaced_existing": existing is not None,
+                "cleared_client_attack_effects": (
+                    cleared_client_attack_effects
+                ),
                 "controller_level": controller_level,
                 "field_epoch": self.state.field_epoch,
                 **self._mob_spawn_details(entered.spawn),
@@ -3950,6 +4105,15 @@ class GameplayStateFold:
             left = MobLeaveField.parse(payload)
             alias = self._alias(self._mob_aliases, left.object_id, "mob")
             known_entity = self.state.mobs.pop(left.object_id, None) is not None
+            cleared_client_attack_effects = len(
+                self._pending_client_attacks.pop(left.object_id, ())
+            )
+            self.state.pending_client_attack_effects -= (
+                cleared_client_attack_effects
+            )
+            self.state.client_attack_effects_cleared += (
+                cleared_client_attack_effects
+            )
             if not known_entity:
                 self.state.unknown_mob_leaves += 1
             self.state.mob_leaves += 1
@@ -3957,6 +4121,9 @@ class GameplayStateFold:
                 "entity": alias,
                 "known_entity": known_entity,
                 "reason": left.reason,
+                "cleared_client_attack_effects": (
+                    cleared_client_attack_effects
+                ),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -4419,12 +4586,53 @@ class GameplayStateFold:
             self.state.mob_health_percentage_updates += 1
             if update.health_percentage == 0:
                 self.state.mob_health_zero_updates += 1
+            pending_queue = self._pending_client_attacks.get(update.object_id)
+            pending_attack = pending_queue.popleft() if pending_queue else None
+            if pending_queue is not None and not pending_queue:
+                del self._pending_client_attacks[update.object_id]
+            correlation_details: dict[str, object] = {
+                "matched_client_attack": pending_attack is not None,
+            }
+            if pending_attack is not None:
+                self.state.pending_client_attack_effects -= 1
+                self.state.client_attack_health_matches += 1
+                response_ms = round(
+                    (
+                        frame.timestamp_ns
+                        - pending_attack.request_timestamp_ns
+                    )
+                    / 1e6,
+                    3,
+                )
+                self.state.last_client_attack_health_response_ms = response_ms
+                self.state.max_client_attack_health_response_ms = max(
+                    self.state.max_client_attack_health_response_ms or 0.0,
+                    response_ms,
+                )
+                correlation_details.update(
+                    {
+                        "client_attack_frame": (
+                            pending_attack.request_frame_index
+                        ),
+                        "client_attack_response_ms": response_ms,
+                        "submitted_damage_values": list(
+                            pending_attack.damage_values
+                        ),
+                        "submitted_damage_total": sum(
+                            pending_attack.damage_values
+                        ),
+                        "submitted_high_bit_markers": list(
+                            pending_attack.high_bit_markers
+                        ),
+                    }
+                )
             details = {
                 "entity": alias,
                 "known_entity": entity is not None,
                 "previous_percentage": previous_percentage,
                 "health_percentage": update.health_percentage,
                 "field_epoch": self.state.field_epoch,
+                **correlation_details,
             }
             self._event(
                 frame,
@@ -4544,6 +4752,9 @@ class GameplayStateFold:
                     ),
                     "pending_item_uses": self.state.pending_item_uses,
                     "pending_item_pickups": self.state.pending_item_pickups,
+                    "pending_client_attack_effects": (
+                        self.state.pending_client_attack_effects
+                    ),
                 },
             )
 
@@ -5444,6 +5655,25 @@ def render_gameplay_analysis(
             f"{state.client_attack_targets_for_known_mobs} "
             "unknown_mob_targets:"
             f"{state.client_attack_targets_for_unknown_mobs} "
+            "client_damage_entries:"
+            f"{state.client_attack_damage_entries} "
+            "client_damage_actions:"
+            f"{state.client_attack_damage_actions} "
+            f"client_damage_total:{state.client_attack_damage_total} "
+            "client_damage_range:"
+            f"{state.client_attack_damage_min}.."
+            f"{state.client_attack_damage_max} "
+            "client_damage_high_bits:"
+            f"{state.client_attack_damage_high_bit_markers} "
+            "client_health_matches:"
+            f"{state.client_attack_health_matches} "
+            "cleared_client_effects:"
+            f"{state.client_attack_effects_cleared} "
+            "pending_client_effects:"
+            f"{state.pending_client_attack_effects} "
+            "client_health_rtt_ms:"
+            f"{state.last_client_attack_health_response_ms}.."
+            f"{state.max_client_attack_health_response_ms} "
             f"server_relays:{state.server_attack_relays} "
             f"server_opcodes:{server_attack_opcodes} "
             f"target_counts:{server_attack_target_counts} "

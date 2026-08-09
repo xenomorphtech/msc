@@ -2959,6 +2959,14 @@ class ClientAttackAction:
     }
 
     @property
+    def target_count(self) -> int:
+        return self.variant >> 4
+
+    @property
+    def hit_count(self) -> int:
+        return self.variant & 0x0F
+
+    @property
     def target_object_id(self) -> int | None:
         if (self.opcode, self.variant) in {
             (50, 17),
@@ -2967,6 +2975,47 @@ class ClientAttackAction:
         }:
             return self.value_2
         return None
+
+    def _split_target_suffix(
+        self,
+    ) -> tuple[bytes, tuple[int, ...], bytes]:
+        if self.target_object_id is None:
+            return b"", (), self.opaque_suffix
+
+        prefix_length = 14
+        tail_length = 8 if self.opcode == 50 else 9
+        expected_length = prefix_length + 4 * self.hit_count + tail_length
+        if len(self.opaque_suffix) != expected_length:
+            raise PacketShapeError(
+                f"client opcode-{self.opcode} targeted attack variant "
+                f"{self.variant} needs {expected_length} suffix bytes for "
+                f"{self.hit_count} hits, got {len(self.opaque_suffix)}"
+            )
+        reader = PacketReader(
+            self.opaque_suffix, packet_name="client_attack_target_suffix"
+        )
+        opaque_prefix = reader.bytes(prefix_length, "opaque_target_prefix")
+        raw_damage_values = tuple(
+            reader.u32(f"damage_values[{hit_index}]")
+            for hit_index in range(self.hit_count)
+        )
+        opaque_tail = reader.bytes(tail_length, "opaque_target_tail")
+        reader.finish()
+        return opaque_prefix, raw_damage_values, opaque_tail
+
+    @property
+    def raw_damage_values(self) -> tuple[int, ...]:
+        return self._split_target_suffix()[1]
+
+    @property
+    def damage_values(self) -> tuple[int, ...]:
+        return tuple(value & 0x7FFF_FFFF for value in self.raw_damage_values)
+
+    @property
+    def high_bit_markers(self) -> tuple[bool, ...]:
+        return tuple(
+            bool(value & 0x8000_0000) for value in self.raw_damage_values
+        )
 
     @classmethod
     def parse(cls, payload: bytes) -> "ClientAttackAction":
@@ -2998,12 +3047,15 @@ class ClientAttackAction:
             opaque_suffix=reader.bytes(suffix_length, "opaque_suffix"),
         )
         reader.finish()
+        action._split_target_suffix()
         return action
 
     def safe_dict(self) -> dict[str, object]:
         details: dict[str, object] = {
             "local_object_index": self.local_object_index,
             "variant": self.variant,
+            "target_count": self.target_count,
+            "hit_count": self.hit_count,
             "client_token_bytes": 4,
             "control_value": self.control_value,
             "opaque_common_state_bytes": len(self.opaque_common_state),
@@ -3013,6 +3065,16 @@ class ClientAttackAction:
         }
         if self.target_object_id is None:
             details["value_2"] = self.value_2
+        else:
+            opaque_prefix, _, opaque_tail = self._split_target_suffix()
+            details.update(
+                {
+                    "opaque_target_prefix_bytes": len(opaque_prefix),
+                    "damage_values": list(self.damage_values),
+                    "high_bit_markers": list(self.high_bit_markers),
+                    "opaque_target_tail_bytes": len(opaque_tail),
+                }
+            )
         return details
 
     def to_bytes(self) -> bytes:
@@ -3037,6 +3099,7 @@ class ClientAttackAction:
                 f"client opcode-{self.opcode} variant {self.variant} suffix "
                 f"needs {suffix_length} bytes, got {len(self.opaque_suffix)}"
             )
+        self._split_target_suffix()
         for name, value, maximum in (
             ("local_object_index", self.local_object_index, 0xFF),
             ("client_token", self.client_token, 0xFFFF_FFFF),
