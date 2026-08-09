@@ -44,6 +44,7 @@ from .gameplay import (
     plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
     plan_final_field_npc_state_replay,
+    plan_field_npc_spawn_replay,
     plan_initial_field_snapshot_replay,
     plan_inventory_quantity_update,
     render_gameplay_analysis,
@@ -2912,6 +2913,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--generate-field-npc-spawns",
+        action="store_true",
+        help=(
+            "materialize every typed opcode-300 NPC spawn and replay the "
+            "generated same-length packets at their captured frame positions"
+        ),
+    )
+    replay.add_argument(
         "--rewrite-initial-current-hp",
         type=int,
         metavar="HP",
@@ -3955,6 +3964,22 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 **initial_field_replay_plan.safe_dict(),
                 "frames_patched": 1,
             }
+        npc_spawn_replay_plan = None
+        if arguments.generate_field_npc_spawns:
+            npc_spawn_replay_plan = plan_field_npc_spawn_replay(transcript)
+            for frame in npc_spawn_replay_plan.frames:
+                if frame.server_frame_index in server_frame_patches:
+                    raise ValueError(
+                        f"server frame {frame.server_frame_index} is set by "
+                        "both an explicit patch and the typed NPC spawn emitter"
+                    )
+                server_frame_patches[frame.server_frame_index] = (
+                    frame.spawn.to_bytes()
+                )
+            runtime_protocol["npc_spawn_emitter"] = {
+                **npc_spawn_replay_plan.safe_dict(),
+                "frames_patched": len(npc_spawn_replay_plan.frames),
+            }
         grouped_client_opcode_replies: dict[int, list[bytes]] = {}
         for opcode, payload in arguments.reply_on_client_opcode:
             grouped_client_opcode_replies.setdefault(opcode, []).append(payload)
@@ -4428,6 +4453,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "generate_initial_field_snapshot": (
                 arguments.generate_initial_field_snapshot
             ),
+            "generate_field_npc_spawns": arguments.generate_field_npc_spawns,
             "rewrite_final_field_drop_position": (
                 arguments.rewrite_final_field_drop_position
             ),

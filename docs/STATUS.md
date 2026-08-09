@@ -65,6 +65,18 @@
   and operation-`2` equip moves. All 256 change sets and 232 modifications
   decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
   spawns also validate after preserving the facing byte values `0/1/2/4/5`.
+- `--generate-field-npc-spawns` now reconstructs every fully typed opcode-`300`
+  frame from the folded aliased entity model. It validates exact 22-byte
+  re-encoding, reparsing, frame uniqueness, and patch conflicts; runtime status
+  excludes object ids. Plans cover all nine stream-`114` frames `20..28` and
+  all 53 stream-`92` frames across seven populated field epochs.
+- A browser-free real-client run composed the initial snapshot generator with
+  all nine generated stream-`114` NPC spawns. Runtime status reported nine
+  patches and aliases `npc:1..npc:9`; the client entered the field and rendered
+  the expected visible NPCs. Transcript
+  `npc_spawn_emitter_live_20260809/world/1786311364616674969_replay_12857.jsonl`
+  folds validly to `active`, nine active/spawned NPCs, and 10/10 matched
+  heartbeats.
 - Server opcode `293` is now an exact seven-byte mob-health-percentage update.
   Stream `92` has 208 and stream `126` has 399; every long-corpus update names
   an active mob, 189 reach zero, and none increase within a mob lifecycle.

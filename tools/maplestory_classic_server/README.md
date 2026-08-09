@@ -152,6 +152,14 @@ python -m maple_server replay \
 Use `--rewrite-initial-current-hp 1` in place of the generation flag for the
 capture-validated controlled HP mutation.
 
+`--generate-field-npc-spawns` applies the same boundary to every fully typed
+opcode-`300` observation. It validates the complete fold, reconstructs each
+22-byte NPC spawn from its aliased entity state, reparses it, checks frame
+length and patch conflicts, and replaces the corresponding replay frame. The
+runtime plan never exposes NPC object ids. It composes with the initial field
+emitter; add it to the command above to generate stream `114` server frames
+`20` through `28` as well as frame `3`.
+
 `--emit-current-hp-update HP` generates a new typed server opcode-`41` after
 the captured transcript. It validates the complete gameplay fold, bounds the
 requested value by modeled max HP, constructs the observed current-HP mask,
@@ -374,7 +382,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `217`: structurally exact life-movement broadcast with an
   aliased object id and the same fixed-width command stream as opcode `47`,
 - server opcode `300`: complete 22-byte NPC spawn records whose facing field is
-  preserved as the observed byte value rather than narrowed to a boolean,
+  preserved as the observed byte value rather than narrowed to a boolean;
+  `--generate-field-npc-spawns` can reconstruct all such replay frames from
+  folded, aliased entity state,
 - server opcode `303`: an 8-byte typed NPC state prefix plus a losslessly
   preserved optional opaque tail,
 - server opcode `279`: mob-entry envelope with object id, template id,
@@ -1104,6 +1114,10 @@ inventory group/item counts, skill count, progression shape/variant,
 original/emitted/max HP, prediction, and patch count. When initial player HP is
 rewritten, the same fields appear under
 `protocol.initial_player_hp_rewrite`.
+When NPC spawn frames are generated, `protocol.npc_spawn_emitter` reports the
+typed emitter, frame/patch count, represented field epochs, identifier-free
+alias/template/position/range records, and the predicted capture-equivalent
+NPC state.
 When a post-transcript HP stat update is generated,
 `protocol.player_stat_update` reports opcode/mask/flag, field epoch,
 original/emitted/max HP, the predicted unchanged state components, and planned

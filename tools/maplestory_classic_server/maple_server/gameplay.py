@@ -624,6 +624,49 @@ class NpcStateReplayPlan:
 
 
 @dataclass(frozen=True)
+class NpcSpawnReplayFrame:
+    server_frame_index: int
+    entity: str
+    field_epoch: int
+    spawn: NpcSpawn = field(repr=False)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "server_frame_index": self.server_frame_index,
+            "entity": self.entity,
+            "field_epoch": self.field_epoch,
+            "template_id": self.spawn.template_id,
+            "x": self.spawn.x,
+            "cy": self.spawn.cy,
+            "facing_value": self.spawn.facing_value,
+            "foothold_id": self.spawn.foothold_id,
+            "range_left": self.spawn.range_left,
+            "range_right": self.spawn.range_right,
+            "hidden": self.spawn.hidden,
+        }
+
+
+@dataclass(frozen=True)
+class FieldNpcSpawnReplayPlan:
+    frames: tuple[NpcSpawnReplayFrame, ...]
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "emitter": "typed_npc_spawn",
+            "frame_count": len(self.frames),
+            "field_epochs": sorted(
+                {frame.field_epoch for frame in self.frames}
+            ),
+            "spawns": [frame.safe_dict() for frame in self.frames],
+            "prediction": {
+                "npc_spawn_events": len(self.frames),
+                "active_npc_state": "capture_equivalent",
+                "phase": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
 class InitialPlayerHpReplayPlan:
     server_frame_index: int
     original_current_hp: int
@@ -7698,6 +7741,52 @@ def plan_final_field_npc_state_replay(
     raise ValueError(
         "world transcript has no modeled known-NPC state update in its final field"
     )
+
+
+def plan_field_npc_spawn_replay(
+    transcript: Transcript,
+) -> FieldNpcSpawnReplayPlan:
+    """Materialize every fully typed NPC spawn for state-based frame replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    frames: list[NpcSpawnReplayFrame] = []
+    for observation in analysis.observations:
+        if observation.kind != "npc_spawn":
+            continue
+        spawn = observation.parsed
+        entity = observation.details.get("entity")
+        field_epoch = observation.details.get("field_epoch")
+        if not isinstance(spawn, NpcSpawn):
+            raise ValueError("NPC spawn observation has no typed packet")
+        if not isinstance(entity, str) or not isinstance(field_epoch, int):
+            raise ValueError(
+                "NPC spawn observation has incomplete folded state"
+            )
+        payload = spawn.to_bytes()
+        if len(payload) != observation.length:
+            raise ValueError("typed NPC spawn emitter changed packet length")
+        if NpcSpawn.parse(payload) != spawn:
+            raise ValueError(
+                "typed NPC spawn emitter failed round-trip validation"
+            )
+        frames.append(
+            NpcSpawnReplayFrame(
+                server_frame_index=observation.direction_index,
+                entity=entity,
+                field_epoch=field_epoch,
+                spawn=spawn,
+            )
+        )
+    if not frames:
+        raise ValueError("world transcript has no typed NPC spawn frames")
+    frame_indices = [frame.server_frame_index for frame in frames]
+    if len(frame_indices) != len(set(frame_indices)):
+        raise ValueError(
+            "typed NPC spawn frames contain duplicate server indices"
+        )
+    return FieldNpcSpawnReplayPlan(frames=tuple(frames))
 
 
 def render_gameplay_analysis(

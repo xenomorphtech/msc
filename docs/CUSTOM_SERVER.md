@@ -360,6 +360,23 @@ progression state and 7/7 generated heartbeat pairs matched. This establishes
 the unchanged emitter as a real client-accepted generator, separately from the
 controlled HP mutation below.
 
+## Typed NPC-spawn generation
+
+Add `--generate-field-npc-spawns` to the world replay command to regenerate
+every fully typed opcode-`300` frame from folded NPC entity state. It composes
+with `--generate-initial-field-snapshot`. For stream `114`, the planner emits
+nine exact 22-byte packets at server frames `20..28`; the status route exposes
+`protocol.npc_spawn_emitter` with nine patches, field epoch `1`, and the
+alias/template/position/range state for `npc:1..npc:9`. Raw runtime object ids
+remain excluded.
+
+The 2026-08-09 browser-free live composition entered map `101000000` and
+rendered the expected visible NPCs. Its observed transcript at
+`downloads/maple_custom_server_observed/npc_spawn_emitter_live_20260809/world/1786311364616674969_replay_12857.jsonl`
+folds validly to `active`, nine active/spawned NPCs, and 10/10 matched generated
+heartbeats. This replaces nine more captured plaintext frames with model-
+generated packets while preserving the client-visible field.
+
 ## Typed post-transcript HP update validation
 
 Opcode `41` is the captured player-stat delta family. The model decodes the
@@ -1365,8 +1382,9 @@ Replace the remaining opaque replay portions with stateful handling:
 1. Isolate the additional client-side drop eligibility condition using the
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
-2. Replace the next finite field-bootstrap replay frames with state-driven
-   packets built from the now-generated initial gamestate.
+2. Type and regenerate the next finite field-bootstrap family before the NPC
+   block; preserve neutral roles until capture comparison or a controlled
+   effect supports semantic names.
 3. Reuse the proven typed final-field mob injection to validate the existing
    movement-acknowledgement policy through the real client.
 4. Capture a ranked or multi-character account to validate the conditional

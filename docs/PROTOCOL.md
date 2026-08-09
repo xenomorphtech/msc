@@ -885,6 +885,22 @@ observed values `0`, `1`, `2`, `4`, and `5`; all 78 stream-`126` spawns parse
 and round-trip. The fold exposes the neutral byte as `facing_value` and keeps
 the hidden field separately boolean.
 
+`--generate-field-npc-spawns` turns those folded entities back into replay
+frames. The planner requires a valid world fold, selects every `npc_spawn`
+observation, emits and reparses the 22-byte record, preserves its server-frame
+index, and rejects duplicate indices or explicit-patch conflicts. Its runtime
+API key is `protocol.npc_spawn_emitter`; records expose session aliases,
+templates, positions, footholds, ranges, facing, hidden state, and field epoch,
+but never the runtime object ids. Stream `114` generates nine frames at server
+indices `20..28`; stream `92` generates 53 across seven populated epochs.
+
+The 2026-08-09 browser-free live run composed those nine frames with the typed
+initial snapshot emitter. The client entered map `101000000` and rendered the
+expected visible NPCs. The simultaneously recorded transcript folds validly to
+`active` with nine active/spawned NPCs and 10/10 matched generated heartbeats.
+This demonstrates client acceptance of the reconstructed entity packets rather
+than only capture-side parsing.
+
 ## Mob health percentage (`server 293`)
 
 The complete update is seven bytes:

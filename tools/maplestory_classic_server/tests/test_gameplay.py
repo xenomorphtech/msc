@@ -27,6 +27,7 @@ from maple_server.gameplay import (  # noqa: E402
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
+    plan_field_npc_spawn_replay,
     plan_final_field_drop_owner_to_player_rewrite,
     plan_final_field_drop_position_rewrite,
     plan_inventory_quantity_update,
@@ -2815,6 +2816,25 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(plan.safe_dict()["progression_shape"], "compact")
         self.assertEqual(plan.safe_dict()["skill_level_count"], 1)
+
+    def test_plans_lossless_typed_field_npc_spawn_emission(self) -> None:
+        transcript = fixture_gameplay_transcript(initial_snapshot=True)
+
+        plan = plan_field_npc_spawn_replay(transcript)
+
+        self.assertEqual(len(plan.frames), 1)
+        frame = plan.frames[0]
+        self.assertEqual(frame.server_frame_index, 1)
+        self.assertEqual(frame.entity, "npc:1")
+        self.assertEqual(NpcSpawn.parse(frame.spawn.to_bytes()), frame.spawn)
+        safe = plan.safe_dict()
+        self.assertEqual(safe["emitter"], "typed_npc_spawn")
+        self.assertEqual(safe["frame_count"], 1)
+        self.assertEqual(safe["field_epochs"], [1])
+        self.assertEqual(
+            safe["spawns"][0]["template_id"], fixture_npc().template_id
+        )
+        self.assertNotIn(str(NPC_OBJECT_ID), repr(safe))
 
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(
