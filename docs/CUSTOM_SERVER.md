@@ -453,6 +453,18 @@ the `2 -> 1` and `50 -> 100` prediction. The completed transcript folded with
 one inventory match, one stat-effect match, zero mismatches/pending requests,
 and 20/20 matched heartbeat pairs.
 
+Reactive item use and pickup now also write bounded runtime request,
+completion, and rejection events. A rejection is folded against the matching
+pending client request and does not close the world connection. A fresh
+browser-free stream-`114` run used direct Wayland PageUp input twice. Frames
+`232`/`234` recorded the first red-potion request and completed `[39,41]`
+response (`2 -> 1`, HP `50 -> 100`); frame `250` recorded and rejected the
+second request at the unvalidated last-item boundary without sending a packet.
+The frozen transcript
+`downloads/maple_custom_server_observed/reactive_item_policy_events_20260809/1786305404534384659_replay_12857.jsonl`
+folds validly with no issues or warnings: two requests, one inventory/effect
+match, one policy rejection, zero pending requests, and 90/90 heartbeat pairs.
+
 ## Pickup request/effect validation
 
 The gameplay analyzer now decodes the complete capture-observed pickup chain:
@@ -508,6 +520,11 @@ in that order, then removes the drop from mutable server state. Mesos, special,
 new-slot, ambiguous-stack, and unknown-template cases remain rejected. The
 client still supplies its own validation token; the server does not synthesize
 or assign semantics to it.
+
+Observed pickup requests now receive the same causal transcript treatment as
+item use: request, completed `[39,49,312]` response, or safe rejection. Unit
+coverage proves a second request for an already removed modeled drop is
+rejected without closing the connection and leaves zero pending pickup work.
 
 The owner rewrite is a separate same-length typed patch. It validates exactly
 one initial player and one final field-load item, then changes only the two

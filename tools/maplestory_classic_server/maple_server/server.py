@@ -1518,11 +1518,21 @@ async def replay_connection(
                             )
                             + 1
                         )
+                    record_runtime_event(
+                        "item_pickup_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "target_active": (
+                                request.drop_object_id
+                                in item_pickup_response_policy.active_drops
+                            ),
+                        },
+                    )
                     try:
                         response_plan = item_pickup_response_policy.respond(
                             request
                         )
-                    except ValueError:
+                    except ValueError as error:
                         if item_pickup_metrics is not None:
                             item_pickup_metrics["requests_rejected"] = (
                                 int(
@@ -1532,7 +1542,18 @@ async def replay_connection(
                                 )
                                 + 1
                             )
-                        raise
+                            item_pickup_metrics["last_rejection"] = str(error)
+                            item_pickup_metrics["state"] = (
+                                item_pickup_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "item_pickup_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
                     for plaintext in response_plan.plaintexts:
                         await send_encrypted_frame(
                             encrypt_next_server_frame(plaintext)
@@ -1564,21 +1585,45 @@ async def replay_connection(
                         item_pickup_metrics["state"] = (
                             item_pickup_response_policy.safe_dict()
                         )
+                    record_runtime_event(
+                        "item_pickup_response_completed",
+                        response_plan.safe_dict(),
+                    )
                 if opcode == 80 and item_use_response_policy is not None:
                     request = ItemUseRequest.parse(client_plaintext)
                     if item_use_metrics is not None:
                         item_use_metrics["requests_observed"] = (
                             int(item_use_metrics.get("requests_observed", 0)) + 1
                         )
+                    record_runtime_event(
+                        "item_use_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "slot_modeled": (
+                                request.slot in item_use_response_policy.use_items
+                            ),
+                        },
+                    )
                     try:
                         response_plan = item_use_response_policy.respond(request)
-                    except ValueError:
+                    except ValueError as error:
                         if item_use_metrics is not None:
                             item_use_metrics["requests_rejected"] = (
                                 int(item_use_metrics.get("requests_rejected", 0))
                                 + 1
                             )
-                        raise
+                            item_use_metrics["last_rejection"] = str(error)
+                            item_use_metrics["state"] = (
+                                item_use_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "item_use_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
                     for plaintext in response_plan.plaintexts:
                         await send_encrypted_frame(
                             encrypt_next_server_frame(plaintext)
@@ -1605,6 +1650,10 @@ async def replay_connection(
                         item_use_metrics["state"] = (
                             item_use_response_policy.safe_dict()
                         )
+                    record_runtime_event(
+                        "item_use_response_completed",
+                        response_plan.safe_dict(),
+                    )
                 if (
                     opcode in {50, 52}
                     and mob_health_response_policy is not None

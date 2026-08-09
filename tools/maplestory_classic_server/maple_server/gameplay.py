@@ -377,6 +377,7 @@ class GameplayGameState:
     item_use_inventory_mismatches: int = 0
     item_use_effect_matches: int = 0
     item_use_effect_mismatches: int = 0
+    item_use_policy_rejections: int = 0
     pending_item_uses: int = 0
     item_pickup_requests: int = 0
     item_pickup_base_requests: int = 0
@@ -390,6 +391,7 @@ class GameplayGameState:
     item_pickup_inferred_mesos_baselines: int = 0
     item_pickup_removal_matches: int = 0
     item_pickup_removal_mismatches: int = 0
+    item_pickup_policy_rejections: int = 0
     pending_item_pickups: int = 0
     item_pickup_known_drops: int = 0
     item_pickup_unknown_drops: int = 0
@@ -2588,6 +2590,9 @@ class GameplayAnalysis:
                 "item_use_effect_mismatches": (
                     self.state.item_use_effect_mismatches
                 ),
+                "item_use_policy_rejections": (
+                    self.state.item_use_policy_rejections
+                ),
                 "pending_item_uses": self.state.pending_item_uses,
                 "item_pickup_requests": self.state.item_pickup_requests,
                 "item_pickup_base_requests": (
@@ -2620,6 +2625,9 @@ class GameplayAnalysis:
                 ),
                 "item_pickup_removal_mismatches": (
                     self.state.item_pickup_removal_mismatches
+                ),
+                "item_pickup_policy_rejections": (
+                    self.state.item_pickup_policy_rejections
                 ),
                 "pending_item_pickups": self.state.pending_item_pickups,
                 "item_pickup_known_drops": self.state.item_pickup_known_drops,
@@ -3127,6 +3135,86 @@ class GameplayStateFold:
             ),
         }
         return pending
+
+    def apply_runtime_event(self, event: GameplayEvent) -> None:
+        """Fold explicit policy rejections into pending request accounting."""
+
+        if event.kind == "item_use_request_rejected":
+            if not isinstance(event.details.get("reason"), str):
+                self.issues.append(
+                    "runtime item-use rejection reason must be a string"
+                )
+                return
+            request_fields = {
+                name: event.details.get(name)
+                for name in ("client_tick", "slot", "item_id")
+            }
+            pending = next(
+                (
+                    candidate
+                    for candidate in self._pending_item_uses
+                    if event.timestamp_ns >= candidate.request_timestamp_ns
+                    and candidate.request.safe_dict() == request_fields
+                ),
+                None,
+            )
+            if pending is None:
+                observed_request = any(
+                    candidate.kind == "item_use_requested"
+                    and event.timestamp_ns >= candidate.timestamp_ns
+                    and all(
+                        candidate.details.get(name) == value
+                        for name, value in request_fields.items()
+                    )
+                    for candidate in self.events
+                )
+                if not observed_request:
+                    self.issues.append(
+                        "runtime item-use rejection had no matching observed "
+                        "request"
+                    )
+                    return
+            else:
+                self._pending_item_uses.remove(pending)
+                self.state.pending_item_uses -= 1
+            self.state.item_use_policy_rejections += 1
+            return
+        if event.kind == "item_pickup_request_rejected":
+            if not isinstance(event.details.get("reason"), str):
+                self.issues.append(
+                    "runtime item-pickup rejection reason must be a string"
+                )
+                return
+            request_fields = {
+                name: event.details.get(name)
+                for name in (
+                    "control_value",
+                    "field_epoch",
+                    "client_tick",
+                    "position_x",
+                    "position_y",
+                    "item_validation_token_present",
+                    "optional_proof_bytes",
+                )
+            }
+            pending = next(
+                (
+                    candidate
+                    for candidate in self._pending_item_pickups
+                    if event.timestamp_ns >= candidate.request_timestamp_ns
+                    and candidate.request.safe_dict() == request_fields
+                ),
+                None,
+            )
+            if pending is None:
+                self.issues.append(
+                    "runtime item-pickup rejection had no matching pending "
+                    "request"
+                )
+                return
+            self._pending_item_pickups.remove(pending)
+            self.state.pending_item_pickups -= 1
+            self.state.item_pickup_policy_rejections += 1
 
     @staticmethod
     def _mob_spawn_details(spawn: MobSpawnData) -> dict[str, object]:
@@ -6153,13 +6241,18 @@ def analyze_gameplay_transcript(transcript: Transcript) -> GameplayAnalysis:
     fold = GameplayStateFold()
     observations = tuple(fold.consume(frame) for frame in decoded.frames)
     transport_closed = any(event.event == "close" for event in transcript.events)
+    runtime_events = _runtime_gameplay_events(
+        transcript, decoded.frames, fold.issues
+    )
+    for runtime_event in runtime_events:
+        fold.apply_runtime_event(runtime_event)
     fold.finish(
         decoded.frames[-1] if decoded.frames else None,
         transport_closed=transport_closed,
     )
     events = [
         *fold.events,
-        *_runtime_gameplay_events(transcript, decoded.frames, fold.issues),
+        *runtime_events,
     ]
     dropped_runtime_events = 0
     for transcript_event in transcript.events:
@@ -7712,6 +7805,7 @@ def render_gameplay_analysis(
             f"inventory_mismatches:{state.item_use_inventory_mismatches} "
             f"effect_matches:{state.item_use_effect_matches} "
             f"effect_mismatches:{state.item_use_effect_mismatches} "
+            f"policy_rejections:{state.item_use_policy_rejections} "
             f"unknown_slots:{state.item_use_unknown_slots} "
             f"item_mismatches:{state.item_use_item_mismatches} "
             f"pending:{state.pending_item_uses}"
@@ -7735,6 +7829,7 @@ def render_gameplay_analysis(
             f"{state.item_pickup_inferred_mesos_baselines} "
             f"removal_matches:{state.item_pickup_removal_matches} "
             f"removal_mismatches:{state.item_pickup_removal_mismatches} "
+            f"policy_rejections:{state.item_pickup_policy_rejections} "
             f"field_removals:{state.field_drop_removals} "
             f"pending:{state.pending_item_pickups}"
         ),

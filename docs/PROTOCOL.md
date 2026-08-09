@@ -559,6 +559,16 @@ responses changed the visible inventory from `2` to `1` and the HUD from HP
 request, one matching inventory response, one matching stat effect, zero
 mismatches/pending requests, and 20 matched heartbeat pairs.
 
+The current responder records `item_use_request_observed`,
+`item_use_response_completed`, and `item_use_request_rejected` runtime events.
+Its fresh browser-free proof used direct Wayland PageUp twice: frames
+`232`/`234` applied quantity `2 -> 1` and HP `50 -> 100` with opcodes `[39,41]`,
+then frame `250` rejected the second request because the last-item removal
+shape remains unvalidated. That rejection emitted no packet and did not close
+the client. The folded transcript is valid and warning-free with two requests,
+one inventory/effect match, one explicit policy rejection, zero pending item
+uses, and 90/90 matched heartbeats.
+
 ## Field-drop spawn (`server 311`)
 
 Server opcode `311` creates or refreshes one field drop. Stream `92` contains
@@ -711,6 +721,9 @@ field epoch, a deterministic captured template effect, and exactly one
 existing stack with capacity. It emits opcodes `39`, `49`, and `312` in that
 order and removes the drop from mutable state. Mesos pickups, special results,
 new-slot insertion, ambiguous stacks, and unknown templates remain rejected.
+Runtime annotations record pickup request, completed response, or rejection;
+an exact rejection consumes its matching pending request without disconnecting
+the client. An annotation without a matching observed request is invalid.
 
 ## Character stat deltas (`server 41`)
 

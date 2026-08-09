@@ -205,12 +205,21 @@
   inventory match, one effect match, zero mismatches/pending requests, and all
   20 heartbeat pairs matched. Runtime status reported one observed/served
   request, zero rejections, and two response packets.
+  Reactive item use and pickup now emit bounded causal request, completion,
+  and rejection events, and a modeled rejection no longer closes the
+  connection. A fresh direct-Wayland PageUp run served red potion `2 -> 1`
+  and HP `50 -> 100`, then safely rejected the second last-item request. Its
+  frozen fold is valid and warning-free with two requests, one matched
+  inventory/effect pair, one policy rejection, zero pending uses, and 90/90
+  heartbeats.
 - Client opcode `185`, server opcode `49`, and server opcode `312` now form a
   typed item-pickup chain. All 54 stream-`92` requests round-trip (48 base and
   six extended), match their folded field epoch, inventory/mesos/special
   result, and exact drop-id removal. All 100 field-drop removals round-trip;
   the 54 local chains have zero effect/removal mismatches and zero pending
-  requests.
+  requests. Reactive pickup tests additionally prove ordered
+  request/completion events and nonfatal rejection after the modeled drop has
+  already been removed.
 - Server opcode `311` is typed across animated item/mesos, field-load item,
   and field-load mesos variants. Stream `92` has 125 packets/66 drop
   lifecycles; the level-1-to-10 corpus adds four exact 30-byte mode-`2` mesos

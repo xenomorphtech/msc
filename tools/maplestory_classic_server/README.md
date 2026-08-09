@@ -204,6 +204,15 @@ python -m maple_server replay \
   --hold-open-seconds 300
 ```
 
+With `--transcript-dir`, item use records bounded runtime request, completion,
+and rejection events. Policy rejections are correlated with and remove the
+matching pending request; they do not tear down the client connection. In the
+fresh browser-free proof, direct Wayland PageUp input first produced `[39,41]`
+with quantity `2 -> 1` and HP `50 -> 100`, then a second PageUp was rejected at
+the intentionally unsupported last-item boundary. The transcript folds validly
+without warnings, with one explicit rejection, no pending item uses, and 90/90
+heartbeats.
+
 `--rewrite-final-field-drop-position X:Y` changes only the typed position in
 the final field's sole active mode-`2` item-drop packet.
 `--rewrite-final-field-drop-owner-to-player` independently rewrites only its
@@ -241,6 +250,10 @@ contains quantity `74`, and stream `92` independently proves four pickups of
 that template as an Etc delta/gain quantity of one. The server never invents a
 drop id or validation token: it preserves the captured drop id, while the
 official client supplies its own token in the request.
+
+Reactive pickup also records request/completion/rejection runtime events. A
+rejected request for a missing or already removed drop stays nonfatal and is
+folded out of pending pickup accounting when it matches the observed request.
 
 Runtime prediction for the owner patch reports
 `drop_owner_fields: match_initial_player` and
@@ -1261,7 +1274,9 @@ preserve distinct Unity scan codes in this setup.
     `27 -> 1` in the real inventory UI, runtime telemetry, and observed fold.
 24. Decode client opcode `80`, correlate all 17 captured potion requests with
     exact quantity/stat effects, serve the request reactively, and confirm the
-    predicted live red-potion quantity `2 -> 1` and HP `50 -> 100` effects.
+    predicted live red-potion quantity `2 -> 1` and HP `50 -> 100` effects;
+    record request/completion/rejection events and prove the last-item
+    rejection leaves the client and heartbeat exchange active.
 25. Decode server opcode `311`, round-trip all 125 long-stream records, fold 66
     drop lifecycles, and prove all 54 pickup values/removals against an active
     spawn while retaining ownership/security fields as neutral.

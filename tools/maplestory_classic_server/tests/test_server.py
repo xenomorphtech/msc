@@ -1583,6 +1583,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.data("server_to_client", greeting + captured_frame)
             source_writer.close()
             source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
             policy = ItemUseResponsePolicy(
                 use_items={
                     15: InventoryItemEntity(
@@ -1618,6 +1619,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             strict=False,
+                            transcript_directory=observed_directory,
                             hold_open_seconds=0.2,
                             item_use_response_policy=policy,
                             runtime_protocol=runtime_protocol,
@@ -1654,18 +1656,68 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 crypt_payload(stat_wire[4:], second_server_iv)
             )
             self.assertEqual(stat_update.current_hp, 100)
+
+            next_client_iv = shuffle_iv(client_iv)
+            writer.write(
+                encode_frame_header(len(request), next_client_iv, 300)
+                + crypt_payload(request, next_client_iv)
+            )
+            await writer.drain()
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(reader.read(1), timeout=0.02)
+
             writer.close()
             await writer.wait_closed()
             await asyncio.gather(*tasks)
             server.close()
             await server.wait_closed()
             metrics = runtime_protocol["item_use_responses"]
-            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_observed"], 2)
             self.assertEqual(metrics["requests_served"], 1)
-            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["requests_rejected"], 1)
             self.assertEqual(metrics["response_packets_sent"], 2)
+            self.assertEqual(
+                metrics["last_rejection"],
+                "item-use last-item removal response shape is not validated",
+            )
             self.assertEqual(policy.use_items[15].quantity, 1)
             self.assertEqual(policy.current_hp, 100)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid)
+            self.assertFalse(
+                any(
+                    "item-use requests had no complete" in warning
+                    for warning in analysis.warnings
+                )
+            )
+            self.assertEqual(analysis.state.pending_item_uses, 0)
+            self.assertEqual(analysis.state.item_use_policy_rejections, 1)
+            item_use_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("item_use_")
+            ]
+            self.assertEqual(
+                [event.kind for event in item_use_events],
+                [
+                    "item_use_request_observed",
+                    "item_use_response_completed",
+                    "item_use_request_observed",
+                    "item_use_request_rejected",
+                ],
+            )
+            self.assertEqual(item_use_events[1].details["quantity_after"], 1)
+            self.assertEqual(item_use_events[1].details["effect_after"], 100)
+            self.assertEqual(
+                item_use_events[1].details["server_opcodes"], [39, 41]
+            )
+            self.assertEqual(
+                item_use_events[-1].details["reason"],
+                "item-use last-item removal response shape is not validated",
+            )
 
     async def test_replay_responds_to_modeled_item_pickup_during_hold_open(
         self,
@@ -1690,6 +1742,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.data("server_to_client", greeting + captured_frame)
             source_writer.close()
             source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
             drop_object_id = 40_004
             spawn = FieldDropSpawn(
                 spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
@@ -1745,6 +1798,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             strict=False,
+                            transcript_directory=observed_directory,
                             hold_open_seconds=0.2,
                             item_pickup_response_policy=policy,
                             runtime_protocol=runtime_protocol,
@@ -1793,6 +1847,16 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(removal.reason, 5)
             self.assertEqual(removal.actor_id, 300_001)
+
+            next_client_iv = shuffle_iv(client_iv)
+            writer.write(
+                encode_frame_header(len(request), next_client_iv, 300)
+                + crypt_payload(request, next_client_iv)
+            )
+            await writer.drain()
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(reader.read(1), timeout=0.02)
+
             writer.close()
             await writer.wait_closed()
             await asyncio.gather(*tasks)
@@ -1800,12 +1864,52 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             await server.wait_closed()
 
             metrics = runtime_protocol["item_pickup_responses"]
-            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_observed"], 2)
             self.assertEqual(metrics["requests_served"], 1)
-            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["requests_rejected"], 1)
             self.assertEqual(metrics["response_packets_sent"], 3)
+            self.assertEqual(
+                metrics["last_rejection"],
+                "item-pickup request references an unknown active drop",
+            )
             self.assertEqual(policy.inventory_items["etc"][7].quantity, 75)
             self.assertEqual(policy.active_drops, {})
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid)
+            self.assertFalse(
+                any(
+                    "item-pickup requests had no complete" in warning
+                    for warning in analysis.warnings
+                )
+            )
+            self.assertEqual(analysis.state.pending_item_pickups, 0)
+            self.assertEqual(analysis.state.item_pickup_policy_rejections, 1)
+            pickup_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("item_pickup_")
+            ]
+            self.assertEqual(
+                [event.kind for event in pickup_events],
+                [
+                    "item_pickup_request_observed",
+                    "item_pickup_response_completed",
+                    "item_pickup_request_observed",
+                    "item_pickup_request_rejected",
+                ],
+            )
+            self.assertEqual(pickup_events[1].details["drop"], "drop:1")
+            self.assertEqual(pickup_events[1].details["quantity_after"], 75)
+            self.assertEqual(
+                pickup_events[1].details["server_opcodes"], [39, 49, 312]
+            )
+            self.assertEqual(
+                pickup_events[-1].details["reason"],
+                "item-pickup request references an unknown active drop",
+            )
 
     async def test_replay_delays_before_and_between_post_transcript_frames(
         self,

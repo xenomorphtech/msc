@@ -3178,6 +3178,37 @@ class GameplayStateFoldTest(unittest.TestCase):
             )
         )
 
+        unmatched_rejection = replace(
+            runtime_event,
+            metadata={
+                "kind": "item_use_request_rejected",
+                "details": {
+                    "client_tick": 1,
+                    "slot": 15,
+                    "item_id": 2_000_000,
+                    "reason": "test rejection",
+                },
+            },
+        )
+        unmatched_analysis = analyze_gameplay_transcript(
+            replace(
+                annotated,
+                events=(
+                    *transcript.events[:-1],
+                    unmatched_rejection,
+                    close_event,
+                ),
+            )
+        )
+        self.assertFalse(unmatched_analysis.valid)
+        self.assertTrue(
+            any(
+                "runtime item-use rejection had no matching observed request"
+                in issue
+                for issue in unmatched_analysis.issues
+            )
+        )
+
     def test_folds_packets_into_field_state_and_timestamped_events(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
 
