@@ -436,12 +436,12 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,601 full,
-44,295 partial, 204 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,622 full,
+44,296 partial, 182 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,403 full, 21,740 partial,
-64 unknown, and zero invalid observations; short stream `114` reaches 44 full,
+metadata. Stream `92` independently passes with 13,404 full, 21,740 partial,
+63 unknown, and zero invalid observations; short stream `114` reaches 44 full,
 20 partial, 12 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
@@ -538,10 +538,11 @@ The gameplay fold currently models these capture-backed boundaries:
   u8/i32/selector/i32 prefix, terminated counted UTF-16 text, and two trailing
   controls only on observed selector `0`; selectors `3`/`6`/`17` end after the
   text terminator and all other selectors remain unknown,
-- server opcodes `69`/`93`/`94`/`201`/`205`/`379`: capture-bounded neutral
+- server opcodes `69`/`93`/`94`/`148`/`201`/`205`/`379`: capture-bounded neutral
   record families; numeric fields are typed, potentially identifying primary
   values are omitted from safe output, fixed unknown regions remain explicit, and the
-  opcode-`94`/`379` layouts come directly from the generated IL2CPP read dump,
+  opcode-`94`/`148`/`379` layouts come directly from the generated IL2CPP read
+  dump; opcode `148` retains one legacy nonempty record body as opaque,
 - server opcodes `11`/`24`/`56`/`58`/`59`/`60`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
@@ -1616,3 +1617,7 @@ preserve distinct Unity scan codes in this setup.
     the Rust shape engine, and replay a typed opcode-`94` packet into the live
     client with unchanged world/player/inventory/progression state and a fresh
     matched heartbeat.
+55. Add the automatic dump's delegated opcode-`148` envelope, round-trip all
+    23 cross-corpus packets, retain the one legacy nonempty record body as an
+    explicit partial observation, and live-replay the bounded empty variant
+    with unchanged gamestate, advancing heartbeats, and no connection failure.

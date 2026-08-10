@@ -16,9 +16,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 70);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 71);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
-    assert_eq!(shapes.len(), 166);
+    assert_eq!(shapes.len(), 167);
 
     let shape = shapes
         .iter()
@@ -50,6 +50,20 @@ fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
     assert_eq!(flag_and_pair.opcode, 94);
     assert_eq!(flag_and_pair.length, Some(11));
     assert_eq!(flag_and_pair.operations.len(), 4);
+
+    let opcode_148 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_148_envelope")
+        .unwrap();
+    assert_eq!(opcode_148.opcode, 148);
+    assert_eq!(opcode_148.length, None);
+    assert_eq!(opcode_148.operations.len(), 3);
+
+    let legacy_opcode_148 = shapes
+        .iter()
+        .find(|shape| shape.name == "observed_server_to_client_opcode_148_length_1639")
+        .unwrap();
+    assert_eq!(legacy_opcode_148.length, Some(1_639));
 }
 
 #[test]
@@ -63,7 +77,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 166);
+    assert_eq!(dump.packet_shapes.len(), 167);
     assert_eq!(
         dump.handlers
             .iter()

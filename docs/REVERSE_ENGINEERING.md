@@ -277,6 +277,19 @@ map/player-state change and continued pairing heartbeats. These traces prove
 field widths, repetition counts, and complete consumption only; names remain
 neutral and no security interpretation is attached.
 
+The automatic `tools/il2cpp_packet_dump` output now also drives opcode `148`
+instead of leaving every occurrence as a hex prefix. Its top-level handler
+delegates to a manager parser and exposes variants `9`, `10`, `12`, and `13`.
+The current GameAssembly data value resolves the delegated record mask to
+`0x9`; the same value was confirmed in a short live process read. That evidence
+bounds count-zero variant `9`, empty variant `10`, and the two signed-`i32`
+variants `12`/`13`. One 1,639-byte legacy variant-`9` packet with 12 records
+does not consume under the current parser, so the generated manifest keeps its
+1,632-byte record region as an explicit capture-pinned opaque shape rather than
+claiming a false decode. All other 22 cross-corpus packets use the semantic
+switch shape. A live replay of variant `10` matched the predicted neutral fold,
+left core state unchanged, and kept the client and heartbeats active.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte

@@ -52,22 +52,28 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,601 full, 44,295 partial, 204 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,403 full, 21,740 partial,
-  64 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
+  26,622 full, 44,296 partial, 182 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,404 full, 21,740 partial,
+  63 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
-- Server opcodes `69`, `93`, `94`, `201`, `205`, and `379` are separated into
-  neutral, capture-bounded records. All 153 reference packets consume and
-  round-trip exactly; exact numeric branches add 57 full observations, while
-  the 96 records with fixed unknown regions remain partial and redact
+- Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, and `379` are
+  separated into neutral, capture-bounded records. All 176 reference packets
+  consume and round-trip exactly; typed branches add 79 full observations,
+  while the 97 records with fixed unknown regions remain partial and redact
   potentially identifying primary values from safe state, events, reports, and
   HTTP-derived analysis.
   The automatic IL2CPP dump proves opcode `94` reads `bool + i32 + i32` and
-  opcode `379` reads a discriminator plus four datetimes on variant `36`.
+  opcode `379` reads a discriminator plus four datetimes on variant `36`; its
+  delegated opcode-`148` handler supplies variants `9`/`10`/`12`/`13`. One
+  legacy nonempty variant-`9` body remains explicitly opaque because it does
+  not consume under the current build's mask `0x9`.
   A typed opcode-`94` live replay produced exactly one predicted neutral event,
   changed no modeled world/player/inventory/progression state, and left the
   browser-free client active with 244/244 heartbeat probes matched.
+  A fresh direct-Wayland replay of empty opcode-`148` variant `10` likewise
+  produced one full neutral event, left core state unchanged, advanced matched
+  heartbeats from 11 to 18, and retained one active connection with no failures.
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly, every leave matches the
   current field epoch, and all opcode-`202`/`217` movement broadcasts now

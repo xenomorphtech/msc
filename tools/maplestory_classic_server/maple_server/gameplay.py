@@ -80,6 +80,7 @@ from .packets import (
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
+    ServerOpcode148Envelope,
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
@@ -945,6 +946,7 @@ NeutralServerRecord = (
     ServerOpcode69Record
     | ServerOpcode93Record
     | ServerOpcode94Record
+    | ServerOpcode148Envelope
     | ServerOpcode201Record
     | ServerOpcode205Record
     | ServerOpcode379Record
@@ -6759,7 +6761,7 @@ class GameplayStateFold:
                 parsed=envelope,
                 details=details,
             )
-        if opcode in {69, 93, 94, 201, 205, 379}:
+        if opcode in {69, 93, 94, 148, 201, 205, 379}:
             if opcode == 69:
                 neutral_record: NeutralServerRecord = (
                     ServerOpcode69Record.parse(payload)
@@ -6768,6 +6770,8 @@ class GameplayStateFold:
                 neutral_record = ServerOpcode93Record.parse(payload)
             elif opcode == 94:
                 neutral_record = ServerOpcode94Record.parse(payload)
+            elif opcode == 148:
+                neutral_record = ServerOpcode148Envelope.parse(payload)
             elif opcode == 201:
                 neutral_record = ServerOpcode201Record.parse(payload)
             elif opcode == 205:
@@ -6790,7 +6794,10 @@ class GameplayStateFold:
                 "neutral_server_record_received",
                 details=details,
             )
-            partial = opcode in {69, 201}
+            partial = opcode in {69, 201} or (
+                isinstance(neutral_record, ServerOpcode148Envelope)
+                and not neutral_record.fully_bounded
+            )
             return self._observation(
                 frame,
                 kind="neutral_server_record",

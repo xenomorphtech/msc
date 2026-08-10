@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,601 observations are full, 44,295 partial, 204
+`--fail-on-invalid`: 26,622 observations are full, 44,296 partial, 182
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -160,15 +160,18 @@ opaque. The fold emits `server_opcode_77_received` and exposes only variant,
 text-code-unit, control/value, and opaque-byte distributions. Neither packet
 records, events, text reports, JSON, nor HTTP status return captured text.
 
-The neutral server-record fold now separates opcodes `69`, `93`, `94`, `201`,
-`205`, and `379`. Across all three reference streams, 153/153 packets consume
-and round-trip exactly. The generated IL2CPP dump supplies exact direct reads
-for opcode `94` (`bool + i32 + i32`) and opcode `379` (variant byte, optionally
-four datetimes); together with opcode `93` and `205`, they provide 57 full
-observations. Opcode `69` retains its fixed 263-byte table and opcode `201`
-retains its fixed 22-byte suffix, adding 96 partial observations and 14,162
-explicitly counted opaque bytes. Potentially character-like primary values are
-retained for exact re-emission but omitted from safe state, events, and reports.
+The neutral server-record fold now separates opcodes `69`, `93`, `94`, `148`,
+`201`, `205`, and `379`. Streams `92/114/126` contribute `49/5/122` records,
+for 176/176 exact packet round trips. Combined opcode counts are `69:50`,
+`93:7`, `94:3`, `148:23`, `201:46`, `205:42`, and `379:5`. The generated
+IL2CPP dump supplies exact direct reads for opcodes `94` and `379` plus the
+delegated opcode-`148` variant switch. That switch bounds empty variant `10`,
+count-zero variant `9`, and two-i32 variants `12`/`13`; the one legacy nonempty
+variant-`9` body remains explicit opaque data because it does not consume under
+the current build's record mask `0x9`. The family therefore provides 79 full
+and 97 partial observations, 505 typed values, and 15,794 opaque bytes.
+Potentially identifying values are retained for exact re-emission but omitted
+from safe state, events, and reports.
 
 The current tree was also exercised through a fresh browser-free launch on the
 nested Wayland space, using direct seat input without moving the desktop
@@ -176,6 +179,12 @@ cursor. The muted client passed world and character selection and rendered map
 `101000000`. At that point `GET /api/v1/status` reported one active connection,
 zero failures, all 21 fixed-record frames patched, and 13/13 paired heartbeat
 probes.
+
+A later browser-free launch used the same direct nested-Wayland seat and muted
+application stream to reach the field, then injected generated opcode-`148`
+variant `10`. The three-byte packet folded as one full neutral event, changed
+no core gamestate, advanced matched heartbeat probes from 11 to 18, and left
+one active world connection with zero injection failures.
 
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
@@ -243,9 +252,9 @@ capture-preexisting resets, four leave-time clears, and zero active statuses at
 the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
-Together, these latest modeled families leave the long-corpus totals at 26,601
-full, 44,295 partial, 204 unknown-but-lossless, and zero invalid. Stream `92`
-now reaches 13,403 full, 21,740 partial, 64 unknown, and zero invalid; stream
+Together, these latest modeled families leave the long-corpus totals at 26,622
+full, 44,296 partial, 182 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,404 full, 21,740 partial, 63 unknown, and zero invalid; stream
 `114` reaches 44/20/12/0.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345

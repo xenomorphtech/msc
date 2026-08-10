@@ -86,14 +86,21 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently contains 70 semantic/manual shapes and 96 explicitly
-observed-opaque exact-width variants, 166 total. Opcode `94` is no longer an
+manifest currently contains 71 semantic/manual shapes and 96 explicitly
+observed-opaque exact-width variants, 167 total. Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
-form and four `datetime/i64` values. The gameplay transaction shapes cover
+form and four `datetime/i64` values. Opcode `148` is represented by one
+semantic switch shape: variant `9` with count zero, empty variant `10`, and
+variants `12`/`13` with two signed `i32` values. The legacy nonempty variant-`9`
+capture remains an explicit 1,639-byte opaque pin because its body does not
+consume under the current build's delegated record mask `0x9`. The gameplay
+transaction shapes cover
 client opcode `103`, server opcode `46`, and client opcode `293`; all 26
 occurrences of that family in `1-10FS.pcapng` stream `126` are exactly consumed.
 Opcodes `60`, `94`, and `379` contribute 14 exact reference frames: ten in
 stream `126` and four across `111.pcapng` streams `92`/`114`.
+Targeted native validation also consumes all 23 opcode-`148` frames: 22 through
+the semantic shape and the one legacy body through its exact opaque pin.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.
