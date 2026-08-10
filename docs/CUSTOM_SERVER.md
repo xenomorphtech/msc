@@ -303,7 +303,8 @@ and `114` are byte-identical four-record ledgers with 128 total text code
 units. Both pass the native manifest validator and exact Python re-emission.
 The gamestate fold now emits full `server_opcode_29_text_ledger` observations
 and `server_opcode_29_ledger_received` events while safe reports expose only
-counts and text lengths. Current strict totals are `13,412/21,762/33/0` for
+counts and text lengths. At that decoder checkpoint, strict totals were
+`13,412/21,762/33/0` for
 stream `92`, `51/20/5/0` for stream `114`, and the unchanged
 `26,660/44,381/59/0` for stream `126`. The HTTP gameplay state/events derived
 from the fold inherit the same redaction; no packet-injection endpoint action
@@ -330,6 +331,18 @@ remained rendered in map `101000000` with the world socket and generated
 heartbeat exchange active. The programmatic audio-mute service remained
 active. Because the visible field state did not identify a bounded effect,
 replay safety is limited to this exact packet-shape/non-stall result.
+
+Server opcode `13` closes the remaining attributed automatic-dump family.
+Handler `ad8499ed...` reads the discriminator directly; every observed server
+type (`7`, `12`, and `14`) then uses a `uint32` byte count whose body consumes
+the packet exactly. This holds for all 23 server packets in `111.pcapng`; the
+level-1-to-10 capture has no server packet in this family. The gameplay fold
+now emits partial `server_opcode_13_envelope` observations and
+`server_opcode_13_message_received` events, exposing only direction-specific
+type/body-length distributions and redaction flags. Stream `92` moves to
+`13,412/21,782/13/0` and stream `114` to `52/22/2/0`; stream `126` is unchanged.
+No replay is enabled because the bodies remain opaque and may contain
+session-local transport state.
 
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
@@ -415,8 +428,8 @@ unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
 26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid. Stream
-`92` now reaches 13,412 full, 21,762 partial, 33 unknown, and zero invalid;
-stream `114` reaches 52/20/4/0.
+`92` now reaches 13,412 full, 21,782 partial, 13 unknown, and zero invalid;
+stream `114` reaches 52/22/2/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
 client has a sequence byte followed by either an opaque identifier, counted
@@ -2027,8 +2040,8 @@ Replace the remaining opaque replay portions with stateful handling:
 1. Isolate the additional client-side drop eligibility condition using the
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
-2. Continue the finite automatic-dump pass with the remaining server opcodes
-   `13` and `394`; separate direct primitive reads
+2. Continue the finite automatic-dump pass with the remaining server opcode
+   `394`; separate direct primitive reads
    from delegated bodies and preserve neutral roles until capture comparison or
    a controlled effect supports semantic names.
 3. Reuse the proven typed final-field mob injection to validate the existing

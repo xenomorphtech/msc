@@ -234,7 +234,7 @@
     },
     {
       "name":"client_transport_envelope","direction":"client_to_server","opcode":13,
-      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator; all capture-111 branches compare as length-prefixed envelopes except type 1 acknowledgement",
+      "source":"capture-derived client direction: all 561 capture-111 and 970 level-1-to-10 packets compare as exact length-prefixed type-6/type-13 envelopes or fixed-width type-1 acknowledgements; the attributed receive handler separately confirms the shared server-direction u8 discriminator",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":13},
         {"op":"read","name":"message_type","kind":"u8"},
@@ -247,7 +247,7 @@
     },
     {
       "name":"server_transport_envelope","direction":"server_to_client","opcode":13,
-      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator; types 7, 12, and 14 are exact u32-length-prefixed capture envelopes",
+      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator; all 23 capture-111 server packets use exact u32-length-prefixed types 7, 12, or 14; the level-1-to-10 capture has no server opcode-13 packet",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":13},
         {"op":"read","name":"message_type","kind":"u8"},

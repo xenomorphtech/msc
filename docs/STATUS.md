@@ -53,8 +53,8 @@
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,412 full, 21,762 partial,
-  33 unknown, and zero invalid; stream `114` reports 52/20/4/0. Seven
+  packet observations. Stream `92` now reports 13,412 full, 21,782 partial,
+  13 unknown, and zero invalid; stream `114` reports 52/22/2/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -147,7 +147,8 @@
   codec round-trips both packets, folds them as full
   `server_opcode_29_text_ledger` observations, and emits
   `server_opcode_29_ledger_received` without exposing text or numeric values.
-  This moves current strict coverage to `13,412/21,762/33/0` and
+  At that decoder checkpoint, strict coverage moved to
+  `13,412/21,762/33/0` and
   `51/20/5/0`; stream `126` remains `26,660/44,381/59/0`. Live replay is
   deferred until the neutral bootstrap values have a bounded cross-session
   role.
@@ -165,6 +166,14 @@
   loopback packet API was processed by the local Wine client without dropping
   the world socket or heartbeat exchange; numeric roles remain neutral because
   no bounded visible effect was observed.
+- Server opcode `13` now folds the handler-confirmed discriminator plus the
+  capture-bounded `uint32` body length for server types `7`, `12`, and `14`.
+  All 23 server packets in `111.pcapng` consume and round-trip exactly; the
+  level-1-to-10 capture has no server packet in this direction. Safe state and
+  `server_opcode_13_message_received` events expose only type/body-length
+  distributions and a redaction flag. The 20 stream-`92` and two stream-`114`
+  packets move from unknown to partial, producing `13,412/21,782/13/0` and
+  `52/22/2/0`. Opaque bodies are not replayed.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

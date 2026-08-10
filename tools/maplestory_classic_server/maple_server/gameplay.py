@@ -788,6 +788,17 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_13_opaque_bytes: int = 0
+    client_opcode_13_opaque_lengths: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_13_messages: int = 0
+    server_opcode_13_messages_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_13_opaque_bytes: int = 0
+    server_opcode_13_opaque_lengths: Counter[int] = field(
+        default_factory=Counter
+    )
     client_opcode_43_packets: int = 0
     client_opcode_43_sequences: Counter[int] = field(default_factory=Counter)
     client_opcode_43_variants: Counter[str] = field(default_factory=Counter)
@@ -3931,6 +3942,20 @@ class GameplayAnalysis:
                 "client_opcode_13_opaque_bytes": (
                     self.state.client_opcode_13_opaque_bytes
                 ),
+                "client_opcode_13_opaque_lengths": dict(
+                    self.state.client_opcode_13_opaque_lengths
+                ),
+                "server_opcode_13": {
+                    "message_count": self.state.server_opcode_13_messages,
+                    "messages_by_type": dict(
+                        self.state.server_opcode_13_messages_by_type
+                    ),
+                    "opaque_bytes": self.state.server_opcode_13_opaque_bytes,
+                    "opaque_lengths": dict(
+                        self.state.server_opcode_13_opaque_lengths
+                    ),
+                    "body_redacted": True,
+                },
                 "client_opcode_43": {
                     "packet_count": self.state.client_opcode_43_packets,
                     "sequences": dict(self.state.client_opcode_43_sequences),
@@ -5423,6 +5448,7 @@ class GameplayStateFold:
             self.state.client_opcode_13_messages += 1
             self.state.client_opcode_13_messages_by_type[message_type] += 1
             self.state.client_opcode_13_opaque_bytes += opaque_bytes
+            self.state.client_opcode_13_opaque_lengths[opaque_bytes] += 1
             details = {
                 "message_type": message_type,
                 "opaque_payload_bytes": opaque_bytes,
@@ -7092,6 +7118,39 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=instruction,
                 details=details,
+            )
+        if opcode == 13 and len(payload) >= 3:
+            message_type = payload[2]
+            if message_type not in {7, 12, 14}:
+                return self._observation(
+                    frame,
+                    kind="server_opcode_13",
+                    coverage=ShapeCoverage.UNKNOWN,
+                )
+            message = Opcode13Envelope.parse(payload)
+            opaque_bytes = len(message.opaque_payload)
+            self.state.server_opcode_13_messages += 1
+            self.state.server_opcode_13_messages_by_type[message_type] += 1
+            self.state.server_opcode_13_opaque_bytes += opaque_bytes
+            self.state.server_opcode_13_opaque_lengths[opaque_bytes] += 1
+            details = {
+                "message_type": message_type,
+                "opaque_payload_bytes": opaque_bytes,
+                "body_redacted": True,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_13_message_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_13_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=message,
+                details=details,
+                issues=("server opcode-13 payload remains opaque",),
             )
         if opcode == 27:
             ledger_27 = ServerOpcode27IntegerLedger.parse(payload)
@@ -10898,6 +10957,15 @@ def render_gameplay_analysis(
     client_opcode_13_message_types = json.dumps(
         dict(sorted(state.client_opcode_13_messages_by_type.items()))
     )
+    client_opcode_13_opaque_lengths = json.dumps(
+        dict(sorted(state.client_opcode_13_opaque_lengths.items()))
+    )
+    server_opcode_13_message_types = json.dumps(
+        dict(sorted(state.server_opcode_13_messages_by_type.items()))
+    )
+    server_opcode_13_opaque_lengths = json.dumps(
+        dict(sorted(state.server_opcode_13_opaque_lengths.items()))
+    )
     client_attack_opcodes = json.dumps(
         dict(sorted(state.client_attack_actions_by_opcode.items()))
     )
@@ -11470,7 +11538,14 @@ def render_gameplay_analysis(
         (
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "
             f"message_types:{client_opcode_13_message_types} "
+            f"opaque_lengths:{client_opcode_13_opaque_lengths} "
             f"opaque_bytes:{state.client_opcode_13_opaque_bytes}"
+        ),
+        (
+            f"server_opcode_13=messages:{state.server_opcode_13_messages} "
+            f"message_types:{server_opcode_13_message_types} "
+            f"opaque_lengths:{server_opcode_13_opaque_lengths} "
+            f"opaque_bytes:{state.server_opcode_13_opaque_bytes}"
         ),
         (
             "neutral_server_records="

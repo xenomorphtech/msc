@@ -4680,6 +4680,46 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
+    def test_folds_server_opcode_13_without_exposing_body(self) -> None:
+        envelope = Opcode13Envelope(
+            message_type=7,
+            opaque_payload=b"sensitive server transport body",
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(envelope.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_13_messages, 1)
+        self.assertEqual(analysis.state.server_opcode_13_messages_by_type, {7: 1})
+        self.assertEqual(
+            analysis.state.server_opcode_13_opaque_lengths,
+            {len(envelope.opaque_payload): 1},
+        )
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_13_envelope"
+        )
+        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(observation.details["message_type"], 7)
+        self.assertTrue(observation.details["body_redacted"])
+        self.assertTrue(
+            any(
+                event.kind == "server_opcode_13_message_received"
+                for event in analysis.events
+            )
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("sensitive server transport body", safe)
+        self.assertIn(
+            "server_opcode_13=messages:1 message_types:{\"7\": 1}",
+            render_gameplay_analysis(analysis),
+        )
+
     def test_folds_non_pickup_server_opcode_49_without_pickup_effects(
         self,
     ) -> None:
@@ -7015,9 +7055,14 @@ class GameplayStateFoldTest(unittest.TestCase):
             {1: 1, 6: 1, 13: 1},
         )
         self.assertEqual(analysis.state.client_opcode_13_opaque_bytes, 37)
+        self.assertEqual(
+            analysis.state.client_opcode_13_opaque_lengths,
+            {8: 1, 12: 1, 17: 1},
+        )
         self.assertIn(
             'client_opcode_13=messages:3 message_types:{"1": 1, "6": 1, '
-            '"13": 1} opaque_bytes:37',
+            '"13": 1} opaque_lengths:{"8": 1, "12": 1, "17": 1} '
+            'opaque_bytes:37',
             report,
         )
         self.assertIn(

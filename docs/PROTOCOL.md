@@ -122,11 +122,18 @@ launches also emit a fully decoded type-`15` status message containing “Please
 check the network connection status.”
 
 The world-session gameplay fold uses the same neutral family. Stream `92`
-contains 446 fixed type-`1` envelopes, 104 type-`6` length-prefixed envelopes,
-and five type-`13` length-prefixed envelopes. Stream `126` contains 970 fixed
-type-`1` envelopes. Every packet consumes exactly and round-trips byte-for-byte;
-the fold emits type and opaque-byte counts without exposing any body. The
-payload meanings remain partial rather than being labeled as security traffic.
+contains 446 fixed client type-`1` envelopes, 104 client type-`6` envelopes,
+and five client type-`13` envelopes. Stream `126` contains 970 fixed client
+type-`1` envelopes. On the server direction, stream `92` contains 14 type-`7`,
+one type-`12`, and five type-`14` envelopes; stream `114` contains one each of
+types `12` and `14`. Across login and gameplay, all 23 captured server packets
+have a body length that reaches the exact packet end; the automatic dump's
+handler confirms the leading discriminator read. The fold emits
+direction-specific type/body-length distributions and redaction flags without
+exposing any body. Server packets fold as partial
+`server_opcode_13_envelope` observations and
+`server_opcode_13_message_received` events. The payload meanings remain
+partial rather than being labeled as security traffic.
 
 ## World opcode `43` neutral envelopes
 
@@ -1170,8 +1177,9 @@ text lengths `30`, `36`, `31`, and `31` code units. The grammar consumes all
 Safe state publishes only packet count, entry-count distribution, total and
 per-entry text lengths, redaction flags, and field epoch. The fold emits
 `server_opcode_29_ledger_received` and a full
-`server_opcode_29_text_ledger` observation. This changes stream `92` coverage
-to `13,412/21,762/33/0` and stream `114` to `51/20/5/0`; the level-1-to-10
+`server_opcode_29_text_ledger` observation. At that decoder checkpoint, stream
+`92` coverage changed to `13,412/21,762/33/0` and stream `114` to
+`51/20/5/0`; the level-1-to-10
 stream remains `26,660/44,381/59/0`. No live replay is claimed because the
 obfuscated numeric fields and captured text have not yet been shown safe across
 sessions.
@@ -3116,8 +3124,8 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,660
 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,412 full, 21,762 partial,
-33 unknown, and zero invalid; stream `114` reaches 52/20/4/0. The long fold
+observations. Stream `92` independently reaches 13,412 full, 21,782 partial,
+13 unknown, and zero invalid; stream `114` reaches 52/22/2/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

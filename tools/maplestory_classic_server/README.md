@@ -440,9 +440,9 @@ gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,660 full,
 44,381 partial, 59 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,412 full, 21,762 partial,
-33 unknown, and zero invalid observations; short stream `114` reaches 52 full,
-20 partial, 4 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,412 full, 21,782 partial,
+13 unknown, and zero invalid observations; short stream `114` reaches 52 full,
+22 partial, 2 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -483,6 +483,9 @@ The gameplay fold currently models these capture-backed boundaries:
   neutral flag/tail values,
 - client opcode `13`: neutral fixed type-`1` and length-prefixed type-`6`/`13`
   envelopes whose bodies remain opaque and are omitted from safe reports,
+- server opcode `13`: the same handler-confirmed discriminator followed by a
+  capture-bounded `uint32` body length for types `7`, `12`, and `14`; safe
+  state/events expose only type and body-length distributions,
 - client/server opcode `43`: neutral, redacted status envelopes; the client
   uses either a sequence, opaque identifier, counted UTF-16 field, and six-byte
   tail or a 12-byte compact form, while the server uses a message byte and
@@ -759,13 +762,16 @@ client tail tags `17/18/21/24` have capture-derived fixed widths; their field
 roles, the client control value, and the tail marker remain neutral, so reports
 classify the family as partial semantic coverage and omit the token value.
 
-Client opcode `13` also continues on the world connection. The fixed type-`1`
+Opcode `13` also continues in both directions on the world connection. The
+fixed client type-`1`
 variant is exactly 11 bytes: opcode, discriminator, and eight opaque bytes.
 Types `6` and `13` carry a 32-bit byte count followed by that many opaque
 bytes. Stream `92` has 446 type-`1`, 104 type-`6`, and five type-`13` packets;
 stream `126` has 970 type-`1` packets. Every envelope round-trips exactly. The
-fold records type/body-size distributions and emits redacted events without
-assigning a security meaning to the body.
+server uses the same length prefix: stream `92` has 14 type-`7`, one type-`12`,
+and five type-`14` envelopes, while stream `114` has one each of type `12` and
+`14`. The fold records direction-specific type/body-size distributions and
+emits redacted events without assigning a security meaning to any body.
 
 Client opcode `217` is distinct from the server-to-client life-movement opcode
 with the same number. In stream `126`, 345 packets use an exact eight-byte
