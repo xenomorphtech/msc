@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,622 observations are full, 44,373 partial, 105
+`--fail-on-invalid`: 26,653 observations are full, 44,373 partial, 74
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -224,8 +224,24 @@ two control bytes; the other three captured selectors end at the terminator.
 All 31 consume and re-encode exactly at full coverage. Safe reports/events/
 JSON/HTTP expose only structural distributions and omit the six distinct
 primary values plus all string contents. No `111.pcapng` gameplay stream
-contains this opcode, unobserved handler selectors remain unknown, and no live
-effect is claimed because the fresh muted client reached only world selection.
+contains this opcode, and unobserved handler selectors remain unknown.
+
+Client opcode `66` completes the capture-local transaction model. Each of the
+31 server opcode-`348` envelopes is followed by exactly one same-selector
+opcode-`66` response: 25 are four-byte selector/status records and six
+selector-`6`, status-`1` records add a redacted u32. The fold matches them FIFO
+per selector with zero unmatched or pending transactions, emits
+`server_opcode_348_acknowledged`, and reports round trips from `728.174` to
+`10,436.006` ms. The generated packet-shape manifest consumes all 31 exactly.
+
+The opt-in injection endpoint also supplied useful negative evidence. It
+accepted an exact 63-byte selector-`0` packet from the level-1-to-10 capture,
+but the active level-12 short-stream client emitted no opcode `66`, advanced
+only one more heartbeat, then closed its world connection and showed a black
+framebuffer. This was a cross-state replay, so the server does not advertise
+opcode `348` as generally safe to inject. The browser-free launcher and direct
+nested-Wayland seat recovered the client to an active field; status then showed
+one active world connection, zero failures, and 719/719 matched heartbeats.
 
 Client opcode `122` is now a capture-bounded redacted selector envelope.
 Stream `126` contains 62 packets across six selector/count shapes: selector
@@ -252,8 +268,8 @@ capture-preexisting resets, four leave-time clears, and zero active statuses at
 the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
-Together, these latest modeled families leave the long-corpus totals at 26,622
-full, 44,373 partial, 105 unknown-but-lossless, and zero invalid. Stream `92`
+Together, these latest modeled families leave the long-corpus totals at 26,653
+full, 44,373 partial, 74 unknown-but-lossless, and zero invalid. Stream `92`
 now reaches 13,404 full, 21,755 partial, 48 unknown, and zero invalid; stream
 `114` reaches 44/20/12/0.
 

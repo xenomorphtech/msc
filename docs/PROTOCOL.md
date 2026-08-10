@@ -897,7 +897,37 @@ The fold emits `server_opcode_348_received` and exposes category, selector,
 value, text-code-unit, and control-pair distributions. Safe state, events,
 reports, JSON, and HTTP-derived analysis omit the primary value and text.
 Their higher-level roles remain neutral, and handler selectors absent from the
-captures stay unknown. No live client effect has been established.
+captures stay unknown.
+
+Every one of those 31 server packets is followed by exactly one same-selector
+client opcode `66` packet, with no pending or unmatched transaction when
+processed chronologically. Its capture-bounded grammar is:
+
+```text
+uint16 opcode = 66
+uint8  selector
+uint8  status
+if selector == 6 and status == 1:
+    uint32 optional_value            # retained for re-emission; redacted
+```
+
+The four-byte selector/status forms are `0/1` (19), `0/255` (1), `3/1` (2),
+`6/0` (1), and `17/1` (2). Six `6/1` packets use the eight-byte form; their
+optional value is `5` five times and `1` once. Same-selector FIFO round trips
+range from `728.174` to `10,436.006` ms with a `1,561.373` ms median. The fold
+emits `server_opcode_348_acknowledged`, exposes only selector/status/shape,
+redacted-value presence, pending counts, and timing, and warns on unmatched or
+unfinished transactions. All 31 packets parse, re-encode, and validate through
+the generated native shape without exposing the text or optional value.
+
+A cross-state live replay does not establish that arbitrary opcode-`348`
+packets are safe. The custom server wrote one exact 63-byte selector-`0` packet
+from the level-1-to-10 stream to an active level-12 client bootstrapped from
+short stream `114`. The client emitted no opcode `66`; after one more heartbeat
+it closed the world connection and displayed a black framebuffer. The launcher
+and direct nested-Wayland seat restored the same client to an active field with
+719/719 heartbeats. This is negative state/build-gating evidence, not a
+contradiction of the capture-local one-to-one transaction correlation.
 
 ## Fixed-width neutral server records
 
@@ -2718,8 +2748,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,622
-full, 44,373 partial, 105 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,653
+full, 44,373 partial, 74 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,404 full, 21,755 partial,
 48 unknown, and zero invalid; stream `114` reaches 44/20/12/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

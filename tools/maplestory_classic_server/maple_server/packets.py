@@ -5306,6 +5306,98 @@ class ServerOpcode43Envelope:
 
 
 @dataclass(frozen=True)
+class ClientOpcode66Acknowledgement:
+    """Capture-bounded acknowledgement for server opcode 348."""
+
+    selector: int
+    status_value: int
+    optional_value: int | None = field(default=None, repr=False)
+    opcode: int = 66
+
+    _CAPTURED_SHORT_PAIRS = frozenset(
+        {
+            (0, 1),
+            (0, 0xFF),
+            (3, 1),
+            (6, 0),
+            (17, 1),
+        }
+    )
+    _CAPTURED_VALUE_PAIR = (6, 1)
+
+    @property
+    def shape(self) -> str:
+        suffix = "value" if self.optional_value is not None else "short"
+        return f"selector={self.selector}:status={self.status_value}:{suffix}"
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode66Acknowledgement":
+        reader = PacketReader(payload, packet_name="client_opcode_66")
+        _expect_opcode(reader, 66)
+        selector = reader.u8("selector")
+        status_value = reader.u8("status_value")
+        pair = (selector, status_value)
+        if reader.remaining == 0:
+            if pair not in cls._CAPTURED_SHORT_PAIRS:
+                raise PacketShapeError(
+                    "client opcode-66 selector/status pair is not a captured "
+                    f"short shape: {selector}/{status_value}"
+                )
+            return cls(selector=selector, status_value=status_value)
+        if pair != cls._CAPTURED_VALUE_PAIR or reader.remaining != 4:
+            raise PacketShapeError(
+                "client opcode-66 optional-value shape requires selector 6, "
+                "status 1, and one u32"
+            )
+        optional_value = reader.u32("optional_value")
+        reader.finish()
+        return cls(
+            selector=selector,
+            status_value=status_value,
+            optional_value=optional_value,
+        )
+
+    def safe_dict(self) -> dict[str, int | bool | str]:
+        return {
+            "selector": self.selector,
+            "status_value": self.status_value,
+            "shape": self.shape,
+            "optional_value_present": self.optional_value is not None,
+            "optional_value_redacted": self.optional_value is not None,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 66:
+            raise PacketShapeError(
+                "client opcode-66 acknowledgement opcode must be 66"
+            )
+        pair = (self.selector, self.status_value)
+        try:
+            prefix = struct.pack("<HBB", self.opcode, *pair)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-66 selector/status is out of range: {error}"
+            ) from error
+        if self.optional_value is None:
+            if pair not in self._CAPTURED_SHORT_PAIRS:
+                raise PacketShapeError(
+                    "client opcode-66 selector/status pair is not a captured "
+                    f"short shape: {self.selector}/{self.status_value}"
+                )
+            return prefix
+        if pair != self._CAPTURED_VALUE_PAIR:
+            raise PacketShapeError(
+                "client opcode-66 optional value requires selector 6 and "
+                "status 1"
+            )
+        if not 0 <= self.optional_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-66 optional value must fit in u32"
+            )
+        return prefix + struct.pack("<I", self.optional_value)
+
+
+@dataclass(frozen=True)
 class ClientOpcode114TextEnvelope:
     """Capture-bounded redacted text envelope for client opcode 114."""
 

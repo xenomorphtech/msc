@@ -436,8 +436,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,622 full,
-44,373 partial, 105 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,653 full,
+44,373 partial, 74 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,404 full, 21,755 partial,
@@ -545,6 +545,10 @@ The gameplay fold currently models these capture-backed boundaries:
   u8/i32/selector/i32 prefix, terminated counted UTF-16 text, and two trailing
   controls only on observed selector `0`; selectors `3`/`6`/`17` end after the
   text terminator and all other selectors remain unknown,
+- client opcode `66`: the correlated response to server opcode `348`, with a
+  selector/status pair and one redacted optional u32 on the captured `6/1`
+  branch; the fold matches same-selector requests FIFO, emits acknowledgement
+  events, and reports pending/unmatched transactions and round-trip timing,
 - server opcodes `69`/`93`/`94`/`148`/`201`/`205`/`379`: capture-bounded neutral
   record families; numeric fields are typed, potentially identifying primary
   values are omitted from safe output, fixed unknown regions remain explicit, and the
@@ -1635,3 +1639,9 @@ preserve distinct Unity scan codes in this setup.
 57. Bound all 44 client opcode-`114` packets as one redacted text envelope,
     preserve the control and trailing-value roles as neutral, publish only safe
     structural distributions, and reduce the long-corpus unknown count to 105.
+58. Bound all 31 client opcode-`66` packets, match each one FIFO to the prior
+    same-selector server opcode-`348` envelope, publish only selector/status/
+    shape and timing evidence, and reduce the long-corpus unknown count to 74.
+    An exact selector-`0` server packet from the level-1-to-10 session did not
+    elicit opcode `66` from the active level-12 short-stream client and the
+    world connection closed, so cross-state replay remains explicitly unsafe.

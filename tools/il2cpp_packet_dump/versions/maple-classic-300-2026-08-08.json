@@ -810,6 +810,38 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":43},{"op":"read","name":"message_type","kind":"u8"},{"op":"bytes","name":"body","length":16}]
     },
     {
+      "name":"client_opcode_66_server_348_acknowledgement","direction":"client_to_server","opcode":66,
+      "source":"1-10FS stream-126 selector/status branches; all 31 packets FIFO-match one same-selector server opcode-348 packet",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":66},
+        {"op":"read","name":"selector","kind":"u8"},
+        {"op":"switch","field":"selector","cases":[
+          {"equals":0,"operations":[
+            {"op":"read","name":"status_value","kind":"u8"},
+            {"op":"switch","field":"status_value","cases":[
+              {"equals":1,"operations":[]},
+              {"equals":255,"operations":[]}
+            ]}
+          ]},
+          {"equals":3,"operations":[
+            {"op":"read","name":"status_value","kind":"u8","equals":1}
+          ]},
+          {"equals":6,"operations":[
+            {"op":"read","name":"status_value","kind":"u8"},
+            {"op":"switch","field":"status_value","cases":[
+              {"equals":0,"operations":[]},
+              {"equals":1,"operations":[
+                {"op":"read","name":"optional_value","kind":"u32"}
+              ]}
+            ]}
+          ]},
+          {"equals":17,"operations":[
+            {"op":"read","name":"status_value","kind":"u8","equals":1}
+          ]}
+        ]}
+      ]
+    },
+    {
       "name":"client_opcode_114_text_envelope","direction":"client_to_server","opcode":114,
       "source":"1-10FS stream-126 common u8/counted-UTF16/trailing-zero/u32 grammar across all 44 length-26/28/32 packets",
       "operations":[

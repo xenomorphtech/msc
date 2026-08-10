@@ -46,6 +46,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAttackAction,
     ClientOpcode43Envelope,
+    ClientOpcode66Acknowledgement,
     ClientOpcode101Record,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
@@ -2150,6 +2151,52 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ClientOpcode43Envelope.parse(bytes.fromhex("2b00010000000000"))
         with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
             replace(server, opaque_body=b"short").to_bytes()
+
+    def test_client_opcode_66_acknowledgement_variants_round_trip(self) -> None:
+        acknowledgements = tuple(
+            ClientOpcode66Acknowledgement(
+                selector=selector,
+                status_value=status_value,
+            )
+            for selector, status_value in (
+                (0, 1),
+                (0, 0xFF),
+                (3, 1),
+                (6, 0),
+                (17, 1),
+            )
+        ) + (
+            ClientOpcode66Acknowledgement(
+                selector=6,
+                status_value=1,
+                optional_value=3_456_789,
+            ),
+        )
+
+        for acknowledgement in acknowledgements:
+            payload = acknowledgement.to_bytes()
+            self.assertEqual(
+                ClientOpcode66Acknowledgement.parse(payload),
+                acknowledgement,
+            )
+        self.assertTrue(
+            all(len(packet.to_bytes()) == 4 for packet in acknowledgements[:-1])
+        )
+        self.assertEqual(len(acknowledgements[-1].to_bytes()), 8)
+        safe = str(acknowledgements[-1].safe_dict())
+        self.assertNotIn("3456789", safe)
+        self.assertIn("optional_value_redacted", safe)
+
+        with self.assertRaisesRegex(PacketShapeError, "not a captured"):
+            ClientOpcode66Acknowledgement(selector=3, status_value=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires selector 6"):
+            replace(acknowledgements[-1], selector=3).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "one u32"):
+            ClientOpcode66Acknowledgement.parse(bytes.fromhex("420006010000"))
+        with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
+            replace(
+                acknowledgements[-1], optional_value=0x1_0000_0000
+            ).to_bytes()
 
     def test_client_opcode_114_text_envelope_round_trip_and_redact(self) -> None:
         envelopes = (
@@ -4642,6 +4689,92 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:16",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_correlates_client_opcode_66_with_server_opcode_348(self) -> None:
+        requests = tuple(
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_000_000 + selector,
+                selector=selector,
+                value=0,
+                text=f"secret-{selector}",
+                control_1=0 if selector == 0 else None,
+                control_2=1 if selector == 0 else None,
+            )
+            for selector in (0, 3, 6, 17)
+        )
+        acknowledgements = (
+            ClientOpcode66Acknowledgement(selector=0, status_value=1),
+            ClientOpcode66Acknowledgement(selector=3, status_value=1),
+            ClientOpcode66Acknowledgement(
+                selector=6,
+                status_value=1,
+                optional_value=3_456_789,
+            ),
+            ClientOpcode66Acknowledgement(selector=17, status_value=1),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                request.to_bytes() for request in requests
+            ),
+            extra_client_plaintexts=tuple(
+                acknowledgement.to_bytes()
+                for acknowledgement in acknowledgements
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_348_packets, 4)
+        self.assertEqual(analysis.state.client_opcode_66_acknowledgements, 4)
+        self.assertEqual(
+            analysis.state.client_opcode_66_selectors,
+            {0: 1, 3: 1, 6: 1, 17: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_66_status_values,
+            {1: 4},
+        )
+        self.assertEqual(analysis.state.client_opcode_66_optional_values, 1)
+        self.assertEqual(
+            analysis.state.matched_client_opcode_66_acknowledgements, 4
+        )
+        self.assertEqual(
+            analysis.state.unmatched_client_opcode_66_acknowledgements, 0
+        )
+        self.assertEqual(analysis.state.pending_server_opcode_348_requests, 0)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_66_acknowledgement"
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                and observation.details["matched_request"]
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "server_opcode_348_acknowledged"
+                for event in analysis.events
+            ),
+            4,
+        )
+        self.assertFalse(
+            any("opcode-348" in warning for warning in analysis.warnings)
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("secret-", safe)
+        self.assertNotIn("3456789", safe)
+        self.assertIn(
+            "client_opcode_66=packets:4 selectors:{0: 1, 3: 1, 6: 1, 17: 1}",
             render_gameplay_analysis(analysis),
         )
 

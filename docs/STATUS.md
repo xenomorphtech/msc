@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,622 full, 44,373 partial, 105 unknown-but-lossless, and zero invalid
+  26,653 full, 44,373 partial, 74 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,404 full, 21,755 partial,
   48 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
@@ -155,9 +155,19 @@
   u8/i32/selector/i32 prefix plus terminated counted UTF-16 text; selector `0`
   has two trailing control bytes, while selectors `3`/`6`/`17` do not. Every
   packet round-trips exactly. State/events/reports/HTTP omit the primary values
-  and text, future selectors stay unknown, and no live effect is claimed: the
-  newly launched browser-free, programmatically muted client validly reached
-  world selection but not a held-open world connection for injection.
+  and text, and future selectors stay unknown.
+- Client opcode `66` now gives those 31 envelopes a complete capture-local
+  transaction model. Every server packet is followed by exactly one
+  same-selector response; 25 packets are four-byte selector/status records and
+  six selector-`6`/status-`1` packets add one redacted u32. Native shape
+  validation and Python parsing consume all 31 exactly, while the gamestate
+  fold reports 31 matched, zero unmatched, zero pending, and round trips from
+  `728.174` to `10,436.006` ms. A cross-state live replay of one exact
+  selector-`0` server packet into the active level-12 short-stream client
+  produced no opcode `66` and the world connection closed after one further
+  heartbeat. The browser-free launcher/direct Wayland seat restored the client
+  to an active field with 719/719 matched heartbeats; opcode `348` therefore
+  remains state-gated rather than generally replay-safe.
 - Client opcode `122` now has full structural coverage for all 62 stream-`126`
   packets. The six observed selector/count shapes contain two to four u32
   values; selector `2` always ends in `0xffffffff`. Every packet round-trips

@@ -310,6 +310,25 @@ same grammar. The leading u8 is nondecreasing, but the trailing u32 decreases
 therefore uses neutral names and the gameplay fold redacts both text and final
 value. Timing near tutorial/UI packets remains hypothesis-only evidence.
 
+Client opcode `66` closes the adjacent server opcode-`348` envelope at the
+capture level. Selector counts match exactly (`0:20, 3:2, 6:7, 17:2`), and a
+chronological per-selector FIFO leaves all 31 transactions matched with no
+orphan on either side. Twenty-five client packets are only `u16 opcode, u8
+selector, u8 status`; six selector-`6`/status-`1` packets add one u32. The
+automatic manifest represents the observed selector/status branches as one
+nested switch, and native validation consumes all 31 without ambiguity. The
+u32 remains redacted because correlation proves the response boundary, not its
+meaning. Round trips span `728.174..10,436.006` ms (median `1,561.373` ms).
+
+Live replay also found a necessary state boundary. Sending one exact
+selector-`0` opcode-`348` packet from the level-1-to-10 session to the active
+level-12 short-stream client produced no opcode `66`; the client answered one
+more heartbeat and then closed the world connection. Recovery through the
+browser-free launcher and direct nested-Wayland seat returned it to the field
+with 719/719 matched heartbeats. This negative cross-state result prevents the
+offline adjacency from being generalized into a state-independent injection
+recipe.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte
