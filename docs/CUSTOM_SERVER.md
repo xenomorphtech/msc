@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,659 observations are full, 44,373 partial, 68
+`--fail-on-invalid`: 26,659 observations are full, 44,380 partial, 61
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -223,8 +223,8 @@ Seven fixed-width semantic declarations cover both observed widths for
 `27`/`28`/`142` and the single 68-byte `425` width. Native validation consumes
 all 13 selected private-regression packets (`9` from `111`, including login
 duplicates, and `4` from `1-10FS`) with no unsupported or failed shapes. The
-Python codecs also consume and re-emit every packet exactly. Strict state-fold
-coverage is now `26,659/44,373/68/0` for stream `126`,
+Python codecs also consume and re-emit every packet exactly. At that checkpoint,
+strict state-fold coverage was `26,659/44,373/68/0` for stream `126`,
 `13,410/21,755/42/0` for stream `92`, and `49/20/7/0` for stream `114`.
 
 One exact 68-byte opcode-`425` packet was sent through the same loopback-only
@@ -235,6 +235,22 @@ map `101000000`, and leaves phase, player, inventory, and progression state
 unchanged. The traced process exited later after the debugger session; a fresh
 browser-free launch, operated through the nested Wayland seat, is back in the
 field with the audio-mute service active and one ready replay connection.
+
+Six related generated handlers provide the next bounded partial family. Server
+opcodes `228`, `230`, `231`, `232`, `234`, and `235` all live on the same
+handler class and directly read one `u32`; their generated bodies make no other
+`PacketReader` calls. The 12 cross-corpus packets retain capture-specific tails
+of `1`, `3`, `4`, `6`, `7`, `16`, or `20` bytes. One typed envelope validates
+the opcode/length combinations, preserves every byte for re-emission, redacts
+the leading value and tail, and folds them as partial neutral records. Seven
+manifest shapes consume all 12 selected packets without native failures.
+
+This family moves seven long-corpus observations and five stream-`92`
+observations from unknown to partial. Current totals are
+`26,659/44,380/61/0`, `13,410/21,760/37/0`, and `49/20/7/0` for streams
+`126`, `92`, and `114`, respectively. No live packet was sent: without a typed
+role for the leading `u32` or ignored tails, replaying a cross-session value
+would be a state-safety guess rather than a model validation.
 
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
@@ -319,8 +335,8 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, these latest modeled families leave the long-corpus totals at 26,659
-full, 44,373 partial, 68 unknown-but-lossless, and zero invalid. Stream `92`
-now reaches 13,410 full, 21,755 partial, 42 unknown, and zero invalid; stream
+full, 44,380 partial, 61 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,410 full, 21,760 partial, 37 unknown, and zero invalid; stream
 `114` reaches 49/20/7/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The

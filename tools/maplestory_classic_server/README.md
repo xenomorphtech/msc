@@ -437,11 +437,11 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,659 full,
-44,373 partial, 68 unknown, and zero invalid packet observations. PCAP
+44,380 partial, 61 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,410 full, 21,755 partial,
-42 unknown, and zero invalid observations; short stream `114` reaches 49 full,
+metadata. Stream `92` independently passes with 13,410 full, 21,760 partial,
+37 unknown, and zero invalid observations; short stream `114` reaches 49 full,
 20 partial, 7 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
@@ -573,6 +573,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `425`: a primitive-traced `u16` count, repeated signed values,
   and four-word trailer; all three gameplay captures use count `12`, trailer
   `(0,0,1,1)`, and the repeated values are redacted,
+- server opcodes `228`/`230`/`231`/`232`/`234`/`235`: generated-handler
+  envelopes with one redacted `u32` followed by an explicitly ignored,
+  capture-bounded tail; the fold reports opcode/tail-length distributions and
+  keeps all 12 observations partial,
 - server opcodes `11`/`24`/`56`/`58`/`59`/`60`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
@@ -1676,3 +1680,8 @@ preserve distinct Unity scan codes in this setup.
     through the loopback packet API, observe the predicted second neutral
     ledger event with unchanged core state, then restore a browser-free,
     direct-Wayland, audio-muted client to the field.
+61. Bound server opcodes `228`, `230`, `231`, `232`, `234`, and `235` from
+    their generated one-`u32` handlers, preserve all seven observed ignored-tail
+    widths without inventing semantics, and move all 12 packets from unknown
+    to redacted partial neutral events. Defer live replay because the leading
+    value and tails may be session-local state.

@@ -1231,7 +1231,7 @@ private-regression packets validate natively (`9` from the selected `111`
 streams, including the login duplicates, plus `4` from `1-10FS`) and every one
 round-trips through the Python codecs. The state fold emits one full ledger
 observation/event per packet and reports only record counts, text lengths,
-boolean counts, and trailer shapes. Coverage rises to
+boolean counts, and trailer shapes. That batch raised coverage to
 `26,659/44,373/68/0` on stream `126`, `13,410/21,755/42/0` on stream `92`,
 and `49/20/7/0` on stream `114`.
 
@@ -1243,6 +1243,47 @@ player, inventory, and progression state unchanged. The later process exit
 followed the debugger session rather than a synchronous packet rejection; a
 fresh browser-free direct-Wayland launch returned to the field with sound
 muted and a ready world connection.
+
+## Generated `u32` envelopes (`228`, `230`, `231`, `232`, `234`, `235`)
+
+These six opcodes are registered on the same generated handler class. Each
+handler makes exactly one direct `PacketReader` call, a `u32`, then invokes its
+local state method without another reader call. The captures contain additional
+bytes after that value, so the honest boundary is a typed leading value plus an
+ignored, capture-bounded tail:
+
+```text
+uint16 opcode
+uint32 primary_value
+bytes  opaque_tail
+```
+
+Only these observed opcode/tail-length combinations are accepted:
+
+| Opcode | Tail bytes | Packet bytes | Occurrences |
+| ---: | ---: | ---: | ---: |
+| `228` | `4` | `10` | `1` in stream `92` |
+| `230` | `1` | `7` | `1` in stream `92`, `1` in stream `126` |
+| `230` | `7` | `13` | `1` in stream `126` |
+| `231` | `20` | `26` | `1` in stream `126` |
+| `232` | `16` | `22` | `1` in stream `92` |
+| `234` | `3` | `9` | `1` in stream `92`, `2` in stream `126` |
+| `235` | `6` | `12` | `1` in stream `92`, `2` in stream `126` |
+
+The shared Python envelope consumes and re-emits all 12 packets exactly.
+Safe state and `neutral_server_record_received` events publish only opcode,
+typed-value count, and opaque-tail length; the `u32` and tail bytes are
+redacted. Observations remain partial because the client handler does not give
+the tail bytes a readable role. Seven semantic manifest declarations replace
+the five matching `111` opaque pins and add the two widths found only in
+`1-10FS`; targeted native validation passes `12/12` with no unsupported or
+consumption failures.
+
+The family moves seven long-stream and five stream-`92` observations from
+unknown to partial. Strict totals become `26,659/44,380/61/0` for stream `126`,
+`13,410/21,760/37/0` for stream `92`, and `49/20/7/0` for stream `114`. Live
+replay is deferred: the leading value may identify session-local state, and
+replaying an untyped ignored tail across sessions would not be a bounded test.
 
 ## Variable server records (`156`, `385`)
 
@@ -2911,9 +2952,9 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,659
-full, 44,373 partial, 68 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,410 full, 21,755 partial,
-42 unknown, and zero invalid; stream `114` reaches 49/20/7/0. The long fold
+full, 44,380 partial, 61 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,410 full, 21,760 partial,
+37 unknown, and zero invalid; stream `114` reaches 49/20/7/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,659 full, 44,373 partial, 68 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,410 full, 21,755 partial,
-  42 unknown, and zero invalid; stream `114` reports 49/20/7/0. Seven
+  26,659 full, 44,380 partial, 61 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,410 full, 21,760 partial,
+  37 unknown, and zero invalid; stream `114` reports 49/20/7/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, and `379` are
@@ -102,6 +102,16 @@
   inventory, or progression state. A fresh browser-free direct-Wayland launch
   is back in the field with the programmatic audio-mute service active and one
   healthy world connection.
+- Server opcodes `228`, `230`, `231`, `232`, `234`, and `235` share one
+  generated-handler boundary: each reads exactly one leading `u32`, while the
+  12 captured packets retain opcode/width-specific ignored tails. Seven
+  semantic width declarations and one redacted Python envelope now preserve
+  and re-emit the `1/3/4/6/7/16/20`-byte tails exactly. All 12 packets pass the
+  native and Python round-trip validators; the fold emits neutral events and
+  marks them partial, because the tail bytes have no handler-backed semantics.
+  Primary values and tails are omitted from safe analysis. Cross-state live
+  replay is intentionally deferred because the leading value may be a
+  session-local identifier and the ignored tails are not yet typed.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

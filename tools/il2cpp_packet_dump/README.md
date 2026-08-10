@@ -86,12 +86,11 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 83 semantic/manual shapes and 96 explicitly
-observed-opaque exact-width variants. Six exact-width opaque pins overlap the
-semantic opcode-`27`, opcode-`28`, opcode-`142`, opcode-`147`, opcode-`272`,
-and opcode-`425` shapes and are retained as raw capture evidence but suppressed
-from the effective shape set. Three additional compact semantic widths leave
-173 active shapes and 90 active opaque pins. Opcode `94` is no longer an
+manifest currently declares 90 semantic/manual shapes and 96 explicitly
+observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
+semantic shapes and are retained as raw capture evidence but suppressed from
+the effective shape set. The added widths found only in `1-10FS` leave 175
+active shapes and 85 active opaque pins. Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
 form and four `datetime/i64` values. Opcode `148` is represented by one
@@ -139,5 +138,12 @@ four-word trailer; the three gameplay packets are identical, and a live trace
 independently observed all 12 repeated `i32` reads. Targeted native validation
 consumes all 13 selected packets without unsupported, short-read, trailing-byte,
 constant, boolean, or ambiguity failures.
+Server opcodes `228`, `230`, `231`, `232`, `234`, and `235` share generated
+handlers that directly read exactly one `u32`. Seven fixed-width shapes retain
+their remaining capture-bounded bytes as explicit opaque tails: five replace
+matching `111` pins and two add widths seen only in `1-10FS`. Targeted native
+validation consumes all 12 packets with zero unsupported or consumption
+failures; higher-level analysis keeps them partial because the client handler
+does not assign readable roles to the tails.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

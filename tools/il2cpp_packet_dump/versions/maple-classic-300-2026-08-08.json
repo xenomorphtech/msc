@@ -902,6 +902,41 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":94},{"op":"read","name":"flag","kind":"bool"},{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]
     },
     {
+      "name":"server_opcode_228_u32_opaque_tail","direction":"server_to_client","opcode":228,"length":10,
+      "source":"generated handler bee2b258... reads one u32; the sole 111 gameplay packet retains four unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":228},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":4}]
+    },
+    {
+      "name":"server_opcode_230_u32_short_tail","direction":"server_to_client","opcode":230,"length":7,
+      "source":"generated handler e49edb9d... reads one u32; 111 and 1-10FS gameplay packets retain one unconsumed capture-bounded byte",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":1}]
+    },
+    {
+      "name":"server_opcode_230_u32_long_tail","direction":"server_to_client","opcode":230,"length":13,
+      "source":"generated handler e49edb9d... reads one u32; one 1-10FS gameplay packet retains seven unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":7}]
+    },
+    {
+      "name":"server_opcode_231_u32_opaque_tail","direction":"server_to_client","opcode":231,"length":26,
+      "source":"generated handler add56c3f... reads one u32; the sole 1-10FS gameplay packet retains 20 unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":231},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":20}]
+    },
+    {
+      "name":"server_opcode_232_u32_opaque_tail","direction":"server_to_client","opcode":232,"length":22,
+      "source":"generated handler a73a2819... reads one u32; the sole 111 gameplay packet retains 16 unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":232},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":16}]
+    },
+    {
+      "name":"server_opcode_234_u32_opaque_tail","direction":"server_to_client","opcode":234,"length":9,
+      "source":"generated handler fc681013... reads one u32; all three gameplay packets retain three unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":234},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":3}]
+    },
+    {
+      "name":"server_opcode_235_u32_opaque_tail","direction":"server_to_client","opcode":235,"length":12,
+      "source":"generated handler ead463fb... reads one u32; all three gameplay packets retain six unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":235},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":6}]
+    },
+    {
       "name":"server_opcode_27_integer_ledger_large","direction":"server_to_client","opcode":27,"length":1056,
       "source":"generated opcode-27 handler reads an i32 count; exact 111 gameplay/login packets decode as repeated i32/i32/i32/trailing-zero UTF-16 entries",
       "operations":[

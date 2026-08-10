@@ -103,6 +103,7 @@ from .packets import (
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    ServerU32OpaqueTailEnvelope,
     SkillLevelChangeRequest,
     SkillRecordUpdate,
     SkillRecordUpdateAcknowledgement,
@@ -1047,6 +1048,7 @@ NeutralServerRecord = (
     | ServerOpcode201Record
     | ServerOpcode205Record
     | ServerOpcode379Record
+    | ServerU32OpaqueTailEnvelope
 )
 
 FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
@@ -7336,11 +7338,27 @@ class GameplayStateFold:
                 parsed=envelope,
                 details=details,
             )
-        if opcode in {69, 93, 94, 148, 201, 205, 379}:
-            if opcode == 69:
+        if opcode in {
+            69,
+            93,
+            94,
+            148,
+            201,
+            205,
+            228,
+            230,
+            231,
+            232,
+            234,
+            235,
+            379,
+        }:
+            if opcode in ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS:
                 neutral_record: NeutralServerRecord = (
-                    ServerOpcode69Record.parse(payload)
+                    ServerU32OpaqueTailEnvelope.parse(payload)
                 )
+            elif opcode == 69:
+                neutral_record = ServerOpcode69Record.parse(payload)
             elif opcode == 93:
                 neutral_record = ServerOpcode93Record.parse(payload)
             elif opcode == 94:
@@ -7369,7 +7387,11 @@ class GameplayStateFold:
                 "neutral_server_record_received",
                 details=details,
             )
-            partial = opcode in {69, 201} or (
+            partial = opcode in {
+                69,
+                201,
+                *ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS,
+            } or (
                 isinstance(neutral_record, ServerOpcode148Envelope)
                 and not neutral_record.fully_bounded
             )

@@ -8113,6 +8113,79 @@ class ServerOpcode348TextEnvelope:
 
 
 @dataclass(frozen=True)
+class ServerU32OpaqueTailEnvelope:
+    """Generated-handler u32 prefix plus a capture-bounded ignored tail."""
+
+    primary_value: int = field(repr=False)
+    opaque_tail: bytes = field(repr=False)
+    opcode: int
+
+    CAPTURED_TAIL_LENGTHS = {
+        228: frozenset({4}),
+        230: frozenset({1, 7}),
+        231: frozenset({20}),
+        232: frozenset({16}),
+        234: frozenset({3}),
+        235: frozenset({6}),
+    }
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerU32OpaqueTailEnvelope":
+        if len(payload) < 2:
+            raise PacketShapeError(
+                "server u32 opaque-tail envelope needs an opcode"
+            )
+        opcode = int.from_bytes(payload[:2], "little")
+        reader = PacketReader(
+            payload, packet_name=f"server_opcode_{opcode}_u32_envelope"
+        )
+        _expect_opcode(reader, opcode)
+        envelope = cls(
+            primary_value=reader.u32("primary_value"),
+            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+            opcode=opcode,
+        )
+        reader.finish()
+        envelope._validate()
+        return envelope
+
+    def _validate(self) -> None:
+        expected_lengths = self.CAPTURED_TAIL_LENGTHS.get(self.opcode)
+        if expected_lengths is None:
+            raise PacketShapeError(
+                "server u32 opaque-tail envelope opcode must be one of "
+                f"{sorted(self.CAPTURED_TAIL_LENGTHS)}, got {self.opcode}"
+            )
+        if len(self.opaque_tail) not in expected_lengths:
+            raise PacketShapeError(
+                f"server opcode-{self.opcode} opaque tail has "
+                f"{len(self.opaque_tail)} bytes, expected one of "
+                f"{sorted(expected_lengths)}"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "primary_value_redacted": True,
+            "typed_value_count": 1,
+            "opaque_tail_length": len(self.opaque_tail),
+            "opaque_tail_redacted": bool(self.opaque_tail),
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return (
+                struct.pack("<HI", self.opcode, self.primary_value)
+                + self.opaque_tail
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-{self.opcode} primary value is out of range: "
+                f"{error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode69Record:
     """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
 
