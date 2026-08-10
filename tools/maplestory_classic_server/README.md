@@ -437,7 +437,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,622 full,
-44,329 partial, 149 unknown, and zero invalid packet observations. PCAP
+44,373 partial, 105 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,404 full, 21,755 partial,
@@ -487,6 +487,9 @@ The gameplay fold currently models these capture-backed boundaries:
   uses either a sequence, opaque identifier, counted UTF-16 field, and six-byte
   tail or a 12-byte compact form, while the server uses a message byte and
   fixed 16-byte body; no security or request/response meaning is inferred,
+- client opcode `114`: one neutral redacted envelope with a control byte,
+  counted UTF-16 field, required zero terminator, and omitted trailing u32;
+  tutorial/UI timing remains a hypothesis rather than a semantic name,
 - client opcode `101`: exact 11-byte five-value record whose numeric widths and
   distributions are typed while all field roles remain neutral,
 - client opcode `122`: capture-bounded selector envelopes containing two to
@@ -1629,3 +1632,6 @@ preserve distinct Unity scan codes in this setup.
     client envelopes, model the fixed server envelope, round-trip all 48
     cross-corpus packets, and live-replay the server branch with unchanged core
     state, advancing heartbeats, and no client or injection failure.
+57. Bound all 44 client opcode-`114` packets as one redacted text envelope,
+    preserve the control and trailing-value roles as neutral, publish only safe
+    structural distributions, and reduce the long-corpus unknown count to 105.

@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,622 full, 44,329 partial, 149 unknown-but-lossless, and zero invalid
+  26,622 full, 44,373 partial, 105 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,404 full, 21,755 partial,
   48 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
@@ -82,6 +82,13 @@
   bodies remain omitted. An exact server packet live replay left core state
   unchanged, advanced matched heartbeats `173 -> 176`, retained one active
   connection with zero failures, and produced no client opcode-`43` response.
+- Client opcode `114` now consumes and round-trips all 44 long-corpus packets
+  as a redacted `u8 + counted UTF-16 + zero + u32` envelope. Text lengths
+  `8/9/11` explain the exact `26/28/32` packet widths. Safe state/events expose
+  only control and text-length distributions plus an omitted-value count;
+  indirect tutorial/UI timing is documented as a hypothesis, not a semantic
+  name. The active idle custom-server client emits none, so no reverse-direction
+  replay is claimed.
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly, every leave matches the
   current field epoch, and all opcode-`202`/`217` movement broadcasts now

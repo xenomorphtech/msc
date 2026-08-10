@@ -86,8 +86,8 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently contains 72 semantic/manual shapes and 96 explicitly
-observed-opaque exact-width variants, 168 total. Opcode `94` is no longer an
+manifest currently contains 73 semantic/manual shapes and 96 explicitly
+observed-opaque exact-width variants, 169 total. Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
 form and four `datetime/i64` values. Opcode `148` is represented by one
@@ -108,5 +108,9 @@ boundary: `u8 + u32 + counted UTF-16 + zero + six bytes`, or the 12-byte
 compact `u8 + nine bytes` envelope. All 45 client packets validate natively,
 including sequences `13..35` from stream `126`; the existing 19-byte server
 shape covers the other three opcode-`43` packets.
+Client opcode `114` adds one variable-width redacted shape: a neutral `u8`, a
+counted UTF-16 field with required zero terminator, and a trailing `u32`. It
+consumes all 44 stream-`126` packets at lengths `26`, `28`, and `32`; text and
+the final value remain omitted from safe gameplay analysis.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

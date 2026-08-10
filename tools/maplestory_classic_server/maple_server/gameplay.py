@@ -18,6 +18,7 @@ from .packets import (
     ClientAttackAction,
     ClientOpcode43Envelope,
     ClientOpcode101Record,
+    ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
@@ -786,6 +787,14 @@ class GameplayGameState:
         default_factory=Counter
     )
     server_opcode_43_opaque_bytes: int = 0
+    client_opcode_114_packets: int = 0
+    client_opcode_114_control_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_114_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_114_redacted_values: int = 0
     client_opcode_122_packets: int = 0
     client_opcode_122_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_122_shapes: Counter[str] = field(default_factory=Counter)
@@ -3816,6 +3825,18 @@ class GameplayAnalysis:
                     ),
                     "opaque_bytes": self.state.server_opcode_43_opaque_bytes,
                 },
+                "client_opcode_114": {
+                    "packet_count": self.state.client_opcode_114_packets,
+                    "control_values": dict(
+                        self.state.client_opcode_114_control_values
+                    ),
+                    "text_code_units": dict(
+                        self.state.client_opcode_114_text_code_units
+                    ),
+                    "redacted_value_count": (
+                        self.state.client_opcode_114_redacted_values
+                    ),
+                },
                 "client_opcode_122": {
                     "packet_count": self.state.client_opcode_122_packets,
                     "selectors": dict(self.state.client_opcode_122_selectors),
@@ -5159,6 +5180,36 @@ class GameplayStateFold:
                 details=details,
                 issues=(
                     "client opcode-43 identifier, text, opaque bytes, and "
+                    "higher-level purpose remain semantically unresolved",
+                ),
+            )
+        if opcode == 114:
+            envelope = ClientOpcode114TextEnvelope.parse(payload)
+            self.state.client_opcode_114_packets += 1
+            self.state.client_opcode_114_control_values[
+                envelope.control_value
+            ] += 1
+            self.state.client_opcode_114_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.client_opcode_114_redacted_values += 1
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_114_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_114_text_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=envelope,
+                details=details,
+                issues=(
+                    "client opcode-114 text, trailing value, and "
                     "higher-level purpose remain semantically unresolved",
                 ),
             )
@@ -10822,6 +10873,14 @@ def render_gameplay_analysis(
             "message_types:"
             f"{dict(sorted(state.server_opcode_43_message_types.items()))} "
             f"opaque_bytes:{state.server_opcode_43_opaque_bytes}"
+        ),
+        (
+            f"client_opcode_114=packets:{state.client_opcode_114_packets} "
+            "control_values:"
+            f"{dict(sorted(state.client_opcode_114_control_values.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.client_opcode_114_text_code_units.items()))} "
+            f"redacted_values:{state.client_opcode_114_redacted_values}"
         ),
         (
             f"client_opcode_122=packets:{state.client_opcode_122_packets} "

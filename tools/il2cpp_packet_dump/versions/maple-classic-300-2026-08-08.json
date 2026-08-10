@@ -810,6 +810,16 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":43},{"op":"read","name":"message_type","kind":"u8"},{"op":"bytes","name":"body","length":16}]
     },
     {
+      "name":"client_opcode_114_text_envelope","direction":"client_to_server","opcode":114,
+      "source":"1-10FS stream-126 common u8/counted-UTF16/trailing-zero/u32 grammar across all 44 length-26/28/32 packets",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":114},
+        {"op":"read","name":"control_value","kind":"u8"},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"read","name":"opaque_value","kind":"u32"}
+      ]
+    },
+    {
       "name":"client_opcode_54","direction":"client_to_server","opcode":54,"length":24,
       "source":"31 capture frames compared at fixed field offsets",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":54},{"op":"read","name":"control_value","kind":"u32"},{"op":"read","name":"flag_1","kind":"u8"},{"op":"read","name":"flag_2","kind":"u8"},{"op":"read","name":"value_1","kind":"u32"},{"op":"read","name":"value_2","kind":"u32"},{"op":"read","name":"value_3","kind":"u32"},{"op":"read","name":"tail","kind":"u32"}]

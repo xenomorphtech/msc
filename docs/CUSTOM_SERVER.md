@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,622 observations are full, 44,329 partial, 149
+`--fail-on-invalid`: 26,622 observations are full, 44,373 partial, 105
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -253,7 +253,7 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, these latest modeled families leave the long-corpus totals at 26,622
-full, 44,329 partial, 149 unknown-but-lossless, and zero invalid. Stream `92`
+full, 44,373 partial, 105 unknown-but-lossless, and zero invalid. Stream `92`
 now reaches 13,404 full, 21,755 partial, 48 unknown, and zero invalid; stream
 `114` reaches 44/20/12/0.
 
@@ -276,6 +276,16 @@ unchanged, and advanced matched heartbeat probes from 173 to 176. Runtime
 status retained one active connection with zero connection or injection
 failures. No client opcode-`43` response appeared, so no security or
 request/response behavior is assigned.
+
+Client opcode `114` now folds all 44 level-1-to-10 packets as one redacted
+`u8 + counted UTF-16 + zero + u32` envelope. Packet lengths `26/28/32` follow
+directly from text lengths `8/9/11`; the fold exposes only control-value and
+text-length distributions plus the count of omitted trailing values. Although
+most packets occur within tens of seconds of tutorial/UI traffic, there is no
+immediate one-for-one response and the higher-level purpose remains neutral.
+The active idle level-12 custom-server client emits none, and this
+client-to-server family is not synthesized or injected in the opposite
+direction.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

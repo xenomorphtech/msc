@@ -301,6 +301,15 @@ Native validation consumes all 45 client packets, and the existing fixed
 server shape consumes its three `u8, byte[16]` responses. The model does not
 name the redacted identifier, string, or opaque bytes as security state.
 
+Client opcode `114` is bounded directly from all 44 long-corpus packets rather
+than from a server handler. Offsets `3..4` are a little-endian UTF-16 code-unit
+count, followed by exactly that many code units, a required zero byte, and one
+final u32. Counts `8/9/11` explain all observed lengths `26/28/32` under the
+same grammar. The leading u8 is nondecreasing, but the trailing u32 decreases
+22 times and cannot be retained as a client-tick interpretation. The manifest
+therefore uses neutral names and the gameplay fold redacts both text and final
+value. Timing near tutorial/UI packets remains hypothesis-only evidence.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte

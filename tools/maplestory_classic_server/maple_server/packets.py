@@ -5306,6 +5306,61 @@ class ServerOpcode43Envelope:
 
 
 @dataclass(frozen=True)
+class ClientOpcode114TextEnvelope:
+    """Capture-bounded redacted text envelope for client opcode 114."""
+
+    control_value: int
+    opaque_text: str = field(repr=False)
+    opaque_value: int = field(repr=False)
+    opcode: int = 114
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.opaque_text.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode114TextEnvelope":
+        reader = PacketReader(payload, packet_name="client_opcode_114")
+        _expect_opcode(reader, 114)
+        envelope = cls(
+            control_value=reader.u8("control_value"),
+            opaque_text=reader.utf16_string(
+                "opaque_text", trailing_byte=True
+            ),
+            opaque_value=reader.u32("opaque_value"),
+        )
+        reader.finish()
+        return envelope
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "control_value": self.control_value,
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+            "opaque_value_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 114:
+            raise PacketShapeError(
+                "client opcode-114 envelope opcode must be 114"
+            )
+        if not 0 <= self.control_value <= 0xFF:
+            raise PacketShapeError(
+                "client opcode-114 control value must fit in u8"
+            )
+        if not 0 <= self.opaque_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-114 opaque value must fit in u32"
+            )
+        return (
+            struct.pack("<HB", self.opcode, self.control_value)
+            + encode_utf16_string(self.opaque_text, trailing_byte=True)
+            + struct.pack("<I", self.opaque_value)
+        )
+
+
+@dataclass(frozen=True)
 class ClientOpcode101Record:
     header_value: int
     primary_value: int

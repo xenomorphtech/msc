@@ -180,6 +180,36 @@ active with zero failures. No client opcode-`43` response appeared, so this
 proves bounded non-stalling acceptance only—not security, status, or
 request/response semantics.
 
+## Client opcode `114` redacted text envelope
+
+All 44 stream-`126` packets use one exact variable-width grammar:
+
+```text
+uint16 opcode = 114
+uint8 control_value
+uint16 text_code_units
+utf16le[text_code_units] opaque_text
+uint8 zero_terminator = 0
+uint32 opaque_value
+```
+
+Text lengths `8`, `9`, and `11` produce total packet lengths `26`, `28`, and
+`32`; their counts are `2`, `8`, and `34`. The control values span `1..34`
+across 26 observed values and are nondecreasing in capture order, but that alone
+does not establish a sequence or tutorial-step role. There are 13 distinct
+redacted strings and 43 distinct trailing values; the trailing values decrease
+22 times, so they are not modeled as a monotonic client tick.
+
+Forty-three packets have prior opcode-`244`/`247` tutorial/UI traffic, with 29
+within 30 seconds and a median gap of 15.285 seconds. That supports a possible
+UI relationship but is too indirect to call the packet an acknowledgement.
+The fold therefore emits neutral `client_opcode_114_submitted` events and
+publishes only control and text-length distributions plus a redacted-value
+count. Python and native manifest validators consume and re-emit all 44 packets
+without ambiguity or failure. Because the family is client-originated and the
+active idle level-12 client emits none, no server-to-client live replay or
+client-visible effect is claimed.
+
 The captured server frame at index `3` is a second opcode-`0` message with
 plaintext result byte `2`. It is the direct source of the replayed
 account-policy dialog: replacing only this frame with heartbeat `0a00` removes
@@ -2689,7 +2719,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,622
-full, 44,329 partial, 149 unknown-but-lossless, and zero invalid packet
+full, 44,373 partial, 105 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,404 full, 21,755 partial,
 48 unknown, and zero invalid; stream `114` reaches 44/20/12/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

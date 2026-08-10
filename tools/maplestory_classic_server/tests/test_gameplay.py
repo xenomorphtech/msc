@@ -47,6 +47,7 @@ from maple_server.packets import (  # noqa: E402
     ClientAttackAction,
     ClientOpcode43Envelope,
     ClientOpcode101Record,
+    ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
@@ -2149,6 +2150,41 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ClientOpcode43Envelope.parse(bytes.fromhex("2b00010000000000"))
         with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
             replace(server, opaque_body=b"short").to_bytes()
+
+    def test_client_opcode_114_text_envelope_round_trip_and_redact(self) -> None:
+        envelopes = (
+            ClientOpcode114TextEnvelope(
+                control_value=32,
+                opaque_text="secret01",
+                opaque_value=3_456_789,
+            ),
+            ClientOpcode114TextEnvelope(
+                control_value=1,
+                opaque_text="hidden-text",
+                opaque_value=4_567_890,
+            ),
+        )
+
+        for envelope in envelopes:
+            payload = envelope.to_bytes()
+            self.assertEqual(
+                ClientOpcode114TextEnvelope.parse(payload), envelope
+            )
+        self.assertEqual(len(envelopes[0].to_bytes()), 26)
+        self.assertEqual(len(envelopes[1].to_bytes()), 32)
+        self.assertEqual(envelopes[0].text_code_units, 8)
+        safe = str(envelopes[0].safe_dict())
+        self.assertNotIn("secret01", safe)
+        self.assertNotIn("3456789", safe)
+
+        invalid_terminator = bytearray(envelopes[0].to_bytes())
+        invalid_terminator[-5] = 1
+        with self.assertRaisesRegex(PacketShapeError, "expected 0"):
+            ClientOpcode114TextEnvelope.parse(bytes(invalid_terminator))
+        with self.assertRaisesRegex(PacketShapeError, "fit in u8"):
+            replace(envelopes[0], control_value=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
+            replace(envelopes[0], opaque_value=0x1_0000_0000).to_bytes()
 
     def test_client_opcode_122_captured_variants_round_trip(self) -> None:
         payloads = (
@@ -4606,6 +4642,68 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:16",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_114_redacted_text_envelopes(self) -> None:
+        envelopes = (
+            ClientOpcode114TextEnvelope(
+                control_value=1,
+                opaque_text="hidden-one",
+                opaque_value=3_456_789,
+            ),
+            ClientOpcode114TextEnvelope(
+                control_value=32,
+                opaque_text="secret02",
+                opaque_value=4_567_890,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_client_plaintexts=tuple(
+                envelope.to_bytes() for envelope in envelopes
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_opcode_114_packets, 2)
+        self.assertEqual(
+            analysis.state.client_opcode_114_control_values,
+            {1: 1, 32: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_114_text_code_units,
+            {10: 1, 8: 1},
+        )
+        self.assertEqual(analysis.state.client_opcode_114_redacted_values, 2)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_114_text_envelope"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "partial"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "client_opcode_114_submitted"
+                for event in analysis.events
+            ),
+            2,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("hidden-one", safe)
+        self.assertNotIn("secret02", safe)
+        self.assertNotIn("3456789", safe)
+        self.assertNotIn("4567890", safe)
+        self.assertIn(
+            "client_opcode_114=packets:2 control_values:{1: 1, 32: 1}",
             render_gameplay_analysis(analysis),
         )
 
