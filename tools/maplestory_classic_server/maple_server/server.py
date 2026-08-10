@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass, replace
 import functools
 from ipaddress import IPv4Address
+import json
 import os
 from pathlib import Path
 import sys
@@ -56,6 +57,11 @@ from .http_api import (
     ServerPacketInjection,
     ServerRuntime,
     start_runtime_http_api,
+)
+from .live_replay import (
+    DEFAULT_PACKET_API_URL,
+    inject_current_hp_live,
+    render_current_hp_live_replay,
 )
 from .packets import (
     ChannelTransitionResponse,
@@ -3448,6 +3454,28 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("first", type=Path)
     compare_parser.add_argument("second", type=Path)
 
+    live_hp_parser = subparsers.add_parser(
+        "inject-current-hp",
+        help=(
+            "plan one typed current-HP packet, inject it through a live replay "
+            "API, and verify the observed gameplay fold"
+        ),
+    )
+    live_hp_parser.add_argument("--transcript", required=True, type=Path)
+    live_hp_parser.add_argument("--current-hp", required=True, type=int)
+    live_hp_parser.add_argument(
+        "--http-api-url",
+        default=DEFAULT_PACKET_API_URL,
+        help="loopback POST /api/v1/server-packets endpoint",
+    )
+    live_hp_parser.add_argument(
+        "--api-timeout-seconds", type=float, default=5.0
+    )
+    live_hp_parser.add_argument(
+        "--verify-timeout-seconds", type=float, default=5.0
+    )
+    live_hp_parser.add_argument("--json", action="store_true")
+
     analyze_parser = subparsers.add_parser(
         "analyze-login",
         help=(
@@ -4702,6 +4730,26 @@ def main() -> None:
         return
     if arguments.command == "compare":
         compare_transcripts(arguments.first, arguments.second)
+        return
+    if arguments.command == "inject-current-hp":
+        result = inject_current_hp_live(
+            arguments.transcript,
+            arguments.current_hp,
+            api_url=arguments.http_api_url,
+            api_timeout_seconds=arguments.api_timeout_seconds,
+            verify_timeout_seconds=arguments.verify_timeout_seconds,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    result.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_current_hp_live_replay(result))
         return
     if arguments.command in {"analyze-login", "analyze-gameplay"}:
         if arguments.pcap is not None:

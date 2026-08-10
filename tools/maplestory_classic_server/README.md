@@ -221,6 +221,27 @@ in the transcript, and exposes only safe counters through
 `GET /api/v1/status`. It has no application authentication and therefore
 assumes every caller inside the local namespace/OS boundary is trusted.
 
+For the modeled current-HP operation, prefer the typed live validator over
+hand-written `plaintext_hex`. It loads the actively written world transcript,
+derives and round-trips opcode `41`, sends it through the same endpoint, and
+does not report success until the new packet folds back out of the transcript.
+It requires exactly one stat-update delta and verifies that max HP, phase,
+field epoch, map, inventory, and progression did not change:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u "$USER" \
+  python -m maple_server inject-current-hp \
+  --transcript /path/to/live-world.jsonl \
+  --current-hp 49 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+The command accepts only plain HTTP to the fixed packet path on `localhost` or
+a numeric loopback address. Its safe result contains the typed prediction, API
+acceptance metadata, the matched decoded frame, and invariant checks; it omits
+packet bytes and private identifiers.
+
 `--generate-field-npc-spawns` applies the same boundary to every fully typed
 opcode-`300` observation. It validates the complete fold, reconstructs each
 22-byte NPC spawn from its aliased entity state, reparses it, checks frame

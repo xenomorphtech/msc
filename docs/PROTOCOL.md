@@ -1455,6 +1455,16 @@ from `50/222` to `1/222`, the observed transcript folded the event as
 and heartbeat responses continued. This validates the predicted effect without
 assigning semantics to the flag or tail marker.
 
+The later live typed-injection validator repeated the smaller reversible
+experiment against an already active browser-free client. Its plan predicted
+only `current_hp 50 -> 49`, one `player_stats_updated` event, and no changes to
+max HP, phase, field epoch, map, inventory, or progression. The real HUD showed
+`49/222`; transcript frame `775` decoded the exact opcode-`41` mask and the fold
+matched every invariant. A second independently planned operation observed the
+current baseline and restored `49 -> 50` at frame `777`, again with all
+invariants matched. The API's runtime injection annotation is separate from
+the one predicted domain event.
+
 ## NPC spawn (`server 300`)
 
 The complete spawn packet is 22 bytes:

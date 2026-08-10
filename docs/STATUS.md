@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 203 tests.
+- The custom-server suite currently passes all 207 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -162,6 +162,14 @@
   client active on map `101000000` at HP `50/222`, MP `97/342`, with 110/110
   heartbeats; the transcript folds to four variable events, 178 entries, six
   typed values, zero opaque bytes, and two injection events.
+- `inject-current-hp` now turns that raw endpoint into a typed, observed live
+  experiment. It plans opcode `41` from the active transcript, restricts the
+  target to the fixed loopback packet route, injects it, and polls until the
+  decoded fold proves exactly one stat update with phase, field epoch, map,
+  inventory, and progression unchanged. On transcript
+  `neutral_records_live_20260810/world/1786346118785123354_replay_12857.jsonl`,
+  the final command and fold matched `50 -> 49` at frame `775`; the same command
+  then matched restoration `49 -> 50` at frame `777`, both on map `101000000`.
 - `?keyboard-skill=KEY_CODE:SKILL_ID` now performs a typed single-value change
   to an existing opcode-`385` selector-`1` binding. On a fresh client, Left Ctrl
   under `2001005` emitted opcode-`52` variant `18` with two hits `[27,32]`;
@@ -408,7 +416,13 @@
 - The live capture-backed server renders five world tabs and online channels.
 - Capture-faithful opcode-`402` timing plus the live selected-world rewrite now
   makes the client emit channel-selection opcode `5` and enter the character
-  controller.
+  controller. A fresh muted, browser-free run selected world `1`/channel `0`
+  through the nested Sway seat, received the typed one-character list, emitted
+  opcode `7`, accepted the `127.0.0.1:12857` handoff, and visibly entered map
+  `101000000`. Login transcript
+  `typed_character_list_live_20260809/login/1786343668425457994_replay_12082.jsonl`
+  folds to `handoff_ready` with zero issues/warnings; its world transcript is
+  the live typed-injection transcript above and folds to `active`.
 - The enabled user service `maplestory-audio-mute.service` continuously mutes
   only PipeWire nodes named `Maplestory_Classic.exe` across relaunches.
 - `tools/maplestory_classic_server/tools/launch_local_game.py` now provides the

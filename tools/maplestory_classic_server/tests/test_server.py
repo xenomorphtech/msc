@@ -531,6 +531,27 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertEqual(arguments.emit_current_hp_update, 1)
 
+    def test_parser_accepts_live_typed_hp_injection_validation(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "inject-current-hp",
+                "--transcript",
+                "live-world.jsonl",
+                "--current-hp",
+                "49",
+                "--http-api-url",
+                "http://127.0.0.1:12858/api/v1/server-packets",
+                "--verify-timeout-seconds",
+                "3",
+                "--json",
+            ]
+        )
+
+        self.assertEqual(arguments.transcript, Path("live-world.jsonl"))
+        self.assertEqual(arguments.current_hp, 49)
+        self.assertEqual(arguments.verify_timeout_seconds, 3)
+        self.assertTrue(arguments.json)
+
     def test_replay_parser_accepts_typed_inventory_quantity_update(self) -> None:
         arguments = build_parser().parse_args(
             [

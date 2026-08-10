@@ -92,6 +92,14 @@ PCAP-backed replay options accept references such as
 these references over placing captured plaintext hex in shell history or
 process arguments. The committed tests use sanitized synthetic records.
 
+The opt-in server-packet HTTP endpoint has no application authentication and
+must remain bound to loopback inside the trusted replay namespace. For current-
+HP experiments, prefer `inject-current-hp`: it rejects non-loopback hosts,
+credentials, alternate paths, query strings, fragments, and HTTPS URLs, and it
+does not print the generated plaintext packet. This URL validation narrows
+accidental use but does not add authentication; any trusted local process that
+can reach the raw endpoint can still mutate the active replay connection.
+
 ## File modes
 
 The capture implementation creates directories as `0700` and transcripts as

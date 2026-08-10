@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 203 tests.
+The last run passed all 207 tests.
 
 ## Inspect and compare captures
 
@@ -578,6 +578,26 @@ multiple ambiguous connections returns `409`; malformed and oversized inputs
 return `400`/`413`. `GET /api/v1/status` exposes only readiness, active-
 connection count, attempts, sends, failures, the last opcode/length/time, and
 the last error.
+
+Do not derive raw HP packet hex by hand. The companion command plans from the
+current live transcript, injects through that endpoint, then polls the same
+transcript until the predicted typed packet and state delta are observed:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u "$USER" \
+  python -m maple_server inject-current-hp \
+  --transcript /path/to/live-world.jsonl \
+  --current-hp 49 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+`inject-current-hp` accepts only the exact packet route over loopback HTTP. It
+round-trips the opcode-`41` shape before sending, requires one new modeled stat
+update afterward, and compares current/max HP, phase, field epoch, map,
+inventory, and progression. API acceptance alone remains insufficient; the
+command succeeds only when the observed fold matches every check. The JSON
+report is identifier-free and does not expose plaintext bytes.
 
 The endpoint does not decode or return opcode-`77` text. If a controlled test
 injects one, `accepted` still proves only a serialized socket write; subsequent
