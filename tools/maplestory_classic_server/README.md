@@ -436,13 +436,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,565 full,
-44,295 partial, 240 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,601 full,
+44,295 partial, 204 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,400 full, 21,740 partial,
-67 unknown, and zero invalid observations; short stream `114` reaches 43 full,
-20 partial, 13 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,403 full, 21,740 partial,
+64 unknown, and zero invalid observations; short stream `114` reaches 44 full,
+20 partial, 12 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -538,10 +538,11 @@ The gameplay fold currently models these capture-backed boundaries:
   u8/i32/selector/i32 prefix, terminated counted UTF-16 text, and two trailing
   controls only on observed selector `0`; selectors `3`/`6`/`17` end after the
   text terminator and all other selectors remain unknown,
-- server opcodes `69`/`93`/`201`/`205`: capture-bounded neutral record
-  families; numeric fields are typed, potentially identifying primary values
-  are omitted from safe output, and fixed unknown regions remain explicit,
-- server opcodes `11`/`24`/`56`/`58`/`59`/`96`/`105`/`178`/`386`/`388`/`389`:
+- server opcodes `69`/`93`/`94`/`201`/`205`/`379`: capture-bounded neutral
+  record families; numeric fields are typed, potentially identifying primary
+  values are omitted from safe output, fixed unknown regions remain explicit, and the
+  opcode-`94`/`379` layouts come directly from the generated IL2CPP read dump,
+- server opcodes `11`/`24`/`56`/`58`/`59`/`60`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
   reconstructs every occurrence rather than assuming they are bootstrap-only,
@@ -1570,9 +1571,10 @@ preserve distinct Unity scan codes in this setup.
     two-hit opcode-`52`, emit the predicted zero-health/leave sequence, fold
     the resulting transcript validly, and preserve active heartbeats. Retain a
     separate boundary around unresolved official ±1 HP authority adjustments.
-43. Bound neutral server opcodes `69`/`93`/`201`/`205`, consume and round-trip
-    all 145 reference packets exactly, and expose safe numeric distributions
-    without leaking their potentially identifying primary values.
+43. Bound the initial neutral server set `69`/`93`/`201`/`205`, consume and
+    round-trip its 145 reference packets exactly, and expose safe numeric
+    distributions without leaking potentially identifying primary values;
+    item 54 records the later generated-shape expansion.
 44. Model opcode-`189`/`190` remote-player entry and removal from pinned client
     handlers, validate all 153 lifecycle packets, and live-test an exact
     enter/move/leave/enter sequence against the rendered client.
@@ -1608,3 +1610,9 @@ preserve distinct Unity scan codes in this setup.
     captured status bit into field-local mob state, match every set to its
     preceding attack-relay target/skill, and preserve source-level/duration
     values as neutral pending a live effect test.
+54. Consume the automatic IL2CPP dump's exact opcode-`60` `i32`, opcode-`94`
+    `bool + i32 + i32`, and opcode-`379` discriminator/datetime reads; promote
+    all 14 reference packets to full events, add native boolean validation to
+    the Rust shape engine, and replay a typed opcode-`94` packet into the live
+    client with unchanged world/player/inventory/progression state and a fresh
+    matched heartbeat.

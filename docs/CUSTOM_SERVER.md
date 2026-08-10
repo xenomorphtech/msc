@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 213 tests.
+The last run passed all 219 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,565 observations are full, 44,295 partial, 240
+`--fail-on-invalid`: 26,601 observations are full, 44,295 partial, 204
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -160,14 +160,15 @@ opaque. The fold emits `server_opcode_77_received` and exposes only variant,
 text-code-unit, control/value, and opaque-byte distributions. Neither packet
 records, events, text reports, JSON, nor HTTP status return captured text.
 
-The neutral server-record fold now also separates opcodes `69`, `93`, `201`,
-and `205`. Across all three reference streams, 145/145 packets consume and
-round-trip exactly. The counted-u32 opcode `93` and numeric opcode `205` add 49
-full observations. Opcode `69` retains its fixed 263-byte table and opcode
-`201` retains its fixed 22-byte suffix, adding 96 partial observations and
-14,162 explicitly counted opaque bytes. Potentially character-like primary
-values are retained for exact re-emission but omitted from safe state, events,
-and reports.
+The neutral server-record fold now separates opcodes `69`, `93`, `94`, `201`,
+`205`, and `379`. Across all three reference streams, 153/153 packets consume
+and round-trip exactly. The generated IL2CPP dump supplies exact direct reads
+for opcode `94` (`bool + i32 + i32`) and opcode `379` (variant byte, optionally
+four datetimes); together with opcode `93` and `205`, they provide 57 full
+observations. Opcode `69` retains its fixed 263-byte table and opcode `201`
+retains its fixed 22-byte suffix, adding 96 partial observations and 14,162
+explicitly counted opaque bytes. Potentially character-like primary values are
+retained for exact re-emission but omitted from safe state, events, and reports.
 
 The current tree was also exercised through a fresh browser-free launch on the
 nested Wayland space, using direct seat input without moving the desktop
@@ -242,9 +243,10 @@ capture-preexisting resets, four leave-time clears, and zero active statuses at
 the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
-Together, these latest modeled families leave the long-corpus totals at 26,565
-full, 44,295 partial, 240 unknown-but-lossless, and zero invalid. Stream `92`
-now reaches 13,400 full, 21,740 partial, 67 unknown, and zero invalid.
+Together, these latest modeled families leave the long-corpus totals at 26,601
+full, 44,295 partial, 204 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,403 full, 21,740 partial, 64 unknown, and zero invalid; stream
+`114` reaches 44/20/12/0.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a
@@ -504,17 +506,19 @@ controlled HP mutation below.
 
 Add `--generate-fixed-server-records` to regenerate all fully modeled
 fixed-width server records at their captured frame indices. The supported
-opcodes are `11`, `24`, `45`, `56`, `58`, `59`, `71`, `72`, `74`, `76`, `89`,
-`96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
+opcodes are `11`, `24`, `45`, `56`, `58`, `59`, `60`, `71`, `72`, `74`, `76`,
+`89`, `96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
 and `398`. The planner requires a valid gameplay fold, round-trips every typed
 record, preserves its packet length, rejects duplicate indices and explicit
 patch conflicts, and does not assume the records occur only during bootstrap.
 Both sustained reference streams contain a second opcode-`96`, repeated empty
 opcode `45`, and repeated opcode-`301` values during later gameplay. Opcode
-`190` is folded separately as a remote-player removal.
+`60` contributes six signed-`i32` records only in stream `126`; its width and
+signedness come from the generated IL2CPP direct-read dump. Opcode `190` is
+folded separately as a remote-player removal.
 
-For stream `114`, the current flag replaces 21 typed server frames. It composes with
-`--generate-initial-field-snapshot` and `--generate-field-npc-spawns`.
+For stream `114`, the current flag replaces 21 typed server frames. It composes
+with `--generate-initial-field-snapshot` and `--generate-field-npc-spawns`.
 `protocol.fixed_server_record_emitter` exposes the frame/opcode sequence,
 neutral typed values, field epochs, patch count, and the predicted unchanged
 player/phase state. The opcode-`59` character id is excluded; status reports
@@ -702,6 +706,16 @@ zero unmatched or pending transactions, and acknowledgement times from
 folds validly and warning-free to active map `101000000`, HP `50`, unchanged
 player/inventory/progression, skill `2001005` still at level `6`, and 61/61
 matched generated heartbeats. The client remained responsive in the field.
+
+The same still-active browser-free session then received a typed opcode-`94`
+record created and round-tripped by `ServerOpcode94Record` before the loopback
+`POST /api/v1/server-packets` call. The API accepted one 11-byte packet, the
+live fold added exactly one `neutral_server_record_received` event with no
+opaque bytes, and phase, field epoch, map, player, inventory, progression,
+skills, and fixed-record state all remained unchanged. A later status sample
+reported one active connection, zero failures, and 244/244 matched heartbeat
+probes. This validates non-stalling client acceptance and the predicted neutral
+fold, not the two integer fields' higher-level meaning.
 
 The browser-free live proof injected exact captured opcode-`385` and `156`
 expanded packets after the client was active. The client stayed on map

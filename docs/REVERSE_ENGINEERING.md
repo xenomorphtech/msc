@@ -16,6 +16,35 @@ The `.codex_tmp/Cpp2IL` directory is a nested Git checkout. Its
 honor `CPP2IL_ASSEMBLY_FILTER`, allowing focused Framework output. Do not reset
 that checkout casually.
 
+## Reproducible packet-shape dump
+
+`tools/il2cpp_packet_dump` is the version-pinned structural source of truth for
+opcodes, attributed handlers, and ordered direct packet-reader calls. Its
+manifest binds protocol `300` to the current `GameAssembly.dll`, metadata,
+generated C#/ISIL trees, and the SHA-256 identities of `111.pcapng` and
+`1-10FS.pcapng`. Regenerate and validate it with:
+
+```sh
+cd /home/sdancer/ms/tools/il2cpp_packet_dump
+cargo run --release -- verify \
+  --manifest versions/maple-classic-300-2026-08-08.json
+cargo run --release -- dump \
+  --manifest versions/maple-classic-300-2026-08-08.json \
+  --output target/current-il2cpp-packets.json
+```
+
+The gameplay model uses these generated reads only where they exactly consume
+the observed payload. The current increment proves server opcode `60` as one
+signed `i32`, opcode `94` as `bool + i32 + i32`, and opcode `379` as a `u8`
+branch with four `datetime/i64` reads on variant `36`. Fourteen reference
+packets consume exactly under those shapes. The Rust validator has a native
+boolean primitive and rejects bytes other than `0` or `1`.
+
+Exported plaintext JSONL under `target/private/` is evidence, not source: it
+contains private captured bytes, remains ignored, and must not be committed or
+pasted into reports. The checked-in manifest and deterministic dump describe
+structure without carrying those payloads.
+
 ## Identified IL2CPP types
 
 Original metadata/source-path strings established these names:

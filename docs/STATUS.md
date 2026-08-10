@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 213 tests.
+- The custom-server suite currently passes all 219 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,16 +52,22 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,565 full, 44,295 partial, 240 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,400 full, 21,740 partial,
-  67 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
+  26,601 full, 44,295 partial, 204 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,403 full, 21,740 partial,
+  64 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
-- Server opcodes `69`, `93`, `201`, and `205` are separated into neutral,
-  capture-bounded records. All 145 reference packets consume and round-trip
-  exactly; numeric branches add 49 full observations, while the 96 records
-  with fixed unknown regions remain partial and redact potentially identifying
-  primary values from safe state, events, reports, and HTTP-derived analysis.
+- Server opcodes `69`, `93`, `94`, `201`, `205`, and `379` are separated into
+  neutral, capture-bounded records. All 153 reference packets consume and
+  round-trip exactly; exact numeric branches add 57 full observations, while
+  the 96 records with fixed unknown regions remain partial and redact
+  potentially identifying primary values from safe state, events, reports, and
+  HTTP-derived analysis.
+  The automatic IL2CPP dump proves opcode `94` reads `bool + i32 + i32` and
+  opcode `379` reads a discriminator plus four datetimes on variant `36`.
+  A typed opcode-`94` live replay produced exactly one predicted neutral event,
+  changed no modeled world/player/inventory/progression state, and left the
+  browser-free client active with 244/244 heartbeat probes matched.
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly, every leave matches the
   current field epoch, and all opcode-`202`/`217` movement broadcasts now
@@ -146,10 +152,12 @@
   decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
   spawns also validate after preserving the facing byte values `0/1/2/4/5`.
 - The common fixed-width server family now has complete typed codecs for
-  opcodes `11`, `24`, `56`, `58`, `59`, `96`, `105`, `178`, `386`, `388`, and
-  `389`. Stream `114` has 11 full records; streams `92` and `126` each have 12
-  because opcode `96` recurs later in gameplay. Opcode `59` matches world-entry
-  character state, and all other value roles remain neutral.
+  opcodes `11`, `24`, `45`, `56`, `58`, `59`, `60`, `71`, `72`, `74`, `76`,
+  `89`, `96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
+  and `398`. Streams `114`, `92`, and `126` contain 21, 69, and 94 full records
+  respectively. Opcode `60` adds six signed-`i32` long-corpus records; opcode
+  `59` matches world-entry character state, and all other value roles remain
+  neutral.
 - `--generate-fixed-server-records` reconstructs every such occurrence,
   validates reparse/length/index/patch invariants, and exposes identifier-free
   plans under `protocol.fixed_server_record_emitter`. A browser-free live run

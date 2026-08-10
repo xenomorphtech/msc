@@ -65,6 +65,7 @@ pub struct ShapeCase {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadKind {
+    Bool,
     U8,
     I8,
     U16,
@@ -78,7 +79,7 @@ pub enum ReadKind {
 impl ReadKind {
     const fn width(self) -> usize {
         match self {
-            Self::U8 | Self::I8 => 1,
+            Self::Bool | Self::U8 | Self::I8 => 1,
             Self::U16 | Self::I16 => 2,
             Self::U32 | Self::I32 => 4,
             Self::U64 | Self::I64 => 8,
@@ -148,6 +149,12 @@ impl<'a> Cursor<'a> {
                 ShapeOp::Read { name, kind, equals } => {
                     let bytes = self.take(kind.width(), name)?;
                     let value = decode_integer(bytes, kind.signed());
+                    if matches!(*kind, ReadKind::Bool) && value > 1 {
+                        return Err(format!(
+                            "{name} is {value}, expected boolean 0 or 1 at offset {}",
+                            self.offset - kind.width()
+                        ));
+                    }
                     if let Some(expected) = equals
                         && value != i128::from(*expected)
                     {
@@ -470,6 +477,25 @@ mod tests {
         assert!(extra.contains("extra bytes"));
         let missing = validate_raw(&[4, 0, 1], &shape);
         assert!(missing.contains("less bytes"));
+    }
+
+    #[test]
+    fn bool_rejects_non_boolean_bytes() {
+        let shape = ShapeSpec {
+            name: "boolean".into(),
+            direction: Direction::ServerToClient,
+            opcode: 94,
+            length: Some(1),
+            source: "generated reader evidence".into(),
+            operations: vec![ShapeOp::Read {
+                name: "flag".into(),
+                kind: ReadKind::Bool,
+                equals: None,
+            }],
+        };
+        assert_eq!(validate_raw(&[0], &shape), "ok");
+        assert_eq!(validate_raw(&[1], &shape), "ok");
+        assert!(validate_raw(&[2], &shape).contains("expected boolean 0 or 1"));
     }
 
     #[test]

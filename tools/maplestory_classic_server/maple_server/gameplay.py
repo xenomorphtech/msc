@@ -27,6 +27,7 @@ from .packets import (
     FieldDropRemoval,
     FieldDropSpawn,
     FixedServerEmptyRecord,
+    FixedServerI32Record,
     FixedServerOpcode11Record,
     FixedServerU16PairRecord,
     FixedServerU16Record,
@@ -78,6 +79,7 @@ from .packets import (
     ServerAttackRelay,
     ServerOpcode69Record,
     ServerOpcode93Record,
+    ServerOpcode94Record,
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
@@ -86,6 +88,7 @@ from .packets import (
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
+    ServerOpcode379Record,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -927,6 +930,7 @@ class FieldNpcSpawnReplayPlan:
 
 FixedServerRecord = (
     FixedServerEmptyRecord
+    | FixedServerI32Record
     | FixedServerOpcode11Record
     | FixedServerU16PairRecord
     | FixedServerU16Record
@@ -940,8 +944,10 @@ FixedServerRecord = (
 NeutralServerRecord = (
     ServerOpcode69Record
     | ServerOpcode93Record
+    | ServerOpcode94Record
     | ServerOpcode201Record
     | ServerOpcode205Record
+    | ServerOpcode379Record
 )
 
 FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
@@ -949,6 +955,7 @@ FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
     FixedServerU8Record.SUPPORTED_OPCODES,
     FixedServerU16Record.SUPPORTED_OPCODES,
     FixedServerU16PairRecord.SUPPORTED_OPCODES,
+    FixedServerI32Record.SUPPORTED_OPCODES,
     FixedServerU32Record.SUPPORTED_OPCODES,
     FixedServerU32PairRecord.SUPPORTED_OPCODES,
     FixedServerU64Record.SUPPORTED_OPCODES,
@@ -6752,17 +6759,21 @@ class GameplayStateFold:
                 parsed=envelope,
                 details=details,
             )
-        if opcode in {69, 93, 201, 205}:
+        if opcode in {69, 93, 94, 201, 205, 379}:
             if opcode == 69:
                 neutral_record: NeutralServerRecord = (
                     ServerOpcode69Record.parse(payload)
                 )
             elif opcode == 93:
                 neutral_record = ServerOpcode93Record.parse(payload)
+            elif opcode == 94:
+                neutral_record = ServerOpcode94Record.parse(payload)
             elif opcode == 201:
                 neutral_record = ServerOpcode201Record.parse(payload)
-            else:
+            elif opcode == 205:
                 neutral_record = ServerOpcode205Record.parse(payload)
+            else:
+                neutral_record = ServerOpcode379Record.parse(payload)
             details: dict[str, object] = {
                 "opcode": opcode,
                 **neutral_record.safe_dict(),
@@ -6813,6 +6824,12 @@ class GameplayStateFold:
                 fixed_record = FixedServerU16Record.parse(payload)
                 details = {
                     "shape": "uint16",
+                    "value": fixed_record.value,
+                }
+            elif opcode in FixedServerI32Record.SUPPORTED_OPCODES:
+                fixed_record = FixedServerI32Record.parse(payload)
+                details = {
+                    "shape": "int32",
                     "value": fixed_record.value,
                 }
             elif opcode in FixedServerU32Record.SUPPORTED_OPCODES:
@@ -9935,6 +9952,7 @@ def plan_fixed_server_record_replay(
         raise ValueError("world transcript failed packet/state validation")
     record_types = (
         FixedServerEmptyRecord,
+        FixedServerI32Record,
         FixedServerOpcode11Record,
         FixedServerU16PairRecord,
         FixedServerU16Record,

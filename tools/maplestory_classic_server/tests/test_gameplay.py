@@ -56,6 +56,7 @@ from maple_server.packets import (  # noqa: E402
     FieldDropRemoval,
     FieldDropSpawn,
     FixedServerEmptyRecord,
+    FixedServerI32Record,
     FixedServerOpcode11Record,
     FixedServerU16PairRecord,
     FixedServerU16Record,
@@ -115,6 +116,7 @@ from maple_server.packets import (  # noqa: E402
     ServerAttackRelay,
     ServerOpcode69Record,
     ServerOpcode93Record,
+    ServerOpcode94Record,
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
@@ -124,6 +126,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
+    ServerOpcode379Record,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -230,6 +233,7 @@ def fixture_fixed_server_records() -> tuple[object, ...]:
         FixedServerU8Record(opcode=121, value=0),
         FixedServerU16Record(opcode=72, value=7),
         FixedServerU16Record(opcode=74, value=26),
+        FixedServerI32Record(opcode=60, value=1_037),
         FixedServerU32Record(opcode=112, value=0),
         FixedServerU32Record(opcode=131, value=0),
         FixedServerU32Record(opcode=301, value=3_290),
@@ -1983,6 +1987,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
         captured = {
             45: "2d00",
+            60: "3c000d040000",
             71: "470035",
             72: "48000700",
             74: "4a001a00",
@@ -2297,6 +2302,11 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ServerOpcode93Record(
                 values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
             ),
+            ServerOpcode94Record(
+                flag=True,
+                primary_value=2_380_000,
+                secondary_value=2,
+            ),
             ServerOpcode201Record(
                 primary_value=302_104,
                 secondary_value=0,
@@ -2312,12 +2322,25 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 numeric_value=1_386_640,
                 trailing_value=0,
             ),
+            ServerOpcode379Record(variant=35),
+            ServerOpcode379Record(
+                variant=36,
+                time_values=(
+                    150_842_304_000_000_000,
+                    150_842_304_000_000_000,
+                    94_354_848_000_000_000,
+                    94_354_848_000_000_000,
+                ),
+            ),
         )
         expected_hex = (
             "450007000000" + "00" * 263,
             "5d000451548900b9241f0095980f0055548900",
+            "5e0001e050240002000000",
             "c900189c04000000000001016e4b4c000000009028150000000000480220f5004d02",
             "cd00189c040000000000902815000000000000",
+            "7b0123",
+            "7b0124008005bb46e61702008005bb46e617020040e0fd3b374f010040e0fd3b374f01",
         )
 
         for record, expected in zip(records, expected_hex, strict=True):
@@ -2330,7 +2353,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "exactly 263"):
             replace(records[0], opaque_tail=b"\x00" * 262).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "exactly 22"):
-            replace(records[2], opaque_tail=b"\x00" * 21).to_bytes()
+            replace(records[3], opaque_tail=b"\x00" * 21).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "zero or one"):
+            ServerOpcode94Record.parse(
+                bytes.fromhex("5e0002e050240002000000")
+            )
+        with self.assertRaisesRegex(PacketShapeError, "requires exactly 4"):
+            replace(records[-1], time_values=()).to_bytes()
 
     def test_variable_server_records_round_trip(self) -> None:
         records = fixture_variable_server_records()
@@ -4671,6 +4700,11 @@ class GameplayStateFoldTest(unittest.TestCase):
             ServerOpcode93Record(
                 values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
             ),
+            ServerOpcode94Record(
+                flag=True,
+                primary_value=2_380_000,
+                secondary_value=2,
+            ),
             ServerOpcode201Record(
                 primary_value=302_104,
                 secondary_value=0,
@@ -4684,6 +4718,16 @@ class GameplayStateFoldTest(unittest.TestCase):
                 numeric_value=1_386_640,
                 trailing_value=0,
             ),
+            ServerOpcode379Record(variant=35),
+            ServerOpcode379Record(
+                variant=36,
+                time_values=(
+                    150_842_304_000_000_000,
+                    150_842_304_000_000_000,
+                    94_354_848_000_000_000,
+                    94_354_848_000_000_000,
+                ),
+            ),
         )
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -4693,12 +4737,12 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 4)
+        self.assertEqual(analysis.state.neutral_server_records, 7)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
-            {69: 1, 93: 1, 201: 1, 205: 1},
+            {69: 1, 93: 1, 94: 1, 201: 1, 205: 1, 379: 2},
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 13)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 22)
         self.assertEqual(analysis.state.neutral_server_opaque_bytes, 285)
         observations = [
             observation
@@ -4707,7 +4751,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            ["partial", "full", "partial", "full"],
+            ["partial", "full", "full", "partial", "full", "full", "full"],
         )
         self.assertEqual(
             len(
@@ -4717,11 +4761,11 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            4,
+            7,
         )
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:4 opcodes:",
+            "neutral_server_records=packets:7 opcodes:",
             render_gameplay_analysis(analysis),
         )
 

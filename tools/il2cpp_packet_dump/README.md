@@ -71,7 +71,8 @@ ignored; do not commit or paste it into logs. Rows also carry the capture hash,
 stream, direction/index, opcode, byte length, and plaintext hash.
 
 The validator fails on a short read, trailing/extra bytes, a wrong expected
-constant, payload hash mismatch, ambiguous shape, or (with
+constant, a non-`0`/`1` generated `bool`, payload hash mismatch, ambiguous
+shape, or (with
 `--require-all-supported`) any absent opcode/length variant. Semantic shapes
 and observed-opaque width pins are distinct in the manifest: an opaque variant
 proves framing and exact total consumption, but does not pretend that its body
@@ -85,9 +86,14 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently contains 68 semantic/manual shapes and 97 explicitly
-observed-opaque exact-width variants, 165 total. The added gameplay transaction
-shapes cover client opcode `103`, server opcode `46`, and client opcode `293`.
-All 26 occurrences of that family in `1-10FS.pcapng` stream `126` are exactly
-consumed. The complete 71,100-frame stream intentionally remains a broader
-modeling corpus rather than an all-opcode manifest regression.
+manifest currently contains 70 semantic/manual shapes and 96 explicitly
+observed-opaque exact-width variants, 166 total. Opcode `94` is no longer an
+opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
+`60` reads one signed `i32` and opcode `379` selects between a one-byte short
+form and four `datetime/i64` values. The gameplay transaction shapes cover
+client opcode `103`, server opcode `46`, and client opcode `293`; all 26
+occurrences of that family in `1-10FS.pcapng` stream `126` are exactly consumed.
+Opcodes `60`, `94`, and `379` contribute 14 exact reference frames: ten in
+stream `126` and four across `111.pcapng` streams `92`/`114`.
+The complete 71,100-frame stream intentionally remains a broader modeling
+corpus rather than an all-opcode manifest regression.

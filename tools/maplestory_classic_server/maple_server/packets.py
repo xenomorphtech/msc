@@ -7247,6 +7247,60 @@ class ServerOpcode93Record:
 
 
 @dataclass(frozen=True)
+class ServerOpcode94Record:
+    """Fully bounded opcode-94 flag and signed integer pair."""
+
+    flag: bool
+    primary_value: int
+    secondary_value: int
+    opcode: int = 94
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode94Record":
+        reader = PacketReader(payload, packet_name="server_opcode_94_record")
+        _expect_opcode(reader, 94)
+        raw_flag = reader.u8("flag")
+        if raw_flag not in {0, 1}:
+            raise PacketShapeError(
+                "server opcode-94 flag must be encoded as zero or one"
+            )
+        record = cls(
+            flag=bool(raw_flag),
+            primary_value=reader.i32("primary_value"),
+            secondary_value=reader.i32("secondary_value"),
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "flag": self.flag,
+            "primary_value": self.primary_value,
+            "secondary_value": self.secondary_value,
+            "typed_value_count": 3,
+            "opaque_tail_length": 0,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 94:
+            raise PacketShapeError("server opcode-94 record opcode must be 94")
+        if not isinstance(self.flag, bool):
+            raise PacketShapeError("server opcode-94 flag must be a bool")
+        try:
+            return struct.pack(
+                "<HBii",
+                self.opcode,
+                int(self.flag),
+                self.primary_value,
+                self.secondary_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-94 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode201Record:
     """Opcode-201 typed prefix with a capture-fixed opaque suffix."""
 
@@ -7362,6 +7416,73 @@ class ServerOpcode205Record:
 
 
 @dataclass(frozen=True)
+class ServerOpcode379Record:
+    """Opcode-379 discriminator with its optional four datetime values."""
+
+    variant: int
+    time_values: tuple[int, ...] = ()
+    opcode: int = 379
+
+    SHORT_VARIANT = 35
+    TIMESTAMPS_VARIANT = 36
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode379Record":
+        reader = PacketReader(payload, packet_name="server_opcode_379_record")
+        _expect_opcode(reader, 379)
+        variant = reader.u8("variant")
+        time_values: tuple[int, ...] = ()
+        if variant == cls.TIMESTAMPS_VARIANT:
+            time_values = tuple(
+                reader.i64(f"time_values[{index}]") for index in range(4)
+            )
+        elif variant != cls.SHORT_VARIANT:
+            raise PacketShapeError(
+                "server opcode-379 variant must be captured value 35 or 36"
+            )
+        record = cls(variant=variant, time_values=time_values)
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 379:
+            raise PacketShapeError("server opcode-379 record opcode must be 379")
+        expected_count = 4 if self.variant == self.TIMESTAMPS_VARIANT else 0
+        if self.variant not in {self.SHORT_VARIANT, self.TIMESTAMPS_VARIANT}:
+            raise PacketShapeError(
+                "server opcode-379 variant must be captured value 35 or 36"
+            )
+        if len(self.time_values) != expected_count:
+            raise PacketShapeError(
+                f"server opcode-379 variant {self.variant} requires exactly "
+                f"{expected_count} datetime values"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "variant": self.variant,
+            "time_values": list(self.time_values),
+            "typed_value_count": 1 + len(self.time_values),
+            "opaque_tail_length": 0,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                f"<HB{len(self.time_values)}q",
+                self.opcode,
+                self.variant,
+                *self.time_values,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-379 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class FixedServerEmptyRecord:
     opcode: int
 
@@ -7443,6 +7564,37 @@ class FixedServerU16Record:
         except struct.error as error:
             raise PacketShapeError(
                 f"fixed-server uint16 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class FixedServerI32Record:
+    opcode: int
+    value: int
+
+    SUPPORTED_OPCODES = {60}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerI32Record":
+        reader = PacketReader(payload, packet_name="fixed_server_i32_record")
+        record = cls(opcode=reader.u16("opcode"), value=reader.i32("value"))
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported int32 fixed-server opcode {self.opcode}"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<Hi", self.opcode, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"fixed-server int32 value is out of range: {error}"
             ) from error
 
 

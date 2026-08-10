@@ -16,9 +16,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 68);
-    assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 97);
-    assert_eq!(shapes.len(), 165);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 70);
+    assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
+    assert_eq!(shapes.len(), 166);
 
     let shape = shapes
         .iter()
@@ -34,6 +34,22 @@ fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
     assert_eq!(skill_update.opcode, 46);
     assert_eq!(skill_update.length, None);
     assert_eq!(skill_update.operations.len(), 6);
+
+    let signed_i32 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_60_i32")
+        .unwrap();
+    assert_eq!(signed_i32.opcode, 60);
+    assert_eq!(signed_i32.length, Some(6));
+    assert_eq!(signed_i32.operations.len(), 2);
+
+    let flag_and_pair = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_94_record")
+        .unwrap();
+    assert_eq!(flag_and_pair.opcode, 94);
+    assert_eq!(flag_and_pair.length, Some(11));
+    assert_eq!(flag_and_pair.operations.len(), 4);
 }
 
 #[test]
@@ -47,7 +63,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 165);
+    assert_eq!(dump.packet_shapes.len(), 166);
     assert_eq!(
         dump.handlers
             .iter()
@@ -100,6 +116,29 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
         .unwrap();
     assert_eq!(transition.rva, Some(0x00c1_1620));
     assert_eq!(transition.direct_reads[0].kind, "i16");
+
+    for (opcode, expected_reads) in [
+        (60, vec!["i32"]),
+        (94, vec!["bool", "i32", "i32"]),
+        (
+            379,
+            vec!["u8", "datetime", "datetime", "datetime", "datetime"],
+        ),
+    ] {
+        let handler = dump
+            .handlers
+            .iter()
+            .find(|handler| handler.opcode == opcode)
+            .unwrap();
+        assert_eq!(
+            handler
+                .direct_reads
+                .iter()
+                .map(|read| read.kind.as_str())
+                .collect::<Vec<_>>(),
+            expected_reads
+        );
+    }
 
     assert_eq!(
         deterministic_json(&dump).unwrap(),
