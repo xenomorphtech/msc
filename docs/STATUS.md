@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 197 tests.
+- The custom-server suite currently passes all 199 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,11 +52,11 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,357 full, 44,295 partial, 448 unknown-but-lossless, and zero invalid
+  26,393 full, 44,295 partial, 412 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,375 full, 21,740 partial,
-  92 unknown, and zero invalid; stream `114` reports 43/20/13/0. Thirteen
-  long-corpus state-correlation warnings remain: the prior 12 plus one
-  aggregate warning for six one-HP combat prediction differences.
+  92 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
+  long-corpus state-correlation warnings remain: six pickup-effect mismatches
+  plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `201`, and `205` are separated into neutral,
   capture-bounded records. All 145 reference packets consume and round-trip
   exactly; numeric branches add 49 full observations, while the 96 records
@@ -92,6 +92,16 @@
   over the sprite at 100 ms, gone by one second. The pair folded as one alias
   and one update at `(633,-2677)`, HP stayed `50/222`, and 131/131 heartbeats
   matched.
+- Server opcode `302` is now a typed NPC lifecycle control. All 36 stream-`126`
+  packets are 23-byte control-`1` spawns whose body is exactly the final 16
+  bytes of opcode `300`; they round-trip at full coverage and establish the
+  NPCs referenced by later opcode-`303` updates. The pinned client handler
+  confirms the common control/object-id prefix and a no-reader alternate
+  branch. A canonical seven-byte control-`0` removal is modeled and unit-tested,
+  while remaining explicitly absent from the reference PCAPs and not yet
+  live-proven. One live composed control-`1` packet was accepted, folded the
+  active NPC count from nine to ten, and left all 360 heartbeat pairs matched
+  until the configured one-hour replay hold expired.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,

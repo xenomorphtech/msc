@@ -59,6 +59,7 @@ from .packets import (
     MobMovementCommand,
     MobMovementSubmission,
     MobSpawnData,
+    NpcLifecycleControl,
     NpcSpawn,
     NpcStateUpdate,
     Opcode13Envelope,
@@ -356,6 +357,9 @@ class GameplayGameState:
     packets_by_direction: Counter[str] = field(default_factory=Counter)
     plaintext_bytes_by_direction: Counter[str] = field(default_factory=Counter)
     npc_spawns: int = 0
+    npc_lifecycle_spawns: int = 0
+    npc_lifecycle_removals: int = 0
+    npc_lifecycle_unknown_removals: int = 0
     npc_state_updates: int = 0
     mob_entries: int = 0
     mob_leaves: int = 0
@@ -2842,6 +2846,11 @@ class GameplayAnalysis:
                     self.state.plaintext_bytes_by_direction
                 ),
                 "npc_spawns": self.state.npc_spawns,
+                "npc_lifecycle_spawns": self.state.npc_lifecycle_spawns,
+                "npc_lifecycle_removals": self.state.npc_lifecycle_removals,
+                "npc_lifecycle_unknown_removals": (
+                    self.state.npc_lifecycle_unknown_removals
+                ),
                 "npc_state_updates": self.state.npc_state_updates,
                 "mob_entries": self.state.mob_entries,
                 "mob_leaves": self.state.mob_leaves,
@@ -6308,6 +6317,77 @@ class GameplayStateFold:
                 parsed=spawn,
                 details=details,
             )
+        if opcode == 302 and (
+            (len(payload) == 23 and payload[2] == NpcLifecycleControl.SPAWN)
+            or (len(payload) == 7 and payload[2] == NpcLifecycleControl.REMOVE)
+        ):
+            lifecycle = NpcLifecycleControl.parse(payload)
+            alias = self._alias(
+                self._npc_aliases, lifecycle.object_id, "npc"
+            )
+            if lifecycle.spawn is not None:
+                spawn = lifecycle.spawn
+                existing = self.state.npcs.get(lifecycle.object_id)
+                if existing is not None and existing.spawn != spawn:
+                    self.issues.append(
+                        f"{alias} received opcode-302 spawn with a different "
+                        f"shape in field epoch {self.state.field_epoch}"
+                    )
+                self.state.npcs[lifecycle.object_id] = NpcEntity(
+                    alias=alias, spawn=spawn
+                )
+                self.state.npc_spawns += 1
+                self.state.npc_lifecycle_spawns += 1
+                details = {
+                    "entity": alias,
+                    "control_value": lifecycle.control_value,
+                    "template_id": spawn.template_id,
+                    "x": spawn.x,
+                    "cy": spawn.cy,
+                    "facing_value": spawn.facing_value,
+                    "foothold_id": spawn.foothold_id,
+                    "range_left": spawn.range_left,
+                    "range_right": spawn.range_right,
+                    "hidden": spawn.hidden,
+                    "field_epoch": self.state.field_epoch,
+                }
+                self._event(
+                    frame,
+                    "npc_spawned",
+                    details=details,
+                    identifiers={"object_id": lifecycle.object_id},
+                )
+                return self._observation(
+                    frame,
+                    kind="npc_lifecycle_spawn",
+                    coverage=ShapeCoverage.FULL,
+                    parsed=lifecycle,
+                    details=details,
+                )
+            existing = self.state.npcs.pop(lifecycle.object_id, None)
+            known_npc = existing is not None
+            self.state.npc_lifecycle_removals += 1
+            if not known_npc:
+                self.state.npc_lifecycle_unknown_removals += 1
+            details = {
+                "entity": alias,
+                "control_value": lifecycle.control_value,
+                "known_npc": known_npc,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "npc_removed",
+                details=details,
+                identifiers={"object_id": lifecycle.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="npc_lifecycle_removal",
+                coverage=ShapeCoverage.FULL,
+                parsed=lifecycle,
+                details=details,
+            )
         if opcode == 303:
             update = NpcStateUpdate.parse(payload)
             alias = self._alias(self._npc_aliases, update.object_id, "npc")
@@ -9402,6 +9482,10 @@ def render_gameplay_analysis(
         ),
         (
             f"npcs=active:{len(state.npcs)} spawned:{state.npc_spawns} "
+            f"lifecycle_spawns:{state.npc_lifecycle_spawns} "
+            f"lifecycle_removals:{state.npc_lifecycle_removals} "
+            "lifecycle_unknown_removals:"
+            f"{state.npc_lifecycle_unknown_removals} "
             f"state_updates:{state.npc_state_updates}"
         ),
         (

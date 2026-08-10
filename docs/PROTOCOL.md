@@ -1421,6 +1421,60 @@ expected visible NPCs. The simultaneously recorded transcript folds validly to
 This demonstrates client acceptance of the reconstructed entity packets rather
 than only capture-side parsing.
 
+## NPC lifecycle control (`server 302`)
+
+Opcode `302` starts with a one-byte control and the field-local NPC object id.
+The captured control-`1` branch is 23 bytes and reuses the complete spawn body
+from opcode `300` after that id:
+
+```text
+uint16 opcode = 302
+uint8  control = 1
+uint32 object_id
+uint32 template_id
+int16  x
+int16  cy
+uint8  facing_value
+uint16 foothold_id
+int16  range_left
+int16  range_right
+uint8  hidden                       # boolean 0/1
+```
+
+All 36 stream-`126` records use that shape. Removing the opcode, control, and
+object id leaves the same 16 bytes produced by `NpcSpawn` after its opcode and
+object id; all 36 parse and re-encode exactly. They now emit full-coverage
+`npc_lifecycle_spawn` observations, enter the entity into current-field NPC
+state, and allow later opcode-`303` updates to resolve against the same alias.
+That raises the long-corpus NPC spawn-event count from 78 direct spawns to 114
+total without changing the distinction between opcode families.
+
+The pinned client handler independently reads `u8 control` and `i32 object_id`.
+When the control equals its runtime branch constant, it invokes a helper with
+the packet reader and consumes the spawn body; the alternate helper receives
+only the object id and cannot consume further bytes. The model uses control
+`0` as the canonical compact encoding for that alternate branch:
+
+```text
+uint16 opcode = 302
+uint8  control = 0
+uint32 object_id
+```
+
+It removes the aliased NPC, tracks known versus unknown removals, and emits a
+full-shape `npc_lifecycle_removal` observation. This seven-byte form is an
+exact typed and unit-tested hypothesis, not capture evidence: no reference
+PCAP contains it, and the first live attempt reached the configured one-hour
+world hold boundary before the removal could be sent.
+
+The same live session did accept a 23-byte control-`1` composition using the
+captured object/template fields and the typed current-map position, foothold,
+and range. Its transcript remained valid and `active`, folded nine direct NPCs
+plus this lifecycle spawn, and matched 360/360 heartbeat pairs until the replay
+closed at its configured one-hour boundary. This validates client acceptance
+and the predicted spawn-state delta; it does not establish visible rendering
+or the compact removal effect.
+
 ## Mob health percentage (`server 293`)
 
 The complete update is seven bytes:
@@ -2257,7 +2311,8 @@ bytes before the ordinary 33-byte Maple greeting; PCAP normalization locates
 the greeting, discards only those preludes, and records both byte counts in
 transcript metadata. The resulting session contains 71,100 decrypted frames
 (31,345 client and 39,755 server), one marker-`26` initial snapshot, 35 later
-field snapshots, 841 stat updates, 256 inventory change sets, 78 NPC spawns,
+field snapshots, 841 stat updates, 256 inventory change sets, 78 direct NPC
+spawns, 36 NPC lifecycle spawns,
 436 drop-spawn packets, and 197 pickup requests.
 
 All 197 pickup requests resolve to a known active drop, match their field
@@ -2266,14 +2321,14 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,357
-full, 44,295 partial, 448 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,393
+full, 44,295 partial, 412 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,375 full, 21,740 partial,
 92 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
-modifications; its 13 remaining warnings are cross-packet state correlations:
-12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed
-combat predictions that differ by one HP. That warning also records the
+modifications; its seven remaining warnings are cross-packet state
+correlations: six pickup-effect mismatches plus one aggregate warning for six
+delayed combat predictions that differ by one HP. That warning also records the
 `{-1: 1, +1: 5}` inferred damage-delta histogram and that all six lack an
 intervening modeled relay hit.
 

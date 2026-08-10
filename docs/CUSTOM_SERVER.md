@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 197 tests.
+The last run passed all 199 tests.
 
 ## Inspect and compare captures
 
@@ -79,10 +79,10 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,357 observations are full, 44,295 partial, 448
-unknown-but-lossless, and none invalid. The original 12 warnings are state
-correlations, not shape failures. The combat model adds one aggregate warning
-for six delayed predictions that differ by one HP, so the current total is 13.
+`--fail-on-invalid`: 26,393 observations are full, 44,295 partial, 412
+unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
+not shape failures: six pickup-effect mismatches and one aggregate warning for
+six delayed combat predictions that differ by one HP.
 The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
 
@@ -176,8 +176,26 @@ cursor. The muted client passed world and character selection and rendered map
 zero failures, all 21 fixed-record frames patched, and 13/13 paired heartbeat
 probes.
 
-Together, these latest modeled families leave the long-corpus totals at 26,357
-full, 44,295 partial, 448 unknown-but-lossless, and zero invalid.
+Opcode `302` now separates the NPC manager's lifecycle control from ordinary
+opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
+object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
+full-coverage `npc_lifecycle_spawn` observations. The pinned handler reads the
+control and object id first, consumes that body only for its matching branch,
+and otherwise calls a compact no-reader helper. The typed control-`0` encoding
+is therefore modeled as a seven-byte removal and is covered by fold tests, but
+remains explicitly unobserved in the reference PCAPs and not yet live-proven.
+
+A composed live control-`1` packet kept the captured object/template shape and
+changed only its typed field placement to the current stream-`114` map. The
+HTTP injector accepted all 23 bytes; the transcript folded it as one additional
+NPC spawn, stayed `active` with ten NPCs, and matched all 360 heartbeat pairs.
+The connection closed at the configured one-hour hold-open boundary rather
+than after the injection. Because the hold expired before the control-`0`
+follow-up could be sent, this run proves client acceptance and predicted fold
+state for the spawn branch but makes no removal or visible-sprite claim.
+
+Together, these latest modeled families leave the long-corpus totals at 26,393
+full, 44,295 partial, 412 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

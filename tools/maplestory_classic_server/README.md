@@ -387,8 +387,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,357 full,
-44,295 partial, 448 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,393 full,
+44,295 partial, 412 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,375 full, 21,740 partial,
@@ -482,6 +482,10 @@ The gameplay fold currently models these capture-backed boundaries:
   preserved as the observed byte value rather than narrowed to a boolean;
   `--generate-field-npc-spawns` can reconstruct all such replay frames from
   folded, aliased entity state,
+- server opcode `302`: a control byte and aliased object id followed, for
+  captured control `1`, by the exact 16-byte opcode-`300` spawn body; the
+  handler-backed compact control-`0` branch is modeled as removal but remains
+  absent from reference captures and not yet live-proven,
 - server opcode `303`: an 8-byte typed NPC state prefix plus a losslessly
   preserved optional opaque tail,
 - server opcode `279`: mob-entry envelope with object id, template id,
@@ -1512,3 +1516,8 @@ preserve distinct Unity scan codes in this setup.
     every update within its field epoch, and live-validate that changing only
     typed coordinates moves a transient visual effect to the predicted player
     position without changing HP.
+48. Decode all 36 opcode-`302` NPC lifecycle spawns, reuse the exact typed
+    opcode-`300` body, fold later NPC updates against the new entities, and
+    live-validate client acceptance of a position-composed spawn. Keep the
+    handler-backed control-`0` removal branch marked as unobserved until a live
+    A/B can complete before the replay hold expires.

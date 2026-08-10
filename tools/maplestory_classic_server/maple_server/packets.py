@@ -2271,6 +2271,84 @@ class NpcSpawn:
 
 
 @dataclass(frozen=True)
+class NpcLifecycleControl:
+    """Opcode-302 NPC-manager spawn/removal control."""
+
+    object_id: int = field(repr=False)
+    control_value: int
+    spawn: NpcSpawn | None = None
+    opcode: int = 302
+
+    SPAWN = 1
+    REMOVE = 0
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "NpcLifecycleControl":
+        reader = PacketReader(payload, packet_name="npc_lifecycle_control")
+        _expect_opcode(reader, 302)
+        control_value = reader.u8("control_value")
+        object_id = reader.u32("object_id")
+        if control_value == cls.SPAWN:
+            spawn_body = reader.bytes(16, "spawn_body")
+            spawn = NpcSpawn.parse(
+                struct.pack("<HI", 300, object_id) + spawn_body
+            )
+        elif control_value == cls.REMOVE:
+            spawn = None
+        else:
+            raise PacketShapeError(
+                "NPC lifecycle control must be captured spawn value 1 or "
+                f"handler-backed removal value 0, got {control_value}"
+            )
+        reader.finish()
+        return cls(
+            object_id=object_id,
+            control_value=control_value,
+            spawn=spawn,
+        )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "object_id_redacted": True,
+            "control_value": self.control_value,
+            "spawn_present": self.spawn is not None,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 302:
+            raise PacketShapeError("NPC lifecycle control opcode must be 302")
+        try:
+            prefix = struct.pack(
+                "<HBI", self.opcode, self.control_value, self.object_id
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"NPC lifecycle control value is out of range: {error}"
+            ) from error
+        if self.control_value == self.SPAWN:
+            if self.spawn is None:
+                raise PacketShapeError(
+                    "NPC lifecycle spawn control requires spawn data"
+                )
+            if self.spawn.opcode != 300:
+                raise PacketShapeError("nested NPC spawn opcode must be 300")
+            if self.spawn.object_id != self.object_id:
+                raise PacketShapeError(
+                    "NPC lifecycle object id does not match nested spawn"
+                )
+            return prefix + self.spawn.to_bytes()[6:]
+        if self.control_value == self.REMOVE:
+            if self.spawn is not None:
+                raise PacketShapeError(
+                    "NPC lifecycle removal control cannot include spawn data"
+                )
+            return prefix
+        raise PacketShapeError(
+            "NPC lifecycle control must be spawn value 1 or removal value 0"
+        )
+
+
+@dataclass(frozen=True)
 class NpcStateUpdate:
     object_id: int
     action: int

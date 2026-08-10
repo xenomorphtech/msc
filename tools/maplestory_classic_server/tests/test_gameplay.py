@@ -95,6 +95,7 @@ from maple_server.packets import (  # noqa: E402
     MobMovementPath,
     MobMovementSubmission,
     MobSpawnData,
+    NpcLifecycleControl,
     NpcSpawn,
     NpcStateUpdate,
     Opcode13Envelope,
@@ -2189,6 +2190,57 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 hidden=False,
             ).to_bytes()
 
+    def test_npc_lifecycle_control_round_trip(self) -> None:
+        spawn = NpcSpawn(
+            object_id=23_607,
+            template_id=2_102,
+            x=-59,
+            cy=95,
+            facing_value=1,
+            foothold_id=35,
+            range_left=-109,
+            range_right=-9,
+            hidden=True,
+        )
+        lifecycle_spawn = NpcLifecycleControl(
+            object_id=spawn.object_id,
+            control_value=NpcLifecycleControl.SPAWN,
+            spawn=spawn,
+        )
+        lifecycle_remove = NpcLifecycleControl(
+            object_id=spawn.object_id,
+            control_value=NpcLifecycleControl.REMOVE,
+        )
+
+        self.assertEqual(
+            lifecycle_spawn.to_bytes().hex(),
+            "2e0101375c000036080000c5ff5f0001230093fff7ff01",
+        )
+        self.assertEqual(
+            NpcLifecycleControl.parse(lifecycle_spawn.to_bytes()),
+            lifecycle_spawn,
+        )
+        self.assertEqual(
+            lifecycle_remove.to_bytes().hex(), "2e0100375c0000"
+        )
+        self.assertEqual(
+            NpcLifecycleControl.parse(lifecycle_remove.to_bytes()),
+            lifecycle_remove,
+        )
+        self.assertNotIn("23607", str(lifecycle_spawn.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "lifecycle control"):
+            replace(lifecycle_remove, control_value=2).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires spawn"):
+            replace(lifecycle_spawn, spawn=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "cannot include spawn"):
+            replace(lifecycle_remove, spawn=spawn).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "object id"):
+            replace(
+                lifecycle_spawn,
+                spawn=replace(spawn, object_id=spawn.object_id + 1),
+            ).to_bytes()
+
     def test_player_movement_submission_and_broadcast_round_trip(self) -> None:
         path = fixture_player_movement_path()
         submission = PlayerMovementSubmission(
@@ -3344,6 +3396,81 @@ class GameplayStateFoldTest(unittest.TestCase):
             safe["spawns"][0]["template_id"], fixture_npc().template_id
         )
         self.assertNotIn(str(NPC_OBJECT_ID), repr(safe))
+
+    def test_folds_npc_lifecycle_spawn_update_and_removal(self) -> None:
+        spawn = NpcSpawn(
+            object_id=23_607,
+            template_id=2_102,
+            x=-59,
+            cy=95,
+            facing_value=1,
+            foothold_id=35,
+            range_left=-109,
+            range_right=-9,
+            hidden=True,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                NpcLifecycleControl(
+                    object_id=spawn.object_id,
+                    control_value=NpcLifecycleControl.SPAWN,
+                    spawn=spawn,
+                ).to_bytes(),
+                NpcStateUpdate(
+                    object_id=spawn.object_id,
+                    action=3,
+                    parameter=1,
+                ).to_bytes(),
+                NpcLifecycleControl(
+                    object_id=spawn.object_id,
+                    control_value=NpcLifecycleControl.REMOVE,
+                ).to_bytes(),
+                NpcLifecycleControl(
+                    object_id=spawn.object_id,
+                    control_value=NpcLifecycleControl.REMOVE,
+                ).to_bytes(),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.npc_lifecycle_spawns, 1)
+        self.assertEqual(analysis.state.npc_lifecycle_removals, 2)
+        self.assertEqual(analysis.state.npc_lifecycle_unknown_removals, 1)
+        self.assertEqual(analysis.state.npc_spawns, 2)
+        self.assertEqual(analysis.state.npc_state_updates, 2)
+        self.assertEqual(list(analysis.state.npcs), [NPC_OBJECT_ID])
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind.startswith("npc_lifecycle_")
+        ]
+        self.assertEqual(
+            [observation.kind for observation in observations],
+            [
+                "npc_lifecycle_spawn",
+                "npc_lifecycle_removal",
+                "npc_lifecycle_removal",
+            ],
+        )
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        event_kinds = [event.kind for event in analysis.events]
+        self.assertEqual(event_kinds.count("npc_spawned"), 2)
+        self.assertEqual(event_kinds.count("npc_removed"), 2)
+        safe = analysis.safe_dict()
+        self.assertNotIn("23607", str(safe))
+        self.assertIn(
+            "lifecycle_spawns:1 lifecycle_removals:2 "
+            "lifecycle_unknown_removals:1",
+            render_gameplay_analysis(analysis),
+        )
 
     def test_folds_and_plans_fixed_server_record_emission(self) -> None:
         records = fixture_fixed_server_records()
