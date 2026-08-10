@@ -1139,6 +1139,43 @@ and field epoch only. The observed event occurs at epoch `31` and moves the
 packet from unknown to full coverage. No cross-session replay is claimed until
 the client resource effect is independently bounded.
 
+## Server opcode `29` delegated text ledger
+
+The generated opcode table identifies handler `b7bc850c...`, but its direct
+packet-read list is empty because it constructs a separate ledger object. The
+handler passes the `PacketReader` to constructor `0x180CB4390`; native control
+flow proves that constructor reads a `u8` count and invokes record constructor
+`0x180CB3F20` once per entry. The record constructor performs the exact ordered
+reads below:
+
+```text
+uint16 opcode = 29
+uint8  entry_count
+repeat entry_count:
+    int32  key                       # redacted, role unproven
+    int32  value_1                   # redacted, role unproven
+    uint16 text_code_units
+    utf16  text[text_code_units]     # redacted
+    uint8  trailing_zero = 0
+    int32  value_2                   # redacted, role unproven
+    int16  short_value               # redacted, role unproven
+```
+
+`111.pcapng` contains one 327-byte server packet in stream `92` and one in
+stream `114`. They are byte-identical, have `entry_count = 4`, and contain
+text lengths `30`, `36`, `31`, and `31` code units. The grammar consumes all
+327 bytes, both native manifest validations pass, and
+`ServerOpcode29TextLedger` parses and re-emits both payloads byte-for-byte.
+
+Safe state publishes only packet count, entry-count distribution, total and
+per-entry text lengths, redaction flags, and field epoch. The fold emits
+`server_opcode_29_ledger_received` and a full
+`server_opcode_29_text_ledger` observation. This changes stream `92` coverage
+to `13,412/21,762/33/0` and stream `114` to `51/20/5/0`; the level-1-to-10
+stream remains `26,660/44,381/59/0`. No live replay is claimed because the
+obfuscated numeric fields and captured text have not yet been shown safe across
+sessions.
+
 ## Field-bootstrap ledgers (`147`, `272`)
 
 Each opcode occurs once and byte-identically across gameplay streams `92`,
@@ -3012,8 +3049,8 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,660
 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,411 full, 21,762 partial,
-34 unknown, and zero invalid; stream `114` reaches 50/20/6/0. The long fold
+observations. Stream `92` independently reaches 13,412 full, 21,762 partial,
+33 unknown, and zero invalid; stream `114` reaches 51/20/5/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

@@ -127,6 +127,8 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode27IntegerLedgerEntry,
     ServerOpcode28TextLedger,
     ServerOpcode28TextLedgerEntry,
+    ServerOpcode29TextLedger,
+    ServerOpcode29TextLedgerEntry,
     ServerOpcode142TextLedger,
     ServerOpcode142TextLedgerEntry,
     ServerOpcode147BoundsLedger,
@@ -2200,6 +2202,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 ),
             )
         )
+        ledger_29 = ServerOpcode29TextLedger(
+            entries=(
+                ServerOpcode29TextLedgerEntry(
+                    key=4_123_456,
+                    value_1=51,
+                    text="hidden delegated ledger text",
+                    value_2=654_123_789,
+                    short_value=123,
+                ),
+            )
+        )
         ledger_142 = ServerOpcode142TextLedger(
             enabled=True,
             header_text="hidden header",
@@ -2229,6 +2242,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         for ledger_type, ledger in (
             (ServerOpcode27IntegerLedger, ledger_27),
             (ServerOpcode28TextLedger, ledger_28),
+            (ServerOpcode29TextLedger, ledger_29),
             (ServerOpcode142TextLedger, ledger_142),
             (ServerOpcode142TextLedger, disabled_142),
             (ServerOpcode425ValueLedger, ledger_425),
@@ -2239,6 +2253,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             {
                 "opcode_27": ledger_27.safe_dict(),
                 "opcode_28": ledger_28.safe_dict(),
+                "opcode_29": ledger_29.safe_dict(),
                 "opcode_142": ledger_142.safe_dict(),
                 "opcode_425": ledger_425.safe_dict(),
             }
@@ -2250,6 +2265,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
             "3456789",
             "765432109",
             "hidden first text",
+            "4123456",
+            "654123789",
+            "hidden delegated ledger text",
             "4567890",
             "654321098",
             "hidden feature text",
@@ -4902,6 +4920,11 @@ class GameplayStateFoldTest(unittest.TestCase):
                 ServerOpcode28TextLedgerEntry(11, 21, "de", "fgh"),
             )
         )
+        ledger_29 = ServerOpcode29TextLedger(
+            entries=(
+                ServerOpcode29TextLedgerEntry(13, 23, "nopq", 33, 43),
+            )
+        )
         ledger_142 = ServerOpcode142TextLedger(
             enabled=True,
             header_text="head",
@@ -4926,7 +4949,13 @@ class GameplayStateFoldTest(unittest.TestCase):
             initial_snapshot=True,
             extra_server_plaintexts=tuple(
                 ledger.to_bytes()
-                for ledger in (ledger_27, ledger_28, ledger_142, ledger_425)
+                for ledger in (
+                    ledger_27,
+                    ledger_28,
+                    ledger_29,
+                    ledger_142,
+                    ledger_425,
+                )
             ),
         )
 
@@ -4941,6 +4970,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(
             analysis.state.server_opcode_28_text_2_code_units, {3: 1}
+        )
+        self.assertEqual(analysis.state.server_opcode_29_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_29_entry_counts, {1: 1})
+        self.assertEqual(
+            analysis.state.server_opcode_29_text_code_units, {4: 1}
         )
         self.assertEqual(analysis.state.server_opcode_142_packets, 1)
         self.assertEqual(analysis.state.server_opcode_142_enabled_packets, 1)
@@ -4962,13 +4996,14 @@ class GameplayStateFoldTest(unittest.TestCase):
         observation_kinds = {
             observation.kind
             for observation in analysis.observations
-            if observation.opcode in {27, 28, 142, 425}
+            if observation.opcode in {27, 28, 29, 142, 425}
         }
         self.assertEqual(
             observation_kinds,
             {
                 "server_opcode_27_integer_ledger",
                 "server_opcode_28_text_ledger",
+                "server_opcode_29_text_ledger",
                 "server_opcode_142_text_ledger",
                 "server_opcode_425_value_ledger",
             },
@@ -4982,6 +5017,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             {
                 "server_opcode_27_ledger_received",
                 "server_opcode_28_ledger_received",
+                "server_opcode_29_ledger_received",
                 "server_opcode_142_ledger_received",
                 "server_opcode_425_ledger_received",
             }.issubset(event_kinds)
@@ -4989,6 +5025,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         report = render_gameplay_analysis(analysis)
         self.assertIn("server_opcode_27=packets:1 entry_counts:{1: 1}", report)
         self.assertIn("server_opcode_28=packets:1 entry_counts:{1: 1}", report)
+        self.assertIn("server_opcode_29=packets:1 entry_counts:{1: 1}", report)
         self.assertIn("server_opcode_142=packets:1 enabled:1", report)
         self.assertIn("server_opcode_425=packets:1 value_counts:{12: 1}", report)
 

@@ -52,6 +52,16 @@ table arms; selector `3` lands at `0x180BC3281`, calls the pinned UTF-16 reader
 once, and exits through the common return. That executed arm consumes the sole
 54-byte gameplay packet exactly, while the other reads in the generated list
 belong to mutually exclusive selector branches.
+Opcode `29` demonstrates the complementary delegated-reader case. The
+automatic dump correctly identifies handler `b7bc850c...` but reports no
+direct reads because the handler passes its reader into ledger constructor
+`0x180CB4390`. Native tracing shows a `u8` count there and a loop over record
+constructor `0x180CB3F20`, whose ordered calls are
+`i32/i32/UTF-16/i32/i16`. That call graph exactly consumes both byte-identical
+327-byte `111.pcapng` packets as four records. The checked-in semantic manifest
+records the proven delegated grammar while the generated handler entry remains
+the authoritative evidence that the top-level handler itself has no direct
+reader calls.
 
 Exported plaintext JSONL under `target/private/` is evidence, not source: it
 contains private captured bytes, remains ignored, and must not be committed or

@@ -1003,6 +1003,21 @@
       ]
     },
     {
+      "name":"server_opcode_29_text_ledger","direction":"server_to_client","opcode":29,"length":327,
+      "source":"generated opcode-29 handler b7bc850c... delegates to constructor 0x180CB4390, which reads a u8 count and loops through record constructor 0x180CB3F20; both byte-identical 111 packets exactly decode as four i32/i32/trailing-zero UTF-16/i32/i16 records",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":29},
+        {"op":"read","name":"entry_count","kind":"u8"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value_1","kind":"i32"},
+          {"op":"utf16","name":"text","trailing_zero":true},
+          {"op":"read","name":"value_2","kind":"i32"},
+          {"op":"read","name":"short_value","kind":"i16"}
+        ]}
+      ]
+    },
+    {
       "name":"server_opcode_142_text_ledger_large","direction":"server_to_client","opcode":142,"length":254,
       "source":"generated opcode-142 handler reads a bool then delegates when true; exact 111 gameplay packet decodes as header UTF-16 plus counted keyed text/control entries",
       "operations":[

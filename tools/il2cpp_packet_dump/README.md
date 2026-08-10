@@ -86,12 +86,12 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 93 semantic/manual shapes and 96 explicitly
+manifest currently declares 94 semantic/manual shapes and 96 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
-the effective shape set. Opcodes `276` and `137` add the twelfth and thirteenth
-overlaps. Opcode `169` adds a non-overlapping shape found only in `1-10FS`,
-leaving 176 active shapes and 83 active opaque pins.
+the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
+fourteenth overlaps. Opcode `169` adds a non-overlapping shape found only in
+`1-10FS`, leaving 176 active shapes and 82 active opaque pins.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
@@ -164,5 +164,13 @@ table; arm `3` calls the UTF-16 reader once and reaches the common return. The
 semantic `u16 opcode + u8 selector + trailing-zero UTF-16` shape consumes the
 sole 54-byte stream-`126` packet exactly. The payload text remains private and
 only its 24-code-unit length is exposed by higher-level analysis.
+Server opcode `29` adds the delegated grammar missing from its top-level
+handler's empty direct-read list. Handler `b7bc850c...` constructs the ledger
+through `0x180CB4390`, which reads a `u8` count and loops over record
+constructor `0x180CB3F20`; each record reads
+`i32/i32/trailing-zero UTF-16/i32/i16`. The semantic 327-byte shape suppresses
+the matching opaque pin and exactly consumes both byte-identical four-record
+packets from streams `92` and `114`. Text and numeric fields remain private;
+higher-level analysis publishes only record and code-unit counts.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

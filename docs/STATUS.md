@@ -53,8 +53,8 @@
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,411 full, 21,762 partial,
-  34 unknown, and zero invalid; stream `114` reports 50/20/6/0. Seven
+  packet observations. Stream `92` now reports 13,412 full, 21,762 partial,
+  33 unknown, and zero invalid; stream `114` reports 51/20/5/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -138,6 +138,19 @@
   publishes only selector and text length. This moves stream `126` to
   `26,660/44,381/59/0`. Live replay is deferred because the captured text is a
   client resource instruction whose cross-field effect is not yet bounded.
+- Server opcode `29` now closes the automatic dump's otherwise empty direct-read
+  boundary by following its delegated constructors. The outer constructor at
+  `0x180CB4390` reads a `u8` count; each record constructor at `0x180CB3F20`
+  reads `i32/i32`, one trailing-zero UTF-16 value, `i32`, and `i16`. The
+  byte-identical 327-byte packets in streams `92` and `114` each contain four
+  records with 128 total text code units and consume exactly. The redacted
+  codec round-trips both packets, folds them as full
+  `server_opcode_29_text_ledger` observations, and emits
+  `server_opcode_29_ledger_received` without exposing text or numeric values.
+  This moves current strict coverage to `13,412/21,762/33/0` and
+  `51/20/5/0`; stream `126` remains `26,660/44,381/59/0`. Live replay is
+  deferred until the neutral bootstrap values have a bounded cross-session
+  role.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

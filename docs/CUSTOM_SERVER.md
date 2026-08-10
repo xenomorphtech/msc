@@ -294,6 +294,22 @@ Strict stream-`126` coverage is now `26,660/44,381/59/0`; streams `92` and
 because the redacted value is a client resource instruction and its field
 effect has not yet been isolated.
 
+Opcode `29` closes the next bootstrap boundary by following the automatic
+handler into its delegated constructors. Handler `b7bc850c...` has no direct
+reads; constructor `0x180CB4390` reads a `u8` record count and loops through
+constructor `0x180CB3F20`, which reads
+`i32/i32/trailing-zero UTF-16/i32/i16`. The 327-byte packets in streams `92`
+and `114` are byte-identical four-record ledgers with 128 total text code
+units. Both pass the native manifest validator and exact Python re-emission.
+The gamestate fold now emits full `server_opcode_29_text_ledger` observations
+and `server_opcode_29_ledger_received` events while safe reports expose only
+counts and text lengths. Current strict totals are `13,412/21,762/33/0` for
+stream `92`, `51/20/5/0` for stream `114`, and the unchanged
+`26,660/44,381/59/0` for stream `126`. The HTTP gameplay state/events derived
+from the fold inherit the same redaction; no packet-injection endpoint action
+is claimed because the captured values remain neutral and cross-session safety
+is unproven.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -378,8 +394,8 @@ unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
 26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid. Stream
-`92` now reaches 13,411 full, 21,762 partial, 34 unknown, and zero invalid;
-stream `114` reaches 50/20/6/0.
+`92` now reaches 13,412 full, 21,762 partial, 33 unknown, and zero invalid;
+stream `114` reaches 51/20/5/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
 client has a sequence byte followed by either an opaque identifier, counted
@@ -1991,7 +2007,7 @@ Replace the remaining opaque replay portions with stateful handling:
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
 2. Continue the finite automatic-dump pass with the remaining server opcodes
-   `13`, `29`, `135`, and `394`; separate direct primitive reads
+   `13`, `135`, and `394`; separate direct primitive reads
    from delegated bodies and preserve neutral roles until capture comparison or
    a controlled effect supports semantic names.
 3. Reuse the proven typed final-field mob injection to validate the existing

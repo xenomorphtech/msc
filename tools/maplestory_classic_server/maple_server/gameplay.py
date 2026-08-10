@@ -88,6 +88,7 @@ from .packets import (
     ServerOpcode169TextInstruction,
     ServerOpcode27IntegerLedger,
     ServerOpcode28TextLedger,
+    ServerOpcode29TextLedger,
     ServerOpcode142TextLedger,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
@@ -860,6 +861,13 @@ class GameplayGameState:
         default_factory=Counter
     )
     server_opcode_28_text_2_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_29_packets: int = 0
+    server_opcode_29_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_29_text_code_units: Counter[int] = field(
         default_factory=Counter
     )
     server_opcode_142_packets: int = 0
@@ -4019,6 +4027,15 @@ class GameplayAnalysis:
                         self.state.server_opcode_28_text_2_code_units
                     ),
                 },
+                "server_opcode_29": {
+                    "packet_count": self.state.server_opcode_29_packets,
+                    "entry_counts": dict(
+                        self.state.server_opcode_29_entry_counts
+                    ),
+                    "text_code_units": dict(
+                        self.state.server_opcode_29_text_code_units
+                    ),
+                },
                 "server_opcode_142": {
                     "packet_count": self.state.server_opcode_142_packets,
                     "enabled_packet_count": (
@@ -7066,6 +7083,31 @@ class GameplayStateFold:
                 kind="server_opcode_28_text_ledger",
                 coverage=ShapeCoverage.FULL,
                 parsed=ledger_28,
+                details=details,
+            )
+        if opcode == 29:
+            ledger_29 = ServerOpcode29TextLedger.parse(payload)
+            self.state.server_opcode_29_packets += 1
+            self.state.server_opcode_29_entry_counts[
+                len(ledger_29.entries)
+            ] += 1
+            self.state.server_opcode_29_text_code_units[
+                ledger_29.text_code_units
+            ] += 1
+            details = {
+                **ledger_29.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_29_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_29_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_29,
                 details=details,
             )
         if opcode == 142:
@@ -11353,6 +11395,14 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_28_text_1_code_units.items()))} "
             "text_2_code_units:"
             f"{dict(sorted(state.server_opcode_28_text_2_code_units.items()))}"
+        ),
+        (
+            "server_opcode_29="
+            f"packets:{state.server_opcode_29_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_29_entry_counts.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_29_text_code_units.items()))}"
         ),
         (
             "server_opcode_142="
