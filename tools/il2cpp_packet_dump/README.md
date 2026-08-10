@@ -86,11 +86,12 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 76 semantic/manual shapes and 96 explicitly
-observed-opaque exact-width variants. Two exact-width opaque pins overlap the
-semantic opcode-`147` and opcode-`272` shapes and are retained as raw capture
-evidence but suppressed from the effective shape set, leaving 170 active
-shapes and 94 active opaque pins. Opcode `94` is no longer an
+manifest currently declares 83 semantic/manual shapes and 96 explicitly
+observed-opaque exact-width variants. Six exact-width opaque pins overlap the
+semantic opcode-`27`, opcode-`28`, opcode-`142`, opcode-`147`, opcode-`272`,
+and opcode-`425` shapes and are retained as raw capture evidence but suppressed
+from the effective shape set. Three additional compact semantic widths leave
+173 active shapes and 90 active opaque pins. Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
 form and four `datetime/i64` values. Opcode `148` is represented by one
@@ -129,5 +130,14 @@ consumes and re-emits all six cross-corpus packets (three identical packets per
 opcode) without an
 unsupported, short-read, trailing-byte, constant, boolean, or ambiguity
 failure.
+Server opcodes `27` and `28` add the generated handlers' signed record counts
+and exact repeated integer/text grammars. Opcode `142` adds its generated
+boolean gate and the exact delegated header plus counted text/control records.
+Each has separate fixed-width declarations for the `111` and `1-10FS`
+variants. Opcode `425` adds a 68-byte `u16`-counted signed-value ledger with a
+four-word trailer; the three gameplay packets are identical, and a live trace
+independently observed all 12 repeated `i32` reads. Targeted native validation
+consumes all 13 selected packets without unsupported, short-read, trailing-byte,
+constant, boolean, or ambiguity failures.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

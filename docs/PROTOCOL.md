@@ -1149,6 +1149,101 @@ focused debugger pause accounts for the 36.6-second maximum round trip. This
 validates packet acceptance and the predicted neutral fold, not a semantic name
 for the ledger fields.
 
+## Counted bootstrap ledgers (`27`, `28`, `142`, `425`)
+
+These shapes are driven by the current automatic
+`tools/il2cpp_packet_dump` handler output and exact parsing of both gameplay
+corpora. The opcode-`27` and opcode-`28` top-level handlers each read one
+signed record count before delegating their entries:
+
+```text
+uint16 opcode = 27
+int32 entry_count
+repeat entry_count:
+    int32 key
+    int32 value
+    int32 control
+    utf16z text                 # uint16 code-unit count + UTF-16LE + zero byte
+
+uint16 opcode = 28
+int32 entry_count
+repeat entry_count:
+    int32 key
+    int32 value
+    utf16z text_1
+    utf16z text_2
+```
+
+The 1,056-byte opcode-`27` form in `111` has 18 records and 390 total text
+code units; the 27-byte stream-`126` form has one record and three code units.
+The 260-byte opcode-`28` form has five records and `56/36` code units in its
+two text columns; stream `126` uses a 164-byte, four-record form with `18/33`
+code units. Keys, values, controls, and text are retained only for exact
+round-trip encoding and omitted from safe output.
+
+Opcode `142` reads one boolean directly and delegates only when it is true:
+
+```text
+uint16 opcode = 142
+bool8 enabled
+if enabled:
+    utf16z header_text
+    int32 entry_count
+    repeat entry_count:
+        int32 key
+        int32 control
+        utf16z text_1
+        utf16z text_2
+        bool8 flag_1
+        bool8 flag_2
+        int32 value_1
+        int32 value_2
+```
+
+The disabled branch ends after three bytes. Both captured packets use the
+enabled branch: stream `92` is 254 bytes with four records, nine header code
+units, and 65 entry-text code units; stream `126` is 190 bytes with three
+records, nine header units, and 45 entry-text units. Every captured `flag_1` is
+true and every `flag_2` is false. The decoder still validates both booleans as
+wire values `0` or `1` and bounds the count before parsing.
+
+Opcode `425` has the following capture-complete neutral shape:
+
+```text
+uint16 opcode = 425
+uint16 value_count
+repeat value_count:
+    int32 value
+int32 trailer[4]
+```
+
+The packets in streams `92`, `114`, and `126` are byte-identical, 68 bytes
+long, have count `12`, and end with trailer `(0,0,1,1)`. A focused live trace
+independently entered the delegated handler at reader cursor 6, observed its
+internally consumed count, and recorded exactly 12 repeated `i32` reader calls
+at cursors `8,12,...,52`. The four trailer words are also identical across all
+three captures and required for exact final-cursor consumption. Repeated values
+remain redacted; safe analysis publishes only the count and neutral trailer.
+
+The native manifest uses seven fixed-width semantic declarations so each
+captured width replaces only its matching opaque pin. All 13 selected
+private-regression packets validate natively (`9` from the selected `111`
+streams, including the login duplicates, plus `4` from `1-10FS`) and every one
+round-trips through the Python codecs. The state fold emits one full ledger
+observation/event per packet and reports only record counts, text lengths,
+boolean counts, and trailer shapes. Coverage rises to
+`26,659/44,373/68/0` on stream `126`, `13,410/21,755/42/0` on stream `92`,
+and `49/20/7/0` on stream `114`.
+
+The loopback-only `POST /api/v1/server-packets` route accepted one exact
+opcode-`425` packet while the real client was in the field. The resulting
+transcript folds the captured packet and injected copy as two full
+`server_opcode_425_ledger_received` events and keeps phase, map `101000000`,
+player, inventory, and progression state unchanged. The later process exit
+followed the debugger session rather than a synchronous packet rejection; a
+fresh browser-free direct-Wayland launch returned to the field with sound
+muted and a ready world connection.
+
 ## Variable server records (`156`, `385`)
 
 Both opcodes select between a compact and expanded capture variant with the
@@ -2815,10 +2910,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,655
-full, 44,373 partial, 72 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,406 full, 21,755 partial,
-46 unknown, and zero invalid; stream `114` reaches 46/20/10/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,659
+full, 44,373 partial, 68 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,410 full, 21,755 partial,
+42 unknown, and zero invalid; stream `114` reaches 49/20/7/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

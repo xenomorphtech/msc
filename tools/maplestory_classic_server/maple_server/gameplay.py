@@ -84,6 +84,9 @@ from .packets import (
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
+    ServerOpcode27IntegerLedger,
+    ServerOpcode28TextLedger,
+    ServerOpcode142TextLedger,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
     ServerOpcode201Record,
@@ -96,6 +99,7 @@ from .packets import (
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
     ServerOpcode379Record,
+    ServerOpcode425ValueLedger,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -837,6 +841,36 @@ class GameplayGameState:
     server_opcode_239_trailing_values: Counter[int] = field(
         default_factory=Counter
     )
+    server_opcode_27_packets: int = 0
+    server_opcode_27_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_27_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_28_packets: int = 0
+    server_opcode_28_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_28_text_1_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_28_text_2_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_packets: int = 0
+    server_opcode_142_enabled_packets: int = 0
+    server_opcode_142_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_header_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_entry_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_flag_1_true_count: int = 0
+    server_opcode_142_flag_2_true_count: int = 0
     server_opcode_147_packets: int = 0
     server_opcode_147_value_counts: Counter[int] = field(
         default_factory=Counter
@@ -853,6 +887,13 @@ class GameplayGameState:
     server_opcode_272_flag_1_true_count: int = 0
     server_opcode_272_flag_2_true_count: int = 0
     server_opcode_272_trailer_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_425_packets: int = 0
+    server_opcode_425_value_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_425_trailer_shapes: Counter[str] = field(
         default_factory=Counter
     )
     instructional_dialogue_requests: int = 0
@@ -3945,6 +3986,48 @@ class GameplayAnalysis:
                         self.state.server_opcode_239_trailing_values
                     ),
                 },
+                "server_opcode_27": {
+                    "packet_count": self.state.server_opcode_27_packets,
+                    "entry_counts": dict(
+                        self.state.server_opcode_27_entry_counts
+                    ),
+                    "text_code_units": dict(
+                        self.state.server_opcode_27_text_code_units
+                    ),
+                },
+                "server_opcode_28": {
+                    "packet_count": self.state.server_opcode_28_packets,
+                    "entry_counts": dict(
+                        self.state.server_opcode_28_entry_counts
+                    ),
+                    "text_1_code_units": dict(
+                        self.state.server_opcode_28_text_1_code_units
+                    ),
+                    "text_2_code_units": dict(
+                        self.state.server_opcode_28_text_2_code_units
+                    ),
+                },
+                "server_opcode_142": {
+                    "packet_count": self.state.server_opcode_142_packets,
+                    "enabled_packet_count": (
+                        self.state.server_opcode_142_enabled_packets
+                    ),
+                    "entry_counts": dict(
+                        self.state.server_opcode_142_entry_counts
+                    ),
+                    "header_text_code_units": dict(
+                        self.state.server_opcode_142_header_text_code_units
+                    ),
+                    "entry_text_code_units": dict(
+                        self.state.server_opcode_142_entry_text_code_units
+                    ),
+                    "flag_1_true_count": (
+                        self.state.server_opcode_142_flag_1_true_count
+                    ),
+                    "flag_2_true_count": (
+                        self.state.server_opcode_142_flag_2_true_count
+                    ),
+                },
                 "server_opcode_147": {
                     "packet_count": self.state.server_opcode_147_packets,
                     "value_counts": dict(
@@ -3952,6 +4035,15 @@ class GameplayAnalysis:
                     ),
                     "rectangle_shapes": dict(
                         self.state.server_opcode_147_rectangle_shapes
+                    ),
+                },
+                "server_opcode_425": {
+                    "packet_count": self.state.server_opcode_425_packets,
+                    "value_counts": dict(
+                        self.state.server_opcode_425_value_counts
+                    ),
+                    "trailer_shapes": dict(
+                        self.state.server_opcode_425_trailer_shapes
                     ),
                 },
                 "server_opcode_272": {
@@ -6904,6 +6996,96 @@ class GameplayStateFold:
                 parsed=instruction,
                 details=details,
             )
+        if opcode == 27:
+            ledger_27 = ServerOpcode27IntegerLedger.parse(payload)
+            self.state.server_opcode_27_packets += 1
+            self.state.server_opcode_27_entry_counts[
+                len(ledger_27.entries)
+            ] += 1
+            self.state.server_opcode_27_text_code_units[
+                ledger_27.text_code_units
+            ] += 1
+            details = {
+                **ledger_27.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_27_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_27_integer_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_27,
+                details=details,
+            )
+        if opcode == 28:
+            ledger_28 = ServerOpcode28TextLedger.parse(payload)
+            self.state.server_opcode_28_packets += 1
+            self.state.server_opcode_28_entry_counts[
+                len(ledger_28.entries)
+            ] += 1
+            self.state.server_opcode_28_text_1_code_units[
+                ledger_28.text_1_code_units
+            ] += 1
+            self.state.server_opcode_28_text_2_code_units[
+                ledger_28.text_2_code_units
+            ] += 1
+            details = {
+                **ledger_28.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_28_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_28_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_28,
+                details=details,
+            )
+        if opcode == 142:
+            ledger_142 = ServerOpcode142TextLedger.parse(payload)
+            self.state.server_opcode_142_packets += 1
+            self.state.server_opcode_142_enabled_packets += int(
+                ledger_142.enabled
+            )
+            self.state.server_opcode_142_entry_counts[
+                len(ledger_142.entries)
+            ] += 1
+            self.state.server_opcode_142_header_text_code_units[
+                ledger_142.header_text_code_units
+            ] += 1
+            self.state.server_opcode_142_entry_text_code_units[
+                ledger_142.entry_text_code_units
+            ] += 1
+            self.state.server_opcode_142_flag_1_true_count += sum(
+                entry.flag_1 for entry in ledger_142.entries
+            )
+            self.state.server_opcode_142_flag_2_true_count += sum(
+                entry.flag_2 for entry in ledger_142.entries
+            )
+            details = {
+                **ledger_142.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_142_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_142_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_142,
+                details=details,
+            )
         if opcode == 147:
             ledger = ServerOpcode147BoundsLedger.parse(payload)
             rectangle_shape = (
@@ -6965,6 +7147,30 @@ class GameplayStateFold:
                 kind="server_opcode_272_ledger",
                 coverage=ShapeCoverage.FULL,
                 parsed=ledger_272,
+                details=details,
+            )
+        if opcode == 425:
+            ledger_425 = ServerOpcode425ValueLedger.parse(payload)
+            trailer_shape = str(ledger_425.trailer)
+            self.state.server_opcode_425_packets += 1
+            self.state.server_opcode_425_value_counts[
+                len(ledger_425.values)
+            ] += 1
+            self.state.server_opcode_425_trailer_shapes[trailer_shape] += 1
+            details = {
+                **ledger_425.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_425_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_425_value_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_425,
                 details=details,
             )
         if (
@@ -11060,6 +11266,37 @@ def render_gameplay_analysis(
             f"extended:{state.tutorial_ui_extended_instructions}"
         ),
         (
+            "server_opcode_27="
+            f"packets:{state.server_opcode_27_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_27_entry_counts.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_27_text_code_units.items()))}"
+        ),
+        (
+            "server_opcode_28="
+            f"packets:{state.server_opcode_28_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_28_entry_counts.items()))} "
+            "text_1_code_units:"
+            f"{dict(sorted(state.server_opcode_28_text_1_code_units.items()))} "
+            "text_2_code_units:"
+            f"{dict(sorted(state.server_opcode_28_text_2_code_units.items()))}"
+        ),
+        (
+            "server_opcode_142="
+            f"packets:{state.server_opcode_142_packets} "
+            f"enabled:{state.server_opcode_142_enabled_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_142_entry_counts.items()))} "
+            "header_text_code_units:"
+            f"{dict(sorted(state.server_opcode_142_header_text_code_units.items()))} "
+            "entry_text_code_units:"
+            f"{dict(sorted(state.server_opcode_142_entry_text_code_units.items()))} "
+            f"flag_1_true:{state.server_opcode_142_flag_1_true_count} "
+            f"flag_2_true:{state.server_opcode_142_flag_2_true_count}"
+        ),
+        (
             "server_opcode_147="
             f"packets:{state.server_opcode_147_packets} "
             "value_counts:"
@@ -11078,6 +11315,14 @@ def render_gameplay_analysis(
             f"flag_2_true:{state.server_opcode_272_flag_2_true_count} "
             "trailer_values:"
             f"{dict(sorted(state.server_opcode_272_trailer_values.items()))}"
+        ),
+        (
+            "server_opcode_425="
+            f"packets:{state.server_opcode_425_packets} "
+            "value_counts:"
+            f"{dict(sorted(state.server_opcode_425_value_counts.items()))} "
+            "trailer_shapes:"
+            f"{dict(sorted(state.server_opcode_425_trailer_shapes.items()))}"
         ),
         (
             "server_opcode_239="

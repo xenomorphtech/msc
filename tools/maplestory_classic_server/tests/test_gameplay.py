@@ -121,6 +121,12 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
+    ServerOpcode27IntegerLedger,
+    ServerOpcode27IntegerLedgerEntry,
+    ServerOpcode28TextLedger,
+    ServerOpcode28TextLedgerEntry,
+    ServerOpcode142TextLedger,
+    ServerOpcode142TextLedgerEntry,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
     ServerOpcode201Record,
@@ -135,6 +141,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
     ServerOpcode379Record,
+    ServerOpcode425ValueLedger,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -2164,6 +2171,114 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 ledger.entries[0],
                 group_1=((1, 2),),  # type: ignore[arg-type]
             ).to_bytes()
+
+    def test_generated_bootstrap_ledgers_round_trip_and_redact(self) -> None:
+        ledger_27 = ServerOpcode27IntegerLedger(
+            entries=(
+                ServerOpcode27IntegerLedgerEntry(
+                    key=2_345_678,
+                    value=876_543_210,
+                    control=35_000,
+                    text="hidden integer ledger text",
+                ),
+            )
+        )
+        ledger_28 = ServerOpcode28TextLedger(
+            entries=(
+                ServerOpcode28TextLedgerEntry(
+                    key=3_456_789,
+                    value=765_432_109,
+                    text_1="hidden first text",
+                    text_2="hidden second text",
+                ),
+            )
+        )
+        ledger_142 = ServerOpcode142TextLedger(
+            enabled=True,
+            header_text="hidden header",
+            entries=(
+                ServerOpcode142TextLedgerEntry(
+                    key=4_567_890,
+                    control=42,
+                    text_1="hidden feature text",
+                    text_2="hidden description",
+                    flag_1=True,
+                    flag_2=False,
+                    value_1=654_321_098,
+                    value_2=543_210_987,
+                ),
+            ),
+        )
+        disabled_142 = ServerOpcode142TextLedger(
+            enabled=False,
+            header_text=None,
+            entries=(),
+        )
+        ledger_425 = ServerOpcode425ValueLedger(
+            values=tuple(range(12)),
+            trailer=(0, 0, 1, 1),
+        )
+
+        for ledger_type, ledger in (
+            (ServerOpcode27IntegerLedger, ledger_27),
+            (ServerOpcode28TextLedger, ledger_28),
+            (ServerOpcode142TextLedger, ledger_142),
+            (ServerOpcode142TextLedger, disabled_142),
+            (ServerOpcode425ValueLedger, ledger_425),
+        ):
+            self.assertEqual(ledger_type.parse(ledger.to_bytes()), ledger)
+
+        safe = str(
+            {
+                "opcode_27": ledger_27.safe_dict(),
+                "opcode_28": ledger_28.safe_dict(),
+                "opcode_142": ledger_142.safe_dict(),
+                "opcode_425": ledger_425.safe_dict(),
+            }
+        )
+        for secret in (
+            "2345678",
+            "876543210",
+            "hidden integer ledger text",
+            "3456789",
+            "765432109",
+            "hidden first text",
+            "4567890",
+            "654321098",
+            "hidden feature text",
+        ):
+            self.assertNotIn(secret, safe)
+        self.assertIn("'value_count': 12", safe)
+        self.assertIn("'trailer': [0, 0, 1, 1]", safe)
+
+        invalid_142_flag = bytearray(ledger_142.to_bytes())
+        first_entry_flag_offset = len(
+            struct.pack("<H?", ledger_142.opcode, ledger_142.enabled)
+            + struct.pack(
+                "<H", len(ledger_142.header_text or "")
+            )
+            + (ledger_142.header_text or "").encode("utf-16-le")
+            + b"\x00"
+            + struct.pack("<i", len(ledger_142.entries))
+            + struct.pack("<ii", 4_567_890, 42)
+            + struct.pack(
+                "<H", len(ledger_142.entries[0].text_1)
+            )
+            + ledger_142.entries[0].text_1.encode("utf-16-le")
+            + b"\x00"
+            + struct.pack(
+                "<H", len(ledger_142.entries[0].text_2)
+            )
+            + ledger_142.entries[0].text_2.encode("utf-16-le")
+            + b"\x00"
+        )
+        invalid_142_flag[first_entry_flag_offset] = 2
+        with self.assertRaisesRegex(PacketShapeError, "flags must be boolean"):
+            ServerOpcode142TextLedger.parse(bytes(invalid_142_flag))
+        invalid_425_count = bytearray(ledger_425.to_bytes())
+        invalid_425_count[2:4] = (13).to_bytes(2, "little")
+        with self.assertRaisesRegex(PacketShapeError, "value count"):
+            ServerOpcode425ValueLedger.parse(bytes(invalid_425_count))
 
     def test_client_opcode_43_variants_round_trip_and_redact(self) -> None:
         compact = ClientOpcode43Envelope(
@@ -4676,6 +4791,107 @@ class GameplayStateFoldTest(unittest.TestCase):
         report = render_gameplay_analysis(analysis)
         self.assertIn("server_opcode_147=packets:1 value_counts:{2: 1}", report)
         self.assertIn("server_opcode_272=packets:1 entry_counts:{2: 1}", report)
+
+    def test_folds_generated_bootstrap_ledgers(self) -> None:
+        ledger_27 = ServerOpcode27IntegerLedger(
+            entries=(
+                ServerOpcode27IntegerLedgerEntry(10, 20, 30, "abc"),
+            )
+        )
+        ledger_28 = ServerOpcode28TextLedger(
+            entries=(
+                ServerOpcode28TextLedgerEntry(11, 21, "de", "fgh"),
+            )
+        )
+        ledger_142 = ServerOpcode142TextLedger(
+            enabled=True,
+            header_text="head",
+            entries=(
+                ServerOpcode142TextLedgerEntry(
+                    12,
+                    22,
+                    "ij",
+                    "klm",
+                    True,
+                    False,
+                    32,
+                    42,
+                ),
+            ),
+        )
+        ledger_425 = ServerOpcode425ValueLedger(
+            values=tuple(range(12)),
+            trailer=(0, 0, 1, 1),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                ledger.to_bytes()
+                for ledger in (ledger_27, ledger_28, ledger_142, ledger_425)
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_27_entry_counts, {1: 1})
+        self.assertEqual(analysis.state.server_opcode_27_text_code_units, {3: 1})
+        self.assertEqual(analysis.state.server_opcode_28_entry_counts, {1: 1})
+        self.assertEqual(
+            analysis.state.server_opcode_28_text_1_code_units, {2: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_28_text_2_code_units, {3: 1}
+        )
+        self.assertEqual(analysis.state.server_opcode_142_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_142_enabled_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_142_entry_counts, {1: 1})
+        self.assertEqual(
+            analysis.state.server_opcode_142_header_text_code_units, {4: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_142_entry_text_code_units, {5: 1}
+        )
+        self.assertEqual(analysis.state.server_opcode_142_flag_1_true_count, 1)
+        self.assertEqual(analysis.state.server_opcode_142_flag_2_true_count, 0)
+        self.assertEqual(analysis.state.server_opcode_425_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_425_value_counts, {12: 1})
+        self.assertEqual(
+            analysis.state.server_opcode_425_trailer_shapes,
+            {"(0, 0, 1, 1)": 1},
+        )
+        observation_kinds = {
+            observation.kind
+            for observation in analysis.observations
+            if observation.opcode in {27, 28, 142, 425}
+        }
+        self.assertEqual(
+            observation_kinds,
+            {
+                "server_opcode_27_integer_ledger",
+                "server_opcode_28_text_ledger",
+                "server_opcode_142_text_ledger",
+                "server_opcode_425_value_ledger",
+            },
+        )
+        event_kinds = {
+            event.kind
+            for event in analysis.events
+            if event.kind.startswith("server_opcode_")
+        }
+        self.assertTrue(
+            {
+                "server_opcode_27_ledger_received",
+                "server_opcode_28_ledger_received",
+                "server_opcode_142_ledger_received",
+                "server_opcode_425_ledger_received",
+            }.issubset(event_kinds)
+        )
+        report = render_gameplay_analysis(analysis)
+        self.assertIn("server_opcode_27=packets:1 entry_counts:{1: 1}", report)
+        self.assertIn("server_opcode_28=packets:1 entry_counts:{1: 1}", report)
+        self.assertIn("server_opcode_142=packets:1 enabled:1", report)
+        self.assertIn("server_opcode_425=packets:1 value_counts:{12: 1}", report)
 
     def test_folds_server_opcode_239_envelope_variants(self) -> None:
         records = (

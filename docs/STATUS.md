@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,655 full, 44,373 partial, 72 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,406 full, 21,755 partial,
-  46 unknown, and zero invalid; stream `114` reports 46/20/10/0. Seven
+  26,659 full, 44,373 partial, 68 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,410 full, 21,755 partial,
+  42 unknown, and zero invalid; stream `114` reports 49/20/7/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, and `379` are
@@ -88,6 +88,20 @@
   runtime status reports one active connection, zero injection failures, and
   advancing heartbeat responses. The debugger pause accounts for the one
   36.6-second heartbeat outlier.
+- Server opcodes `27`, `28`, `142`, and `425` now replace their generated
+  capture-width pins with seven exact semantic shapes. The generated handlers
+  prove the leading `i32` counts for `27`/`28` and the boolean gate for `142`;
+  cross-corpus exact parsing closes their repeated integer/text records. Three
+  byte-identical opcode-`425` packets have a `u16` count of 12 and a fixed
+  four-`i32` trailer; a live handler trace independently observed exactly 12
+  repeated `i32` reads. All 13 relevant private-regression packets validate
+  natively and round-trip through the Python codecs. Safe events expose only
+  counts, text lengths, booleans, and the neutral trailer while redacting text,
+  keys, and values. An exact live opcode-`425` injection produced the predicted
+  second full ledger event without changing phase, map `101000000`, player,
+  inventory, or progression state. A fresh browser-free direct-Wayland launch
+  is back in the field with the programmatic audio-mute service active and one
+  healthy world connection.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

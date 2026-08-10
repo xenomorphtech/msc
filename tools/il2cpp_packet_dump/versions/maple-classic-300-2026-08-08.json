@@ -902,6 +902,117 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":94},{"op":"read","name":"flag","kind":"bool"},{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]
     },
     {
+      "name":"server_opcode_27_integer_ledger_large","direction":"server_to_client","opcode":27,"length":1056,
+      "source":"generated opcode-27 handler reads an i32 count; exact 111 gameplay/login packets decode as repeated i32/i32/i32/trailing-zero UTF-16 entries",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":27},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_27_integer_ledger_compact","direction":"server_to_client","opcode":27,"length":27,
+      "source":"generated opcode-27 handler reads an i32 count; exact 1-10FS stream-126 packet is the one-entry form of the repeated i32/i32/i32/trailing-zero UTF-16 grammar",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":27},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_28_text_ledger_large","direction":"server_to_client","opcode":28,"length":260,
+      "source":"generated opcode-28 handler reads an i32 count; exact 111 gameplay/login packets decode as repeated i32/i32 and two trailing-zero UTF-16 strings",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":28},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_28_text_ledger_compact","direction":"server_to_client","opcode":28,"length":164,
+      "source":"generated opcode-28 handler reads an i32 count; exact 1-10FS stream-126 packet is the four-entry form of the repeated i32/i32/paired UTF-16 grammar",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":28},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_142_text_ledger_large","direction":"server_to_client","opcode":142,"length":254,
+      "source":"generated opcode-142 handler reads a bool then delegates when true; exact 111 gameplay packet decodes as header UTF-16 plus counted keyed text/control entries",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":142},
+        {"op":"read","name":"enabled","kind":"bool","equals":1},
+        {"op":"utf16","name":"header_text","trailing_zero":true},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true},
+          {"op":"read","name":"flag_1","kind":"bool"},
+          {"op":"read","name":"flag_2","kind":"bool"},
+          {"op":"read","name":"value_1","kind":"i32"},
+          {"op":"read","name":"value_2","kind":"i32"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_142_text_ledger_compact","direction":"server_to_client","opcode":142,"length":190,
+      "source":"generated opcode-142 handler reads a bool then delegates when true; exact 1-10FS stream-126 packet is the three-entry form of the header/count/text grammar",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":142},
+        {"op":"read","name":"enabled","kind":"bool","equals":1},
+        {"op":"utf16","name":"header_text","trailing_zero":true},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true},
+          {"op":"read","name":"flag_1","kind":"bool"},
+          {"op":"read","name":"flag_2","kind":"bool"},
+          {"op":"read","name":"value_1","kind":"i32"},
+          {"op":"read","name":"value_2","kind":"i32"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_425_value_ledger","direction":"server_to_client","opcode":425,"length":68,
+      "source":"identical 111/1-10FS gameplay packets plus live handler trace: u16 count 12, twelve i32 reader calls, and fixed four-i32 trailer",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":425},
+        {"op":"read","name":"value_count","kind":"u16"},
+        {"op":"repeat","count_from":"value_count","operations":[
+          {"op":"read","name":"value","kind":"i32"}
+        ]},
+        {"op":"read","name":"trailer_1","kind":"i32","equals":0},
+        {"op":"read","name":"trailer_2","kind":"i32","equals":0},
+        {"op":"read","name":"trailer_3","kind":"i32","equals":1},
+        {"op":"read","name":"trailer_4","kind":"i32","equals":1}
+      ]
+    },
+    {
       "name":"server_opcode_147_bounds_ledger","direction":"server_to_client","opcode":147,"length":94,
       "source":"IL2CPP opcode-147 handler a1b62634... reads two Rect values, an i32 count, and repeated i32 values; all gameplay captures share the exact 14-value form",
       "operations":[

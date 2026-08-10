@@ -436,13 +436,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,655 full,
-44,373 partial, 72 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,659 full,
+44,373 partial, 68 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,406 full, 21,755 partial,
-46 unknown, and zero invalid observations; short stream `114` reaches 46 full,
-20 partial, 10 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,410 full, 21,755 partial,
+42 unknown, and zero invalid observations; short stream `114` reaches 49 full,
+20 partial, 7 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -554,6 +554,15 @@ The gameplay fold currently models these capture-backed boundaries:
   values are omitted from safe output, fixed unknown regions remain explicit, and the
   opcode-`94`/`148`/`379` layouts come directly from the generated IL2CPP read
   dump; opcode `148` retains one legacy nonempty record body as opaque,
+- server opcode `27`: a counted integer/control/text ledger with required
+  trailing-zero UTF-16 strings; safe state reports only entry and text-length
+  distributions,
+- server opcode `28`: a counted ledger of neutral integer pairs and two
+  trailing-zero UTF-16 strings per record; all keys, values, and text remain
+  redacted,
+- server opcode `142`: a boolean-gated header and counted keyed text/control
+  records with two validated booleans and two signed values per entry; the
+  three-byte disabled branch is also modeled,
 - server opcode `147`: two signed-`i32` rectangles followed by a counted
   signed-`i32` vector; the fold redacts vector values while reporting the
   rectangle and count shapes,
@@ -561,6 +570,9 @@ The gameplay fold currently models these capture-backed boundaries:
   a neutral header, 11 counted entries, two booleans and two counted groups of
   signed-`i32` triples per entry, plus a terminal signed value; entry selectors
   and triple values remain redacted,
+- server opcode `425`: a primitive-traced `u16` count, repeated signed values,
+  and four-word trailer; all three gameplay captures use count `12`, trailer
+  `(0,0,1,1)`, and the repeated values are redacted,
 - server opcodes `11`/`24`/`56`/`58`/`59`/`60`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
@@ -1657,3 +1669,10 @@ preserve distinct Unity scan codes in this setup.
     to exact full coverage, fold their redacted structural ledgers, and replay
     opcode `272` twice through the active real client with the predicted core
     gamestate unchanged.
+60. Drive server opcodes `27`, `28`, `142`, and `425` from the automatic dump
+    plus exact cross-corpus parsing, promote all 11 gameplay packets to full
+    coverage, and validate all 13 selected private-regression packets natively
+    and through round-trip Python codecs. Trace opcode `425` live, replay it
+    through the loopback packet API, observe the predicted second neutral
+    ledger event with unchanged core state, then restore a browser-free,
+    direct-Wayland, audio-muted client to the field.

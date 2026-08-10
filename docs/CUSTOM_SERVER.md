@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,655 observations are full, 44,373 partial, 72
+`--fail-on-invalid`: 26,659 observations are full, 44,373 partial, 68
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -209,6 +209,33 @@ and phase unchanged. Runtime status retains one active connection, zero
 injection failures, and advancing heartbeat responses; the GDB attach pause,
 not the packet, explains the recorded 36.6-second maximum heartbeat latency.
 
+The next automatic-dump batch closes server opcodes `27`, `28`, `142`, and
+`425` without publishing captured text or identifiers. Generated handlers show
+that `27` and `28` begin with an `i32` record count and that `142` begins with a
+boolean gate before delegating. Exact parses across both reference captures add
+integer/control/text records for `27`, paired-text records for `28`, and a
+gated header plus keyed text/control records for `142`. Opcode `425` is a
+`u16` count, repeated `i32` values, and a fixed four-`i32` trailer; its live
+handler trace entered at reader cursor 6, consumed the count internally, and
+made exactly 12 repeated `i32` calls at cursors 8 through 52.
+
+Seven fixed-width semantic declarations cover both observed widths for
+`27`/`28`/`142` and the single 68-byte `425` width. Native validation consumes
+all 13 selected private-regression packets (`9` from `111`, including login
+duplicates, and `4` from `1-10FS`) with no unsupported or failed shapes. The
+Python codecs also consume and re-emit every packet exactly. Strict state-fold
+coverage is now `26,659/44,373/68/0` for stream `126`,
+`13,410/21,755/42/0` for stream `92`, and `49/20/7/0` for stream `114`.
+
+One exact 68-byte opcode-`425` packet was sent through the same loopback-only
+`POST /api/v1/server-packets` API. Its independent transcript contains the
+captured packet and injected copy as two full
+`server_opcode_425_ledger_received` events, remains semantically `active` on
+map `101000000`, and leaves phase, player, inventory, and progression state
+unchanged. The traced process exited later after the debugger session; a fresh
+browser-free launch, operated through the nested Wayland seat, is back in the
+field with the audio-mute service active and one ready replay connection.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -291,10 +318,10 @@ capture-preexisting resets, four leave-time clears, and zero active statuses at
 the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
-Together, these latest modeled families leave the long-corpus totals at 26,655
-full, 44,373 partial, 72 unknown-but-lossless, and zero invalid. Stream `92`
-now reaches 13,406 full, 21,755 partial, 46 unknown, and zero invalid; stream
-`114` reaches 46/20/10/0.
+Together, these latest modeled families leave the long-corpus totals at 26,659
+full, 44,373 partial, 68 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,410 full, 21,755 partial, 42 unknown, and zero invalid; stream
+`114` reaches 49/20/7/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
 client has a sequence byte followed by either an opaque identifier, counted
