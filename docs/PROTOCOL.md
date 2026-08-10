@@ -661,6 +661,58 @@ matched, and runtime reported no connection failure. This validates the
 dialogue-request effect while deliberately leaving its numeric value roles
 unnamed.
 
+## Positioned visual effects (`320`, `322`, `323`)
+
+The pinned version-300 handlers for opcodes `320`, `322`, and `323` live in the
+same dictionary/list-backed manager. Each reads a primary int32 key plus signed
+16-bit coordinates. The remaining value roles stay neutral:
+
+```text
+opcode 320:
+    uint16 opcode
+    int32 primary_value              # aliased/redacted
+    uint8 control_value
+    int16 x
+    int16 y
+    int16 numeric_value
+    uint8 secondary_control_value
+    uint8 trailing_value
+
+opcode 322:
+    uint16 opcode
+    int32 primary_value              # aliased/redacted
+    int32 numeric_value
+    uint8 control_value
+    int16 x
+    int16 y
+    uint8 trailing_value
+
+opcode 323:
+    uint16 opcode
+    int32 primary_value              # aliased/redacted
+    uint8 control_value
+    int16 x
+    int16 y
+```
+
+Stream `126` contains 12/50/20 packets respectively, all exactly 15/16/11
+bytes and all exact full-coverage round trips. The field-scoped fold creates 36
+aliased effect entities and applies 46 updates. Every opcode-`323` record
+references an entity already observed in its current field epoch; field
+snapshots clear the active effect map. State and `positioned_effect_observed`
+events expose only aliases, coordinates, opcode/control distributions, and
+whether a record created or updated the alias. Raw primary values are omitted.
+
+A live exact opcode-`322` record at captured coordinates `(2609,-372)` was
+accepted without a visible in-view change. A second typed record changed only
+the i16 coordinates to the folded local-player position `(633,-2677)`. At 100
+ms the client showed a transient blue `10` directly above the player; it was
+gone at one second, HP remained `50/222`, and the connection stayed active.
+The transcript folds the pair exactly as `effect:1` creation then update,
+ending at `(633,-2677)` with zero unknown updates and 131/131 matched heartbeat
+pairs. This validates the coordinate/effect interpretation, but not the
+meaning of the displayed number or any neutral numeric/control field.
+
 ## Fixed-width neutral server records
 
 Three independent gameplay streams share a small fixed-width server-record
@@ -2214,8 +2266,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,275
-full, 44,295 partial, 530 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,357
+full, 44,295 partial, 448 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,375 full, 21,740 partial,
 92 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

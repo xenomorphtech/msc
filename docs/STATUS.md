@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 195 tests.
+- The custom-server suite currently passes all 197 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,275 full, 44,295 partial, 530 unknown-but-lossless, and zero invalid
+  26,357 full, 44,295 partial, 448 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,375 full, 21,740 partial,
   92 unknown, and zero invalid; stream `114` reports 43/20/13/0. Thirteen
   long-corpus state-correlation warnings remain: the prior 12 plus one
@@ -83,6 +83,15 @@
   one exact `instructional_dialogue_requested` event, stays active on map
   `101000000`, and matches all 11 heartbeat pairs without assigning meanings
   to the three numeric values.
+- Server opcodes `320`/`322`/`323` are exact positioned-effect records with an
+  aliased primary key, typed i16 coordinates, and neutral controls. All 82
+  stream-`126` packets round-trip at full coverage, producing 36 field-scoped
+  aliases and 46 updates with no unknown opcode-`323` update. In the live A/B,
+  an exact off-screen opcode-`322` had no visible effect; changing only its
+  coordinates to the folded player position produced a transient blue `10`
+  over the sprite at 100 ms, gone by one second. The pair folded as one alias
+  and one update at `(633,-2677)`, HP stayed `50/222`, and 131/131 heartbeats
+  matched.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,

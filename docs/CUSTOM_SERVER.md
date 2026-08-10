@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 195 tests.
+The last run passed all 197 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,275 observations are full, 44,295 partial, 530
+`--fail-on-invalid`: 26,357 observations are full, 44,295 partial, 448
 unknown-but-lossless, and none invalid. The original 12 warnings are state
 correlations, not shape failures. The combat model adds one aggregate warning
 for six delayed predictions that differ by one HP, so the current total is 13.
@@ -120,6 +120,17 @@ an NPC instruction dialogue; its text was partially rendered at 100 ms and
 complete at one second. The packet folded back exactly at full coverage, the
 client stayed active on map `101000000`, and all 11 transcript heartbeats were
 matched.
+
+Server opcodes `320`, `322`, and `323` form a handler-backed positioned-effect
+family. Their exact 15/16/11-byte records retain an aliased primary identifier,
+typed i16 coordinates, and neutral numeric/control values. All 82 stream-`126`
+packets round-trip at full coverage; every opcode-`323` update resolves to a
+current-field entity. A live exact opcode-`322` packet at its captured
+off-screen position made no visible change. Replaying the same typed packet
+with only its position changed to the folded player coordinate `(633,-2677)`
+produced a transient blue `10` over the sprite, gone by one second, while HP
+remained `50/222`. The transcript folded both packets as one aliased entity
+plus one update and matched all 131 heartbeat pairs.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
@@ -165,8 +176,8 @@ cursor. The muted client passed world and character selection and rendered map
 zero failures, all 21 fixed-record frames patched, and 13/13 paired heartbeat
 probes.
 
-Together, these latest modeled families leave the long-corpus totals at 26,275
-full, 44,295 partial, 530 unknown-but-lossless, and zero invalid.
+Together, these latest modeled families leave the long-corpus totals at 26,357
+full, 44,295 partial, 448 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

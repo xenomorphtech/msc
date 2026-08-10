@@ -76,6 +76,9 @@ from .packets import (
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode244DialogueInstruction,
+    ServerOpcode320PositionedEffectRecord,
+    ServerOpcode322PositionedEffectRecord,
+    ServerOpcode323PositionedEffectRecord,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -185,6 +188,14 @@ class ObservedPlayerEntity:
     y: int | None
     level: int | None = None
     name_code_units: int | None = None
+
+
+@dataclass
+class PositionedEffectEntity:
+    alias: str
+    x: int
+    y: int
+    last_opcode: int
 
 
 @dataclass
@@ -697,6 +708,19 @@ class GameplayGameState:
     instructional_dialogue_value_1: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_2: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_3: Counter[int] = field(default_factory=Counter)
+    positioned_effect_entities: dict[int, PositionedEffectEntity] = field(
+        default_factory=dict, repr=False
+    )
+    positioned_effect_records: int = 0
+    positioned_effect_records_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    positioned_effect_new_entities: int = 0
+    positioned_effect_updates: int = 0
+    positioned_effect_unknown_updates: int = 0
+    positioned_effect_control_values: Counter[str] = field(
+        default_factory=Counter
+    )
     fixed_server_records: int = 0
     fixed_server_records_by_opcode: Counter[int] = field(
         default_factory=Counter
@@ -2672,6 +2696,20 @@ class GameplayAnalysis:
             if show_identifiers:
                 record["object_id"] = object_id
             observed_players.append(record)
+        positioned_effect_entities: list[dict[str, object]] = []
+        for primary_value, entity in sorted(
+            self.state.positioned_effect_entities.items(),
+            key=lambda item: item[1].alias,
+        ):
+            record = {
+                "entity": entity.alias,
+                "x": entity.x,
+                "y": entity.y,
+                "last_opcode": entity.last_opcode,
+            }
+            if show_identifiers:
+                record["primary_value"] = primary_value
+            positioned_effect_entities.append(record)
         field_drops: list[dict[str, object]] = []
         for object_id, entity in sorted(
             self.state.field_drops.items(), key=lambda item: item[1].alias
@@ -2782,6 +2820,10 @@ class GameplayAnalysis:
                     self.state.observed_players
                 ),
                 "observed_remote_players": observed_players,
+                "positioned_effect_entity_count": len(
+                    self.state.positioned_effect_entities
+                ),
+                "positioned_effect_entities": positioned_effect_entities,
                 "active_field_drop_count": len(self.state.field_drops),
                 "field_drops": field_drops,
                 "active_npc_count": len(self.state.npcs),
@@ -3512,6 +3554,22 @@ class GameplayAnalysis:
                     "value_2": dict(self.state.instructional_dialogue_value_2),
                     "value_3": dict(self.state.instructional_dialogue_value_3),
                 },
+                "positioned_effect_records": {
+                    "packet_count": self.state.positioned_effect_records,
+                    "by_opcode": dict(
+                        self.state.positioned_effect_records_by_opcode
+                    ),
+                    "new_entity_count": (
+                        self.state.positioned_effect_new_entities
+                    ),
+                    "update_count": self.state.positioned_effect_updates,
+                    "unknown_update_count": (
+                        self.state.positioned_effect_unknown_updates
+                    ),
+                    "control_values": dict(
+                        self.state.positioned_effect_control_values
+                    ),
+                },
                 "fixed_server_records": (
                     self.state.fixed_server_records
                 ),
@@ -3603,6 +3661,7 @@ class GameplayStateFold:
         self._mob_aliases: dict[int, str] = {}
         self._player_aliases: dict[int, str] = {}
         self._drop_aliases: dict[int, str] = {}
+        self._positioned_effect_aliases: dict[int, str] = {}
         self._pending_movements: dict[
             tuple[int, int], deque[PendingMobMovement]
         ] = {}
@@ -5548,6 +5607,9 @@ class GameplayStateFold:
             cleared_mobs = len(self.state.mobs)
             cleared_players = len(self.state.observed_players)
             cleared_drops = len(self.state.field_drops)
+            cleared_positioned_effects = len(
+                self.state.positioned_effect_entities
+            )
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -5560,6 +5622,7 @@ class GameplayStateFold:
             self.state.mob_templates.clear()
             self.state.observed_players.clear()
             self.state.field_drops.clear()
+            self.state.positioned_effect_entities.clear()
             self.state.player_x = None
             self.state.player_y = None
             self._drop_aliases.clear()
@@ -5585,6 +5648,7 @@ class GameplayStateFold:
                 "cleared_mobs": cleared_mobs,
                 "cleared_players": cleared_players,
                 "cleared_drops": cleared_drops,
+                "cleared_positioned_effects": cleared_positioned_effects,
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
                 ),
@@ -6004,6 +6068,61 @@ class GameplayStateFold:
                 kind="server_opcode_244_dialogue_instruction",
                 coverage=ShapeCoverage.FULL,
                 parsed=record,
+                details=details,
+            )
+        if opcode in {320, 322, 323}:
+            if opcode == 320:
+                effect_record = ServerOpcode320PositionedEffectRecord.parse(payload)
+            elif opcode == 322:
+                effect_record = ServerOpcode322PositionedEffectRecord.parse(payload)
+            else:
+                effect_record = ServerOpcode323PositionedEffectRecord.parse(payload)
+            primary_value = effect_record.primary_value
+            existing = self.state.positioned_effect_entities.get(primary_value)
+            new_entity = existing is None
+            if existing is None:
+                alias = self._alias(
+                    self._positioned_effect_aliases,
+                    primary_value,
+                    "effect",
+                )
+                existing = PositionedEffectEntity(
+                    alias=alias,
+                    x=effect_record.x,
+                    y=effect_record.y,
+                    last_opcode=opcode,
+                )
+                self.state.positioned_effect_entities[primary_value] = existing
+                self.state.positioned_effect_new_entities += 1
+                if opcode == 323:
+                    self.state.positioned_effect_unknown_updates += 1
+            else:
+                existing.x = effect_record.x
+                existing.y = effect_record.y
+                existing.last_opcode = opcode
+                self.state.positioned_effect_updates += 1
+            self.state.positioned_effect_records += 1
+            self.state.positioned_effect_records_by_opcode[opcode] += 1
+            self.state.positioned_effect_control_values[
+                f"{opcode}:{effect_record.control_value}"
+            ] += 1
+            details = {
+                "entity": existing.alias,
+                **effect_record.safe_dict(),
+                "new_entity": new_entity,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "positioned_effect_observed",
+                details=details,
+                identifiers={"primary_value": primary_value},
+            )
+            return self._observation(
+                frame,
+                kind="positioned_effect_record",
+                coverage=ShapeCoverage.FULL,
+                parsed=effect_record,
                 details=details,
             )
         if opcode in {69, 93, 201, 205}:
@@ -9124,6 +9243,9 @@ def render_gameplay_analysis(
     tutorial_ui_control_values = json.dumps(
         dict(sorted(state.tutorial_ui_control_values.items()))
     )
+    positioned_effect_opcodes = json.dumps(
+        dict(sorted(state.positioned_effect_records_by_opcode.items()))
+    )
     player_stat_masks = json.dumps(
         {
             f"0x{mask:08x}": count
@@ -9544,6 +9666,16 @@ def render_gameplay_analysis(
             f"value_1:{dict(sorted(state.instructional_dialogue_value_1.items()))} "
             f"value_2:{dict(sorted(state.instructional_dialogue_value_2.items()))} "
             f"value_3:{dict(sorted(state.instructional_dialogue_value_3.items()))}"
+        ),
+        (
+            "positioned_effect_records="
+            f"packets:{state.positioned_effect_records} "
+            f"opcodes:{positioned_effect_opcodes} "
+            f"active:{len(state.positioned_effect_entities)} "
+            f"new:{state.positioned_effect_new_entities} "
+            f"updates:{state.positioned_effect_updates} "
+            f"unknown_updates:{state.positioned_effect_unknown_updates} "
+            f"controls:{dict(sorted(state.positioned_effect_control_values.items()))}"
         ),
         (
             f"client_opcode_217=packets:{state.client_opcode_217_packets} "

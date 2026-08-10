@@ -387,8 +387,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,275 full,
-44,295 partial, 530 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,357 full,
+44,295 partial, 448 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,375 full, 21,740 partial,
@@ -465,6 +465,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `247`: a fully bounded tutorial-UI instruction containing
   redacted terminated counted UTF-16 text, two signed 16-bit values, a control
   byte, and a handler-confirmed optional pair of signed 32-bit values,
+- server opcodes `320`/`322`/`323`: exact positioned-effect records with an
+  aliased primary key, signed coordinates, neutral controls, and current-field
+  update correlation,
 - server opcodes `69`/`93`/`201`/`205`: capture-bounded neutral record
   families; numeric fields are typed, potentially identifying primary values
   are omitted from safe output, and fixed unknown regions remain explicit,
@@ -1505,3 +1508,7 @@ preserve distinct Unity scan codes in this setup.
 46. Decode opcode-`244` selector `8`, round-trip all 54 reference packets, and
     reproduce its instructional NPC dialogue on the live client while keeping
     the three signed 32-bit value roles neutral.
+47. Decode all 82 opcode-`320`/`322`/`323` positioned-effect records, correlate
+    every update within its field epoch, and live-validate that changing only
+    typed coordinates moves a transient visual effect to the predicted player
+    position without changing HP.

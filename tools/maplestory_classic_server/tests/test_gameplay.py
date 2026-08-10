@@ -113,6 +113,9 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode244DialogueInstruction,
+    ServerOpcode320PositionedEffectRecord,
+    ServerOpcode322PositionedEffectRecord,
+    ServerOpcode323PositionedEffectRecord,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -1929,6 +1932,53 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode244DialogueInstruction.parse(encoded + b"\x00")
+
+    def test_positioned_effect_records_round_trip_and_redact_primary(self) -> None:
+        records = (
+            (
+                ServerOpcode320PositionedEffectRecord(
+                    primary_value=2_357_555,
+                    control_value=1,
+                    x=1412,
+                    y=435,
+                    numeric_value=305,
+                    secondary_control_value=0,
+                    trailing_value=5,
+                ),
+                "400133f92300018405b30131010005",
+            ),
+            (
+                ServerOpcode322PositionedEffectRecord(
+                    primary_value=12_597,
+                    numeric_value=2000,
+                    control_value=0,
+                    x=2609,
+                    y=-372,
+                    trailing_value=0,
+                ),
+                "420135310000d007000000310a8cfe00",
+            ),
+            (
+                ServerOpcode323PositionedEffectRecord(
+                    primary_value=12_597,
+                    control_value=0,
+                    x=2609,
+                    y=-372,
+                ),
+                "43013531000000310a8cfe",
+            ),
+        )
+
+        for record, expected_hex in records:
+            encoded = record.to_bytes()
+            self.assertEqual(encoded.hex(), expected_hex)
+            self.assertEqual(type(record).parse(encoded), record)
+            self.assertNotIn(str(record.primary_value), str(record.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
+            ServerOpcode323PositionedEffectRecord.parse(
+                records[-1][0].to_bytes() + b"\x00"
+            )
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,
@@ -3827,6 +3877,87 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "instructional_dialogue_requests=packets:2",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_positioned_effect_records(self) -> None:
+        records = (
+            ServerOpcode322PositionedEffectRecord(
+                primary_value=12_597,
+                numeric_value=2000,
+                control_value=0,
+                x=2609,
+                y=-372,
+                trailing_value=0,
+            ),
+            ServerOpcode320PositionedEffectRecord(
+                primary_value=12_597,
+                control_value=1,
+                x=2600,
+                y=-370,
+                numeric_value=305,
+                secondary_control_value=0,
+                trailing_value=5,
+            ),
+            ServerOpcode323PositionedEffectRecord(
+                primary_value=12_597,
+                control_value=2,
+                x=2590,
+                y=-368,
+            ),
+            ServerOpcode323PositionedEffectRecord(
+                primary_value=99_999,
+                control_value=3,
+                x=10,
+                y=20,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(record.to_bytes() for record in records),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.positioned_effect_records, 4)
+        self.assertEqual(
+            analysis.state.positioned_effect_records_by_opcode,
+            {322: 1, 320: 1, 323: 2},
+        )
+        self.assertEqual(analysis.state.positioned_effect_new_entities, 2)
+        self.assertEqual(analysis.state.positioned_effect_updates, 2)
+        self.assertEqual(analysis.state.positioned_effect_unknown_updates, 1)
+        self.assertEqual(len(analysis.state.positioned_effect_entities), 2)
+        entity = analysis.state.positioned_effect_entities[12_597]
+        self.assertEqual((entity.x, entity.y, entity.last_opcode), (2590, -368, 323))
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "positioned_effect_record"
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(observation.coverage.value == "full" for observation in observations)
+        )
+        self.assertEqual(
+            len(
+                [
+                    event
+                    for event in analysis.events
+                    if event.kind == "positioned_effect_observed"
+                ]
+            ),
+            4,
+        )
+        safe = analysis.safe_dict()
+        self.assertNotIn("12597", str(safe))
+        self.assertEqual(
+            safe["state"]["positioned_effect_entities"][0]["entity"],
+            "effect:1",
+        )
+        self.assertIn(
+            "positioned_effect_records=packets:4",
             render_gameplay_analysis(analysis),
         )
 
