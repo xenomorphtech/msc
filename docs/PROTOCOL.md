@@ -1114,6 +1114,31 @@ packets validate natively and in the state fold. Live replay is deferred because
 the generated handler does not name the values or consume the delegated tail,
 so cross-session injection would not be a bounded semantic test.
 
+## Server opcode `169` text instruction
+
+The automatic dump identifies an eight-way selector handler. Native jump-table
+inspection is required because its direct-read list is the union of mutually
+exclusive branches. Selector `3` lands at `0x180BC3281`, calls the pinned
+UTF-16 reader once, then exits through the common return:
+
+```text
+uint16 opcode = 169
+uint8  selector = 3
+uint16 text_code_units
+utf16  text[text_code_units]        # redacted
+uint8  trailing_zero = 0
+```
+
+The sole reference occurrence is a 54-byte server packet in
+`1-10FS.pcapng` stream `126`; its string has 24 code units and the shape
+consumes the frame exactly. `ServerOpcode169TextInstruction` preserves the
+text for exact re-emission but omits it from safe dictionaries, events, JSON,
+and text reports. The gamestate fold increments selector/text-length counters
+and emits `server_opcode_169_text_instruction_received` with selector, length,
+and field epoch only. The observed event occurs at epoch `31` and moves the
+packet from unknown to full coverage. No cross-session replay is claimed until
+the client resource effect is independently bounded.
+
 ## Field-bootstrap ledgers (`147`, `272`)
 
 Each opcode occurs once and byte-identically across gameplay streams `92`,
@@ -2985,8 +3010,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,659
-full, 44,381 partial, 60 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,660
+full, 44,381 partial, 59 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,411 full, 21,762 partial,
 34 unknown, and zero invalid; stream `114` reaches 50/20/6/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

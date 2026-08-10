@@ -85,6 +85,7 @@ from .packets import (
     ServerOpcode93Record,
     ServerOpcode94Record,
     ServerOpcode137OpaqueTailEnvelope,
+    ServerOpcode169TextInstruction,
     ServerOpcode27IntegerLedger,
     ServerOpcode28TextLedger,
     ServerOpcode142TextLedger,
@@ -914,6 +915,11 @@ class GameplayGameState:
     positioned_effect_updates: int = 0
     positioned_effect_unknown_updates: int = 0
     positioned_effect_control_values: Counter[str] = field(
+        default_factory=Counter
+    )
+    server_opcode_169_packets: int = 0
+    server_opcode_169_selectors: Counter[int] = field(default_factory=Counter)
+    server_opcode_169_text_code_units: Counter[int] = field(
         default_factory=Counter
     )
     server_opcode_348_packets: int = 0
@@ -4087,6 +4093,13 @@ class GameplayAnalysis:
                     ),
                     "control_values": dict(
                         self.state.positioned_effect_control_values
+                    ),
+                },
+                "server_opcode_169": {
+                    "packet_count": self.state.server_opcode_169_packets,
+                    "selectors": dict(self.state.server_opcode_169_selectors),
+                    "text_code_units": dict(
+                        self.state.server_opcode_169_text_code_units
                     ),
                 },
                 "server_opcode_348": {
@@ -7295,6 +7308,29 @@ class GameplayStateFold:
                 kind="positioned_effect_record",
                 coverage=ShapeCoverage.FULL,
                 parsed=effect_record,
+                details=details,
+            )
+        if opcode == 169:
+            instruction = ServerOpcode169TextInstruction.parse(payload)
+            self.state.server_opcode_169_packets += 1
+            self.state.server_opcode_169_selectors[instruction.selector] += 1
+            self.state.server_opcode_169_text_code_units[
+                instruction.text_code_units
+            ] += 1
+            details = {
+                **instruction.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_169_text_instruction_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_169_text_instruction",
+                coverage=ShapeCoverage.FULL,
+                parsed=instruction,
                 details=details,
             )
         if (
@@ -11388,6 +11424,13 @@ def render_gameplay_analysis(
             f"updates:{state.positioned_effect_updates} "
             f"unknown_updates:{state.positioned_effect_unknown_updates} "
             f"controls:{dict(sorted(state.positioned_effect_control_values.items()))}"
+        ),
+        (
+            "server_opcode_169="
+            f"packets:{state.server_opcode_169_packets} "
+            f"selectors:{dict(sorted(state.server_opcode_169_selectors.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_169_text_code_units.items()))}"
         ),
         (
             "server_opcode_348="

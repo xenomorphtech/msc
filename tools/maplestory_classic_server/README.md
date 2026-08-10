@@ -436,8 +436,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,659 full,
-44,381 partial, 60 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,660 full,
+44,381 partial, 59 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,411 full, 21,762 partial,
@@ -541,6 +541,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcodes `320`/`322`/`323`: exact positioned-effect records with an
   aliased primary key, signed coordinates, neutral controls, and current-field
   update correlation,
+- server opcode `169`: selector `3` followed by one redacted, terminated
+  counted UTF-16 value; the automatic dump plus native jump-table arm proves
+  exact consumption, while safe state/events expose only selector, code-unit
+  count, and field epoch,
 - server opcode `348`: capture-bounded redacted text envelopes with a common
   u8/i32/selector/i32 prefix, terminated counted UTF-16 text, and two trailing
   controls only on observed selector `0`; selectors `3`/`6`/`17` end after the

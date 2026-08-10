@@ -16,9 +16,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 92);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 93);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
-    assert_eq!(shapes.len(), 175);
+    assert_eq!(shapes.len(), 176);
 
     let shape = shapes
         .iter()
@@ -58,6 +58,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_137.opcode, 137);
     assert_eq!(opcode_137.length, Some(84));
     assert_eq!(opcode_137.operations.len(), 5);
+
+    let opcode_169 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_169_text_instruction")
+        .unwrap();
+    assert_eq!(opcode_169.opcode, 169);
+    assert_eq!(opcode_169.length, Some(54));
+    assert_eq!(opcode_169.operations.len(), 3);
 
     let opcode_148 = shapes
         .iter()
@@ -185,7 +193,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 175);
+    assert_eq!(dump.packet_shapes.len(), 176);
     assert_eq!(
         dump.handlers
             .iter()
@@ -245,6 +253,13 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
         (60, vec!["i32"]),
         (94, vec!["bool", "i32", "i32"]),
         (142, vec!["bool"]),
+        (
+            169,
+            vec![
+                "u8", "u8", "i32", "i32", "utf16", "utf16", "utf16", "i32", "i32", "i32", "u8",
+                "i32", "i32", "i32", "i32", "u8", "u8", "utf16",
+            ],
+        ),
         (228, vec!["u32"]),
         (230, vec!["u32"]),
         (231, vec!["u32"]),

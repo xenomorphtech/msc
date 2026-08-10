@@ -86,12 +86,12 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 92 semantic/manual shapes and 96 explicitly
+manifest currently declares 93 semantic/manual shapes and 96 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276` and `137` add the twelfth and thirteenth
-overlaps. The added widths found only in `1-10FS` leave 175 active shapes and
-83 active opaque pins.
+overlaps. Opcode `169` adds a non-overlapping shape found only in `1-10FS`,
+leaving 176 active shapes and 83 active opaque pins.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
@@ -158,5 +158,11 @@ and a 72-byte capture-bounded tail. The semantic 84-byte shape suppresses the
 matching opaque pin and validates both stream-`92` packets plus the one
 stream-`126` packet; safe gameplay analysis keeps these observations partial
 and redacts the prefix and tail.
+Server opcode `169` adds the generated handler's selector-`3` arm rather than
+its flattened branch superset. The first `u8` indexes an eight-way native jump
+table; arm `3` calls the UTF-16 reader once and reaches the common return. The
+semantic `u16 opcode + u8 selector + trailing-zero UTF-16` shape consumes the
+sole 54-byte stream-`126` packet exactly. The payload text remains private and
+only its 24-code-unit length is exposed by higher-level analysis.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

@@ -122,6 +122,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode93Record,
     ServerOpcode94Record,
     ServerOpcode137OpaqueTailEnvelope,
+    ServerOpcode169TextInstruction,
     ServerOpcode27IntegerLedger,
     ServerOpcode27IntegerLedgerEntry,
     ServerOpcode28TextLedger,
@@ -2744,6 +2745,26 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(envelope.safe_dict()["opaque_tail_length"], 72)
         with self.assertRaisesRegex(PacketShapeError, "exactly 72"):
             replace(envelope, opaque_tail=b"short").to_bytes()
+
+    def test_server_opcode_169_text_instruction_round_trip(self) -> None:
+        instruction = ServerOpcode169TextInstruction(
+            selector=3,
+            text="private-map-resource",
+        )
+
+        encoded = instruction.to_bytes()
+
+        self.assertEqual(
+            ServerOpcode169TextInstruction.parse(encoded), instruction
+        )
+        self.assertEqual(instruction.safe_dict()["selector"], 3)
+        self.assertEqual(
+            instruction.safe_dict()["text_code_units"],
+            len("private-map-resource"),
+        )
+        self.assertNotIn("private-map-resource", str(instruction.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "selector must be 3"):
+            replace(instruction, selector=2).to_bytes()
 
     def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
         self,
@@ -5368,6 +5389,45 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("4294967295", safe)
         self.assertIn(
             "client_opcode_122=packets:6 selectors:{1: 2, 2: 2, 4: 1, 5: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_server_opcode_169_text_instruction(self) -> None:
+        instruction = ServerOpcode169TextInstruction(
+            selector=3,
+            text="private-map-resource",
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(instruction.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_169_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_169_selectors, {3: 1})
+        self.assertEqual(
+            analysis.state.server_opcode_169_text_code_units,
+            {len("private-map-resource"): 1},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_169_text_instruction"
+        ]
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0].coverage.value, "full")
+        self.assertEqual(
+            sum(
+                event.kind == "server_opcode_169_text_instruction_received"
+                for event in analysis.events
+            ),
+            1,
+        )
+        self.assertNotIn("private-map-resource", str(analysis.safe_dict()))
+        self.assertIn(
+            "server_opcode_169=packets:1 selectors:{3: 1}",
             render_gameplay_analysis(analysis),
         )
 

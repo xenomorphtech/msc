@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,659 full, 44,381 partial, 60 unknown-but-lossless, and zero invalid
+  26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,411 full, 21,762 partial,
   34 unknown, and zero invalid; stream `114` reports 50/20/6/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
@@ -130,6 +130,14 @@
   `13,411/21,762/34/0` and stream `126` to `26,659/44,381/60/0`; live replay is
   deferred because neither the values nor delegated tail have safe
   cross-session semantics.
+- Server opcode `169` now uses the automatic handler's selector dispatch rather
+  than an opaque width. Native jump-table arm `3` reads exactly one
+  trailing-zero UTF-16 value and returns; the sole 54-byte stream-`126` packet
+  is consumed exactly with 24 code units. The redacted codec emits one full
+  `server_opcode_169_text_instruction_received` event at field epoch `31` and
+  publishes only selector and text length. This moves stream `126` to
+  `26,660/44,381/59/0`. Live replay is deferred because the captured text is a
+  client resource instruction whose cross-field effect is not yet bounded.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

@@ -8285,6 +8285,67 @@ class ServerOpcode137OpaqueTailEnvelope:
 
 
 @dataclass(frozen=True)
+class ServerOpcode169TextInstruction:
+    """Generated selector-3 branch carrying one redacted UTF-16 value."""
+
+    selector: int
+    text: str = field(repr=False)
+    opcode: int = 169
+
+    TEXT_SELECTOR = 3
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode169TextInstruction":
+        reader = PacketReader(
+            payload, packet_name="server_opcode_169_text_instruction"
+        )
+        _expect_opcode(reader, 169)
+        selector = reader.u8("selector")
+        if selector != cls.TEXT_SELECTOR:
+            raise PacketShapeError(
+                "server opcode-169 text instruction selector must be 3, "
+                f"got {selector}"
+            )
+        instruction = cls(
+            selector=selector,
+            text=reader.utf16_string("text", trailing_byte=True),
+        )
+        reader.finish()
+        return instruction
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.text.encode("utf-16-le")) // 2
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "selector": self.selector,
+            "text_present": True,
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 169:
+            raise PacketShapeError(
+                "server opcode-169 text instruction opcode must be 169"
+            )
+        if self.selector != self.TEXT_SELECTOR:
+            raise PacketShapeError(
+                "server opcode-169 text instruction selector must be 3, "
+                f"got {self.selector}"
+            )
+        try:
+            return struct.pack("<HB", self.opcode, self.selector) + (
+                encode_utf16_string(self.text, trailing_byte=True)
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-169 selector is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode69Record:
     """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
 

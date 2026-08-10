@@ -46,6 +46,12 @@ the concrete cross-corpus case: wire byte `0x05` is accepted as true.
 Opcode `137` is the complementary partial case: the dump proves direct
 `i16/i32/i32` reads, while capture comparison leaves the following 72 bytes
 opaque until delegated-reader evidence is available.
+Opcode `169` demonstrates why the flattened direct-read list must be paired
+with native control flow. Its handler's first `u8` selects one of eight jump
+table arms; selector `3` lands at `0x180BC3281`, calls the pinned UTF-16 reader
+once, and exits through the common return. That executed arm consumes the sole
+54-byte gameplay packet exactly, while the other reads in the generated list
+belong to mutually exclusive selector branches.
 
 Exported plaintext JSONL under `target/private/` is evidence, not source: it
 contains private captured bytes, remains ignored, and must not be committed or

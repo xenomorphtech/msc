@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,659 observations are full, 44,381 partial, 60
+`--fail-on-invalid`: 26,660 observations are full, 44,381 partial, 59
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -282,6 +282,18 @@ counts. Coverage moves to `13,411/21,762/34/0` and
 was sent because the three values and delegated tail may depend on session or
 field state.
 
+Opcode `169` closes one branch completely by combining the automatic dump with
+the native selector jump table. The handler first reads a `u8`; selector `3`
+lands at `0x180BC3281`, reads one trailing-zero UTF-16 value, and returns
+without executing the other selector branches listed by the flattened dump.
+The sole stream-`126` packet is 54 bytes and contains 24 code units. Its codec
+round-trips exactly, redacts the text, and emits one full
+`server_opcode_169_text_instruction_received` event at field epoch `31`.
+Strict stream-`126` coverage is now `26,660/44,381/59/0`; streams `92` and
+`114` remain `13,411/21,762/34/0` and `50/20/6/0`. Live replay is deferred
+because the redacted value is a client resource instruction and its field
+effect has not yet been isolated.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -365,7 +377,7 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,659 full, 44,381 partial, 60 unknown-but-lossless, and zero invalid. Stream
+26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid. Stream
 `92` now reaches 13,411 full, 21,762 partial, 34 unknown, and zero invalid;
 stream `114` reaches 50/20/6/0.
 
@@ -1979,7 +1991,7 @@ Replace the remaining opaque replay portions with stateful handling:
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
 2. Continue the finite automatic-dump pass with the remaining server opcodes
-   `13`, `29`, `135`, `169`, and `394`; separate direct primitive reads
+   `13`, `29`, `135`, and `394`; separate direct primitive reads
    from delegated bodies and preserve neutral roles until capture comparison or
    a controlled effect supports semantic names.
 3. Reuse the proven typed final-field mob injection to validate the existing

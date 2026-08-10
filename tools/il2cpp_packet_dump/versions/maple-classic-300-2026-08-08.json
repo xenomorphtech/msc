@@ -907,6 +907,11 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":137},{"op":"read","name":"first_value","kind":"i16"},{"op":"read","name":"second_value","kind":"i32"},{"op":"read","name":"third_value","kind":"i32"},{"op":"bytes","name":"opaque_tail","length":72}]
     },
     {
+      "name":"server_opcode_169_text_instruction","direction":"server_to_client","opcode":169,"length":54,
+      "source":"generated opcode-169 handler b047ac0a... dispatches on a u8 selector; selector 3 jumps to native arm 0x180BC3281, reads one trailing-zero UTF-16 value, and exactly consumes the sole 1-10FS packet",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":169},{"op":"read","name":"selector","kind":"u8","equals":3},{"op":"utf16","name":"text","trailing_zero":true}]
+    },
+    {
       "name":"server_opcode_228_u32_opaque_tail","direction":"server_to_client","opcode":228,"length":10,
       "source":"generated handler bee2b258... reads one u32; the sole 111 gameplay packet retains four unconsumed capture-bounded bytes",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":228},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":4}]
