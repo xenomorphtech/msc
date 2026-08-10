@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 137 tests.
+The last run passed all 186 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 25,937 observations are full, 43,961 partial, 1,202
+`--fail-on-invalid`: 26,072 observations are full, 44,177 partial, 851
 unknown-but-lossless, and none invalid. The original 12 warnings are state
 correlations, not shape failures. The combat model adds one aggregate warning
 for six delayed predictions that differ by one HP, so the current total is 13.
@@ -103,6 +103,15 @@ The analyzer now accepts the exact 11-byte type-`1` shape and the existing
 length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
 counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
 packets across all three observed variants, all with exact round trips.
+Server opcode `49` is explicitly split by its byte discriminator: variant `0`
+is the existing pickup-gain notice, while variants `1/3/4/6/10/12` use a
+separate neutral envelope and cannot enter pickup correlation. Across streams
+`92` and `126`, all 503 non-pickup packets now round-trip exactly. Keyed/text,
+keyed-u64, u64, and text branches provide 243 full observations; the 258
+variant-`3` numeric records and two variant-`4` records retain 7,607 total
+opaque bytes and provide 260 partial observations. Decoded text is kept only
+for re-emission: events, reports, safe JSON, and HTTP-derived analysis expose
+its code-unit count but never its contents.
 Server opcode `77` is a separate redacted envelope family. Across streams
 `92`, `114`, and `126`, variants `3/4/5/8` contribute 515 exact round trips.
 Variants `3`, `4`, and `5` fully bound their counted UTF-16 fields and neutral
@@ -111,8 +120,8 @@ opaque. The fold emits `server_opcode_77_received` and exposes only variant,
 text-code-unit, control/value, and opaque-byte distributions. Neither packet
 records, events, text reports, JSON, nor HTTP status return captured text.
 
-Together, these latest modeled families leave the long-corpus totals at 25,937
-full, 43,961 partial, 1,202 unknown-but-lossless, and zero invalid.
+Together, these latest modeled families leave the long-corpus totals at 26,072
+full, 44,177 partial, 851 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

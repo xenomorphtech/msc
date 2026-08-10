@@ -747,6 +747,59 @@ normal client progression from the unsafe opcode-`42` experiment. Do not replay
 opcode `42` as a response until a capture-backed nonzero record grammar and a
 fresh-client minimal-packet acceptance test exist.
 
+## Non-pickup server opcode-`49` envelope
+
+Server opcode `49` is overloaded. A byte discriminator of `0` selects the
+separately modeled pickup-gain notice. Every other observed discriminator uses
+the following neutral envelope and is excluded from pickup request/effect
+correlation regardless of packet length:
+
+```text
+uint16 opcode = 49
+uint8 variant
+
+variant 1:
+    uint32 key
+    uint8 value_kind
+    if value_kind == 1:
+        utf16 text_value
+        uint8 zero_terminator
+    if value_kind == 2:
+        uint64 numeric_value
+
+variant 3:
+    uint8 record_marker             # observed 1
+    uint32 record_value
+    bytes opaque_tail               # observed lengths 28, 29, or 36
+
+variant 4:
+    bytes opaque_body               # three bytes in both samples
+
+variant 6:
+    uint64 numeric_value
+
+variant 10:
+    uint8 reserved_zero
+    utf16 text_value
+    uint8 zero_terminator
+
+variant 12:
+    uint32 key
+    utf16 text_value
+    uint8 zero_terminator
+```
+
+Stream `92` contributes variants `3/10/12 = 44/101/7`. Level-1-through-10
+stream `126` contributes variants `1/3/4/6/10/12 = 128/214/2/1/1/5`; variant
+`1` divides into 98 terminated strings and 30 u64 values. Thus all 503
+non-pickup packets parse to their exact ends and round-trip byte-for-byte: 243
+move from unknown to full coverage and 260 move from unknown to partial. The
+partial records retain 7,607 opaque bytes. The fold emits
+`server_opcode_49_received` and tracks variant, neutral shape, text-code-unit,
+and opaque-byte distributions. Text is retained only in the typed object for
+exact re-emission and is omitted from safe JSON, events, text reports, and
+HTTP-derived analysis.
+
 ## Redacted server opcode-`77` envelope
 
 All 515 opcode-`77` samples in the sustained gameplay references share a
@@ -1994,10 +2047,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 25,937
-full, 43,961 partial, 1,202 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,164 full, 21,610 partial,
-433 unknown, and zero invalid; stream `114` reaches 31/14/31/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,072
+full, 44,177 partial, 851 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,272 full, 21,654 partial,
+281 unknown, and zero invalid; stream `114` reaches 31/14/31/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its 13 remaining warnings are cross-packet state correlations:
 12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed

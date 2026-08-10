@@ -3418,6 +3418,258 @@ class ItemPickupRequest:
 
 
 @dataclass(frozen=True)
+class ServerOpcode49Envelope:
+    """Non-pickup server opcode-49 variants with redacted text fields.
+
+    Variant zero belongs to :class:`PickupGainNotice`.  The remaining
+    capture-observed variants share this neutral envelope but have distinct
+    keyed-text, numeric, and partially opaque record bodies.
+    """
+
+    variant: int
+    key: int | None = None
+    value_kind: int | None = None
+    text_value: str | None = field(default=None, repr=False)
+    numeric_value: int | None = None
+    record_marker: int | None = None
+    record_value: int | None = None
+    reserved_value: int | None = None
+    opaque_tail: bytes = field(default=b"", repr=False)
+    opcode: int = 49
+
+    TEXT_VALUE = 1
+    U64_VALUE = 2
+    FULLY_BOUNDED_VARIANTS = frozenset({6, 10, 12})
+
+    @property
+    def text_code_unit_count(self) -> int | None:
+        if self.text_value is None:
+            return None
+        return len(self.text_value.encode("utf-16-le")) // 2
+
+    @property
+    def fully_bounded(self) -> bool:
+        return (
+            self.variant in self.FULLY_BOUNDED_VARIANTS
+            or (
+                self.variant == 1
+                and self.value_kind in {self.TEXT_VALUE, self.U64_VALUE}
+                and not self.opaque_tail
+            )
+        )
+
+    @property
+    def shape_name(self) -> str:
+        if self.variant == 1:
+            if self.value_kind == self.TEXT_VALUE:
+                return "keyed_text"
+            if self.value_kind == self.U64_VALUE:
+                return "keyed_u64"
+            return "keyed_opaque"
+        return {
+            3: "numeric_record_opaque",
+            4: "opaque_record",
+            6: "u64",
+            10: "text",
+            12: "keyed_text",
+        }.get(self.variant, "unknown_opaque")
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode49Envelope":
+        reader = PacketReader(payload, packet_name="server_opcode_49_envelope")
+        _expect_opcode(reader, 49)
+        variant = reader.u8("variant")
+        if variant == 0:
+            raise PacketShapeError(
+                "server_opcode_49_envelope variant 0 is a pickup gain notice"
+            )
+        values: dict[str, int | str | bytes] = {}
+        if variant == 1:
+            values["key"] = reader.u32("key")
+            value_kind = reader.u8("value_kind")
+            values["value_kind"] = value_kind
+            if value_kind == cls.TEXT_VALUE:
+                values["text_value"] = reader.utf16_string(
+                    "text_value", trailing_byte=True
+                )
+            elif value_kind == cls.U64_VALUE:
+                values["numeric_value"] = reader.u64("numeric_value")
+            else:
+                values["opaque_tail"] = reader.bytes(
+                    reader.remaining, "opaque_value"
+                )
+        elif variant == 3:
+            values["record_marker"] = reader.u8("record_marker")
+            values["record_value"] = reader.u32("record_value")
+            values["opaque_tail"] = reader.bytes(
+                reader.remaining, "opaque_tail"
+            )
+        elif variant == 4:
+            values["opaque_tail"] = reader.bytes(
+                reader.remaining, "opaque_body"
+            )
+        elif variant == 6:
+            values["numeric_value"] = reader.u64("numeric_value")
+        elif variant == 10:
+            reserved_value = reader.u8("reserved_value")
+            if reserved_value != 0:
+                raise PacketShapeError(
+                    "server_opcode_49_envelope variant 10 reserved value is "
+                    f"{reserved_value}, expected 0"
+                )
+            values["reserved_value"] = reserved_value
+            values["text_value"] = reader.utf16_string(
+                "text_value", trailing_byte=True
+            )
+        elif variant == 12:
+            values["key"] = reader.u32("key")
+            values["text_value"] = reader.utf16_string(
+                "text_value", trailing_byte=True
+            )
+        else:
+            values["opaque_tail"] = reader.bytes(
+                reader.remaining, "opaque_body"
+            )
+        reader.finish()
+        return cls(variant=variant, **values)
+
+    def safe_dict(self) -> dict[str, int | str | bool | None]:
+        return {
+            "variant": self.variant,
+            "shape": self.shape_name,
+            "key": self.key,
+            "value_kind": self.value_kind,
+            "numeric_value": self.numeric_value,
+            "record_marker": self.record_marker,
+            "record_value": self.record_value,
+            "reserved_value": self.reserved_value,
+            "text_present": self.text_value is not None,
+            "text_code_units": self.text_code_unit_count,
+            "text_redacted": self.text_value is not None,
+            "opaque_tail_length": len(self.opaque_tail),
+        }
+
+    def to_bytes(self) -> bytes:
+        typed_values = {
+            "key": self.key,
+            "value_kind": self.value_kind,
+            "text_value": self.text_value,
+            "numeric_value": self.numeric_value,
+            "record_marker": self.record_marker,
+            "record_value": self.record_value,
+            "reserved_value": self.reserved_value,
+        }
+
+        def reject_fields(*allowed: str) -> None:
+            foreign = sorted(
+                name
+                for name, value in typed_values.items()
+                if name not in allowed and value is not None
+            )
+            if foreign:
+                raise PacketShapeError(
+                    "server opcode-49 variant "
+                    f"{self.variant} has foreign fields {foreign}"
+                )
+
+        try:
+            header = struct.pack("<HB", self.opcode, self.variant)
+            if self.variant == 0:
+                raise PacketShapeError(
+                    "server opcode-49 variant 0 must use PickupGainNotice"
+                )
+            if self.variant == 1:
+                reject_fields("key", "value_kind", "text_value", "numeric_value")
+                if self.key is None or self.value_kind is None:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 1 requires key and value_kind"
+                    )
+                body = struct.pack("<IB", self.key, self.value_kind)
+                if self.value_kind == self.TEXT_VALUE:
+                    if self.text_value is None or self.numeric_value is not None:
+                        raise PacketShapeError(
+                            "server opcode-49 keyed text requires only text_value"
+                        )
+                    if self.opaque_tail:
+                        raise PacketShapeError(
+                            "server opcode-49 keyed text cannot retain opaque bytes"
+                        )
+                    return header + body + encode_utf16_string(
+                        self.text_value, trailing_byte=True
+                    )
+                if self.value_kind == self.U64_VALUE:
+                    if self.numeric_value is None or self.text_value is not None:
+                        raise PacketShapeError(
+                            "server opcode-49 keyed u64 requires only numeric_value"
+                        )
+                    if self.opaque_tail:
+                        raise PacketShapeError(
+                            "server opcode-49 keyed u64 cannot retain opaque bytes"
+                        )
+                    return header + body + struct.pack("<Q", self.numeric_value)
+                if self.text_value is not None or self.numeric_value is not None:
+                    raise PacketShapeError(
+                        "unmodeled opcode-49 keyed kinds retain only opaque bytes"
+                    )
+                return header + body + bytes(self.opaque_tail)
+            if self.variant == 3:
+                reject_fields("record_marker", "record_value")
+                if self.record_marker is None or self.record_value is None:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 3 requires marker and value"
+                    )
+                return header + struct.pack(
+                    "<BI", self.record_marker, self.record_value
+                ) + bytes(self.opaque_tail)
+            if self.variant == 4:
+                reject_fields()
+                return header + bytes(self.opaque_tail)
+            if self.variant == 6:
+                reject_fields("numeric_value")
+                if self.numeric_value is None:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 6 requires numeric_value"
+                    )
+                if self.opaque_tail:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 6 has no opaque tail"
+                    )
+                return header + struct.pack("<Q", self.numeric_value)
+            if self.variant == 10:
+                reject_fields("text_value", "reserved_value")
+                if self.reserved_value != 0 or self.text_value is None:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 10 requires reserved zero and text"
+                    )
+                if self.opaque_tail:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 10 has no opaque tail"
+                    )
+                return header + bytes((self.reserved_value,)) + encode_utf16_string(
+                    self.text_value, trailing_byte=True
+                )
+            if self.variant == 12:
+                reject_fields("key", "text_value")
+                if self.key is None or self.text_value is None:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 12 requires key and text"
+                    )
+                if self.opaque_tail:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 12 has no opaque tail"
+                    )
+                return header + struct.pack("<I", self.key) + encode_utf16_string(
+                    self.text_value, trailing_byte=True
+                )
+            reject_fields()
+            return header + bytes(self.opaque_tail)
+        except (struct.error, TypeError, ValueError) as error:
+            raise PacketShapeError(
+                "server opcode-49 numeric fields must fit their unsigned widths"
+            ) from error
+
+
+@dataclass(frozen=True)
 class PickupGainNotice:
     """Server confirmation describing the value collected from a field drop."""
 

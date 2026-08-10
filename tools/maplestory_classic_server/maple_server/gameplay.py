@@ -67,6 +67,7 @@ from .packets import (
     PlayerMovementSubmission,
     PickupGainNotice,
     ServerAttackRelay,
+    ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
     WorldBootstrapAcknowledgement,
@@ -628,6 +629,12 @@ class GameplayGameState:
         default_factory=Counter
     )
     local_temporary_stat_opaque_bytes: int = 0
+    server_opcode_49_packets: int = 0
+    server_opcode_49_by_variant: Counter[int] = field(default_factory=Counter)
+    server_opcode_49_by_shape: Counter[str] = field(default_factory=Counter)
+    server_opcode_49_text_fields: int = 0
+    server_opcode_49_text_code_units: int = 0
+    server_opcode_49_opaque_bytes: int = 0
     server_opcode_77_packets: int = 0
     server_opcode_77_by_variant: Counter[int] = field(default_factory=Counter)
     server_opcode_77_text_fields: int = 0
@@ -3337,6 +3344,22 @@ class GameplayAnalysis:
                         self.state.local_temporary_stat_opaque_bytes
                     ),
                 },
+                "server_opcode_49": {
+                    "packet_count": self.state.server_opcode_49_packets,
+                    "packets_by_variant": dict(
+                        self.state.server_opcode_49_by_variant
+                    ),
+                    "packets_by_shape": dict(
+                        self.state.server_opcode_49_by_shape
+                    ),
+                    "text_field_count": (
+                        self.state.server_opcode_49_text_fields
+                    ),
+                    "text_code_units": (
+                        self.state.server_opcode_49_text_code_units
+                    ),
+                    "opaque_bytes": self.state.server_opcode_49_opaque_bytes,
+                },
                 "server_opcode_77": {
                     "packet_count": self.state.server_opcode_77_packets,
                     "packets_by_variant": dict(
@@ -5028,7 +5051,7 @@ class GameplayStateFold:
                 details=details,
                 issues=tuple(issues),
             )
-        if opcode == 49 and len(payload) in {8, 12, 15}:
+        if opcode == 49 and len(payload) > 2 and payload[2] == 0:
             notice = PickupGainNotice.parse(payload)
             pending = next(
                 (
@@ -5172,6 +5195,46 @@ class GameplayStateFold:
                     "pickup result flag, mesos subtype/tail, and special-value "
                     "semantics remain neutral",
                 ),
+            )
+        if opcode == 49:
+            envelope = ServerOpcode49Envelope.parse(payload)
+            self.state.server_opcode_49_packets += 1
+            self.state.server_opcode_49_by_variant[envelope.variant] += 1
+            self.state.server_opcode_49_by_shape[envelope.shape_name] += 1
+            if envelope.text_code_unit_count is not None:
+                self.state.server_opcode_49_text_fields += 1
+                self.state.server_opcode_49_text_code_units += (
+                    envelope.text_code_unit_count
+                )
+            self.state.server_opcode_49_opaque_bytes += len(
+                envelope.opaque_tail
+            )
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_49_received",
+                details=details,
+            )
+            partial = not envelope.fully_bounded
+            return self._observation(
+                frame,
+                kind="server_opcode_49_envelope",
+                coverage=(
+                    ShapeCoverage.PARTIAL if partial else ShapeCoverage.FULL
+                ),
+                parsed=envelope,
+                details=details,
+                issues=(
+                    (
+                        f"variant {envelope.variant} retains "
+                        f"{len(envelope.opaque_tail)} opaque bytes"
+                    ),
+                )
+                if partial
+                else (),
             )
         if opcode == 311:
             spawn = FieldDropSpawn.parse(payload)
@@ -8719,6 +8782,12 @@ def render_gameplay_analysis(
     local_temporary_stat_mask_patterns = json.dumps(
         dict(sorted(state.local_temporary_stat_mask_patterns.items()))
     )
+    server_opcode_49_variants = json.dumps(
+        dict(sorted(state.server_opcode_49_by_variant.items()))
+    )
+    server_opcode_49_shapes = json.dumps(
+        dict(sorted(state.server_opcode_49_by_shape.items()))
+    )
     server_opcode_77_variants = json.dumps(
         dict(sorted(state.server_opcode_77_by_variant.items()))
     )
@@ -9095,6 +9164,15 @@ def render_gameplay_analysis(
             f"enabled_bits:{state.local_temporary_stat_enabled_bits} "
             f"mask_patterns:{local_temporary_stat_mask_patterns} "
             f"opaque_bytes:{state.local_temporary_stat_opaque_bytes}"
+        ),
+        (
+            "server_opcode_49="
+            f"packets:{state.server_opcode_49_packets} "
+            f"variants:{server_opcode_49_variants} "
+            f"shapes:{server_opcode_49_shapes} "
+            f"text_fields:{state.server_opcode_49_text_fields} "
+            f"text_code_units:{state.server_opcode_49_text_code_units} "
+            f"opaque_bytes:{state.server_opcode_49_opaque_bytes}"
         ),
         (
             "server_opcode_77="
