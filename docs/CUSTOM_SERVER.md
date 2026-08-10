@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 209 tests.
+The last run passed all 211 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,545 observations are full, 44,295 partial, 260
+`--fail-on-invalid`: 26,565 observations are full, 44,295 partial, 240
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -225,8 +225,17 @@ and re-encode exactly at full coverage. The fold exposes only selector/count/
 sentinel distributions and emits redacted structural events; it does not
 assign meanings to the u32 values or accept unobserved shapes.
 
-Together, these latest modeled families leave the long-corpus totals at 26,545
-full, 44,295 partial, 260 unknown-but-lossless, and zero invalid.
+Server opcode `224` is an exact 22-byte remote-player/mob-template value record:
+u32 player id, fixed marker `0xff`, u32 neutral value, u32 mob template, flag
+`0`/`1`, reserved u16 zero, and the same u32 value again. All 20 stream-`126`
+and nine stream-`92` packets round-trip exactly; every player is active and
+every template has an active mob at packet time. The fold aliases the player,
+reports template/value/flag distributions and active-template counts, and
+does not claim that the still-neutral value is damage.
+
+Together, these latest modeled families leave the long-corpus totals at 26,565
+full, 44,295 partial, 240 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,385 full, 21,740 partial, 82 unknown, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

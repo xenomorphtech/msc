@@ -72,6 +72,7 @@ from .packets import (
     PickupGainNotice,
     RemotePlayerEnterField,
     RemotePlayerLeaveField,
+    RemotePlayerMobValueRecord,
     ServerAttackRelay,
     ServerOpcode69Record,
     ServerOpcode93Record,
@@ -395,6 +396,14 @@ class GameplayGameState:
     remote_player_entry_opaque_bytes: int = 0
     remote_player_leaves: int = 0
     remote_player_unknown_leaves: int = 0
+    remote_player_mob_value_records: int = 0
+    remote_player_mob_values_for_known_players: int = 0
+    remote_player_mob_values_for_unknown_players: int = 0
+    remote_player_mob_values_with_active_template: int = 0
+    remote_player_mob_values_with_inactive_template: int = 0
+    remote_player_mob_values: Counter[int] = field(default_factory=Counter)
+    remote_player_mob_templates: Counter[int] = field(default_factory=Counter)
+    remote_player_mob_value_flags: Counter[int] = field(default_factory=Counter)
     life_movement_submissions: int = 0
     life_movement_submission_commands: int = 0
     life_movement_submission_commands_by_type: Counter[int] = field(
@@ -2932,6 +2941,28 @@ class GameplayAnalysis:
                 "remote_player_unknown_leaves": (
                     self.state.remote_player_unknown_leaves
                 ),
+                "remote_player_mob_values": {
+                    "packet_count": (
+                        self.state.remote_player_mob_value_records
+                    ),
+                    "known_player_count": (
+                        self.state.remote_player_mob_values_for_known_players
+                    ),
+                    "unknown_player_count": (
+                        self.state.remote_player_mob_values_for_unknown_players
+                    ),
+                    "active_template_count": (
+                        self.state.remote_player_mob_values_with_active_template
+                    ),
+                    "inactive_template_count": (
+                        self.state.remote_player_mob_values_with_inactive_template
+                    ),
+                    "values": dict(self.state.remote_player_mob_values),
+                    "mob_templates": dict(
+                        self.state.remote_player_mob_templates
+                    ),
+                    "flags": dict(self.state.remote_player_mob_value_flags),
+                },
                 "life_movement_submissions": (
                     self.state.life_movement_submissions
                 ),
@@ -6678,6 +6709,48 @@ class GameplayStateFold:
                 parsed=left,
                 details=details,
             )
+        if opcode == 224:
+            record = RemotePlayerMobValueRecord.parse(payload)
+            alias = self._alias(
+                self._player_aliases, record.object_id, "player"
+            )
+            known_player = record.object_id in self.state.observed_players
+            active_template_count = sum(
+                entity.spawn.template_id == record.mob_template_id
+                for entity in self.state.mobs.values()
+            )
+            self.state.remote_player_mob_value_records += 1
+            if known_player:
+                self.state.remote_player_mob_values_for_known_players += 1
+            else:
+                self.state.remote_player_mob_values_for_unknown_players += 1
+            if active_template_count:
+                self.state.remote_player_mob_values_with_active_template += 1
+            else:
+                self.state.remote_player_mob_values_with_inactive_template += 1
+            self.state.remote_player_mob_values[record.value] += 1
+            self.state.remote_player_mob_templates[record.mob_template_id] += 1
+            self.state.remote_player_mob_value_flags[record.flag] += 1
+            details = {
+                **record.safe_dict(),
+                "entity": alias,
+                "known_player": known_player,
+                "active_mob_template_count": active_template_count,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "remote_player_mob_value_received",
+                details=details,
+                identifiers={"object_id": record.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="remote_player_mob_value_record",
+                coverage=ShapeCoverage.FULL,
+                parsed=record,
+                details=details,
+            )
         if opcode == 217:
             broadcast = LifeMovementBroadcast.parse(payload)
             path = broadcast.movement
@@ -9690,6 +9763,20 @@ def render_gameplay_analysis(
             f"{state.remote_player_movement_commands} "
             "remote_command_types:"
             f"{remote_player_movement_command_types}"
+        ),
+        (
+            "remote_player_mob_values="
+            f"packets:{state.remote_player_mob_value_records} "
+            f"known_players:{state.remote_player_mob_values_for_known_players} "
+            f"unknown_players:{state.remote_player_mob_values_for_unknown_players} "
+            "active_templates:"
+            f"{state.remote_player_mob_values_with_active_template} "
+            "inactive_templates:"
+            f"{state.remote_player_mob_values_with_inactive_template} "
+            f"values:{dict(sorted(state.remote_player_mob_values.items()))} "
+            "mob_templates:"
+            f"{dict(sorted(state.remote_player_mob_templates.items()))} "
+            f"flags:{dict(sorted(state.remote_player_mob_value_flags.items()))}"
         ),
         (
             f"life_movement=submitted:{state.life_movement_submissions} "

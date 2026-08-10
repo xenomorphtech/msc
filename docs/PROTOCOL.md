@@ -597,6 +597,38 @@ movement made it visible again and restored `3 -> 4`. The final transcript is
 valid with zero unknown leaves. The client remained active on map `101000000`
 with no connection failures and 209/209 paired heartbeat probes.
 
+## Remote-player/mob-template value record (`224`)
+
+The pinned opcode-`224` handler reads the remote-player object id directly and
+delegates the remaining body. The two sustained gameplay references establish
+the complete 22-byte packet:
+
+```text
+uint16 opcode = 224
+uint32 object_id                    # active remote player; redacted/aliased
+uint8  marker = 0xff
+uint32 value                        # neutral role
+uint32 mob_template_id
+uint8  flag                         # observed 0 or 1
+uint16 reserved = 0
+uint32 repeated_value               # must equal value
+```
+
+Stream `126` contains 20 records and stream `92` contains nine; stream `114`
+contains none. All 29 consume and re-encode byte-for-byte. At each frame the
+object id names a remote player introduced by opcode `189`, and at least one
+currently active mob has the encoded template. The long stream uses player
+aliases for two ids and templates `130100`, `210100`, and `1110100`; stream
+`92` uses four player ids and templates `130100`/`210100`.
+
+The fold emits `remote_player_mob_value_received` with a session-local player
+alias, known-player boolean, active-template count, mob template, neutral
+value, and flag. It records unknown-player/inactive-template counters for
+future captures but both remain zero in the references. Safe output never
+contains the player id. The repeated value and remote-player/mob correlations
+are exact; they do not by themselves prove that the value is damage or justify
+a live visual/state effect claim.
+
 ## Capture-bounded selector envelope (`239`)
 
 The pinned version-300 opcode-`239` handler reads one selector byte and
@@ -2437,10 +2469,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,545
-full, 44,295 partial, 260 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,376 full, 21,740 partial,
-91 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,565
+full, 44,295 partial, 240 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,385 full, 21,740 partial,
+82 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

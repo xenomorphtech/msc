@@ -408,12 +408,12 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,545 full,
-44,295 partial, 260 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,565 full,
+44,295 partial, 240 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,376 full, 21,740 partial,
-91 unknown, and zero invalid observations; short stream `114` reaches 43 full,
+metadata. Stream `92` independently passes with 13,385 full, 21,740 partial,
+82 unknown, and zero invalid observations; short stream `114` reaches 43 full,
 20 partial, 13 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
@@ -483,6 +483,10 @@ The gameplay fold currently models these capture-backed boundaries:
   redacted counted UTF-16 name, and a losslessly retained version-specific
   body; server opcode `190` is the exact object-id removal, and the fold now
   requires movement broadcasts to reference a current-field entry,
+- server opcode `224`: exact remote-player/mob-template value record with a
+  fixed `0xff` marker, a repeated neutral u32 value, flag `0`/`1`, and zero
+  reserved u16; the fold requires no meaning for the value but correlates the
+  aliased player and active mob template,
 - server opcode `217`: structurally exact life-movement broadcast with an
   aliased object id and the same fixed-width command stream as opcode `47`,
 - server opcode `239`: capture-bounded selector envelopes for counted
@@ -1565,3 +1569,6 @@ preserve distinct Unity scan codes in this setup.
     all 62 level-1-to-10 packets, fold their redacted structural distributions,
     and preserve unobserved shapes as unknown without assigning meanings to
     their u32 values.
+52. Decode all 29 cross-corpus opcode-`224` records, prove that each references
+    an active remote player and active mob template, enforce the marker/flag/
+    reserved/repeated-value invariants, and keep the shared u32 value neutral.

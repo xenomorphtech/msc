@@ -109,6 +109,7 @@ from maple_server.packets import (  # noqa: E402
     PickupGainNotice,
     RemotePlayerEnterField,
     RemotePlayerLeaveField,
+    RemotePlayerMobValueRecord,
     ServerAttackRelay,
     ServerOpcode69Record,
     ServerOpcode93Record,
@@ -2144,6 +2145,34 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(entered, opaque_body=b"").to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "needs 8 bytes"):
             RemotePlayerEnterField.parse(bytes.fromhex("bd00010000000c0400"))
+
+    def test_remote_player_mob_value_record_round_trip(self) -> None:
+        payload = bytes.fromhex(
+            "e000cf1e0400ff0100000034fc010000000001000000"
+        )
+        record = RemotePlayerMobValueRecord(
+            object_id=270_031,
+            value=1,
+            mob_template_id=130_100,
+            flag=0,
+            repeated_value=1,
+        )
+
+        self.assertEqual(record.to_bytes(), payload)
+        self.assertEqual(RemotePlayerMobValueRecord.parse(payload), record)
+        self.assertNotIn("270031", str(record.safe_dict()))
+        self.assertTrue(record.safe_dict()["repeated_value_matches"])
+
+        with self.assertRaisesRegex(PacketShapeError, "marker must be"):
+            replace(record, marker=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "zero or one"):
+            replace(record, flag=2).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "reserved u16"):
+            replace(record, reserved_u16=1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must repeat"):
+            replace(record, repeated_value=2).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 4 bytes"):
+            RemotePlayerMobValueRecord.parse(payload[:-1])
 
     def test_neutral_server_records_round_trip_and_redact_primary_values(
         self,
@@ -4750,6 +4779,100 @@ class GameplayStateFoldTest(unittest.TestCase):
         event_kinds = [event.kind for event in analysis.events]
         self.assertEqual(event_kinds.count("remote_player_entered_field"), 3)
         self.assertEqual(event_kinds.count("remote_player_left_field"), 2)
+
+    def test_folds_remote_player_mob_value_records(self) -> None:
+        player = RemotePlayerEnterField(
+            object_id=987_654_321,
+            level=12,
+            name="CaptureName",
+            opaque_body=b"\xaa",
+        )
+        records = (
+            RemotePlayerMobValueRecord(
+                object_id=player.object_id,
+                value=11,
+                mob_template_id=210_100,
+                flag=0,
+                repeated_value=11,
+            ),
+            RemotePlayerMobValueRecord(
+                object_id=777_777_777,
+                value=10,
+                mob_template_id=210_100,
+                flag=1,
+                repeated_value=10,
+            ),
+            RemotePlayerMobValueRecord(
+                object_id=player.object_id,
+                value=1,
+                mob_template_id=999_999,
+                flag=0,
+                repeated_value=1,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                player.to_bytes(),
+                *(record.to_bytes() for record in records),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.remote_player_mob_value_records, 3)
+        self.assertEqual(
+            analysis.state.remote_player_mob_values_for_known_players, 2
+        )
+        self.assertEqual(
+            analysis.state.remote_player_mob_values_for_unknown_players, 1
+        )
+        self.assertEqual(
+            analysis.state.remote_player_mob_values_with_active_template, 2
+        )
+        self.assertEqual(
+            analysis.state.remote_player_mob_values_with_inactive_template, 1
+        )
+        self.assertEqual(
+            analysis.state.remote_player_mob_values,
+            {1: 1, 10: 1, 11: 1},
+        )
+        self.assertEqual(
+            analysis.state.remote_player_mob_templates,
+            {210_100: 2, 999_999: 1},
+        )
+        self.assertEqual(
+            analysis.state.remote_player_mob_value_flags,
+            {0: 2, 1: 1},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "remote_player_mob_value_record"
+        ]
+        self.assertEqual(len(observations), 3)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "remote_player_mob_value_received"
+                for event in analysis.events
+            ),
+            3,
+        )
+        safe = str([observation.details for observation in observations])
+        self.assertNotIn("987654321", safe)
+        self.assertNotIn("777777777", safe)
+        self.assertIn(
+            "remote_player_mob_values=packets:3 known_players:2 "
+            "unknown_players:1 active_templates:2 inactive_templates:1",
+            render_gameplay_analysis(analysis),
+        )
 
     def test_remote_player_attack_before_first_movement_has_no_position(
         self,

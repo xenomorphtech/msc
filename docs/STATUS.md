@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 209 tests.
+- The custom-server suite currently passes all 211 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,545 full, 44,295 partial, 260 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,376 full, 21,740 partial,
-  91 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
+  26,565 full, 44,295 partial, 240 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,385 full, 21,740 partial,
+  82 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `201`, and `205` are separated into neutral,
@@ -68,6 +68,12 @@
   reference a prior entry. A browser-free direct-Wayland A/B/A live test moved,
   removed, and restored the expected sprite while the folded active count
   followed `4 -> 3 -> 4` and the client remained active.
+- Server opcode `224` is now an exact 22-byte remote-player/mob-template value
+  record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
+  coverage; every primary id names an active remote player and every template
+  names at least one active mob. Marker `0xff`, flag `0`/`1`, reserved u16 zero,
+  and repeated-value equality are enforced. The player id is aliased/redacted,
+  while the value remains neutrally named pending live-effect evidence.
 - Server opcode `247` is fully decoded as a tutorial-UI instruction with
   redacted terminated UTF-16 text, two signed 16-bit values, a control byte,
   and an optional signed-32 pair confirmed by the pinned handler. All 33

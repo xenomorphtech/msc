@@ -6158,6 +6158,91 @@ class RemotePlayerLeaveField:
 
 
 @dataclass(frozen=True)
+class RemotePlayerMobValueRecord:
+    """Exact opcode-224 remote-player/mob-template value record."""
+
+    object_id: int = field(repr=False)
+    value: int
+    mob_template_id: int
+    flag: int
+    repeated_value: int
+    marker: int = 0xFF
+    reserved_u16: int = 0
+    opcode: int = 224
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "RemotePlayerMobValueRecord":
+        reader = PacketReader(
+            payload, packet_name="remote_player_mob_value_record"
+        )
+        _expect_opcode(reader, 224)
+        record = cls(
+            object_id=reader.u32("object_id"),
+            marker=reader.u8("marker"),
+            value=reader.u32("value"),
+            mob_template_id=reader.u32("mob_template_id"),
+            flag=reader.u8("flag"),
+            reserved_u16=reader.u16("reserved_u16"),
+            repeated_value=reader.u32("repeated_value"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 224:
+            raise PacketShapeError(
+                "remote-player mob-value record opcode must be 224"
+            )
+        if self.marker != 0xFF:
+            raise PacketShapeError(
+                "remote-player mob-value marker must be 0xff"
+            )
+        if self.flag not in {0, 1}:
+            raise PacketShapeError(
+                "remote-player mob-value flag must be zero or one"
+            )
+        if self.reserved_u16 != 0:
+            raise PacketShapeError(
+                "remote-player mob-value reserved u16 must be zero"
+            )
+        if self.repeated_value != self.value:
+            raise PacketShapeError(
+                "remote-player mob-value trailing value must repeat value"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "object_id_redacted": True,
+            "marker": self.marker,
+            "value": self.value,
+            "mob_template_id": self.mob_template_id,
+            "flag": self.flag,
+            "reserved_u16": self.reserved_u16,
+            "repeated_value_matches": self.repeated_value == self.value,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<HIBIIBHI",
+                self.opcode,
+                self.object_id,
+                self.marker,
+                self.value,
+                self.mob_template_id,
+                self.flag,
+                self.reserved_u16,
+                self.repeated_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player mob-value field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class TutorialUiInstruction:
     """Opcode-247 tutorial key with handler-bounded numeric controls."""
 
