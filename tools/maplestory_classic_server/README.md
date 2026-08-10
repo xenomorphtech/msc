@@ -387,13 +387,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 25,937 full,
-43,961 partial, 1,202 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,221 full,
+44,295 partial, 584 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,164 full, 21,610 partial,
-433 unknown, and zero invalid observations; short stream `114` remains 31 full,
-14 partial, 31 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,375 full, 21,740 partial,
+92 unknown, and zero invalid observations; short stream `114` reaches 43 full,
+20 partial, 13 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -453,8 +453,18 @@ The gameplay fold currently models these capture-backed boundaries:
   start/end-position trailer,
 - server opcode `202`: remote-player movement with an aliased object id, the
   same control value and command stream, and no client-only trailer,
+- server opcode `189`: remote-player entry with an aliased object id, level,
+  redacted counted UTF-16 name, and a losslessly retained version-specific
+  body; server opcode `190` is the exact object-id removal, and the fold now
+  requires movement broadcasts to reference a current-field entry,
 - server opcode `217`: structurally exact life-movement broadcast with an
   aliased object id and the same fixed-width command stream as opcode `47`,
+- server opcode `247`: a fully bounded tutorial-UI instruction containing
+  redacted terminated counted UTF-16 text, two signed 16-bit values, a control
+  byte, and a handler-confirmed optional pair of signed 32-bit values,
+- server opcodes `69`/`93`/`201`/`205`: capture-bounded neutral record
+  families; numeric fields are typed, potentially identifying primary values
+  are omitted from safe output, and fixed unknown regions remain explicit,
 - server opcodes `11`/`24`/`56`/`58`/`59`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
@@ -1480,3 +1490,12 @@ preserve distinct Unity scan codes in this setup.
     two-hit opcode-`52`, emit the predicted zero-health/leave sequence, fold
     the resulting transcript validly, and preserve active heartbeats. Retain a
     separate boundary around unresolved official ±1 HP authority adjustments.
+43. Bound neutral server opcodes `69`/`93`/`201`/`205`, consume and round-trip
+    all 145 reference packets exactly, and expose safe numeric distributions
+    without leaking their potentially identifying primary values.
+44. Model opcode-`189`/`190` remote-player entry and removal from pinned client
+    handlers, validate all 153 lifecycle packets, and live-test an exact
+    enter/move/leave/enter sequence against the rendered client.
+45. Fully decode opcode-`247` tutorial-UI instructions, round-trip all 33
+    reference packets, and verify that two exact live injections are accepted
+    without blocking the active client while leaving rendering state-gated.

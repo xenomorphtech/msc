@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 184 tests.
+- The custom-server suite currently passes all 193 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,11 +52,29 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  25,937 full, 43,961 partial, 1,202 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,164 full, 21,610 partial,
-  433 unknown, and zero invalid; stream `114` reports 31/14/31/0. Thirteen
+  26,221 full, 44,295 partial, 584 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,375 full, 21,740 partial,
+  92 unknown, and zero invalid; stream `114` reports 43/20/13/0. Thirteen
   long-corpus state-correlation warnings remain: the prior 12 plus one
   aggregate warning for six one-HP combat prediction differences.
+- Server opcodes `69`, `93`, `201`, and `205` are separated into neutral,
+  capture-bounded records. All 145 reference packets consume and round-trip
+  exactly; numeric branches add 49 full observations, while the 96 records
+  with fixed unknown regions remain partial and redact potentially identifying
+  primary values from safe state, events, reports, and HTTP-derived analysis.
+- Server opcodes `189`/`190` now establish remote-player entry/removal state.
+  All 114 entries and 39 leaves round-trip exactly, every leave matches the
+  current field epoch, and all opcode-`202`/`217` movement broadcasts now
+  reference a prior entry. A browser-free direct-Wayland A/B/A live test moved,
+  removed, and restored the expected sprite while the folded active count
+  followed `4 -> 3 -> 4` and the client remained active.
+- Server opcode `247` is fully decoded as a tutorial-UI instruction with
+  redacted terminated UTF-16 text, two signed 16-bit values, a control byte,
+  and an optional signed-32 pair confirmed by the pinned handler. All 33
+  stream-`126` packets are full-coverage exact round trips. Two exact packets
+  were accepted and folded by the active live client without blocking it; no
+  overlay appeared in samples through one second, so visual rendering remains
+  explicitly state-gated rather than inferred from packet acceptance.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,

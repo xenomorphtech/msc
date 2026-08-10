@@ -5966,6 +5966,83 @@ class RemotePlayerLeaveField:
 
 
 @dataclass(frozen=True)
+class TutorialUiInstruction:
+    """Opcode-247 tutorial key with handler-bounded numeric controls."""
+
+    text: str = field(repr=False)
+    value_1: int
+    value_2: int
+    control_value: int
+    extended_values: tuple[int, int] | None = None
+    opcode: int = 247
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "TutorialUiInstruction":
+        reader = PacketReader(payload, packet_name="tutorial_ui_instruction")
+        _expect_opcode(reader, 247)
+        text = reader.utf16_string("text", trailing_byte=True)
+        value_1 = reader.i16("value_1")
+        value_2 = reader.i16("value_2")
+        control_value = reader.u8("control_value")
+        if reader.remaining == 0:
+            extended_values = None
+        elif reader.remaining == 8:
+            extended_values = (
+                reader.i32("extended_value_1"),
+                reader.i32("extended_value_2"),
+            )
+        else:
+            raise PacketShapeError(
+                "tutorial UI instruction needs zero or eight extension bytes, "
+                f"got {reader.remaining}"
+            )
+        reader.finish()
+        return cls(
+            text=text,
+            value_1=value_1,
+            value_2=value_2,
+            control_value=control_value,
+            extended_values=extended_values,
+        )
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.text.encode("utf-16-le")) // 2
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "text_redacted": True,
+            "text_code_units": self.text_code_units,
+            "value_1": self.value_1,
+            "value_2": self.value_2,
+            "control_value": self.control_value,
+            "extended_values_present": self.extended_values is not None,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 247:
+            raise PacketShapeError("tutorial UI instruction opcode must be 247")
+        try:
+            encoded = (
+                struct.pack("<H", self.opcode)
+                + encode_utf16_string(self.text, trailing_byte=True)
+                + struct.pack(
+                    "<hhB",
+                    self.value_1,
+                    self.value_2,
+                    self.control_value,
+                )
+            )
+            if self.extended_values is not None:
+                encoded += struct.pack("<ii", *self.extended_values)
+            return encoded
+        except struct.error as error:
+            raise PacketShapeError(
+                f"tutorial UI instruction value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode69Record:
     """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
 

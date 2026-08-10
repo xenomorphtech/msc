@@ -597,6 +597,39 @@ movement made it visible again and restored `3 -> 4`. The final transcript is
 valid with zero unknown leaves. The client remained active on map `101000000`
 with no connection failures and 209/209 paired heartbeat probes.
 
+## Tutorial UI instruction (`247`)
+
+The pinned version-300 opcode-`247` handler reads a terminated counted UTF-16
+string, two signed 16-bit values, and a control byte. One control branch reads
+two additional signed 32-bit values:
+
+```text
+uint16 opcode = 247
+uint16 text_code_units
+utf16le[text_code_units] text        # retained only for re-emission
+uint8 text_terminator = 0
+int16 value_1
+int16 value_2
+uint8 control_value
+optional int32 extended_value_1
+optional int32 extended_value_2
+```
+
+Only stream `126` contains this family: 33 packets of 60 or 62 bytes, with 17
+distinct tutorial localization keys. Six strings contain 25 UTF-16 code units
+and 27 contain 26. `value_1` has distribution `100:7, 110:2, 150:23, 200:1`;
+`value_2` is always `5`, the control byte is always `1`, and none uses the
+extended branch. All 33 parse at full coverage and round-trip exactly. The fold
+emits `tutorial_ui_instruction_received` and exposes only code-unit and numeric
+distributions; text never appears in safe state, events, reports, or JSON.
+
+Two exact compact packets were injected into the live level-12 client. Both
+were accepted, independently folded at full coverage, and left the client
+active on map `101000000` with four remote players and no connection failure.
+Framebuffers sampled at 100 ms, 400 ms, and one second showed no new overlay,
+so rendering is state-gated in this client state and is not claimed. The live
+test validates packet shape, encryption/order, and non-blocking handling only.
+
 ## Fixed-width neutral server records
 
 Three independent gameplay streams share a small fixed-width server-record
@@ -2150,8 +2183,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,188
-full, 44,295 partial, 617 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,221
+full, 44,295 partial, 584 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,375 full, 21,740 partial,
 92 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

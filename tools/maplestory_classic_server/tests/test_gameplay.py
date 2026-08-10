@@ -115,6 +115,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    TutorialUiInstruction,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -1875,6 +1876,34 @@ class GameplayPacketShapeTest(unittest.TestCase):
         for opcode, expected_hex in captured.items():
             with self.subTest(opcode=opcode):
                 self.assertEqual(by_opcode[opcode].to_bytes().hex(), expected_hex)
+
+    def test_tutorial_ui_instruction_round_trip_and_redacts_text(self) -> None:
+        compact = TutorialUiInstruction(
+            text="$SCRIPTSTRING_TUTORIAL_0$",
+            value_1=150,
+            value_2=5,
+            control_value=1,
+        )
+        extended = TutorialUiInstruction(
+            text="extended",
+            value_1=-2,
+            value_2=3,
+            control_value=0,
+            extended_values=(-4, 5),
+        )
+
+        encoded = compact.to_bytes()
+        self.assertEqual(len(encoded), 60)
+        self.assertEqual(TutorialUiInstruction.parse(encoded), compact)
+        self.assertEqual(
+            TutorialUiInstruction.parse(extended.to_bytes()),
+            extended,
+        )
+        self.assertNotIn("SCRIPTSTRING", str(compact.safe_dict()))
+        self.assertEqual(compact.safe_dict()["text_code_units"], 25)
+
+        with self.assertRaisesRegex(PacketShapeError, "zero or eight"):
+            TutorialUiInstruction.parse(encoded + b"\x00")
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,
@@ -3649,6 +3678,68 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("sensitive", safe)
         self.assertIn(
             "server_opcode_49=packets:7 variants:",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_tutorial_ui_instructions_without_exposing_text(
+        self,
+    ) -> None:
+        instructions = (
+            TutorialUiInstruction(
+                text="$SCRIPTSTRING_TUTORIAL_0$",
+                value_1=150,
+                value_2=5,
+                control_value=1,
+            ),
+            TutorialUiInstruction(
+                text="$SCRIPTSTRING_TUTORIAL_10$",
+                value_1=100,
+                value_2=5,
+                control_value=0,
+                extended_values=(7, 8),
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                instruction.to_bytes() for instruction in instructions
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.tutorial_ui_instructions, 2)
+        self.assertEqual(
+            analysis.state.tutorial_ui_text_code_units,
+            {25: 1, 26: 1},
+        )
+        self.assertEqual(analysis.state.tutorial_ui_value_1, {150: 1, 100: 1})
+        self.assertEqual(analysis.state.tutorial_ui_value_2, {5: 2})
+        self.assertEqual(analysis.state.tutorial_ui_control_values, {1: 1, 0: 1})
+        self.assertEqual(analysis.state.tutorial_ui_extended_instructions, 1)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "tutorial_ui_instruction"
+        ]
+        self.assertEqual(
+            [observation.coverage.value for observation in observations],
+            ["full", "full"],
+        )
+        self.assertEqual(
+            len(
+                [
+                    event
+                    for event in analysis.events
+                    if event.kind == "tutorial_ui_instruction_received"
+                ]
+            ),
+            2,
+        )
+        self.assertNotIn("SCRIPTSTRING", str(analysis.safe_dict()))
+        self.assertIn(
+            "tutorial_ui_instructions=packets:2",
             render_gameplay_analysis(analysis),
         )
 

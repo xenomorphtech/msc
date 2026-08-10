@@ -78,6 +78,7 @@ from .packets import (
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    TutorialUiInstruction,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
     WorldSessionTermination,
@@ -685,6 +686,12 @@ class GameplayGameState:
     )
     neutral_server_typed_values: int = 0
     neutral_server_opaque_bytes: int = 0
+    tutorial_ui_instructions: int = 0
+    tutorial_ui_text_code_units: Counter[int] = field(default_factory=Counter)
+    tutorial_ui_value_1: Counter[int] = field(default_factory=Counter)
+    tutorial_ui_value_2: Counter[int] = field(default_factory=Counter)
+    tutorial_ui_control_values: Counter[int] = field(default_factory=Counter)
+    tutorial_ui_extended_instructions: int = 0
     fixed_server_records: int = 0
     fixed_server_records_by_opcode: Counter[int] = field(
         default_factory=Counter
@@ -3478,6 +3485,20 @@ class GameplayAnalysis:
                     ),
                     "opaque_bytes": self.state.neutral_server_opaque_bytes,
                 },
+                "tutorial_ui_instructions": {
+                    "packet_count": self.state.tutorial_ui_instructions,
+                    "text_code_units": dict(
+                        self.state.tutorial_ui_text_code_units
+                    ),
+                    "value_1": dict(self.state.tutorial_ui_value_1),
+                    "value_2": dict(self.state.tutorial_ui_value_2),
+                    "control_values": dict(
+                        self.state.tutorial_ui_control_values
+                    ),
+                    "extended_packet_count": (
+                        self.state.tutorial_ui_extended_instructions
+                    ),
+                },
                 "fixed_server_records": (
                     self.state.fixed_server_records
                 ),
@@ -5919,6 +5940,35 @@ class GameplayStateFold:
                     else ShapeCoverage.PARTIAL
                 ),
                 parsed=variable_record,
+                details=details,
+            )
+        if opcode == 247:
+            instruction = TutorialUiInstruction.parse(payload)
+            details = {
+                **instruction.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self.state.tutorial_ui_instructions += 1
+            self.state.tutorial_ui_text_code_units[
+                instruction.text_code_units
+            ] += 1
+            self.state.tutorial_ui_value_1[instruction.value_1] += 1
+            self.state.tutorial_ui_value_2[instruction.value_2] += 1
+            self.state.tutorial_ui_control_values[
+                instruction.control_value
+            ] += 1
+            if instruction.extended_values is not None:
+                self.state.tutorial_ui_extended_instructions += 1
+            self._event(
+                frame,
+                "tutorial_ui_instruction_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="tutorial_ui_instruction",
+                coverage=ShapeCoverage.FULL,
+                parsed=instruction,
                 details=details,
             )
         if opcode in {69, 93, 201, 205}:
@@ -9027,6 +9077,18 @@ def render_gameplay_analysis(
     neutral_server_record_opcodes = json.dumps(
         dict(sorted(state.neutral_server_records_by_opcode.items()))
     )
+    tutorial_ui_text_code_units = json.dumps(
+        dict(sorted(state.tutorial_ui_text_code_units.items()))
+    )
+    tutorial_ui_value_1 = json.dumps(
+        dict(sorted(state.tutorial_ui_value_1.items()))
+    )
+    tutorial_ui_value_2 = json.dumps(
+        dict(sorted(state.tutorial_ui_value_2.items()))
+    )
+    tutorial_ui_control_values = json.dumps(
+        dict(sorted(state.tutorial_ui_control_values.items()))
+    )
     player_stat_masks = json.dumps(
         {
             f"0x{mask:08x}": count
@@ -9431,6 +9493,15 @@ def render_gameplay_analysis(
             f"opcodes:{neutral_server_record_opcodes} "
             f"typed_values:{state.neutral_server_typed_values} "
             f"opaque_bytes:{state.neutral_server_opaque_bytes}"
+        ),
+        (
+            "tutorial_ui_instructions="
+            f"packets:{state.tutorial_ui_instructions} "
+            f"text_code_units:{tutorial_ui_text_code_units} "
+            f"value_1:{tutorial_ui_value_1} "
+            f"value_2:{tutorial_ui_value_2} "
+            f"controls:{tutorial_ui_control_values} "
+            f"extended:{state.tutorial_ui_extended_instructions}"
         ),
         (
             f"client_opcode_217=packets:{state.client_opcode_217_packets} "
