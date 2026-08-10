@@ -408,8 +408,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,483 full,
-44,295 partial, 322 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,545 full,
+44,295 partial, 260 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,376 full, 21,740 partial,
@@ -457,6 +457,11 @@ The gameplay fold currently models these capture-backed boundaries:
   envelopes whose bodies remain opaque and are omitted from safe reports,
 - client opcode `101`: exact 11-byte five-value record whose numeric widths and
   distributions are typed while all field roles remain neutral,
+- client opcode `122`: capture-bounded selector envelopes containing two to
+  four redacted u32 values; selectors `1`/`2` have short and long forms,
+  selectors `4`/`5` have one form, selector `2` requires terminal
+  `0xffffffff`, and every unobserved selector/count combination remains
+  unknown,
 - client opcodes `50`/`52`: capture-bounded attack-action envelopes with exact
   variant/suffix lengths, redacted client tokens, and an aliased mob target in
   extended variants, plus typed per-hit damage words between bounded opaque
@@ -1556,3 +1561,7 @@ preserve distinct Unity scan codes in this setup.
 50. Bound observed opcode-`348` selectors `0`/`3`/`6`/`17`, round-trip all 31
     level-1-to-10 packets, emit identifier-safe structural events, and keep
     the primary values and UTF-16 strings out of reports and HTTP state.
+51. Bound all six observed client opcode-`122` selector/count shapes, round-trip
+    all 62 level-1-to-10 packets, fold their redacted structural distributions,
+    and preserve unobserved shapes as unknown without assigning meanings to
+    their u32 values.

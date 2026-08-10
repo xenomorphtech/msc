@@ -17,6 +17,7 @@ from .packets import (
     CharacterStatUpdate,
     ClientAttackAction,
     ClientOpcode101Record,
+    ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
@@ -687,6 +688,10 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_13_opaque_bytes: int = 0
+    client_opcode_122_packets: int = 0
+    client_opcode_122_selectors: Counter[int] = field(default_factory=Counter)
+    client_opcode_122_shapes: Counter[str] = field(default_factory=Counter)
+    client_opcode_122_terminal_sentinels: int = 0
     client_opcode_217_packets: int = 0
     client_opcode_217_compact_packets: int = 0
     client_opcode_217_record_sets: int = 0
@@ -3534,6 +3539,14 @@ class GameplayAnalysis:
                 "client_opcode_13_opaque_bytes": (
                     self.state.client_opcode_13_opaque_bytes
                 ),
+                "client_opcode_122": {
+                    "packet_count": self.state.client_opcode_122_packets,
+                    "selectors": dict(self.state.client_opcode_122_selectors),
+                    "shapes": dict(self.state.client_opcode_122_shapes),
+                    "terminal_sentinel_count": (
+                        self.state.client_opcode_122_terminal_sentinels
+                    ),
+                },
                 "client_opcode_217_packets": (
                     self.state.client_opcode_217_packets
                 ),
@@ -4734,6 +4747,29 @@ class GameplayStateFold:
                 parsed=message,
                 details=details,
                 issues=("client opcode-13 payload remains opaque",),
+            )
+        if opcode == 122 and ClientOpcode122Envelope.is_captured_shape(payload):
+            envelope = ClientOpcode122Envelope.parse(payload)
+            self.state.client_opcode_122_packets += 1
+            self.state.client_opcode_122_selectors[envelope.selector] += 1
+            self.state.client_opcode_122_shapes[envelope.shape] += 1
+            if envelope.terminal_sentinel_present:
+                self.state.client_opcode_122_terminal_sentinels += 1
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_122_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_122_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=envelope,
+                details=details,
             )
         if opcode == 217:
             record_set = ClientOpcode217RecordSet.parse(payload)
@@ -9914,6 +9950,13 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
             "control_pairs:"
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
+        ),
+        (
+            f"client_opcode_122=packets:{state.client_opcode_122_packets} "
+            f"selectors:{dict(sorted(state.client_opcode_122_selectors.items()))} "
+            f"shapes:{dict(sorted(state.client_opcode_122_shapes.items()))} "
+            "terminal_sentinels:"
+            f"{state.client_opcode_122_terminal_sentinels}"
         ),
         (
             f"client_opcode_217=packets:{state.client_opcode_217_packets} "

@@ -4867,6 +4867,120 @@ class ClientOpcode101Record:
 
 
 @dataclass(frozen=True)
+class ClientOpcode122Envelope:
+    """Capture-bounded selector/word variants of client opcode 122."""
+
+    selector: int
+    opaque_values: tuple[int, ...] = field(default=(), repr=False)
+    opcode: int = 122
+
+    _CAPTURED_VALUE_COUNTS = {
+        1: frozenset({2, 3}),
+        2: frozenset({3, 4}),
+        4: frozenset({3}),
+        5: frozenset({3}),
+    }
+    _TERMINAL_SENTINEL_SELECTOR = 2
+    _TERMINAL_SENTINEL = 0xFFFF_FFFF
+
+    @classmethod
+    def is_captured_shape(cls, payload: bytes) -> bool:
+        if len(payload) < 3 or len(payload) % 4 != 3:
+            return False
+        opcode, selector = struct.unpack_from("<HB", payload)
+        if opcode != 122:
+            return False
+        value_count = (len(payload) - 3) // 4
+        return value_count in cls._CAPTURED_VALUE_COUNTS.get(
+            selector, frozenset()
+        )
+
+    @property
+    def value_count(self) -> int:
+        return len(self.opaque_values)
+
+    @property
+    def terminal_sentinel_present(self) -> bool:
+        return (
+            self.selector == self._TERMINAL_SENTINEL_SELECTOR
+            and bool(self.opaque_values)
+            and self.opaque_values[-1] == self._TERMINAL_SENTINEL
+        )
+
+    @property
+    def shape(self) -> str:
+        return f"selector={self.selector}:values={self.value_count}"
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode122Envelope":
+        reader = PacketReader(payload, packet_name="client_opcode_122_envelope")
+        _expect_opcode(reader, 122)
+        selector = reader.u8("selector")
+        if reader.remaining % 4:
+            raise PacketShapeError(
+                "client opcode-122 body must contain complete u32 values"
+            )
+        value_count = reader.remaining // 4
+        captured_counts = cls._CAPTURED_VALUE_COUNTS.get(selector)
+        if captured_counts is None or value_count not in captured_counts:
+            raise PacketShapeError(
+                "client opcode-122 selector/value count is not a captured "
+                f"shape: selector {selector}, values {value_count}"
+            )
+        values = tuple(
+            reader.u32(f"opaque_values[{index}]")
+            for index in range(value_count)
+        )
+        reader.finish()
+        envelope = cls(selector=selector, opaque_values=values)
+        if (
+            selector == cls._TERMINAL_SENTINEL_SELECTOR
+            and not envelope.terminal_sentinel_present
+        ):
+            raise PacketShapeError(
+                "client opcode-122 selector 2 requires terminal 0xffffffff"
+            )
+        return envelope
+
+    def safe_dict(self) -> dict[str, int | bool | str]:
+        return {
+            "selector": self.selector,
+            "value_count": self.value_count,
+            "shape": self.shape,
+            "values_redacted": bool(self.opaque_values),
+            "terminal_sentinel_present": self.terminal_sentinel_present,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 122:
+            raise PacketShapeError("client opcode-122 envelope opcode must be 122")
+        captured_counts = self._CAPTURED_VALUE_COUNTS.get(self.selector)
+        if captured_counts is None or self.value_count not in captured_counts:
+            raise PacketShapeError(
+                "client opcode-122 selector/value count is not a captured "
+                f"shape: selector {self.selector}, values {self.value_count}"
+            )
+        if (
+            self.selector == self._TERMINAL_SENTINEL_SELECTOR
+            and not self.terminal_sentinel_present
+        ):
+            raise PacketShapeError(
+                "client opcode-122 selector 2 requires terminal 0xffffffff"
+            )
+        try:
+            return struct.pack(
+                f"<HB{self.value_count}I",
+                self.opcode,
+                self.selector,
+                *self.opaque_values,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-122 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ClientOpcode217RecordSet:
     opaque_prefix: bytes
     record_format: int | None = None

@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 207 tests.
+The last run passed all 209 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,483 observations are full, 44,295 partial, 322
+`--fail-on-invalid`: 26,545 observations are full, 44,295 partial, 260
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -217,8 +217,16 @@ primary values plus all string contents. No `111.pcapng` gameplay stream
 contains this opcode, unobserved handler selectors remain unknown, and no live
 effect is claimed because the fresh muted client reached only world selection.
 
-Together, these latest modeled families leave the long-corpus totals at 26,483
-full, 44,295 partial, 322 unknown-but-lossless, and zero invalid.
+Client opcode `122` is now a capture-bounded redacted selector envelope.
+Stream `126` contains 62 packets across six selector/count shapes: selector
+`1` carries two or three u32 values, selector `2` carries three or four and
+always ends in `0xffffffff`, and selectors `4`/`5` carry three. All 62 consume
+and re-encode exactly at full coverage. The fold exposes only selector/count/
+sentinel distributions and emits redacted structural events; it does not
+assign meanings to the u32 values or accept unobserved shapes.
+
+Together, these latest modeled families leave the long-corpus totals at 26,545
+full, 44,295 partial, 260 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

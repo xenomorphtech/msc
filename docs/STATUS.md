@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 207 tests.
+- The custom-server suite currently passes all 209 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,483 full, 44,295 partial, 322 unknown-but-lossless, and zero invalid
+  26,545 full, 44,295 partial, 260 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,376 full, 21,740 partial,
   91 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
@@ -118,6 +118,12 @@
   and text, future selectors stay unknown, and no live effect is claimed: the
   newly launched browser-free, programmatically muted client validly reached
   world selection but not a held-open world connection for injection.
+- Client opcode `122` now has full structural coverage for all 62 stream-`126`
+  packets. The six observed selector/count shapes contain two to four u32
+  values; selector `2` always ends in `0xffffffff`. Every packet round-trips
+  byte-for-byte and folds into selector/shape counters plus one redacted event.
+  The values remain available only to the lossless packet object, never safe
+  state/events/reports/HTTP, and unobserved selector/count shapes stay unknown.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,

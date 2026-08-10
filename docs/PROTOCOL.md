@@ -2123,6 +2123,40 @@ one second later. Those negative correlations are insufficient to identify an
 attack or any other effect. The custom server therefore validates this family
 but does not generate or replay it.
 
+## Client opcode `122` selector envelopes
+
+The long gameplay corpus establishes six exact client-to-server shapes:
+
+```text
+uint16 opcode = 122
+uint8  selector
+repeat captured_value_count(selector, packet_length):
+  uint32 opaque_value               # redacted from safe output
+```
+
+The capture-bounded selector/count matrix is:
+
+```text
+selector  u32 values  packets  additional invariant
+1         2           2        none
+1         3          26        none
+2         3           1        final value = 0xffffffff
+2         4          25        final value = 0xffffffff
+4         3           6        none
+5         3           2        none
+```
+
+All 62 stream-`126` packets consume exactly and re-encode byte-for-byte. No
+opcode-`122` packet occurs in gameplay streams `92` or `114`. Selector `1` and
+selector `2` frequently appear as a pair with the same first value, and the
+remaining words include coordinate-like packed values, but those correlations
+do not establish field roles or a safe replay effect. The codec therefore
+retains every u32 only for lossless re-emission while reports, events, JSON,
+and HTTP-derived state expose selector, value count, shape, and terminal-
+sentinel presence. The fold emits `client_opcode_122_submitted`; any selector/
+count combination outside the matrix remains unknown instead of being parsed
+through an observed variant.
+
 ## Empty notification/acknowledgement (`server 426`, `client 309`)
 
 This family is exactly two opcode-only packets:
@@ -2403,8 +2437,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,483
-full, 44,295 partial, 322 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,545
+full, 44,295 partial, 260 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,376 full, 21,740 partial,
 91 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

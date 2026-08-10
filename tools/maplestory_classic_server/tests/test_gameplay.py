@@ -46,6 +46,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAttackAction,
     ClientOpcode101Record,
+    ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
@@ -1981,6 +1982,47 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(empty_9, records=record_set.records).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "requires text"):
             ServerOpcode239Envelope(selector=21).to_bytes()
+
+    def test_client_opcode_122_captured_variants_round_trip(self) -> None:
+        payloads = (
+            bytes.fromhex("7a00015408000041bf0f00"),
+            bytes.fromhex("7a0001070400003508000043ffe501"),
+            bytes.fromhex("7a00025408000041bf0f00ffffffff"),
+            bytes.fromhex(
+                "7a000207040000340800008b036d01ffffffff"
+            ),
+            bytes.fromhex("7a000418040000507b8900a500e7ff"),
+            bytes.fromhex("7a0005cc740000685489001dfdf7f4"),
+        )
+
+        for payload in payloads:
+            self.assertTrue(ClientOpcode122Envelope.is_captured_shape(payload))
+            self.assertEqual(
+                ClientOpcode122Envelope.parse(payload).to_bytes(), payload
+            )
+        short = ClientOpcode122Envelope.parse(payloads[0])
+        self.assertEqual(short.safe_dict()["shape"], "selector=1:values=2")
+        self.assertNotIn("2132", str(short.safe_dict()))
+        terminal = ClientOpcode122Envelope.parse(payloads[2])
+        self.assertTrue(terminal.terminal_sentinel_present)
+        self.assertNotIn("4294967295", str(terminal.safe_dict()))
+
+        unsupported = struct.pack("<HB3I", 122, 3, 1, 2, 3)
+        self.assertFalse(ClientOpcode122Envelope.is_captured_shape(unsupported))
+        with self.assertRaisesRegex(PacketShapeError, "not a captured shape"):
+            ClientOpcode122Envelope.parse(unsupported)
+        with self.assertRaisesRegex(PacketShapeError, "complete u32"):
+            ClientOpcode122Envelope.parse(payloads[0] + b"\x00")
+        with self.assertRaisesRegex(PacketShapeError, "terminal 0xffffffff"):
+            ClientOpcode122Envelope(
+                selector=2,
+                opaque_values=(1, 2, 3),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            ClientOpcode122Envelope(
+                selector=1,
+                opaque_values=(1, 0x1_0000_0000),
+            ).to_bytes()
 
     def test_server_opcode_348_text_envelope_variants_round_trip(self) -> None:
         extended = ServerOpcode348TextEnvelope(
@@ -4168,6 +4210,99 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("2345678", safe)
         self.assertIn(
             "server_opcode_239=packets:4 selectors:{3: 1, 9: 1, 13: 1, 21: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_122_captured_variants(self) -> None:
+        records = (
+            ClientOpcode122Envelope(
+                selector=1,
+                opaque_values=(2_132, 1_032_001),
+            ),
+            ClientOpcode122Envelope(
+                selector=1,
+                opaque_values=(1_031, 2_101, 0x01E5_FF43),
+            ),
+            ClientOpcode122Envelope(
+                selector=2,
+                opaque_values=(2_132, 1_032_001, 0xFFFF_FFFF),
+            ),
+            ClientOpcode122Envelope(
+                selector=2,
+                opaque_values=(1_031, 2_100, 0x016D_038B, 0xFFFF_FFFF),
+            ),
+            ClientOpcode122Envelope(
+                selector=4,
+                opaque_values=(1_048, 9_010_000, 0xFFE7_00A5),
+            ),
+            ClientOpcode122Envelope(
+                selector=5,
+                opaque_values=(29_900, 9_000_040, 0xF4F7_FD1D),
+            ),
+        )
+        unsupported = struct.pack("<HB3I", 122, 3, 1, 2, 3)
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_client_plaintexts=(
+                *(record.to_bytes() for record in records),
+                unsupported,
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_opcode_122_packets, 6)
+        self.assertEqual(
+            analysis.state.client_opcode_122_selectors,
+            {1: 2, 2: 2, 4: 1, 5: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_122_shapes,
+            {
+                "selector=1:values=2": 1,
+                "selector=1:values=3": 1,
+                "selector=2:values=3": 1,
+                "selector=2:values=4": 1,
+                "selector=4:values=3": 1,
+                "selector=5:values=3": 1,
+            },
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_122_terminal_sentinels, 2
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_122_envelope"
+        ]
+        self.assertEqual(len(observations), 6)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "client_opcode_122_submitted"
+                for event in analysis.events
+            ),
+            6,
+        )
+        self.assertEqual(
+            sum(
+                observation.kind == "client_opcode_122"
+                and observation.coverage.value == "unknown"
+                for observation in analysis.observations
+            ),
+            1,
+        )
+        safe = str([observation.details for observation in observations])
+        self.assertNotIn("9010000", safe)
+        self.assertNotIn("4294967295", safe)
+        self.assertIn(
+            "client_opcode_122=packets:6 selectors:{1: 2, 2: 2, 4: 1, 5: 1}",
             render_gameplay_analysis(analysis),
         )
 
