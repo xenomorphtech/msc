@@ -1082,6 +1082,73 @@ advanced matched heartbeat probes from 11 to 18, and retained one active world
 connection with zero injection failures. This validates the bounded empty
 branch and predicted neutral fold only.
 
+## Field-bootstrap ledgers (`147`, `272`)
+
+Each opcode occurs once and byte-identically across gameplay streams `92`,
+`114`, and `126`, immediately after the initial field snapshot and the earlier
+fixed/variable bootstrap records. The generated opcode-`147` handler directly
+reads two rectangles followed by a counted integer vector:
+
+```text
+uint16 opcode = 147
+int32 rectangle_1[4]
+int32 rectangle_2[4]
+int32 value_count
+repeat value_count:
+    int32 value
+```
+
+The captured packet is exactly 94 bytes. Its rectangles are
+`(-300,-370,300,220)` and `(-300,-405,300,290)`, and `value_count` is `14`.
+The vector values remain neutrally named and are omitted from safe output.
+
+Opcode `272` delegates from its generated top-level handler. A focused live
+primitive-reader trace over the exact 1,056-byte captured plaintext supplies
+the complete nested grammar:
+
+```text
+uint16 opcode = 272
+int32 header_value
+int64 start_ticks
+int64 end_ticks
+int32 header_values[5]
+int32 entry_count
+repeat entry_count:
+    int32 selector
+    bool8 flag_1
+    bool8 flag_2
+    int32 group_1_count
+    repeat group_1_count:
+        int32 values[3]
+    int32 group_2_count
+    repeat group_2_count:
+        int32 values[3]
+int32 trailer_value
+```
+
+The reference has 11 entries, both flags false in every entry, 28 total
+group-1 triples, 43 total group-2 triples, and trailer zero. Selectors and all
+header/triple values are retained only for exact re-emission and redacted from
+safe state and events. Counts are bounded before allocation, booleans accept
+only wire values `0` and `1`, and the decoder requires exact final-cursor
+consumption.
+
+The fold emits `field_bounds_ledger_received` and
+`field_configuration_ledger_received`, records rectangle/count/group/flag and
+trailer distributions, and marks both observations full. The native manifest
+keeps the original opaque width pins as raw evidence but suppresses them when
+the matching semantic opcode/length shape is active, avoiding ambiguity. All
+six cross-corpus packets parse and re-emit exactly through both implementations.
+
+Two exact post-bootstrap opcode-`272` writes through the opt-in loopback packet
+API were accepted by the active browser-free client. The resulting transcript
+folds the original plus both injections as three full ledger events, remains
+`active` on map `101000000`, and leaves player, inventory, progression, skills,
+NPCs, and phase unchanged. Heartbeat responses continued after detach; the
+focused debugger pause accounts for the 36.6-second maximum round trip. This
+validates packet acceptance and the predicted neutral fold, not a semantic name
+for the ledger fields.
+
 ## Variable server records (`156`, `385`)
 
 Both opcodes select between a compact and expanded capture variant with the
@@ -2748,10 +2815,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,653
-full, 44,373 partial, 74 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,404 full, 21,755 partial,
-48 unknown, and zero invalid; stream `114` reaches 44/20/12/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,655
+full, 44,373 partial, 72 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,406 full, 21,755 partial,
+46 unknown, and zero invalid; stream `114` reaches 46/20/10/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

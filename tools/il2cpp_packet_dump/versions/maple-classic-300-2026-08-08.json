@@ -902,6 +902,59 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":94},{"op":"read","name":"flag","kind":"bool"},{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]
     },
     {
+      "name":"server_opcode_147_bounds_ledger","direction":"server_to_client","opcode":147,"length":94,
+      "source":"IL2CPP opcode-147 handler a1b62634... reads two Rect values, an i32 count, and repeated i32 values; all gameplay captures share the exact 14-value form",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":147},
+        {"op":"read","name":"rectangle_1_x","kind":"i32"},
+        {"op":"read","name":"rectangle_1_y","kind":"i32"},
+        {"op":"read","name":"rectangle_1_width","kind":"i32"},
+        {"op":"read","name":"rectangle_1_height","kind":"i32"},
+        {"op":"read","name":"rectangle_2_x","kind":"i32"},
+        {"op":"read","name":"rectangle_2_y","kind":"i32"},
+        {"op":"read","name":"rectangle_2_width","kind":"i32"},
+        {"op":"read","name":"rectangle_2_height","kind":"i32"},
+        {"op":"read","name":"value_count","kind":"i32"},
+        {"op":"repeat","count_from":"value_count","operations":[
+          {"op":"read","name":"value","kind":"i32"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_272_field_ledger","direction":"server_to_client","opcode":272,"length":1056,
+      "source":"live primitive-reader trace through cursor 1060 plus identical 111/1-10FS packet: i32/datetime header, counted entries, boolean flags, two counted triple groups, and i32 trailer",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":272},
+        {"op":"read","name":"header_value","kind":"i32"},
+        {"op":"read","name":"start_ticks","kind":"i64"},
+        {"op":"read","name":"end_ticks","kind":"i64"},
+        {"op":"read","name":"header_value_1","kind":"i32"},
+        {"op":"read","name":"header_value_2","kind":"i32"},
+        {"op":"read","name":"header_value_3","kind":"i32"},
+        {"op":"read","name":"header_value_4","kind":"i32"},
+        {"op":"read","name":"header_value_5","kind":"i32"},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"selector","kind":"i32"},
+          {"op":"read","name":"flag_1","kind":"bool"},
+          {"op":"read","name":"flag_2","kind":"bool"},
+          {"op":"read","name":"group_1_count","kind":"i32"},
+          {"op":"repeat","count_from":"group_1_count","operations":[
+            {"op":"read","name":"group_1_value_1","kind":"i32"},
+            {"op":"read","name":"group_1_value_2","kind":"i32"},
+            {"op":"read","name":"group_1_value_3","kind":"i32"}
+          ]},
+          {"op":"read","name":"group_2_count","kind":"i32"},
+          {"op":"repeat","count_from":"group_2_count","operations":[
+            {"op":"read","name":"group_2_value_1","kind":"i32"},
+            {"op":"read","name":"group_2_value_2","kind":"i32"},
+            {"op":"read","name":"group_2_value_3","kind":"i32"}
+          ]}
+        ]},
+        {"op":"read","name":"trailer_value","kind":"i32"}
+      ]
+    },
+    {
       "name":"server_opcode_148_envelope","direction":"server_to_client","opcode":148,
       "source":"IL2CPP opcode-148 handler acda95d7... delegates to manager c5b43350...; variants 9/10/12/13 and exact bounded branches verified across 1-10FS stream 126 and 111 stream 92",
       "operations":[

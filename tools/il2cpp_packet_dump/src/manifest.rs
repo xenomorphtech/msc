@@ -89,6 +89,13 @@ impl LoadedManifest {
                     observed.length
                 );
             }
+            if self.manifest.manual_shapes.iter().any(|shape| {
+                shape.direction == observed.direction
+                    && shape.opcode == observed.opcode
+                    && shape.length == Some(observed.length)
+            }) {
+                continue;
+            }
             shapes.push(ShapeSpec {
                 name: format!(
                     "observed_{}_opcode_{}_length_{}",

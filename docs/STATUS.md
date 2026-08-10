@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,653 full, 44,373 partial, 74 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,404 full, 21,755 partial,
-  48 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
+  26,655 full, 44,373 partial, 72 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,406 full, 21,755 partial,
+  46 unknown, and zero invalid; stream `114` reports 46/20/10/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, and `379` are
@@ -74,6 +74,20 @@
   A fresh direct-Wayland replay of empty opcode-`148` variant `10` likewise
   produced one full neutral event, left core state unchanged, advanced matched
   heartbeats from 11 to 18, and retained one active connection with no failures.
+- Server opcodes `147` and `272` now use the automatic IL2CPP packet dump as
+  their shape source rather than the older observed-opaque width pins. Opcode
+  `147` is two four-`i32` rectangles plus a counted `i32` vector. A focused
+  live primitive-reader trace closes opcode `272` as a neutral header, 11
+  counted entries with two booleans and two counted triple groups, and one
+  terminal `i32`. The three packets for each opcode are byte-identical across
+  streams `92`, `114`, and `126`; all six round-trip natively and fold at full
+  coverage with identifiers and values redacted. Two exact live opcode-`272`
+  injections were accepted; the
+  current transcript folds the original plus both injections as three full
+  events, remains `active` on map `101000000`, keeps core state unchanged, and
+  runtime status reports one active connection, zero injection failures, and
+  advancing heartbeat responses. The debugger pause accounts for the one
+  36.6-second heartbeat outlier.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

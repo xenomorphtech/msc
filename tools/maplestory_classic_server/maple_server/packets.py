@@ -7333,6 +7333,264 @@ class ServerOpcode323PositionedEffectRecord:
 
 
 @dataclass(frozen=True)
+class ServerOpcode147BoundsLedger:
+    """Handler-bounded rectangles and counted values from opcode 147."""
+
+    rectangle_1: tuple[int, int, int, int]
+    rectangle_2: tuple[int, int, int, int]
+    values: tuple[int, ...] = field(repr=False)
+    opcode: int = 147
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode147BoundsLedger":
+        reader = PacketReader(payload, packet_name="server_opcode_147")
+        _expect_opcode(reader, 147)
+        rectangle_1 = tuple(
+            reader.i32(f"rectangle_1[{index}]") for index in range(4)
+        )
+        rectangle_2 = tuple(
+            reader.i32(f"rectangle_2[{index}]") for index in range(4)
+        )
+        value_count = reader.i32("value_count")
+        if value_count < 0 or value_count > reader.remaining // 4:
+            raise PacketShapeError(
+                "server opcode-147 value count does not fit the packet: "
+                f"{value_count} with {reader.remaining} bytes remaining"
+            )
+        values = tuple(
+            reader.i32(f"values[{index}]") for index in range(value_count)
+        )
+        reader.finish()
+        return cls(
+            rectangle_1=rectangle_1,  # type: ignore[arg-type]
+            rectangle_2=rectangle_2,  # type: ignore[arg-type]
+            values=values,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "rectangles": [list(self.rectangle_1), list(self.rectangle_2)],
+            "value_count": len(self.values),
+            "values_redacted": bool(self.values),
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 147:
+            raise PacketShapeError("server opcode-147 ledger opcode must be 147")
+        if len(self.rectangle_1) != 4 or len(self.rectangle_2) != 4:
+            raise PacketShapeError(
+                "server opcode-147 rectangles must contain four i32 values"
+            )
+        if len(self.values) > 0x7FFF_FFFF:
+            raise PacketShapeError(
+                "server opcode-147 value count exceeds signed i32"
+            )
+        try:
+            prefix = struct.pack(
+                "<H8ii",
+                self.opcode,
+                *self.rectangle_1,
+                *self.rectangle_2,
+                len(self.values),
+            )
+            return prefix + struct.pack(
+                f"<{len(self.values)}i", *self.values
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-147 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode272LedgerEntry:
+    """One counted, neutral opcode-272 ledger entry."""
+
+    selector: int = field(repr=False)
+    flag_1: bool
+    flag_2: bool
+    group_1: tuple[tuple[int, int, int], ...] = field(repr=False)
+    group_2: tuple[tuple[int, int, int], ...] = field(repr=False)
+
+    @staticmethod
+    def _read_group(
+        reader: PacketReader, *, field_name: str
+    ) -> tuple[tuple[int, int, int], ...]:
+        count = reader.i32(f"{field_name}.count")
+        if count < 0 or count > reader.remaining // 12:
+            raise PacketShapeError(
+                f"server opcode-272 {field_name} count does not fit the "
+                f"packet: {count} with {reader.remaining} bytes remaining"
+            )
+        return tuple(
+            tuple(
+                reader.i32(f"{field_name}[{index}][{member}]")
+                for member in range(3)
+            )
+            for index in range(count)
+        )  # type: ignore[return-value]
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, index: int
+    ) -> "ServerOpcode272LedgerEntry":
+        selector = reader.i32(f"entries[{index}].selector")
+        flag_values = (
+            reader.u8(f"entries[{index}].flag_1"),
+            reader.u8(f"entries[{index}].flag_2"),
+        )
+        if any(value not in {0, 1} for value in flag_values):
+            raise PacketShapeError(
+                "server opcode-272 entry flags must be boolean 0 or 1: "
+                f"{flag_values[0]}/{flag_values[1]}"
+            )
+        return cls(
+            selector=selector,
+            flag_1=bool(flag_values[0]),
+            flag_2=bool(flag_values[1]),
+            group_1=cls._read_group(
+                reader, field_name=f"entries[{index}].group_1"
+            ),
+            group_2=cls._read_group(
+                reader, field_name=f"entries[{index}].group_2"
+            ),
+        )
+
+    def to_bytes(self) -> bytes:
+        if type(self.flag_1) is not bool or type(self.flag_2) is not bool:
+            raise PacketShapeError(
+                "server opcode-272 entry flags must be booleans"
+            )
+        if len(self.group_1) > 0x7FFF_FFFF or len(self.group_2) > 0x7FFF_FFFF:
+            raise PacketShapeError(
+                "server opcode-272 group count exceeds signed i32"
+            )
+        parts: list[bytes] = []
+        try:
+            parts.append(
+                struct.pack(
+                    "<i??i",
+                    self.selector,
+                    self.flag_1,
+                    self.flag_2,
+                    len(self.group_1),
+                )
+            )
+            for group in self.group_1:
+                if len(group) != 3:
+                    raise PacketShapeError(
+                        "server opcode-272 group members must contain three i32 values"
+                    )
+                parts.append(struct.pack("<3i", *group))
+            parts.append(struct.pack("<i", len(self.group_2)))
+            for group in self.group_2:
+                if len(group) != 3:
+                    raise PacketShapeError(
+                        "server opcode-272 group members must contain three i32 values"
+                    )
+                parts.append(struct.pack("<3i", *group))
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-272 entry value is out of range: {error}"
+            ) from error
+        return b"".join(parts)
+
+
+@dataclass(frozen=True)
+class ServerOpcode272Ledger:
+    """Primitive-traced, fully consumed opcode-272 field ledger."""
+
+    header_value: int = field(repr=False)
+    start_ticks: int = field(repr=False)
+    end_ticks: int = field(repr=False)
+    header_values: tuple[int, int, int, int, int] = field(repr=False)
+    entries: tuple[ServerOpcode272LedgerEntry, ...]
+    trailer_value: int
+    opcode: int = 272
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode272Ledger":
+        reader = PacketReader(payload, packet_name="server_opcode_272")
+        _expect_opcode(reader, 272)
+        header_value = reader.i32("header_value")
+        start_ticks = reader.i64("start_ticks")
+        end_ticks = reader.i64("end_ticks")
+        header_values = tuple(
+            reader.i32(f"header_values[{index}]") for index in range(5)
+        )
+        entry_count = reader.i32("entry_count")
+        if entry_count < 0 or entry_count > max(0, (reader.remaining - 4) // 14):
+            raise PacketShapeError(
+                "server opcode-272 entry count does not fit the packet: "
+                f"{entry_count} with {reader.remaining} bytes remaining"
+            )
+        entries = tuple(
+            ServerOpcode272LedgerEntry.parse_from(reader, index=index)
+            for index in range(entry_count)
+        )
+        trailer_value = reader.i32("trailer_value")
+        reader.finish()
+        return cls(
+            header_value=header_value,
+            start_ticks=start_ticks,
+            end_ticks=end_ticks,
+            header_values=header_values,  # type: ignore[arg-type]
+            entries=entries,
+            trailer_value=trailer_value,
+        )
+
+    @property
+    def group_1_count(self) -> int:
+        return sum(len(entry.group_1) for entry in self.entries)
+
+    @property
+    def group_2_count(self) -> int:
+        return sum(len(entry.group_2) for entry in self.entries)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "entry_count": len(self.entries),
+            "flag_1_true_count": sum(entry.flag_1 for entry in self.entries),
+            "flag_2_true_count": sum(entry.flag_2 for entry in self.entries),
+            "group_1_count": self.group_1_count,
+            "group_2_count": self.group_2_count,
+            "group_1_sizes": [len(entry.group_1) for entry in self.entries],
+            "group_2_sizes": [len(entry.group_2) for entry in self.entries],
+            "trailer_value": self.trailer_value,
+            "datetime_values_redacted": True,
+            "numeric_values_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 272:
+            raise PacketShapeError("server opcode-272 ledger opcode must be 272")
+        if len(self.header_values) != 5:
+            raise PacketShapeError(
+                "server opcode-272 header must contain five i32 values"
+            )
+        if len(self.entries) > 0x7FFF_FFFF:
+            raise PacketShapeError(
+                "server opcode-272 entry count exceeds signed i32"
+            )
+        try:
+            prefix = struct.pack(
+                "<Hiqq5ii",
+                self.opcode,
+                self.header_value,
+                self.start_ticks,
+                self.end_ticks,
+                *self.header_values,
+                len(self.entries),
+            )
+            trailer = struct.pack("<i", self.trailer_value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-272 value is out of range: {error}"
+            ) from error
+        return prefix + b"".join(entry.to_bytes() for entry in self.entries) + trailer
+
+
+@dataclass(frozen=True)
 class ServerOpcode348TextEnvelope:
     """Capture-bounded, identifier-safe text branches of server opcode 348."""
 

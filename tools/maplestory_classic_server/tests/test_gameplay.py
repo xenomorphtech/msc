@@ -121,12 +121,15 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
+    ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
     ServerOpcode239ValueRecord,
     ServerOpcode244DialogueInstruction,
+    ServerOpcode272Ledger,
+    ServerOpcode272LedgerEntry,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
@@ -2105,6 +2108,62 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(empty_9, records=record_set.records).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "requires text"):
             ServerOpcode239Envelope(selector=21).to_bytes()
+
+    def test_field_bootstrap_ledgers_round_trip_and_redact(self) -> None:
+        bounds = ServerOpcode147BoundsLedger(
+            rectangle_1=(-300, -370, 300, 220),
+            rectangle_2=(-300, -405, 300, 290),
+            values=(80_000_619, 80_000_645, 80_014_063),
+        )
+        ledger = ServerOpcode272Ledger(
+            header_value=987_654_321,
+            start_ticks=134_115_660_000_000_000,
+            end_ticks=134_747_711_400_000_000,
+            header_values=(4_102_002, 503_333, 66_969, 66_166, 66_167),
+            entries=(
+                ServerOpcode272LedgerEntry(
+                    selector=3_456_789,
+                    flag_1=True,
+                    flag_2=False,
+                    group_1=((10, 20, 30),),
+                    group_2=(),
+                ),
+                ServerOpcode272LedgerEntry(
+                    selector=30,
+                    flag_1=False,
+                    flag_2=True,
+                    group_1=(),
+                    group_2=((40, 50, 60), (70, 80, 90)),
+                ),
+            ),
+            trailer_value=0,
+        )
+
+        self.assertEqual(
+            ServerOpcode147BoundsLedger.parse(bounds.to_bytes()), bounds
+        )
+        self.assertEqual(ServerOpcode272Ledger.parse(ledger.to_bytes()), ledger)
+        self.assertEqual(ledger.group_1_count, 1)
+        self.assertEqual(ledger.group_2_count, 2)
+        safe = str(ledger.safe_dict())
+        self.assertNotIn("987654321", safe)
+        self.assertNotIn("3456789", safe)
+        self.assertNotIn("134115660000000000", safe)
+        self.assertTrue(ledger.safe_dict()["numeric_values_redacted"])
+
+        invalid_flag = bytearray(ledger.to_bytes())
+        invalid_flag[50] = 2
+        with self.assertRaisesRegex(PacketShapeError, "flags must be boolean"):
+            ServerOpcode272Ledger.parse(bytes(invalid_flag))
+        invalid_count = bytearray(ledger.to_bytes())
+        invalid_count[42:46] = (-1).to_bytes(4, "little", signed=True)
+        with self.assertRaisesRegex(PacketShapeError, "entry count"):
+            ServerOpcode272Ledger.parse(bytes(invalid_count))
+        with self.assertRaisesRegex(PacketShapeError, "three i32"):
+            replace(
+                ledger.entries[0],
+                group_1=((1, 2),),  # type: ignore[arg-type]
+            ).to_bytes()
 
     def test_client_opcode_43_variants_round_trip_and_redact(self) -> None:
         compact = ClientOpcode43Envelope(
@@ -4532,6 +4591,91 @@ class GameplayStateFoldTest(unittest.TestCase):
             "instructional_dialogue_requests=packets:2",
             render_gameplay_analysis(analysis),
         )
+
+    def test_folds_field_bootstrap_ledgers(self) -> None:
+        bounds = ServerOpcode147BoundsLedger(
+            rectangle_1=(-300, -370, 300, 220),
+            rectangle_2=(-300, -405, 300, 290),
+            values=(80_000_619, 80_000_645),
+        )
+        ledger = ServerOpcode272Ledger(
+            header_value=987_654_321,
+            start_ticks=134_115_660_000_000_000,
+            end_ticks=134_747_711_400_000_000,
+            header_values=(4_102_002, 503_333, 66_969, 66_166, 66_167),
+            entries=(
+                ServerOpcode272LedgerEntry(
+                    selector=10,
+                    flag_1=True,
+                    flag_2=False,
+                    group_1=((1, 2, 3),),
+                    group_2=(),
+                ),
+                ServerOpcode272LedgerEntry(
+                    selector=12,
+                    flag_1=False,
+                    flag_2=True,
+                    group_1=((4, 5, 6), (7, 8, 9)),
+                    group_2=((10, 11, 12),),
+                ),
+            ),
+            trailer_value=0,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(bounds.to_bytes(), ledger.to_bytes()),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_147_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_147_value_counts, {2: 1})
+        self.assertEqual(analysis.state.server_opcode_272_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_272_entry_counts, {2: 1})
+        self.assertEqual(analysis.state.server_opcode_272_group_1_count, 3)
+        self.assertEqual(analysis.state.server_opcode_272_group_2_count, 1)
+        self.assertEqual(analysis.state.server_opcode_272_flag_1_true_count, 1)
+        self.assertEqual(analysis.state.server_opcode_272_flag_2_true_count, 1)
+        self.assertEqual(
+            analysis.state.server_opcode_272_trailer_values, {0: 1}
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {
+                "server_opcode_147_bounds_ledger",
+                "server_opcode_272_ledger",
+            }
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "field_bounds_ledger_received"
+                for event in analysis.events
+            ),
+            1,
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "field_configuration_ledger_received"
+                for event in analysis.events
+            ),
+            1,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("987654321", safe)
+        self.assertNotIn("134115660000000000", safe)
+        report = render_gameplay_analysis(analysis)
+        self.assertIn("server_opcode_147=packets:1 value_counts:{2: 1}", report)
+        self.assertIn("server_opcode_272=packets:1 entry_counts:{2: 1}", report)
 
     def test_folds_server_opcode_239_envelope_variants(self) -> None:
         records = (

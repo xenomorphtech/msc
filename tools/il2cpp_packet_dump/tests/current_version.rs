@@ -13,10 +13,10 @@ fn manifest() -> LoadedManifest {
 }
 
 #[test]
-fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
+fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 74);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 76);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
     assert_eq!(shapes.len(), 170);
 
@@ -96,6 +96,26 @@ fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
     assert_eq!(opcode_66.opcode, 66);
     assert_eq!(opcode_66.length, None);
     assert_eq!(opcode_66.operations.len(), 3);
+
+    let opcode_147 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_147_bounds_ledger")
+        .unwrap();
+    assert_eq!(opcode_147.opcode, 147);
+    assert_eq!(opcode_147.length, Some(94));
+    assert_eq!(opcode_147.operations.len(), 11);
+
+    let opcode_272 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_272_field_ledger")
+        .unwrap();
+    assert_eq!(opcode_272.opcode, 272);
+    assert_eq!(opcode_272.length, Some(1_056));
+    assert_eq!(opcode_272.operations.len(), 12);
+    assert!(!shapes.iter().any(|shape| {
+        shape.name == "observed_server_to_client_opcode_147_length_94"
+            || shape.name == "observed_server_to_client_opcode_272_length_1056"
+    }));
 }
 
 #[test]

@@ -436,13 +436,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,653 full,
-44,373 partial, 74 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,655 full,
+44,373 partial, 72 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,404 full, 21,755 partial,
-48 unknown, and zero invalid observations; short stream `114` reaches 44 full,
-20 partial, 12 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,406 full, 21,755 partial,
+46 unknown, and zero invalid observations; short stream `114` reaches 46 full,
+20 partial, 10 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -554,6 +554,13 @@ The gameplay fold currently models these capture-backed boundaries:
   values are omitted from safe output, fixed unknown regions remain explicit, and the
   opcode-`94`/`148`/`379` layouts come directly from the generated IL2CPP read
   dump; opcode `148` retains one legacy nonempty record body as opaque,
+- server opcode `147`: two signed-`i32` rectangles followed by a counted
+  signed-`i32` vector; the fold redacts vector values while reporting the
+  rectangle and count shapes,
+- server opcode `272`: a fully consumed field-configuration ledger containing
+  a neutral header, 11 counted entries, two booleans and two counted groups of
+  signed-`i32` triples per entry, plus a terminal signed value; entry selectors
+  and triple values remain redacted,
 - server opcodes `11`/`24`/`56`/`58`/`59`/`60`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
@@ -1645,3 +1652,8 @@ preserve distinct Unity scan codes in this setup.
     An exact selector-`0` server packet from the level-1-to-10 session did not
     elicit opcode `66` from the active level-12 short-stream client and the
     world connection closed, so cross-state replay remains explicitly unsafe.
+59. Drive server opcodes `147` and `272` from the automatic IL2CPP dump plus a
+    focused live primitive-reader trace, promote all six cross-corpus packets
+    to exact full coverage, fold their redacted structural ledgers, and replay
+    opcode `272` twice through the active real client with the predicted core
+    gamestate unchanged.

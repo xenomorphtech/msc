@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,653 observations are full, 44,373 partial, 74
+`--fail-on-invalid`: 26,655 observations are full, 44,373 partial, 72
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -186,6 +186,29 @@ variant `10`. The three-byte packet folded as one full neutral event, changed
 no core gamestate, advanced matched heartbeat probes from 11 to 18, and left
 one active world connection with zero injection failures.
 
+The next finite field-bootstrap pair now comes from the automatic
+`tools/il2cpp_packet_dump` evidence instead of capture-width guesses. Opcode
+`147` reads two four-`i32` rectangles and a counted `i32` vector. The generated
+opcode-`272` handler delegates its body, so a focused live primitive-reader
+trace supplies the complete neutral grammar: an `i32`, two `i64` values, five
+more `i32` values, a counted entry list, two booleans and two counted groups of
+`i32` triples per entry, and one terminal `i32`. The packet classes parse and
+re-emit both shapes exactly; safe folds report only rectangle/count/group/flag
+distributions and redact entry selectors and vector/triple values.
+
+The three packets for each opcode are byte-identical across streams `92`,
+`114`, and `126`; all six validate through both the Python fold and the native
+generated-shape engine. The long corpus gains two full observations, reaching
+`26,655/44,373/72/0`; stream `92` reaches `13,406/21,755/46/0`, and stream
+`114` reaches `46/20/10/0`. The opt-in loopback packet route accepted the exact
+1,056-byte opcode-`272` packet twice while the browser-free client was active.
+Its independent transcript folds the captured bootstrap packet plus both live
+injections as three `field_configuration_ledger_received` events, stays active
+on map `101000000`, and leaves player, inventory, progression, skills, NPCs,
+and phase unchanged. Runtime status retains one active connection, zero
+injection failures, and advancing heartbeat responses; the GDB attach pause,
+not the packet, explains the recorded 36.6-second maximum heartbeat latency.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -268,10 +291,10 @@ capture-preexisting resets, four leave-time clears, and zero active statuses at
 the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
-Together, these latest modeled families leave the long-corpus totals at 26,653
-full, 44,373 partial, 74 unknown-but-lossless, and zero invalid. Stream `92`
-now reaches 13,404 full, 21,755 partial, 48 unknown, and zero invalid; stream
-`114` reaches 44/20/12/0.
+Together, these latest modeled families leave the long-corpus totals at 26,655
+full, 44,373 partial, 72 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,406 full, 21,755 partial, 46 unknown, and zero invalid; stream
+`114` reaches 46/20/10/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
 client has a sequence byte followed by either an opaque identifier, counted
@@ -1882,9 +1905,9 @@ Replace the remaining opaque replay portions with stateful handling:
 1. Isolate the additional client-side drop eligibility condition using the
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
-2. Type and regenerate the next finite field-bootstrap family before the NPC
-   block; preserve neutral roles until capture comparison or a controlled
-   effect supports semantic names.
+2. Continue the finite field-bootstrap pass with opcodes `27`, `28`, `142`, and
+   `425`; prefer generated reader evidence and preserve neutral roles until
+   capture comparison or a controlled effect supports semantic names.
 3. Reuse the proven typed final-field mob injection to validate the existing
    movement-acknowledgement policy through the real client.
 4. Capture a ranked or multi-character account to validate the conditional

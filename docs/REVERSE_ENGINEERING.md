@@ -277,6 +277,24 @@ map/player-state change and continued pairing heartbeats. These traces prove
 field widths, repetition counts, and complete consumption only; names remain
 neutral and no security interpretation is attached.
 
+The next generated-shape pass closed two more finite field-bootstrap records.
+Opcode `147` needs no live trace: its generated handler performs eight direct
+signed-`i32` reads for two rectangles, then an `i32` count and that many
+signed-`i32` values. Its exact 94-byte packet is byte-identical in streams
+`92`, `114`, and `126`. Opcode `272` delegates immediately, so the generated
+top-level dump supplied the handler boundary and a focused live
+primitive-reader trace supplied the body. Starting at framed cursor `6`, the
+trace consumed one `i32`, two `i64`, five `i32`, an entry count, then 11
+entries. Each entry reads an `i32` selector, two booleans, and two independently
+counted lists of three-`i32` records. One final `i32` ended exactly at framed
+cursor `1,060`, the end of the 1,056-byte plaintext plus framing cursor bias.
+Offline parse/re-emission and the native manifest consume all six cross-corpus
+packets exactly. The active client accepted the same opcode-`272` plaintext
+twice after bootstrap and continued heartbeats; the GDB pause, not packet
+processing, explains the observed 36.6-second round-trip outlier. This evidence
+establishes widths and repetition only, so selectors and values stay redacted
+and semantically neutral.
+
 The automatic `tools/il2cpp_packet_dump` output now also drives opcode `148`
 instead of leaving every occurrence as a hex prefix. Its top-level handler
 delegates to a manager parser and exposes variants `9`, `10`, `12`, and `13`.
@@ -351,10 +369,10 @@ captured boundary. Its 23-byte base and 35-byte extended forms, the three short
 opcode-`49` result variants, and all three opcode-`312` removal widths
 round-trip across stream `92`. FIFO inventory/mesos effect correlation plus
 exact drop-id removal correlation matches all 54 local pickup chains. The
-remaining useful trace target is opcode `311`, which must establish a typed
-field-drop spawn before a safe live pickup can be generated. Keep the opcode
-`185` validation token, optional proof, opcode-`49` flags, and opcode-`312`
-reason/actor roles neutral.
+opcode-`311` drop spawn is already fully typed across its animated item/mesos
+and field-load item/mesos variants; no additional primitive trace is required
+for its captured boundary. Keep the opcode `185` validation token, optional
+proof, opcode-`49` flags, and opcode-`312` reason/actor roles neutral.
 
 ## Next debugger work
 
@@ -362,11 +380,13 @@ reason/actor roles neutral.
    opcode-`4` response and name its exact fields.
 2. Trace the two opcode-`402` branches only if the capture-faithful 2.5-second
    sequence still fails to produce client opcode `5`.
-3. Trace opcode-`311` field-drop spawn to enable a controlled live pickup;
-   trace the bounded five-byte player-movement type-`3` command only if a
-   controlled effect requires its semantics. The opcode-`41` stat-delta,
-   opcode-`39` inventory-effect, opcode-`80` consumable-use, and opcode-`185`
-   pickup-request grammars are complete at their evidenced boundaries.
+3. Trace the remaining finite field-bootstrap opcodes `27`, `28`, `142`, and
+   `425`, preferring a generated direct-read ledger where available. Trace the
+   bounded five-byte player-movement type-`3` command only if a controlled
+   effect requires its semantics. The opcode-`41` stat-delta, opcode-`39`
+   inventory-effect, opcode-`80` consumable-use, opcode-`185` pickup-request,
+   and opcode-`311` drop-spawn grammars are complete at their evidenced
+   boundaries.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory
