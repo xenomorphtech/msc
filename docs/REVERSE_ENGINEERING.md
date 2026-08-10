@@ -123,6 +123,32 @@ transition therefore skips essential setup. A bounded 128-byte zero-filled
 payload is currently used to exercise the original parser safely while the
 full account schema is recovered.
 
+The successful stream-`83` reference now closes that structural gap. Its
+63-byte account response parses exactly through result, account ID, three
+flags/booleans, three UTF-16 strings, a `uint16`, three additional flag bytes,
+an `int64` timestamp, and two trailing bytes. Account strings do not consume
+the world parser's extra trailing byte. The reference opcode is `0`, while the
+local build reaches this handler with opcode `1`; replay rewrites only those
+two opcode bytes.
+
+The same reference validates the world parser without GDB: all five
+2,183-byte records consume exactly, including 60 channels apiece. Flags `1`
+and `2` render named/online tabs live. Client opcode `4` selects a world,
+server opcode `402` performs a two-packet timed transition, client opcode `5`
+selects a channel, server opcode `4` carries the character list, client opcode
+`7` selects a character, and server opcode `5` performs the handoff.
+
+The opcode-`4` handler's indirect character-data constructor matches the
+world-entry stat prefix followed by its appearance parser. Capture evidence
+then fixes the remaining control flow: two reserved `uint32` values and a byte
+count precede the records; each record has two sentinel-terminated appearance
+slot maps, seven neutral `uint32` style values, an entry byte, a ranking flag,
+and optionally four signed ranking values; a six-byte trailer follows the
+record loop. This consumes both the one-record 170-byte stream-`83` response
+and the empty 18-byte `1-10FS.pcapng` stream-`116` response exactly. Neutral
+names are retained where the handler establishes width/control flow but not
+game meaning.
+
 Focused Cpp2IL output for the world parser is stored under:
 
 ```text
@@ -139,6 +165,7 @@ gdb_patch_login_opcode1_transition.py
 gdb_patch_login_opcode2_transition.py
 gdb_dump_world_parser.py
 gdb_stage_opcode2_controller_capture.py
+gdb_trace_packet_reads.py
 ```
 
 `gdb_dump_world_parser.py` reports only structural fields and handler branches;
@@ -147,23 +174,118 @@ stalls Wine/Unity rendering even when the probe is armed after startup, so it is
 not suitable for timing-sensitive validation.
 
 `gdb_stage_opcode2_controller_capture.py` is the current non-stalling probe. It
-validates the opcode-`2` prologue, redirects it through 32 bytes of verified
-zero-filled executable padding at RVA `0x52de900`, stores the controller pointer
-in verified writable padding at RVA `0x6be5b80`, executes the exact displaced
-prologue, and returns to the original handler. Its `arm`, `status`, `restore`,
-and `dump` actions each attach only briefly. The transparent run confirmed that
-the handler is reached roughly 60–80 seconds into the current staged replay and
-that the account probe initializes an empty controller world list.
+validates the opcode-`2` and world-parser prologues, redirects both through
+separate verified zero-filled executable padding regions at RVAs `0x52de900`
+and `0x52de940`, stores controller/stream/world arguments in writable padding at
+RVA `0x6be5b80`, executes the exact displaced prologues, and returns to the
+original functions. Its `arm`, `status`, `restore`, and `dump` actions each
+attach only briefly. The transparent run confirmed that the handler and parser
+both execute and that the parsed object contains world `test` with channel
+`test-1`.
+
+Focused Cpp2IL output for controller field `+0xc8` is stored under:
+
+```text
+/home/sdancer/ms/.codex_tmp/maple_world_event_isil/IsilDump/Assembly-CSharp/
+```
+
+That field is wrapper type
+`b7915082055ad4e85ef9b377003089ac7f24de4489704b7129555d1243d4684`.
+Its `List<World>` backing field is wrapper `+0x50`, and its add method is the
+handler's call at RVA `0xa9a540`. Reading wrapper `+0x18` as a list count caused
+the earlier false zero-world result. The corrected dump reports `worlds=1`.
 
 Attaching before NGS finishes startup can still invalidate the run. Do not
 leave a breakpoint probe attached, and always restore process-local patches.
 
+`gdb_trace_packet_reads.py` traces the build's packet primitive readers by RVA.
+Its manifest-backed labels now cover all 12 readers used by this build:
+`u16=0x1cd0300`, `u8=0x1cd0530`, `bool=0x1cd0560`, `i8=0x1cd0700`,
+`i16=0x1cd0730`, `i32=0x1cd0760`, `i64=0x1cd0790`, `u64=0x1cd07c0`,
+`datetime=0x1cd09d0`, `u32=0x1cd0b00`, `utf16=0x1cd0ca0`, and
+`string=0x1cd0ce0`. Opcode filtering accepts either the cached plaintext opcode
+or the opcode at the framed buffer cursor, which avoids silently dropping the
+first targeted read.
+
+Set `MAPLE_TRACE_OPCODE` to restrict output to one plaintext opcode,
+`MAPLE_TRACE_DUMP_BYTES=0` to omit repeated packet-buffer hex, and
+`MAPLE_TRACE_STOP_CURSOR` to disable all reader breakpoints at a known final
+cursor. The compact opcode-`157` run used:
+
+```sh
+MAPLE_TRACE_OPCODE=157 \
+MAPLE_TRACE_DUMP_BYTES=0 \
+MAPLE_TRACE_STOP_CURSOR=4506
+```
+
+The stream-`114` initial field packet produced 734 reader calls and reached the
+configured final cursor, which made the trace useful as a complete structural
+read ledger rather than a truncated console dump. Use GDB non-stop mode and
+`continue -a`; set non-stop before `attach`, pass `SIGSEGV`, `SIGUSR1`, and
+`SIGUSR2` without stopping/printing, and issue `continue -a` again if attach
+left other threads stopped. Detach immediately after the targeted packet; an
+all-stop or lingering attach stalls Wine's worker/GC threads. Even the
+non-stop trace can destabilize the instrumented client after hundreds of
+breakpoints, so treat that client process as sacrificial and validate the
+recovered layout offline against the PCAP. The decoded 112-byte prefix now
+round-trips both stream `92` and stream `114`. The trace's repeated item-reader
+callers also bound five equipment groups and the use/setup/etc/cash lists; the
+two extracted inventory regions round-trip independently. The remaining
+1,422 bytes decode into counted skill, string-property, timestamp, saved-map,
+and extended-property collections plus a fixed trailer. The complete initial
+packet is now structurally bounded; semantic identification of neutral fields
+is the next boundary.
+
+The same short-lived method closed both expanded variable-server records. For
+opcode `385`, the trace read the discriminator bool at framed cursor `6`, then
+89 repetitions of `u8` and `i32`, ending exactly at framed cursor `452` for the
+448-byte plaintext. For opcode `156`, it read `u8` at cursor `6`, a five-byte
+packet UTF-16 string at cursor `7`, bool at `12`, and three `i32` values at
+`13`, `17`, and `21`, ending exactly at cursor `25` for the 21-byte plaintext.
+Offline capture decoding and exact re-emission confirm both ledgers. The live
+client then accepted exact post-bootstrap replays of both packets without a
+map/player-state change and continued pairing heartbeats. These traces prove
+field widths, repetition counts, and complete consumption only; names remain
+neutral and no security interpretation is attached.
+
+The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
+marker-`26` branch without another debugger trace. Exact offline cursor
+accounting splits its 823 bytes into the shared character prefix, a 537-byte
+nine-group inventory with five items, and a 172-byte progression. That final
+region uses the common counted skills/properties/saved-map prefix, then a
+seven-byte neutral variant header and compact trailer. Parsing and re-emitting
+that variant byte-for-byte guards against treating a shorter valid branch as
+an opaque exception or forcing the marker-`23` grammar onto it.
+
+Client opcode `80` no longer needs a debugger trace for its primitive shape.
+All 17 stream-`92` instances are exactly `u16 opcode, u32 tick, i16 Use slot,
+u32 item template` and round-trip. Their typed state correlations establish
+same-slot quantity `-1`, red-potion HP `+50`, and blue-potion MP `+80` with
+maximum capping. The live reactive test reproduced the predicted red-potion
+`2 -> 1` and HP `50 -> 100` effects. Keep the tick role and last-item
+remove-versus-zero behavior unnamed until independent evidence resolves them.
+
+Client opcode `185` also no longer needs a primitive-reader trace for its
+captured boundary. Its 23-byte base and 35-byte extended forms, the three short
+opcode-`49` result variants, and all three opcode-`312` removal widths
+round-trip across stream `92`. FIFO inventory/mesos effect correlation plus
+exact drop-id removal correlation matches all 54 local pickup chains. The
+remaining useful trace target is opcode `311`, which must establish a typed
+field-drop spawn before a safe live pickup can be generated. Keep the opcode
+`185` validation token, optional proof, opcode-`49` flags, and opcode-`312`
+reason/actor roles neutral.
+
 ## Next debugger work
 
-1. Delay the `-1` sentinel and record world/channel counts from the transparent
-   controller probe before the sentinel clears the staging list.
-2. Verify the channel row in the world-selection UI.
-3. After selecting a channel, locate and decode the character-list handler.
+1. Locate the inner character-record parser reached from the 170-byte server
+   opcode-`4` response and name its exact fields.
+2. Trace the two opcode-`402` branches only if the capture-faithful 2.5-second
+   sequence still fails to produce client opcode `5`.
+3. Trace opcode-`311` field-drop spawn to enable a controlled live pickup;
+   trace the bounded five-byte player-movement type-`3` command only if a
+   controlled effect requires its semantics. The opcode-`41` stat-delta,
+   opcode-`39` inventory-effect, opcode-`80` consumable-use, and opcode-`185`
+   pickup-request grammars are complete at their evidenced boundaries.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory

@@ -106,7 +106,10 @@ class TranscriptWriter:
         label: str,
         metadata: dict[str, object],
         max_bytes_per_direction: int = 16 * 1024 * 1024,
+        max_runtime_events: int = 16_384,
     ) -> None:
+        if max_runtime_events < 0:
+            raise ValueError("max_runtime_events cannot be negative")
         capture_directory = Path(directory)
         capture_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         safe_label = "".join(
@@ -117,6 +120,9 @@ class TranscriptWriter:
         self._file: IO[str] = self.path.open("x", encoding="ascii", buffering=1)
         self.path.chmod(0o600)
         self._max_bytes_per_direction = max_bytes_per_direction
+        self._max_runtime_events = max_runtime_events
+        self._runtime_events_written = 0
+        self._runtime_events_dropped = 0
         self._captured_bytes = {
             "client_to_server": 0,
             "server_to_client": 0,
@@ -154,6 +160,38 @@ class TranscriptWriter:
             }
         )
 
+    def runtime_event(
+        self,
+        kind: str,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        """Append one identifier-free runtime decision annotation."""
+
+        if self._closed:
+            raise RuntimeError("Cannot append to a closed transcript")
+        if not kind or not kind.replace("_", "").isalnum():
+            raise ValueError(
+                "Runtime transcript event kind must contain only letters, "
+                "digits, and underscores"
+            )
+        record: dict[str, object] = {
+            "event": "runtime_event",
+            "timestamp_ns": time.time_ns(),
+            "kind": kind,
+            "details": dict(details or {}),
+        }
+        try:
+            json.dumps(record)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"Runtime transcript event details are not JSON-safe: {error}"
+            ) from error
+        if self._runtime_events_written >= self._max_runtime_events:
+            self._runtime_events_dropped += 1
+            return
+        self._write_record(record)
+        self._runtime_events_written += 1
+
     def close(self, *, error: str | None = None) -> None:
         if self._closed:
             return
@@ -161,6 +199,8 @@ class TranscriptWriter:
             "event": "close",
             "timestamp_ns": time.time_ns(),
             "captured_bytes": self._captured_bytes,
+            "runtime_events_written": self._runtime_events_written,
+            "runtime_events_dropped": self._runtime_events_dropped,
         }
         if error:
             record["error"] = error

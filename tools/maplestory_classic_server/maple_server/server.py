@@ -3,13 +3,84 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, replace
 import functools
+from ipaddress import IPv4Address
+import json
 import os
 from pathlib import Path
 import sys
 from typing import Awaitable, Callable
 
+from .gamestate import (
+    ShapeCoverage,
+    analyze_login_transcript,
+    decode_transcript,
+    normalize_maple_transcript,
+    render_login_analysis,
+)
+from .gameplay import (
+    MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
+    MAX_PLAYER_MOB_PROXIMITY_RADIUS,
+    ItemPickupResponsePolicy,
+    ItemUseResponsePolicy,
+    MobHealthResponsePolicy,
+    MobMovementAcknowledgementPolicy,
+    MobMovementBroadcastDecisionQueue,
+    MobMovementBroadcastPlan,
+    MobMovementBroadcastScheduler,
+    MobMovementPlanningContext,
+    MobMovementRelativeDecisionPolicy,
+    PlayerMobProximityPredicate,
+    analyze_gameplay_transcript,
+    build_mob_movement_planning_context,
+    derive_item_pickup_response_policy,
+    derive_item_use_response_policy,
+    derive_mob_health_response_policy,
+    derive_mob_movement_acknowledgement_policy,
+    plan_composed_mob_movement_broadcasts,
+    plan_mob_movement_broadcast,
+    plan_current_hp_stat_update,
+    plan_final_field_drop_owner_to_player_rewrite,
+    plan_final_field_drop_position_rewrite,
+    plan_final_field_npc_state_replay,
+    plan_fixed_server_record_replay,
+    plan_field_npc_spawn_replay,
+    plan_initial_field_snapshot_replay,
+    plan_inventory_quantity_update,
+    plan_variable_server_record_replay,
+    render_gameplay_analysis,
+    world_session_termination_frame_index,
+)
+from .http_api import (
+    ServerPacketInjection,
+    ServerRuntime,
+    start_runtime_http_api,
+)
+from .live_replay import (
+    DEFAULT_PACKET_API_URL,
+    inject_current_hp_live,
+    render_current_hp_live_replay,
+)
+from .packets import (
+    ChannelTransitionResponse,
+    CharacterListEnvelope,
+    ClientAttackAction,
+    FieldDropSpawn,
+    HeartbeatProbe,
+    ItemPickupRequest,
+    ItemUseRequest,
+    MobControllerChange,
+    MobEnterField,
+    MobMovementSubmission,
+    PlayerMovementSubmission,
+    PacketShapeError,
+    VariableServerRecord,
+    WorldHandoff,
+    WorldSelection,
+)
+from .pcap import load_pcap_tcp_stream
 from .protocol import (
     ProtocolError,
     crypt_payload,
@@ -281,6 +352,33 @@ async def copy_maple_streams_with_rewrites(
     await asyncio.gather(server_to_client(), client_to_server())
 
 
+def rewrite_channel_transition_world_from_selection(
+    replies: tuple[bytes, ...], client_plaintext: bytes
+) -> tuple[bytes, ...]:
+    """Bind captured stage-1 opcode-402 replies to the live world selection."""
+
+    selection = WorldSelection.parse(client_plaintext)
+    rewritten: list[bytes] = []
+    found_stage_one = False
+    for reply in replies:
+        opcode = int.from_bytes(reply[:2], "little") if len(reply) >= 2 else None
+        if opcode != 402:
+            rewritten.append(reply)
+            continue
+        transition = ChannelTransitionResponse.parse(reply)
+        if transition.stage == 1:
+            transition = ChannelTransitionResponse(
+                stage=1, world_id=selection.world_id
+            )
+            found_stage_one = True
+        rewritten.append(transition.to_bytes())
+    if not found_stage_one:
+        raise PacketShapeError(
+            "reactive world-selection replies contain no opcode-402 stage 1"
+        )
+    return tuple(rewritten)
+
+
 async def replay_connection(
     client_reader: asyncio.StreamReader,
     client_writer: asyncio.StreamWriter,
@@ -293,31 +391,444 @@ async def replay_connection(
     hold_open_seconds: float = 0.0,
     initial_delay_seconds: float = 0.0,
     server_frame_patches: dict[int, bytes] | None = None,
+    dropped_server_frames: set[int] | None = None,
     post_transcript_server_frames: tuple[bytes, ...] = (),
+    post_transcript_start_delay_seconds: float = 0.0,
     post_transcript_frame_delay_seconds: float = 0.0,
     post_transcript_gap_delays_seconds: tuple[float, ...] = (),
     post_transcript_replies: tuple[bytes, ...] = (),
-    client_opcode_replies: dict[int, bytes] | None = None,
+    client_opcode_replies: dict[int, bytes | tuple[bytes, ...]] | None = None,
+    client_opcode_reply_delays: dict[int, tuple[float, ...]] | None = None,
+    rewrite_channel_transition_world: bool = False,
+    keep_world_open: bool = False,
+    world_heartbeat_interval_seconds: float | None = None,
+    npc_state_replay_plaintext: bytes | None = None,
+    player_stat_update_plaintext: bytes | None = None,
+    inventory_quantity_update_plaintext: bytes | None = None,
+    mob_movement_broadcast_plans: tuple[MobMovementBroadcastPlan, ...] = (),
+    mob_movement_baseline_server_frames: tuple[bytes, ...] = (),
+    mob_movement_step_delay_seconds: float | None = None,
+    mob_movement_follow_up_targets: tuple[
+        tuple[int, int, int, int], ...
+    ] = (),
+    mob_movement_follow_up_policy: (
+        MobMovementRelativeDecisionPolicy | None
+    ) = None,
+    mob_movement_policy_trigger: str = "immediate",
+    mob_movement_proximity_radius: int | None = None,
+    mob_movement_policy_cooldown_seconds: float = 0.0,
+    mob_movement_evidence_transcript: Transcript | None = None,
+    mob_movement_planning_context: MobMovementPlanningContext | None = None,
+    item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
+    item_use_response_policy: ItemUseResponsePolicy | None = None,
+    mob_movement_acknowledgement_policy: (
+        MobMovementAcknowledgementPolicy | None
+    ) = None,
+    mob_health_response_policy: MobHealthResponsePolicy | None = None,
+    runtime_protocol: dict[str, object] | None = None,
+    server_packet_injection: ServerPacketInjection | None = None,
 ) -> None:
     if hold_open_seconds < 0:
         raise ValueError("hold_open_seconds cannot be negative")
+    if (
+        world_heartbeat_interval_seconds is not None
+        and world_heartbeat_interval_seconds <= 0
+    ):
+        raise ValueError("world_heartbeat_interval_seconds must be positive")
+    if world_heartbeat_interval_seconds is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "world heartbeat probes require a positive hold_open_seconds"
+        )
+    if (
+        mob_movement_acknowledgement_policy is not None
+        and hold_open_seconds <= 0
+    ):
+        raise ValueError(
+            "reactive mob movement acknowledgements require a positive "
+            "hold_open_seconds"
+        )
+    if mob_health_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive mob-health responses require a positive "
+            "hold_open_seconds"
+        )
+    if item_use_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive item-use responses require a positive hold_open_seconds"
+        )
+    if item_pickup_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive item-pickup responses require a positive hold_open_seconds"
+        )
     if initial_delay_seconds < 0:
         raise ValueError("initial_delay_seconds cannot be negative")
+    if post_transcript_start_delay_seconds < 0:
+        raise ValueError(
+            "post_transcript_start_delay_seconds cannot be negative"
+        )
     if post_transcript_frame_delay_seconds < 0:
         raise ValueError("post_transcript_frame_delay_seconds cannot be negative")
+    if (
+        mob_movement_step_delay_seconds is not None
+        and mob_movement_step_delay_seconds < 0
+    ):
+        raise ValueError("mob_movement_step_delay_seconds cannot be negative")
+    if (
+        mob_movement_step_delay_seconds is not None
+        and not mob_movement_broadcast_plans
+    ):
+        raise ValueError(
+            "mob movement step delay requires a movement schedule"
+        )
+    if (
+        mob_movement_follow_up_targets
+        and not mob_movement_broadcast_plans
+    ):
+        raise ValueError(
+            "mob movement follow-up decisions require an initial movement "
+            "schedule"
+        )
+    if (
+        mob_movement_follow_up_policy is not None
+        and not mob_movement_broadcast_plans
+    ):
+        raise ValueError(
+            "mob movement relative policy requires an initial movement "
+            "schedule"
+        )
+    if (
+        mob_movement_follow_up_targets
+        and mob_movement_follow_up_policy is not None
+    ):
+        raise ValueError(
+            "mob movement follow-up targets conflict with a relative policy"
+        )
+    if mob_movement_policy_trigger not in {
+        "immediate",
+        "matched_heartbeat",
+        "player_proximity",
+        "served_mob_movement",
+    }:
+        raise ValueError("unknown mob movement policy trigger")
+    if (
+        mob_movement_policy_trigger != "immediate"
+        and mob_movement_follow_up_policy is None
+    ):
+        raise ValueError(
+            "event-driven movement trigger requires a relative policy"
+        )
+    if (
+        mob_movement_policy_trigger == "matched_heartbeat"
+        and world_heartbeat_interval_seconds is None
+    ):
+        raise ValueError(
+            "matched-heartbeat movement trigger requires periodic world "
+            "heartbeats"
+        )
+    if (
+        mob_movement_policy_trigger == "served_mob_movement"
+        and mob_movement_acknowledgement_policy is None
+    ):
+        raise ValueError(
+            "served-mob-movement trigger requires reactive movement "
+            "acknowledgements"
+        )
+    if (
+        mob_movement_proximity_radius is not None
+        and not (
+            1
+            <= mob_movement_proximity_radius
+            <= MAX_PLAYER_MOB_PROXIMITY_RADIUS
+        )
+    ):
+        raise ValueError("mob movement proximity radius must be in 1..4096")
+    if (
+        mob_movement_policy_trigger == "player_proximity"
+        and mob_movement_proximity_radius is None
+    ):
+        raise ValueError(
+            "player-proximity trigger requires a proximity radius"
+        )
+    if (
+        mob_movement_proximity_radius is not None
+        and mob_movement_policy_trigger != "player_proximity"
+    ):
+        raise ValueError(
+            "mob movement proximity radius requires player-proximity trigger"
+        )
+    if not 0 <= mob_movement_policy_cooldown_seconds <= 3600:
+        raise ValueError(
+            "mob movement policy cooldown must be in 0..3600 seconds"
+        )
+    if (
+        mob_movement_policy_cooldown_seconds > 0
+        and mob_movement_policy_trigger == "immediate"
+    ):
+        raise ValueError(
+            "mob movement policy cooldown requires an event-driven trigger"
+        )
+    player_proximity_predicate = (
+        PlayerMobProximityPredicate(mob_movement_proximity_radius)
+        if mob_movement_proximity_radius is not None
+        else None
+    )
     if any(delay < 0 for delay in post_transcript_gap_delays_seconds):
         raise ValueError("post_transcript_gap_delays_seconds cannot be negative")
+    if any(
+        delay < 0
+        for delays in (client_opcode_reply_delays or {}).values()
+        for delay in delays
+    ):
+        raise ValueError("client_opcode_reply_delays cannot be negative")
     if strict and client_opcode_replies:
         raise ValueError("client opcode replies require non-strict replay")
+    if (
+        mob_movement_acknowledgement_policy is not None
+        and 207 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 207 cannot use both captured and modeled replies"
+        )
+    if (
+        item_use_response_policy is not None
+        and 80 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 80 cannot use both captured and modeled replies"
+        )
+    if (
+        item_pickup_response_policy is not None
+        and 185 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 185 cannot use both captured and modeled replies"
+        )
+    if mob_health_response_policy is not None and any(
+        opcode in (client_opcode_replies or {}) for opcode in (50, 52)
+    ):
+        raise ValueError(
+            "client opcodes 50/52 cannot use both captured and modeled replies"
+        )
+    if (
+        npc_state_replay_plaintext is not None
+        and npc_state_replay_plaintext not in post_transcript_server_frames
+    ):
+        raise ValueError(
+            "npc_state_replay_plaintext must be a post-transcript server frame"
+        )
+    if (
+        player_stat_update_plaintext is not None
+        and player_stat_update_plaintext not in post_transcript_server_frames
+    ):
+        raise ValueError(
+            "player_stat_update_plaintext must be a post-transcript server frame"
+        )
+    if (
+        inventory_quantity_update_plaintext is not None
+        and inventory_quantity_update_plaintext
+        not in post_transcript_server_frames
+    ):
+        raise ValueError(
+            "inventory_quantity_update_plaintext must be a post-transcript "
+            "server frame"
+        )
+    movement_schedule = (
+        MobMovementBroadcastDecisionQueue(
+            transcript,
+            mob_movement_broadcast_plans,
+            follow_up_targets=mob_movement_follow_up_targets,
+            follow_up_policy=mob_movement_follow_up_policy,
+            evidence_transcript=mob_movement_evidence_transcript,
+            planning_context=mob_movement_planning_context,
+            baseline_server_frames=mob_movement_baseline_server_frames,
+        )
+        if (
+            mob_movement_follow_up_targets
+            or mob_movement_follow_up_policy is not None
+        )
+        else MobMovementBroadcastScheduler(
+            mob_movement_broadcast_plans,
+            baseline_server_frames=mob_movement_baseline_server_frames,
+        )
+        if mob_movement_broadcast_plans
+        else None
+    )
+    movement_plaintexts = (
+        movement_schedule.plaintexts
+        if movement_schedule is not None
+        else ()
+    )
+    movement_post_transcript_start: int | None = None
+    if movement_plaintexts:
+        movement_post_transcript_start = next(
+            (
+                start
+                for start in range(
+                    len(post_transcript_server_frames)
+                    - len(movement_plaintexts)
+                    + 1
+                )
+                if post_transcript_server_frames[
+                    start : start + len(movement_plaintexts)
+                ]
+                == movement_plaintexts
+            ),
+            None,
+        )
+        if movement_post_transcript_start is None:
+            raise ValueError(
+                "mob movement schedule must appear contiguously in the "
+                "post-transcript server frames"
+            )
     previous_timestamp_ns: int | None = None
     patched_server_events = iter(
-        patch_server_event_data(transcript, server_frame_patches or {})
+        patch_server_event_data(
+            transcript,
+            server_frame_patches or {},
+            dropped_server_frames,
+        )
     )
-    remaining_opcode_replies = dict(client_opcode_replies or {})
+    remaining_opcode_replies = {
+        opcode: (payloads if isinstance(payloads, tuple) else (payloads,))
+        for opcode, payloads in (client_opcode_replies or {}).items()
+    }
     pending_opcode_replies: list[bytes] = []
+    pending_periodic_heartbeats: deque[float] = deque()
+    heartbeat_metrics = (
+        runtime_protocol.get("world_heartbeat")
+        if runtime_protocol is not None
+        else None
+    )
+    if heartbeat_metrics is not None and not isinstance(
+        heartbeat_metrics, dict
+    ):
+        raise TypeError("runtime world_heartbeat telemetry must be a dictionary")
+    npc_state_replay_metrics = (
+        runtime_protocol.get("npc_state_replay")
+        if runtime_protocol is not None
+        else None
+    )
+    if npc_state_replay_metrics is not None and not isinstance(
+        npc_state_replay_metrics, dict
+    ):
+        raise TypeError("runtime npc_state_replay telemetry must be a dictionary")
+    player_stat_update_metrics = (
+        runtime_protocol.get("player_stat_update")
+        if runtime_protocol is not None
+        else None
+    )
+    if player_stat_update_metrics is not None and not isinstance(
+        player_stat_update_metrics, dict
+    ):
+        raise TypeError(
+            "runtime player_stat_update telemetry must be a dictionary"
+        )
+    inventory_quantity_update_metrics = (
+        runtime_protocol.get("inventory_quantity_update")
+        if runtime_protocol is not None
+        else None
+    )
+    if inventory_quantity_update_metrics is not None and not isinstance(
+        inventory_quantity_update_metrics, dict
+    ):
+        raise TypeError(
+            "runtime inventory_quantity_update telemetry must be a dictionary"
+        )
+    item_use_metrics = (
+        runtime_protocol.get("item_use_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if item_use_metrics is not None and not isinstance(item_use_metrics, dict):
+        raise TypeError("runtime item_use_responses telemetry must be a dictionary")
+    item_pickup_metrics = (
+        runtime_protocol.get("item_pickup_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if item_pickup_metrics is not None and not isinstance(
+        item_pickup_metrics, dict
+    ):
+        raise TypeError(
+            "runtime item_pickup_responses telemetry must be a dictionary"
+        )
+    mob_acknowledgement_metrics = (
+        runtime_protocol.get("mob_movement_acknowledgements")
+        if runtime_protocol is not None
+        else None
+    )
+    if mob_acknowledgement_metrics is not None and not isinstance(
+        mob_acknowledgement_metrics, dict
+    ):
+        raise TypeError(
+            "runtime mob_movement_acknowledgements telemetry must be a dictionary"
+        )
+    mob_health_metrics = (
+        runtime_protocol.get("mob_health_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if mob_health_metrics is not None and not isinstance(
+        mob_health_metrics, dict
+    ):
+        raise TypeError(
+            "runtime mob_health_responses telemetry must be a dictionary"
+        )
+    movement_broadcast_metrics = (
+        runtime_protocol.get("mob_movement_broadcast")
+        if runtime_protocol is not None
+        else None
+    )
+    if movement_broadcast_metrics is not None and not isinstance(
+        movement_broadcast_metrics, dict
+    ):
+        raise TypeError(
+            "runtime mob_movement_broadcast telemetry must be a dictionary"
+        )
+    movement_policy_trigger_metrics = (
+        movement_broadcast_metrics.get("policy_trigger")
+        if movement_broadcast_metrics is not None
+        else None
+    )
+    if movement_policy_trigger_metrics is not None and not isinstance(
+        movement_policy_trigger_metrics, dict
+    ):
+        raise TypeError(
+            "runtime movement policy trigger telemetry must be a dictionary"
+        )
+    if movement_policy_trigger_metrics is not None:
+        movement_policy_trigger_metrics["cooldown_seconds"] = (
+            mob_movement_policy_cooldown_seconds
+        )
+        movement_policy_trigger_metrics.setdefault(
+            "events_rejected_by_cooldown", 0
+        )
+        movement_policy_trigger_metrics.setdefault("last_event_outcome", None)
+        movement_policy_trigger_metrics.setdefault(
+            "last_cooldown_remaining_seconds", 0.0
+        )
+    if (
+        movement_policy_trigger_metrics is not None
+        and player_proximity_predicate is not None
+    ):
+        movement_policy_trigger_metrics["proximity"] = (
+            player_proximity_predicate.safe_dict()
+        )
+    if movement_schedule is not None and movement_broadcast_metrics is not None:
+        movement_broadcast_metrics.update(
+            movement_schedule.telemetry_dict()
+        )
     client_iv = (
         parse_handshake(transcript.server_bytes).first_iv
-        if client_opcode_replies
+        if (
+            client_opcode_replies
+            or world_heartbeat_interval_seconds is not None
+            or item_pickup_response_policy is not None
+            or item_use_response_policy is not None
+            or mob_movement_acknowledgement_policy is not None
+            or mob_health_response_policy is not None
+            or player_proximity_predicate is not None
+        )
         else None
     )
     observed = (
@@ -331,12 +842,18 @@ async def replay_connection(
                 "hold_open_seconds": hold_open_seconds,
                 "initial_delay_seconds": initial_delay_seconds,
                 "server_frame_patch_indices": sorted(server_frame_patches or {}),
+                "dropped_server_frame_indices": sorted(
+                    dropped_server_frames or set()
+                ),
                 "post_transcript_reply_lengths": [
                     len(payload) for payload in post_transcript_replies
                 ],
                 "post_transcript_server_frame_lengths": [
                     len(payload) for payload in post_transcript_server_frames
                 ],
+                "post_transcript_start_delay_seconds": (
+                    post_transcript_start_delay_seconds
+                ),
                 "post_transcript_frame_delay_seconds": (
                     post_transcript_frame_delay_seconds
                 ),
@@ -344,14 +861,76 @@ async def replay_connection(
                     post_transcript_gap_delays_seconds
                 ),
                 "client_reply_opcodes": sorted(remaining_opcode_replies),
+                "client_reply_delays": {
+                    str(opcode): list(delays)
+                    for opcode, delays in (client_opcode_reply_delays or {}).items()
+                },
+                "rewrite_channel_transition_world": (
+                    rewrite_channel_transition_world
+                ),
+                "keep_world_open": keep_world_open,
+                "world_heartbeat_interval_seconds": (
+                    world_heartbeat_interval_seconds
+                ),
+                "repeat_final_field_npc_state_update": (
+                    npc_state_replay_plaintext is not None
+                ),
+                "emit_current_hp_update": (
+                    player_stat_update_plaintext is not None
+                ),
+                "emit_inventory_quantity_update": (
+                    inventory_quantity_update_plaintext is not None
+                ),
+                "emit_mob_movement_broadcast": (
+                    bool(mob_movement_broadcast_plans)
+                ),
+                "mob_movement_step_delay_seconds": (
+                    mob_movement_step_delay_seconds
+                ),
+                "mob_movement_follow_up_targets": [
+                    {
+                        "max_steps": max_steps,
+                        "x": target_x,
+                        "y": target_y,
+                        "foothold_id": foothold_id,
+                    }
+                    for (
+                        max_steps,
+                        target_x,
+                        target_y,
+                        foothold_id,
+                    ) in mob_movement_follow_up_targets
+                ],
+                "mob_movement_relative_policy": (
+                    mob_movement_follow_up_policy.safe_dict()
+                    if mob_movement_follow_up_policy is not None
+                    else None
+                ),
+                "mob_movement_policy_trigger": mob_movement_policy_trigger,
+                "mob_movement_proximity_radius": (
+                    mob_movement_proximity_radius
+                ),
+                "mob_movement_policy_cooldown_seconds": (
+                    mob_movement_policy_cooldown_seconds
+                ),
+                "reactive_item_use_responses": (
+                    item_use_response_policy is not None
+                ),
+                "reactive_mob_movement_acknowledgements": (
+                    mob_movement_acknowledgement_policy is not None
+                ),
+                "reactive_mob_health_responses": (
+                    mob_health_response_policy is not None
+                ),
             },
         )
         if transcript_directory is not None
         else None
     )
-    error: str | None = None
+    connection_error: str | None = None
+    server_packet_injection_token: int | None = None
 
-    async def read_live_frame() -> tuple[bytes, int | None]:
+    async def read_live_frame() -> tuple[bytes, int | None, bytes]:
         nonlocal client_iv
         if client_iv is None:
             raise RuntimeError("Client cipher state is not initialized")
@@ -363,13 +942,35 @@ async def replay_connection(
             if len(plaintext) >= 2
             else None
         )
-        return frame, opcode
+        return frame, opcode, plaintext
 
     async def send_encrypted_frame(frame: bytes) -> None:
         if observed is not None:
             observed.data("server_to_client", frame)
         client_writer.write(frame)
         await client_writer.drain()
+
+    async def send_reactive_plaintexts(
+        opcode: int,
+        plaintexts: tuple[bytes, ...],
+        client_plaintext: bytes,
+    ) -> None:
+        if rewrite_channel_transition_world and opcode == 4:
+            plaintexts = rewrite_channel_transition_world_from_selection(
+                plaintexts, client_plaintext
+            )
+        delays = (client_opcode_reply_delays or {}).get(
+            opcode, (0.0,) * len(plaintexts)
+        )
+        if len(delays) != len(plaintexts):
+            raise ValueError(
+                f"client opcode {opcode} has {len(plaintexts)} replies but "
+                f"{len(delays)} delays"
+            )
+        for delay, reactive_plaintext in zip(delays, plaintexts, strict=True):
+            if delay > 0:
+                await asyncio.sleep(delay)
+            await send_server_plaintext(reactive_plaintext)
 
     try:
         if initial_delay_seconds > 0:
@@ -383,12 +984,19 @@ async def replay_connection(
             if event.direction == "client_to_server":
                 if remaining_opcode_replies:
                     while True:
-                        received, opcode = await read_live_frame()
+                        received, opcode, client_plaintext = await read_live_frame()
                         if opcode not in remaining_opcode_replies:
                             break
-                        pending_opcode_replies.append(
-                            remaining_opcode_replies.pop(opcode)
-                        )
+                        plaintexts = remaining_opcode_replies.pop(opcode)
+                        if rewrite_channel_transition_world and opcode == 4:
+                            plaintexts = (
+                                rewrite_channel_transition_world_from_selection(
+                                    plaintexts, client_plaintext
+                                )
+                            )
+                        pending_opcode_replies.extend(plaintexts)
+                elif client_iv is not None:
+                    received, _, _ = await read_live_frame()
                 elif strict:
                     received = await read_and_record_exactly(
                         client_reader, len(event.data), observed
@@ -420,10 +1028,19 @@ async def replay_connection(
             or post_transcript_replies
             or pending_opcode_replies
             or remaining_opcode_replies
+            or world_heartbeat_interval_seconds is not None
+            or item_pickup_response_policy is not None
+            or item_use_response_policy is not None
+            or mob_movement_acknowledgement_policy is not None
+            or mob_health_response_policy is not None
+            or (
+                server_packet_injection is not None
+                and server_packet_injection.enabled
+            )
         )
         if needs_server_cipher:
             server_iv, server_version_mask = post_transcript_server_cipher_state(
-                transcript
+                transcript, dropped_server_frames
             )
         else:
             server_iv, server_version_mask = b"", 0
@@ -441,147 +1058,975 @@ async def replay_connection(
             server_iv = shuffle_iv(server_iv)
             return outgoing
 
-        for index, plaintext in enumerate(
+        def apply_emitted_server_plaintext(
+            plaintext: bytes, *, confirm_movement: bool = False
+        ) -> None:
+            if item_pickup_response_policy is not None:
+                item_pickup_response_policy.apply_server_packet(plaintext)
+                if item_pickup_metrics is not None:
+                    item_pickup_metrics["state"] = (
+                        item_pickup_response_policy.safe_dict()
+                    )
+            if item_use_response_policy is not None:
+                item_use_response_policy.apply_server_packet(plaintext)
+                if item_use_metrics is not None:
+                    item_use_metrics["state"] = (
+                        item_use_response_policy.safe_dict()
+                    )
+            if mob_health_response_policy is not None:
+                mob_health_response_policy.apply_server_packet(plaintext)
+                if mob_health_metrics is not None:
+                    mob_health_metrics["state"] = (
+                        mob_health_response_policy.safe_dict()
+                    )
+            if mob_movement_acknowledgement_policy is not None:
+                mob_movement_acknowledgement_policy.apply_server_packet(
+                    plaintext
+                )
+                if mob_acknowledgement_metrics is not None:
+                    mob_acknowledgement_metrics["state"] = (
+                        mob_movement_acknowledgement_policy.safe_dict()
+                    )
+            if confirm_movement:
+                if movement_schedule is None:
+                    raise RuntimeError(
+                        "cannot confirm movement without a schedule"
+                    )
+                movement_schedule.confirm_sent(plaintext)
+                if movement_broadcast_metrics is not None:
+                    movement_broadcast_metrics.update(
+                        movement_schedule.telemetry_dict()
+                    )
+            if (
+                npc_state_replay_plaintext is not None
+                and plaintext == npc_state_replay_plaintext
+                and npc_state_replay_metrics is not None
+            ):
+                npc_state_replay_metrics["packets_sent"] = (
+                    int(npc_state_replay_metrics.get("packets_sent", 0)) + 1
+                )
+            if (
+                player_stat_update_plaintext is not None
+                and plaintext == player_stat_update_plaintext
+                and player_stat_update_metrics is not None
+            ):
+                player_stat_update_metrics["packets_sent"] = (
+                    int(player_stat_update_metrics.get("packets_sent", 0)) + 1
+                )
+            if (
+                inventory_quantity_update_plaintext is not None
+                and plaintext == inventory_quantity_update_plaintext
+                and inventory_quantity_update_metrics is not None
+            ):
+                inventory_quantity_update_metrics["packets_sent"] = (
+                    int(
+                        inventory_quantity_update_metrics.get(
+                            "packets_sent", 0
+                        )
+                    )
+                    + 1
+                )
+
+        server_plaintext_lock = asyncio.Lock()
+
+        async def send_server_plaintext(plaintext: bytes) -> None:
+            async with server_plaintext_lock:
+                await send_encrypted_frame(
+                    encrypt_next_server_frame(plaintext)
+                )
+
+        async def send_movement_follow_up_decisions(
+            *,
+            decision_limit: int | None = None,
+            delay_before_first_packet: bool = True,
+        ) -> None:
+            if not isinstance(
+                movement_schedule, MobMovementBroadcastDecisionQueue
+            ):
+                return
+            if movement_schedule.decisions_completed == 0:
+                return
+            target_decisions_completed = (
+                movement_schedule.decisions_total
+                if decision_limit is None
+                else min(
+                    movement_schedule.decisions_total,
+                    movement_schedule.decisions_completed + decision_limit,
+                )
+            )
+            packets_sent_this_call = 0
+            while (
+                not movement_schedule.complete
+                and movement_schedule.decisions_completed
+                < target_decisions_completed
+            ):
+                if movement_schedule.has_unplanned_decision:
+                    await asyncio.to_thread(
+                        movement_schedule.plan_next_decision
+                    )
+                    if movement_broadcast_metrics is not None:
+                        movement_broadcast_metrics.update(
+                            movement_schedule.telemetry_dict()
+                        )
+                    continue
+                delay_seconds = (
+                    mob_movement_step_delay_seconds
+                    if mob_movement_step_delay_seconds is not None
+                    else post_transcript_frame_delay_seconds
+                )
+                if delay_seconds > 0 and (
+                    delay_before_first_packet or packets_sent_this_call > 0
+                ):
+                    await asyncio.sleep(delay_seconds)
+                plaintext = movement_schedule.next_plaintext
+                if plaintext is None:
+                    raise RuntimeError(
+                        "incomplete movement decision queue has no next packet"
+                    )
+                await send_server_plaintext(plaintext)
+                apply_emitted_server_plaintext(
+                    plaintext, confirm_movement=True
+                )
+                packets_sent_this_call += 1
+
+        movement_policy_cooldown_until = 0.0
+
+        def record_runtime_event(
+            kind: str,
+            details: dict[str, object],
+        ) -> None:
+            if observed is not None:
+                observed.runtime_event(kind, details)
+
+        def record_movement_policy_runtime_event(
+            kind: str,
+            details: dict[str, object],
+        ) -> None:
+            record_runtime_event(
+                kind,
+                {
+                    "trigger": mob_movement_policy_trigger,
+                    **details,
+                },
+            )
+
+        async def observe_movement_policy_trigger_event() -> None:
+            nonlocal movement_policy_cooldown_until
+            now = asyncio.get_running_loop().time()
+            cooldown_remaining = max(
+                0.0, movement_policy_cooldown_until - now
+            )
+            if movement_policy_trigger_metrics is not None:
+                movement_policy_trigger_metrics["awaiting_event"] = False
+                movement_policy_trigger_metrics[
+                    "last_cooldown_remaining_seconds"
+                ] = round(cooldown_remaining, 6)
+                movement_policy_trigger_metrics[
+                    "matched_events_observed"
+                ] = int(
+                    movement_policy_trigger_metrics.get(
+                        "matched_events_observed", 0
+                    )
+                ) + 1
+            record_movement_policy_runtime_event(
+                "mob_movement_policy_trigger_observed",
+                {
+                    "cooldown_remaining_seconds": round(
+                        cooldown_remaining, 6
+                    ),
+                },
+            )
+            if not isinstance(
+                movement_schedule,
+                MobMovementBroadcastDecisionQueue,
+            ) or movement_schedule.complete:
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["awaiting_event"] = False
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "ignored_after_completion"
+                    movement_policy_trigger_metrics[
+                        "events_ignored_after_completion"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "events_ignored_after_completion", 0
+                        )
+                    ) + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_trigger_ignored",
+                    {
+                        "reason": "decision_queue_complete",
+                        "cooldown_remaining_seconds": round(
+                            cooldown_remaining, 6
+                        ),
+                    },
+                )
+                return
+            if cooldown_remaining > 0:
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["awaiting_event"] = (
+                        movement_schedule.has_unplanned_decision
+                    )
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "rejected_by_cooldown"
+                    movement_policy_trigger_metrics[
+                        "events_rejected_by_cooldown"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "events_rejected_by_cooldown", 0
+                        )
+                    ) + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_trigger_rejected",
+                    {
+                        "reason": "cooldown",
+                        "cooldown_remaining_seconds": round(
+                            cooldown_remaining, 6
+                        ),
+                    },
+                )
+                return
+            if (
+                isinstance(
+                    movement_schedule,
+                    MobMovementBroadcastDecisionQueue,
+                )
+                and not movement_schedule.complete
+            ):
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics[
+                        "decisions_started"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "decisions_started", 0
+                        )
+                    ) + 1
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "decision_started"
+                decisions_completed_before = (
+                    movement_schedule.decisions_completed
+                )
+                decision_index = movement_schedule.decisions_planned + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_decision_started",
+                    {"decision_index": decision_index},
+                )
+                await send_movement_follow_up_decisions(
+                    decision_limit=1,
+                    delay_before_first_packet=False,
+                )
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics[
+                        "decisions_completed"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "decisions_completed", 0
+                        )
+                    ) + (
+                        movement_schedule.decisions_completed
+                        - decisions_completed_before
+                    )
+                    movement_policy_trigger_metrics["awaiting_event"] = (
+                        movement_schedule.has_unplanned_decision
+                    )
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "decision_completed"
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_decision_completed",
+                    {
+                        "decision_index": decision_index,
+                        "cooldown_seconds": (
+                            mob_movement_policy_cooldown_seconds
+                        ),
+                    },
+                )
+                movement_policy_cooldown_until = (
+                    asyncio.get_running_loop().time()
+                    + mob_movement_policy_cooldown_seconds
+                )
+
+        post_transcript_plaintexts = (
             tuple(pending_opcode_replies) + post_transcript_server_frames
-        ):
+        )
+        movement_plaintext_start = (
+            len(pending_opcode_replies) + movement_post_transcript_start
+            if movement_post_transcript_start is not None
+            else None
+        )
+        if post_transcript_plaintexts and post_transcript_start_delay_seconds > 0:
+            await asyncio.sleep(post_transcript_start_delay_seconds)
+        for index, plaintext in enumerate(post_transcript_plaintexts):
             if index > 0:
                 gap_index = index - 1
                 gap_delay_seconds = (
                     post_transcript_gap_delays_seconds[gap_index]
                     if gap_index < len(post_transcript_gap_delays_seconds)
-                    else post_transcript_frame_delay_seconds
+                    else (
+                        mob_movement_step_delay_seconds
+                        if (
+                            mob_movement_step_delay_seconds is not None
+                            and movement_plaintext_start is not None
+                            and movement_plaintext_start < index
+                            < movement_plaintext_start
+                            + len(movement_plaintexts)
+                        )
+                        else post_transcript_frame_delay_seconds
+                    )
                 )
                 if gap_delay_seconds > 0:
                     await asyncio.sleep(gap_delay_seconds)
-            await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+            await send_server_plaintext(plaintext)
+            is_movement_plaintext = (
+                movement_schedule is not None
+                and movement_plaintext_start is not None
+                and movement_plaintext_start <= index
+                < movement_plaintext_start + len(movement_plaintexts)
+            )
+            apply_emitted_server_plaintext(
+                plaintext,
+                confirm_movement=is_movement_plaintext,
+            )
+            if is_movement_plaintext:
+                if mob_movement_policy_trigger == "immediate":
+                    await send_movement_follow_up_decisions()
+                elif (
+                    movement_policy_trigger_metrics is not None
+                    and isinstance(
+                        movement_schedule,
+                        MobMovementBroadcastDecisionQueue,
+                    )
+                ):
+                    movement_policy_trigger_metrics["awaiting_event"] = (
+                        movement_schedule.has_unplanned_decision
+                    )
 
         for plaintext in post_transcript_replies:
             if remaining_opcode_replies:
                 while True:
-                    _, opcode = await read_live_frame()
+                    _, opcode, client_plaintext = await read_live_frame()
                     if opcode not in remaining_opcode_replies:
                         break
-                    await send_encrypted_frame(
-                        encrypt_next_server_frame(
-                            remaining_opcode_replies.pop(opcode)
-                        )
+                    await send_reactive_plaintexts(
+                        opcode,
+                        remaining_opcode_replies.pop(opcode),
+                        client_plaintext,
                     )
             else:
-                await read_and_record_encrypted_frame(client_reader, observed)
-            await send_encrypted_frame(encrypt_next_server_frame(plaintext))
+                if client_iv is not None:
+                    await read_live_frame()
+                else:
+                    await read_and_record_encrypted_frame(client_reader, observed)
+            await send_server_plaintext(plaintext)
+
+        async def inject_server_plaintext(
+            plaintext: bytes,
+        ) -> dict[str, object]:
+            await send_server_plaintext(plaintext)
+            apply_emitted_server_plaintext(plaintext)
+            details = {
+                "opcode": int.from_bytes(plaintext[:2], "little"),
+                "plaintext_length": len(plaintext),
+            }
+            record_runtime_event("http_server_packet_injected", details)
+            return details
+
+        if server_packet_injection is not None and server_packet_injection.enabled:
+            server_packet_injection_token = server_packet_injection.register(
+                inject_server_plaintext
+            )
 
         if hold_open_seconds > 0:
-            deadline = asyncio.get_running_loop().time() + hold_open_seconds
-            while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + hold_open_seconds
+            next_heartbeat_at = (
+                loop.time() + world_heartbeat_interval_seconds
+                if world_heartbeat_interval_seconds is not None
+                else None
+            )
+            while (remaining := deadline - loop.time()) > 0:
+                now = loop.time()
+                if next_heartbeat_at is not None and now >= next_heartbeat_at:
+                    await send_server_plaintext(HeartbeatProbe().to_bytes())
+                    pending_periodic_heartbeats.append(loop.time())
+                    if heartbeat_metrics is not None:
+                        heartbeat_metrics["probes_sent"] = (
+                            int(heartbeat_metrics.get("probes_sent", 0)) + 1
+                        )
+                        heartbeat_metrics["pending"] = (
+                            int(heartbeat_metrics.get("pending", 0)) + 1
+                        )
+                    next_heartbeat_at += world_heartbeat_interval_seconds
+                    if next_heartbeat_at <= now:
+                        next_heartbeat_at = (
+                            now + world_heartbeat_interval_seconds
+                        )
+                    continue
+                timeout = remaining
+                if next_heartbeat_at is not None:
+                    timeout = min(timeout, next_heartbeat_at - now)
                 try:
-                    if remaining_opcode_replies:
-                        received, opcode = await asyncio.wait_for(
-                            read_live_frame(), timeout=remaining
+                    if client_iv is not None:
+                        received, opcode, client_plaintext = await asyncio.wait_for(
+                            read_live_frame(), timeout=timeout
                         )
                     else:
                         received = await asyncio.wait_for(
-                            client_reader.read(65536), timeout=remaining
+                            client_reader.read(65536), timeout=timeout
                         )
                         opcode = None
                         if received and observed is not None:
                             observed.data("client_to_server", received)
                 except TimeoutError:
+                    if next_heartbeat_at is not None:
+                        continue
+                    break
+                except asyncio.IncompleteReadError:
                     break
                 if not received:
                     break
+                matched_periodic_heartbeat = (
+                    opcode == 23 and bool(pending_periodic_heartbeats)
+                )
+                if matched_periodic_heartbeat:
+                    sent_at = pending_periodic_heartbeats.popleft()
+                    round_trip_ms = (loop.time() - sent_at) * 1000
+                    if heartbeat_metrics is not None:
+                        heartbeat_metrics["responses_observed"] = (
+                            int(
+                                heartbeat_metrics.get(
+                                    "responses_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                        heartbeat_metrics["pending"] = max(
+                            0,
+                            int(heartbeat_metrics.get("pending", 0)) - 1,
+                        )
+                        heartbeat_metrics["last_round_trip_ms"] = round(
+                            round_trip_ms, 3
+                        )
+                        prior_max = heartbeat_metrics.get(
+                            "max_round_trip_ms"
+                        )
+                        heartbeat_metrics["max_round_trip_ms"] = round(
+                            max(float(prior_max or 0.0), round_trip_ms), 3
+                        )
+                    if mob_movement_policy_trigger == "matched_heartbeat":
+                        await observe_movement_policy_trigger_event()
+                if (
+                    opcode == 182
+                    and player_proximity_predicate is not None
+                    and isinstance(
+                        movement_schedule,
+                        MobMovementBroadcastDecisionQueue,
+                    )
+                ):
+                    player_movement = PlayerMovementSubmission.parse(
+                        client_plaintext
+                    )
+                    qualifies = player_proximity_predicate.observe(
+                        player_x=player_movement.path_end_x,
+                        player_y=player_movement.path_end_y,
+                        mob_x=(
+                            movement_schedule.active_schedule.current_x
+                        ),
+                        mob_y=(
+                            movement_schedule.active_schedule.current_y
+                        ),
+                    )
+                    if movement_policy_trigger_metrics is not None:
+                        movement_policy_trigger_metrics["proximity"] = (
+                            player_proximity_predicate.safe_dict()
+                        )
+                    if qualifies:
+                        await observe_movement_policy_trigger_event()
+                if (
+                    opcode == 185
+                    and item_pickup_response_policy is not None
+                ):
+                    request = ItemPickupRequest.parse(client_plaintext)
+                    if item_pickup_metrics is not None:
+                        item_pickup_metrics["requests_observed"] = (
+                            int(
+                                item_pickup_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "item_pickup_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "target_active": (
+                                request.drop_object_id
+                                in item_pickup_response_policy.active_drops
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = item_pickup_response_policy.respond(
+                            request
+                        )
+                    except ValueError as error:
+                        if item_pickup_metrics is not None:
+                            item_pickup_metrics["requests_rejected"] = (
+                                int(
+                                    item_pickup_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            item_pickup_metrics["last_rejection"] = str(error)
+                            item_pickup_metrics["state"] = (
+                                item_pickup_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "item_pickup_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if item_pickup_metrics is not None:
+                        item_pickup_metrics["requests_served"] = (
+                            int(
+                                item_pickup_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        item_pickup_metrics["response_packets_sent"] = (
+                            int(
+                                item_pickup_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        item_pickup_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        item_pickup_metrics["state"] = (
+                            item_pickup_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "item_pickup_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if opcode == 80 and item_use_response_policy is not None:
+                    request = ItemUseRequest.parse(client_plaintext)
+                    if item_use_metrics is not None:
+                        item_use_metrics["requests_observed"] = (
+                            int(item_use_metrics.get("requests_observed", 0)) + 1
+                        )
+                    record_runtime_event(
+                        "item_use_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "slot_modeled": (
+                                request.slot in item_use_response_policy.use_items
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = item_use_response_policy.respond(request)
+                    except ValueError as error:
+                        if item_use_metrics is not None:
+                            item_use_metrics["requests_rejected"] = (
+                                int(item_use_metrics.get("requests_rejected", 0))
+                                + 1
+                            )
+                            item_use_metrics["last_rejection"] = str(error)
+                            item_use_metrics["state"] = (
+                                item_use_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "item_use_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_pickup_response_policy is not None:
+                            item_pickup_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if item_use_metrics is not None:
+                        item_use_metrics["requests_served"] = (
+                            int(item_use_metrics.get("requests_served", 0)) + 1
+                        )
+                        item_use_metrics["response_packets_sent"] = (
+                            int(
+                                item_use_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        item_use_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        item_use_metrics["state"] = (
+                            item_use_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "item_use_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode in {50, 52}
+                    and mob_health_response_policy is not None
+                ):
+                    attack = ClientAttackAction.parse(client_plaintext)
+                    if mob_health_metrics is not None:
+                        mob_health_metrics["requests_observed"] = (
+                            int(
+                                mob_health_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "mob_health_request_observed",
+                        {
+                            "attack_opcode": attack.opcode,
+                            "target_present": (
+                                attack.target_object_id is not None
+                            ),
+                            "damage_values": list(attack.damage_values),
+                            "high_bit_damage_entries": sum(
+                                attack.high_bit_markers
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = mob_health_response_policy.respond(
+                            attack
+                        )
+                    except ValueError as error:
+                        if mob_health_metrics is not None:
+                            mob_health_metrics["requests_rejected"] = (
+                                int(
+                                    mob_health_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            mob_health_metrics["last_rejection"] = str(error)
+                            mob_health_metrics["state"] = (
+                                mob_health_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "mob_health_request_rejected",
+                            {
+                                "attack_opcode": attack.opcode,
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if (
+                            mob_movement_acknowledgement_policy
+                            is not None
+                        ):
+                            mob_movement_acknowledgement_policy.apply_server_packet(
+                                plaintext
+                            )
+                            if mob_acknowledgement_metrics is not None:
+                                mob_acknowledgement_metrics["state"] = (
+                                    mob_movement_acknowledgement_policy.safe_dict()
+                                )
+                    if mob_health_metrics is not None:
+                        mob_health_metrics["requests_served"] = (
+                            int(
+                                mob_health_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        mob_health_metrics["response_packets_sent"] = (
+                            int(
+                                mob_health_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        mob_health_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        mob_health_metrics["state"] = (
+                            mob_health_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "mob_health_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode == 207
+                    and mob_movement_acknowledgement_policy is not None
+                ):
+                    movement = MobMovementSubmission.parse(client_plaintext)
+                    movement_path = movement.movement_path
+                    template_id = (
+                        mob_movement_acknowledgement_policy
+                        .known_mob_templates.get(movement.object_id)
+                    )
+                    movement_details: dict[str, object] = {
+                        "sequence": movement.sequence,
+                        "target_known": template_id is not None,
+                        "template_id": template_id,
+                        "control_byte_0_nonzero": bool(
+                            movement_path.opaque_control[0]
+                        ),
+                        "command_count": len(movement_path.commands),
+                        "reference_position": [
+                            movement_path.reference_x,
+                            movement_path.reference_y,
+                        ],
+                        "path_start": [
+                            movement_path.path_start_x,
+                            movement_path.path_start_y,
+                        ],
+                        "path_end": [
+                            movement_path.path_end_x,
+                            movement_path.path_end_y,
+                        ],
+                    }
+                    if mob_acknowledgement_metrics is not None:
+                        mob_acknowledgement_metrics["submissions_observed"] = (
+                            int(
+                                mob_acknowledgement_metrics.get(
+                                    "submissions_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "mob_movement_submission_observed",
+                        movement_details,
+                    )
+                    try:
+                        acknowledgement = (
+                            mob_movement_acknowledgement_policy.acknowledge(
+                                movement
+                            )
+                        )
+                    except ValueError as error:
+                        if mob_acknowledgement_metrics is not None:
+                            mob_acknowledgement_metrics[
+                                "submissions_rejected"
+                            ] = (
+                                int(
+                                    mob_acknowledgement_metrics.get(
+                                        "submissions_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            mob_acknowledgement_metrics[
+                                "last_rejection"
+                            ] = str(error)
+                            mob_acknowledgement_metrics["state"] = (
+                                mob_movement_acknowledgement_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "mob_movement_submission_rejected",
+                            {
+                                **movement_details,
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    await send_server_plaintext(acknowledgement.to_bytes())
+                    if mob_acknowledgement_metrics is not None:
+                        mob_acknowledgement_metrics["responses_sent"] = (
+                            int(
+                                mob_acknowledgement_metrics.get(
+                                    "responses_sent", 0
+                                )
+                            )
+                            + 1
+                        )
+                        mob_acknowledgement_metrics["last_response"] = {
+                            "template_id": (
+                                mob_movement_acknowledgement_policy
+                                .known_mob_templates[movement.object_id]
+                            ),
+                            "sequence": acknowledgement.sequence,
+                            "status_flag": acknowledgement.status_flag,
+                            "status_value": acknowledgement.status_value,
+                            "status_auxiliary_1": (
+                                acknowledgement.status_auxiliary_1
+                            ),
+                            "status_auxiliary_2": (
+                                acknowledgement.status_auxiliary_2
+                            ),
+                        }
+                        mob_acknowledgement_metrics["state"] = (
+                            mob_movement_acknowledgement_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "mob_movement_acknowledgement_completed",
+                        {
+                            **movement_details,
+                            "server_opcode": acknowledgement.opcode,
+                            "status_flag": acknowledgement.status_flag,
+                            "status_value": acknowledgement.status_value,
+                            "status_auxiliary_1": (
+                                acknowledgement.status_auxiliary_1
+                            ),
+                            "status_auxiliary_2": (
+                                acknowledgement.status_auxiliary_2
+                            ),
+                        },
+                    )
+                    if (
+                        mob_movement_policy_trigger
+                        == "served_mob_movement"
+                    ):
+                        await observe_movement_policy_trigger_event()
                 if opcode in remaining_opcode_replies:
-                    reactive_plaintext = remaining_opcode_replies.pop(opcode)
-                    await send_encrypted_frame(
-                        encrypt_next_server_frame(reactive_plaintext)
+                    await send_reactive_plaintexts(
+                        opcode,
+                        remaining_opcode_replies.pop(opcode),
+                        client_plaintext,
                     )
     except Exception as exception:
-        error = f"{type(exception).__name__}: {exception}"
+        connection_error = f"{type(exception).__name__}: {exception}"
         raise
     finally:
+        if (
+            server_packet_injection is not None
+            and server_packet_injection_token is not None
+        ):
+            server_packet_injection.unregister(server_packet_injection_token)
         if observed is not None:
-            observed.close(error=error)
+            observed.close(error=connection_error)
         client_writer.close()
         await client_writer.wait_closed()
 
 
 def patch_server_frames(
-    transcript: Transcript, frame_patches: dict[int, bytes]
+    transcript: Transcript,
+    frame_patches: dict[int, bytes],
+    dropped_frame_indices: set[int] | None = None,
 ) -> bytes:
-    """Return the server stream with selected encrypted payloads replaced.
+    """Return the server stream with selected frames replaced or omitted.
 
-    Replacements are plaintext and may change the encrypted frame length.  Later
-    frames retain their captured ciphertext because IV progression depends on the
-    frame count, not the preceding payload lengths.
+    Replacements are plaintext and may change the encrypted frame length.  When a
+    frame is omitted, all later frames are decrypted with the captured IV stream
+    and re-encrypted with the emitted IV stream so the client remains synchronized.
     """
+    dropped_frame_indices = dropped_frame_indices or set()
     server_bytes = transcript.server_bytes
-    if not frame_patches:
+    if not frame_patches and not dropped_frame_indices:
         return server_bytes
-    if any(index < 0 for index in frame_patches):
-        raise ValueError("Server frame patch indices cannot be negative")
+    edited_indices = set(frame_patches) | dropped_frame_indices
+    if any(index < 0 for index in edited_indices):
+        raise ValueError("Server frame edit indices cannot be negative")
+    overlap = sorted(set(frame_patches) & dropped_frame_indices)
+    if overlap:
+        raise ValueError(
+            f"Server frames cannot be both patched and dropped: {overlap}"
+        )
 
     handshake = parse_handshake(server_bytes)
     frames = parse_encrypted_frames(server_bytes, offset=handshake.wire_length)
-    missing = sorted(set(frame_patches) - set(range(len(frames))))
+    missing = sorted(edited_indices - set(range(len(frames))))
     if missing:
         raise ValueError(
-            f"Server frame patch indices are out of range: {missing}; "
+            f"Server frame edit indices are out of range: {missing}; "
             f"capture has {len(frames)} frames"
         )
 
     patched = bytearray(server_bytes[: handshake.wire_length])
     source_offset = handshake.wire_length
-    iv = handshake.second_iv
+    captured_iv = handshake.second_iv
+    emitted_iv = handshake.second_iv
     for index, frame in enumerate(frames):
         patched.extend(server_bytes[source_offset : frame.offset])
-        replacement = frame_patches.get(index)
-        if replacement is not None:
-            original_first_word = int.from_bytes(frame.header[:2], "little")
-            version_mask = original_first_word ^ int.from_bytes(iv[2:4], "little")
+        original_plaintext = crypt_payload(frame.payload, captured_iv)
+        version_mask = int.from_bytes(
+            frame.header[:2], "little"
+        ) ^ int.from_bytes(captured_iv[2:4], "little")
+        captured_iv = shuffle_iv(captured_iv)
+
+        if index not in dropped_frame_indices:
+            plaintext = frame_patches.get(index, original_plaintext)
             patched.extend(
-                encode_frame_header(len(replacement), iv, version_mask)
-                + crypt_payload(replacement, iv)
+                encode_frame_header(len(plaintext), emitted_iv, version_mask)
+                + crypt_payload(plaintext, emitted_iv)
             )
-        else:
-            patched.extend(
-                server_bytes[frame.offset : frame.offset + frame.wire_length]
-            )
+            emitted_iv = shuffle_iv(emitted_iv)
         source_offset = frame.offset + frame.wire_length
-        iv = shuffle_iv(iv)
     patched.extend(server_bytes[source_offset:])
     return bytes(patched)
 
 
 def patch_server_event_data(
-    transcript: Transcript, frame_patches: dict[int, bytes]
+    transcript: Transcript,
+    frame_patches: dict[int, bytes],
+    dropped_frame_indices: set[int] | None = None,
 ) -> tuple[bytes, ...]:
-    """Map a resized patched stream back onto captured server event timing.
+    """Map an edited server stream back onto captured server event timing.
 
     Event boundaries inside a resized frame are moved proportionally through its
-    payload.  This preserves every client/server ordering point while allowing a
-    replacement frame to grow or shrink.
+    payload; boundaries inside an omitted frame collapse to its former start.
+    This preserves every client/server ordering point while allowing a frame to
+    grow, shrink, or disappear.
     """
+    dropped_frame_indices = dropped_frame_indices or set()
     server_events = tuple(
         event
         for event in data_events(transcript.events)
         if event.direction == "server_to_client"
     )
-    if not frame_patches:
+    if not frame_patches and not dropped_frame_indices:
         return tuple(event.data for event in server_events)
 
     original = transcript.server_bytes
-    patched = patch_server_frames(transcript, frame_patches)
+    patched = patch_server_frames(
+        transcript, frame_patches, dropped_frame_indices
+    )
     handshake = parse_handshake(original)
     frames = parse_encrypted_frames(original, offset=handshake.wire_length)
     edits: list[tuple[int, int, int, int]] = []
     cumulative_delta = 0
     for index, frame in enumerate(frames):
         replacement = frame_patches.get(index)
-        if replacement is None:
+        dropped = index in dropped_frame_indices
+        if replacement is None and not dropped:
             continue
         old_start = frame.offset
         old_end = frame.offset + frame.wire_length
         new_start = old_start + cumulative_delta
-        new_end = new_start + len(frame.header) + len(replacement)
+        new_end = (
+            new_start
+            if dropped
+            else new_start + len(frame.header) + len(replacement)
+        )
         edits.append((old_start, old_end, new_start, new_end))
         cumulative_delta += (new_end - new_start) - (old_end - old_start)
 
@@ -593,6 +2038,8 @@ def patch_server_event_data(
             if boundary >= old_end:
                 delta += (new_end - new_start) - (old_end - old_start)
                 continue
+            if new_start == new_end:
+                return new_start
 
             relative = boundary - old_start
             header_length = 4
@@ -624,8 +2071,10 @@ def patch_server_event_data(
 
 def post_transcript_server_cipher_state(
     transcript: Transcript,
+    dropped_frame_indices: set[int] | None = None,
 ) -> tuple[bytes, int]:
-    """Return the server IV and version mask after all captured frames."""
+    """Return server cipher state after all emitted captured frames."""
+    dropped_frame_indices = dropped_frame_indices or set()
     handshake = parse_handshake(transcript.server_bytes)
     captured_frames = parse_encrypted_frames(
         transcript.server_bytes, offset=handshake.wire_length
@@ -641,7 +2090,15 @@ def post_transcript_server_cipher_state(
     ) ^ int.from_bytes(
         iv[2:4], "little"
     )
-    for _ in captured_frames:
+    missing = sorted(dropped_frame_indices - set(range(len(captured_frames))))
+    if missing:
+        raise ValueError(
+            f"Dropped server frame indices are out of range: {missing}; "
+            f"capture has {len(captured_frames)} frames"
+        )
+    for index, _ in enumerate(captured_frames):
+        if index in dropped_frame_indices:
+            continue
         iv = shuffle_iv(iv)
     return iv, version_mask
 
@@ -697,6 +2154,508 @@ def parse_plaintext_hex(specification: str) -> bytes:
         return bytes.fromhex(specification)
     except ValueError as error:
         raise argparse.ArgumentTypeError("payload is not valid hex") from error
+
+
+def parse_ipv4_endpoint(specification: str) -> tuple[IPv4Address, int]:
+    try:
+        address_text, port_text = specification.rsplit(":", 1)
+        address = IPv4Address(address_text)
+        port = int(port_text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "endpoint must be an IPv4 address and port, such as 127.0.0.1:8587"
+        ) from error
+    if not 1 <= port <= 0xFFFF:
+        raise argparse.ArgumentTypeError("endpoint port must be between 1 and 65535")
+    return address, port
+
+
+def parse_non_negative_int(specification: str) -> int:
+    try:
+        value = int(specification, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"expected a non-negative integer, got {specification!r}"
+        ) from error
+    if value < 0:
+        raise argparse.ArgumentTypeError("value cannot be negative")
+    return value
+
+
+def parse_i16_position(specification: str) -> tuple[int, int]:
+    parts = specification.split(":")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("position must use X:Y")
+    try:
+        position_x, position_y = (int(part, 0) for part in parts)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "position coordinates must be integers"
+        ) from error
+    if not all(-0x8000 <= value <= 0x7FFF for value in (position_x, position_y)):
+        raise argparse.ArgumentTypeError("position coordinates must fit in i16")
+    return position_x, position_y
+
+
+def parse_mob_movement_broadcast_target(
+    specification: str,
+) -> tuple[int, int, int, int]:
+    parts = specification.split(":")
+    if len(parts) not in {3, 4}:
+        raise argparse.ArgumentTypeError(
+            "mob movement broadcast must use X:Y:FOOTHOLD[:STANCE]"
+        )
+    position_x, position_y = parse_i16_position(":".join(parts[:2]))
+    try:
+        foothold_id = int(parts[2], 0)
+        stance = int(parts[3], 0) if len(parts) == 4 else 4
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold and stance must be integers"
+        ) from error
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must fit in uint16"
+        )
+    if not 0 <= stance <= 0xFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement stance must fit in uint8"
+        )
+    return position_x, position_y, foothold_id, stance
+
+
+def parse_mob_movement_path_target(
+    specification: str,
+) -> tuple[int, int, int, int]:
+    parts = specification.split(":")
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError(
+            "mob movement path must use EVIDENCE_SERVER_FRAME:X:Y:FOOTHOLD"
+        )
+    try:
+        evidence_frame = int(parts[0], 0)
+        foothold_id = int(parts[3], 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "mob movement evidence frame and foothold must be integers"
+        ) from error
+    if evidence_frame < 0:
+        raise argparse.ArgumentTypeError(
+            "mob movement evidence frame cannot be negative"
+        )
+    position_x, position_y = parse_i16_position(":".join(parts[1:3]))
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must fit in uint16"
+        )
+    return evidence_frame, position_x, position_y, foothold_id
+
+
+def parse_mob_movement_auto_path_target(
+    specification: str,
+) -> tuple[int, int, int]:
+    parts = specification.split(":")
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError(
+            "automatic mob movement path must use X:Y:FOOTHOLD"
+        )
+    position_x, position_y = parse_i16_position(":".join(parts[:2]))
+    try:
+        foothold_id = int(parts[2], 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must be an integer"
+        ) from error
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "mob movement foothold must fit in uint16"
+        )
+    return position_x, position_y, foothold_id
+
+
+def parse_mob_movement_composed_path_target(
+    specification: str,
+) -> tuple[int, int, int, int]:
+    parts = specification.split(":")
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError(
+            "composed mob movement path must use MAX_STEPS:X:Y:FOOTHOLD"
+        )
+    try:
+        max_steps = int(parts[0], 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "composed mob movement max steps must be an integer"
+        ) from error
+    if not 2 <= max_steps <= 8:
+        raise argparse.ArgumentTypeError(
+            "composed mob movement max steps must be in 2..8"
+        )
+    position_x, position_y, foothold_id = (
+        parse_mob_movement_auto_path_target(":".join(parts[1:]))
+    )
+    return max_steps, position_x, position_y, foothold_id
+
+
+def parse_mob_movement_relative_policy(
+    specification: str,
+) -> MobMovementRelativeDecisionPolicy:
+    parts = specification.split(":")
+    if len(parts) != 5:
+        raise argparse.ArgumentTypeError(
+            "mob movement relative policy must use "
+            "DECISIONS:MAX_STEPS:DX:DY:FOOTHOLD"
+        )
+    try:
+        decision_count = int(parts[0], 0)
+        max_steps = int(parts[1], 0)
+        displacement_x = int(parts[2], 0)
+        displacement_y = int(parts[3], 0)
+        foothold_id = int(parts[4], 0)
+        return MobMovementRelativeDecisionPolicy(
+            decision_count=decision_count,
+            max_steps=max_steps,
+            displacement_x=displacement_x,
+            displacement_y=displacement_y,
+            foothold_id=foothold_id,
+        )
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def parse_inventory_quantity_update(
+    specification: str,
+) -> tuple[str, int, int]:
+    parts = specification.split(":")
+    if len(parts) != 3 or parts[0] not in {"use", "setup", "etc"}:
+        raise argparse.ArgumentTypeError(
+            "expected INVENTORY:SLOT:QUANTITY with inventory use, setup, or etc"
+        )
+    try:
+        slot = int(parts[1], 0)
+        quantity = int(parts[2], 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "inventory slot and quantity must be integers"
+        ) from error
+    if not 1 <= slot <= 0x7FFF:
+        raise argparse.ArgumentTypeError(
+            "inventory slot must be between 1 and 32767"
+        )
+    if not 1 <= quantity <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "inventory quantity must be between 1 and 65535"
+        )
+    return parts[0], slot, quantity
+
+
+@functools.lru_cache(maxsize=8)
+def _load_pcap_plaintexts(path: str, tcp_stream: int) -> tuple[bytes, ...]:
+    transcript = load_pcap_tcp_stream(Path(path), tcp_stream)
+    decoded = decode_transcript(transcript)
+    return tuple(
+        frame.plaintext
+        for frame in decoded.frames
+        if frame.direction == "server_to_client"
+    )
+
+
+def parse_pcap_plaintext_reference(specification: str) -> bytes:
+    """Resolve PCAP@STREAM:SERVER_FRAME[?TRANSFORM] without logging payload."""
+    reference, separator, transform = specification.partition("?")
+    source_text, index_separator, frame_index_text = reference.rpartition(":")
+    path_text, stream_separator, stream_text = source_text.rpartition("@")
+    if not index_separator or not stream_separator or not path_text:
+        raise argparse.ArgumentTypeError(
+            "pcap frame reference must have the form PCAP@STREAM:SERVER_FRAME"
+        )
+    try:
+        tcp_stream = int(stream_text, 0)
+        frame_index = int(frame_index_text, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "pcap stream and server frame index must be integers"
+        ) from error
+    if tcp_stream < 0 or frame_index < 0:
+        raise argparse.ArgumentTypeError(
+            "pcap stream and server frame index cannot be negative"
+        )
+    try:
+        payload = _load_pcap_plaintexts(path_text, tcp_stream)[frame_index]
+    except IndexError as error:
+        raise argparse.ArgumentTypeError(
+            f"pcap stream {tcp_stream} has no server frame {frame_index}"
+        ) from error
+    if not separator:
+        return payload
+    if transform.startswith("opcode="):
+        try:
+            opcode = int(transform.removeprefix("opcode="), 0)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap opcode transform must be an integer"
+            ) from error
+        if not 0 <= opcode <= 0xFFFF:
+            raise argparse.ArgumentTypeError(
+                "pcap opcode transform must be between 0 and 65535"
+            )
+        if len(payload) < 2:
+            raise argparse.ArgumentTypeError(
+                "cannot rewrite the opcode of a plaintext shorter than 2 bytes"
+            )
+        return opcode.to_bytes(2, "little") + payload[2:]
+    if transform.startswith("handoff="):
+        endpoint = parse_ipv4_endpoint(transform.removeprefix("handoff="))
+        try:
+            original = WorldHandoff.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap handoff transform requires a validated handoff packet"
+            ) from error
+        address, port = endpoint
+        return WorldHandoff(
+            result=original.result,
+            address=address,
+            port=port,
+            character_id=original.character_id,
+            trailing=original.trailing,
+            opcode=original.opcode,
+        ).to_bytes()
+    if transform == "character-list":
+        try:
+            character_list = CharacterListEnvelope.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap character-list transform requires a validated opcode-4 "
+                "character-list response"
+            ) from error
+        return character_list.to_bytes()
+    if transform.startswith("keyboard-skill="):
+        fields = transform.removeprefix("keyboard-skill=").split(":")
+        if len(fields) != 2:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill transform must use KEY_CODE:SKILL_ID"
+            )
+        try:
+            key_code, skill_id = (int(value, 0) for value in fields)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill key code and skill id must be integers"
+            ) from error
+        if not 0 <= key_code < VariableServerRecord.KEYBOARD_BINDING_COUNT:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill key code must be between 0 and 88"
+            )
+        if not 0 <= skill_id <= 0x7FFFFFFF:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill skill id must fit a non-negative int32"
+            )
+        try:
+            record = VariableServerRecord.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill transform requires an expanded opcode-385 "
+                "keyboard-binding packet"
+            ) from error
+        if record.opcode != 385 or record.variant:
+            raise argparse.ArgumentTypeError(
+                "keyboard-skill transform requires an expanded opcode-385 "
+                "keyboard-binding packet"
+            )
+        original = record.entries[key_code]
+        if original.selector != VariableServerRecord.SKILL_BINDING_SELECTOR:
+            raise argparse.ArgumentTypeError(
+                f"keyboard key code {key_code} is not a captured skill binding"
+            )
+        entries = list(record.entries)
+        entries[key_code] = replace(original, value=skill_id)
+        return replace(record, entries=tuple(entries)).to_bytes()
+    if transform.startswith("mob-spawn="):
+        fields = transform.removeprefix("mob-spawn=").split(":")
+        if len(fields) not in {2, 4}:
+            raise argparse.ArgumentTypeError(
+                "mob-spawn transform must use X:Y or X:Y:FOOTHOLD:ORIGIN"
+            )
+        position_x, position_y = parse_i16_position(":".join(fields[:2]))
+        entered = None
+        controller = None
+        try:
+            opcode = int.from_bytes(payload[:2], "little")
+            if opcode == 279:
+                entered = MobEnterField.parse(payload)
+                original_spawn = entered.spawn
+            elif opcode == 281:
+                controller = MobControllerChange.parse(payload)
+                if controller.spawn is None:
+                    raise ValueError(
+                        "controller packet has no embedded mob spawn"
+                    )
+                original_spawn = controller.spawn
+            else:
+                raise ValueError("packet does not carry a typed mob spawn")
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "pcap mob-spawn transform requires a validated mob-enter or "
+                "controller-with-spawn packet"
+            ) from error
+        foothold_id = original_spawn.foothold_id
+        origin_foothold_id = original_spawn.origin_foothold_id
+        if len(fields) == 4:
+            try:
+                foothold_id, origin_foothold_id = (
+                    int(value, 0) for value in fields[2:]
+                )
+            except ValueError as error:
+                raise argparse.ArgumentTypeError(
+                    "mob-spawn footholds must be integers"
+                ) from error
+            if not all(
+                0 <= value <= 0xFFFF
+                for value in (foothold_id, origin_foothold_id)
+            ):
+                raise argparse.ArgumentTypeError(
+                    "mob-spawn footholds must fit in uint16"
+                )
+        rewritten_spawn = replace(
+            original_spawn,
+            x=position_x,
+            y=position_y,
+            foothold_id=foothold_id,
+            origin_foothold_id=origin_foothold_id,
+        )
+        if entered is not None:
+            return replace(entered, spawn=rewritten_spawn).to_bytes()
+        if controller is None:
+            raise argparse.ArgumentTypeError(
+                "pcap mob-spawn transform found no typed spawn packet"
+            )
+        return replace(controller, spawn=rewritten_spawn).to_bytes()
+    raise argparse.ArgumentTypeError(
+        "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
+        "character-list, keyboard-skill=KEY_CODE:SKILL_ID, or "
+        "mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
+    )
+
+
+def parse_client_opcode_pcap_reply(specification: str) -> tuple[int, bytes]:
+    opcode_text, separator, reference = specification.partition("=")
+    if not separator:
+        raise argparse.ArgumentTypeError(
+            "pcap client opcode reply must have the form OPCODE=REFERENCE"
+        )
+    try:
+        opcode = int(opcode_text, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"invalid client opcode: {opcode_text!r}"
+        ) from error
+    if not 0 <= opcode <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "client opcode must be between 0 and 65535"
+        )
+    return opcode, parse_pcap_plaintext_reference(reference)
+
+
+def parse_client_opcode_reply_delays(
+    specification: str,
+) -> tuple[int, tuple[float, ...]]:
+    opcode_text, separator, delays_text = specification.partition("=")
+    if not separator:
+        raise argparse.ArgumentTypeError(
+            "reply delays must have the form OPCODE=SECONDS[,SECONDS...]"
+        )
+    try:
+        opcode = int(opcode_text, 0)
+        delays = tuple(float(value) for value in delays_text.split(","))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "reply opcode and delays must be numeric"
+        ) from error
+    if not 0 <= opcode <= 0xFFFF:
+        raise argparse.ArgumentTypeError(
+            "client opcode must be between 0 and 65535"
+        )
+    if not delays or any(delay < 0 for delay in delays):
+        raise argparse.ArgumentTypeError(
+            "reply delays must contain non-negative seconds"
+        )
+    return opcode, delays
+
+
+def parse_server_frame_pcap_patch(specification: str) -> tuple[int, bytes]:
+    index_text, separator, reference = specification.partition("=")
+    if not separator:
+        raise argparse.ArgumentTypeError(
+            "pcap server frame patch must have the form INDEX=REFERENCE"
+        )
+    try:
+        index = int(index_text, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"invalid server frame index: {index_text!r}"
+        ) from error
+    if index < 0:
+        raise argparse.ArgumentTypeError("server frame index cannot be negative")
+    return index, parse_pcap_plaintext_reference(reference)
+
+
+def drop_normalized_client_frames(
+    transcript: Transcript, frame_indices: set[int]
+) -> Transcript:
+    found: set[int] = set()
+    events = []
+    for event in transcript.events:
+        frame_index = (
+            event.metadata.get("frame_index")
+            if event.metadata is not None
+            else None
+        )
+        if (
+            event.event == "data"
+            and event.direction == "client_to_server"
+            and isinstance(frame_index, int)
+            and frame_index in frame_indices
+        ):
+            found.add(frame_index)
+            continue
+        events.append(event)
+    missing = frame_indices - found
+    if missing:
+        raise ValueError(
+            f"client frame indices are absent from normalized transcript: "
+            f"{sorted(missing)}"
+        )
+    return Transcript(path=transcript.path, events=tuple(events))
+
+
+def build_handoff_frame_patch(
+    transcript: Transcript, endpoint: tuple[IPv4Address, int]
+) -> tuple[int, bytes]:
+    analysis = analyze_login_transcript(transcript)
+    handoffs = [
+        observation
+        for observation in analysis.observations
+        if observation.kind == "world_handoff"
+        and observation.coverage == ShapeCoverage.FULL
+    ]
+    if len(handoffs) != 1:
+        raise ValueError(
+            f"expected exactly one validated world handoff, found {len(handoffs)}"
+        )
+    observation = handoffs[0]
+    if not isinstance(observation.parsed, WorldHandoff):
+        raise RuntimeError("validated handoff observation has no parsed packet")
+    address, port = endpoint
+    original = observation.parsed
+    replacement = WorldHandoff(
+        result=original.result,
+        address=address,
+        port=port,
+        character_id=original.character_id,
+        trailing=original.trailing,
+        opcode=original.opcode,
+    )
+    return observation.direction_index, replacement.to_bytes()
 
 
 def parse_zero_filled_frame(specification: str) -> bytes:
@@ -863,22 +2822,58 @@ async def run_listener(
     host: str,
     port: int,
     handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]],
+    *,
+    runtime: ServerRuntime,
+    http_api_host: str,
+    http_api_port: int | None,
 ) -> None:
     tasks: set[asyncio.Task[None]] = set()
+
+    async def tracked_handler(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        runtime.connection_started()
+        error: Exception | None = None
+        try:
+            await handler(reader, writer)
+        except Exception as exception:
+            error = exception
+            raise
+        finally:
+            runtime.connection_finished(error)
 
     def start_handler(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        task = asyncio.create_task(handler(reader, writer))
+        task = asyncio.create_task(tracked_handler(reader, writer))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         task.add_done_callback(report_task_error)
 
     server = await asyncio.start_server(start_handler, host, port)
-    addresses = ", ".join(str(socket.getsockname()) for socket in server.sockets or [])
+    runtime.listener_addresses = tuple(
+        str(socket.getsockname()) for socket in server.sockets or []
+    )
+    addresses = ", ".join(runtime.listener_addresses)
     print(f"listening mode={handler_name(handler)} addresses={addresses}", flush=True)
-    async with server:
-        await server.serve_forever()
+    http_server = (
+        await start_runtime_http_api(runtime, http_api_host, http_api_port)
+        if http_api_port is not None
+        else None
+    )
+    if http_server is not None:
+        http_addresses = ", ".join(
+            str(socket.getsockname()) for socket in http_server.sockets or []
+        )
+        print(f"http_api addresses={http_addresses}", flush=True)
+    if http_server is None:
+        async with server:
+            await server.serve_forever()
+    else:
+        async with server, http_server:
+            await asyncio.gather(
+                server.serve_forever(), http_server.serve_forever()
+            )
 
 
 def handler_name(handler: object) -> str:
@@ -951,7 +2946,19 @@ def build_parser() -> argparse.ArgumentParser:
         "replay", help="Replay one captured server session to a client"
     )
     add_listener_arguments(replay)
-    replay.add_argument("--transcript", required=True, type=Path)
+    replay_source = replay.add_mutually_exclusive_group(required=True)
+    replay_source.add_argument("--transcript", type=Path)
+    replay_source.add_argument(
+        "--pcap", type=Path, help="read one Maple TCP stream directly from pcap"
+    )
+    replay.add_argument(
+        "--tcp-stream",
+        type=int,
+        help="Wireshark tcp.stream index (required with --pcap)",
+    )
+    replay.add_argument(
+        "--tshark", default="tshark", help="tshark executable used for pcap input"
+    )
     replay.add_argument(
         "--transcript-dir",
         type=Path,
@@ -972,6 +2979,83 @@ def build_parser() -> argparse.ArgumentParser:
         help="delay transcript playback after accept (useful for debugger attach)",
     )
     replay.add_argument(
+        "--generate-initial-field-snapshot",
+        action="store_true",
+        help=(
+            "materialize the initial opcode-157 snapshot through character, "
+            "inventory, progression, and trailer state before replay"
+        ),
+    )
+    replay.add_argument(
+        "--generate-field-npc-spawns",
+        action="store_true",
+        help=(
+            "materialize every typed opcode-300 NPC spawn and replay the "
+            "generated same-length packets at their captured frame positions"
+        ),
+    )
+    replay.add_argument(
+        "--generate-fixed-server-records",
+        action="store_true",
+        help=(
+            "materialize the modeled fixed-width server records and replay "
+            "them at their captured frame positions"
+        ),
+    )
+    replay.add_argument(
+        "--generate-variable-server-records",
+        action="store_true",
+        help=(
+            "materialize the capture-bounded opcode-156/385 variants and "
+            "replay them at their captured frame positions"
+        ),
+    )
+    replay.add_argument(
+        "--rewrite-initial-current-hp",
+        type=int,
+        metavar="HP",
+        help=(
+            "rewrite only the typed current-HP field in the initial opcode-157 "
+            "snapshot after validating the complete packet model"
+        ),
+    )
+    replay.add_argument(
+        "--rewrite-final-field-drop-position",
+        type=parse_i16_position,
+        metavar="X:Y",
+        help=(
+            "rewrite only the typed position of the final field's sole active "
+            "field-load item drop"
+        ),
+    )
+    replay.add_argument(
+        "--rewrite-final-field-drop-owner-to-player",
+        action="store_true",
+        help=(
+            "rewrite the equal owner words of the final field's sole active "
+            "field-load item drop to the validated initial player character; "
+            "composes with --rewrite-final-field-drop-position"
+        ),
+    )
+    replay.add_argument(
+        "--emit-current-hp-update",
+        type=int,
+        metavar="HP",
+        help=(
+            "generate one typed opcode-41 current-HP stat update after replay; "
+            "requires --keep-world-open and the validated stat-update model"
+        ),
+    )
+    replay.add_argument(
+        "--emit-inventory-quantity-update",
+        type=parse_inventory_quantity_update,
+        metavar="INVENTORY:SLOT:QUANTITY",
+        help=(
+            "generate one typed opcode-39 stack-quantity update after replay; "
+            "inventory must be use, setup, or etc; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--server-frame-patch",
         action="append",
         default=[],
@@ -980,6 +3064,222 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "replace a captured server frame with plaintext (length may change); "
             "may be repeated"
+        ),
+    )
+    replay.add_argument(
+        "--server-frame-patch-from-pcap",
+        dest="server_frame_patch",
+        action="append",
+        type=parse_server_frame_pcap_patch,
+        metavar="INDEX=PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help="replace a captured replay frame with plaintext sourced from pcap",
+    )
+    replay.add_argument(
+        "--drop-server-frame",
+        action="append",
+        default=[],
+        type=parse_non_negative_int,
+        metavar="INDEX",
+        help=(
+            "omit one captured encrypted server frame and re-encrypt every later "
+            "frame with corrected IV progression; may be repeated"
+        ),
+    )
+    replay.add_argument(
+        "--keep-world-open",
+        action="store_true",
+        help=(
+            "validate and omit the final server opcode-9 world-session "
+            "termination packet; requires --hold-open-seconds"
+        ),
+    )
+    replay.add_argument(
+        "--world-heartbeat-interval-seconds",
+        type=float,
+        help=(
+            "after replay, periodically send the modeled server opcode-10 "
+            "heartbeat probe while holding the world open"
+        ),
+    )
+    replay.add_argument(
+        "--repeat-final-field-npc-state-update",
+        action="store_true",
+        help=(
+            "select the final fully modeled update for a known NPC in the "
+            "capture's final field and send it once after replay; requires "
+            "--keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-item-use-responses",
+        action="store_true",
+        help=(
+            "during hold-open, validate opcode-80 potion requests against the "
+            "modeled Use inventory and emit typed opcode-39/opcode-41 effects; "
+            "requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-item-pickup-responses",
+        action="store_true",
+        help=(
+            "during hold-open, validate opcode-185 requests against active "
+            "drops and captured item-effect evidence, then emit typed "
+            "opcode-39/opcode-49/opcode-312 responses; requires "
+            "--keep-world-open"
+        ),
+    )
+    item_pickup_evidence = replay.add_mutually_exclusive_group()
+    item_pickup_evidence.add_argument(
+        "--item-pickup-evidence-transcript",
+        type=Path,
+        help=(
+            "derive item-pickup result quantities and inventory targets from "
+            "a separate validated world transcript"
+        ),
+    )
+    item_pickup_evidence.add_argument(
+        "--item-pickup-evidence-tcp-stream",
+        type=parse_non_negative_int,
+        metavar="STREAM",
+        help=(
+            "derive item-pickup evidence from another TCP stream in the "
+            "replay --pcap"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-mob-movement-acknowledgements",
+        action="store_true",
+        help=(
+            "during hold-open, derive the validated opcode-283 policy and "
+            "acknowledge opcode-207 submissions only for field-local mobs "
+            "with known templates; requires --keep-world-open"
+        ),
+    )
+    mob_movement_evidence = replay.add_mutually_exclusive_group()
+    mob_movement_evidence.add_argument(
+        "--mob-movement-evidence-transcript",
+        type=Path,
+        help=(
+            "derive opcode-282 stationary shapes and opcode-283 "
+            "acknowledgement values from a separate validated world transcript"
+        ),
+    )
+    mob_movement_evidence.add_argument(
+        "--mob-movement-evidence-tcp-stream",
+        type=parse_non_negative_int,
+        metavar="STREAM",
+        help=(
+            "derive mob-movement broadcast/acknowledgement evidence from "
+            "another TCP stream in the replay --pcap"
+        ),
+    )
+    mob_movement_emission = replay.add_mutually_exclusive_group()
+    mob_movement_emission.add_argument(
+        "--emit-mob-movement-broadcast",
+        type=parse_mob_movement_broadcast_target,
+        metavar="X:Y:FOOTHOLD[:STANCE]",
+        help=(
+            "append one capture-proven stationary opcode-282 placement for "
+            "the only active modeled mob; requires --keep-world-open"
+        ),
+    )
+    mob_movement_emission.add_argument(
+        "--emit-mob-movement-path",
+        type=parse_mob_movement_path_target,
+        metavar="EVIDENCE_SERVER_FRAME:X:Y:FOOTHOLD",
+        help=(
+            "translate one capture-derived, multi-command opcode-282 path "
+            "selected by server-direction frame index to the requested "
+            "endpoint for the only active modeled mob; requires "
+            "--keep-world-open"
+        ),
+    )
+    mob_movement_emission.add_argument(
+        "--emit-mob-movement-auto-path",
+        type=parse_mob_movement_auto_path_target,
+        metavar="X:Y:FOOTHOLD",
+        help=(
+            "select the unique captured multi-command opcode-282 relative "
+            "motion shape for the active mob template/current displacement; "
+            "requires --keep-world-open"
+        ),
+    )
+    mob_movement_emission.add_argument(
+        "--emit-mob-movement-composed-path",
+        type=parse_mob_movement_composed_path_target,
+        metavar="MAX_STEPS:X:Y:FOOTHOLD",
+        help=(
+            "compose the unique shortest monotonic sequence of captured "
+            "multi-command opcode-282 displacement shapes; requires "
+            "--keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--queue-mob-movement-composed-path",
+        action="append",
+        default=[],
+        type=parse_mob_movement_composed_path_target,
+        metavar="MAX_STEPS:X:Y:FOOTHOLD",
+        help=(
+            "queue a composed follow-up decision after the preceding "
+            "movement schedule is transmitted; may be repeated up to "
+            f"{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS} times and requires "
+            "an initial mob-movement emission option"
+        ),
+    )
+    replay.add_argument(
+        "--mob-movement-relative-policy",
+        type=parse_mob_movement_relative_policy,
+        metavar="DECISIONS:MAX_STEPS:DX:DY:FOOTHOLD",
+        help=(
+            "derive up to eight composed follow-up targets by repeatedly "
+            "adding DX:DY to the last confirmed mob state; requires an "
+            "initial mob-movement emission option"
+        ),
+    )
+    replay.add_argument(
+        "--mob-movement-policy-trigger",
+        choices=(
+            "immediate",
+            "matched-heartbeat",
+            "player-proximity",
+            "served-mob-movement",
+        ),
+        default="immediate",
+        help=(
+            "start each relative-policy decision immediately, after one "
+            "matched periodic heartbeat response, after the local player "
+            "enters a bounded mob radius, or after one accepted mob-movement "
+            "submission is acknowledged"
+        ),
+    )
+    replay.add_argument(
+        "--mob-movement-proximity-radius",
+        type=int,
+        metavar="PIXELS",
+        help=(
+            "Manhattan radius in 1..4096 for the player-proximity movement "
+            "policy trigger"
+        ),
+    )
+    replay.add_argument(
+        "--mob-movement-policy-cooldown-seconds",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help=(
+            "reject otherwise qualifying movement-policy events for up to "
+            "3600 seconds after a decision completes"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-mob-health-responses",
+        action="store_true",
+        help=(
+            "during hold-open, subtract decoded nonzero damage words from "
+            "exact modeled mob HP and emit typed opcode-293 health updates "
+            "plus opcode-280 removal on zero HP; requires --keep-world-open"
         ),
     )
     replay.add_argument(
@@ -1006,10 +3306,37 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--send-after-transcript-from-pcap",
+        dest="post_transcript_server_frames",
+        action="append",
+        type=parse_pcap_plaintext_reference,
+        metavar="PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help=(
+            "append plaintext extracted and validated from one pcap server frame; "
+            "may be repeated"
+        ),
+    )
+    replay.add_argument(
+        "--post-transcript-start-delay-seconds",
+        type=float,
+        default=0.0,
+        help="delay before the first post-transcript server frame",
+    )
+    replay.add_argument(
         "--post-transcript-frame-delay-seconds",
         type=float,
         default=0.0,
         help="delay between consecutive post-transcript server frames",
+    )
+    replay.add_argument(
+        "--mob-movement-step-delay-seconds",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "override the default delay only between consecutive generated "
+            "mob-movement steps"
+        ),
     )
     replay.add_argument(
         "--post-transcript-gap-delay-seconds",
@@ -1035,6 +3362,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reply-after-client-frame-from-pcap",
+        dest="reply_after_client_frame",
+        action="append",
+        type=parse_pcap_plaintext_reference,
+        metavar="PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help="reply to the next client frame with pcap-sourced plaintext",
+    )
+    replay.add_argument(
         "--reply-on-client-opcode",
         action="append",
         default=[],
@@ -1044,6 +3379,61 @@ def build_parser() -> argparse.ArgumentParser:
             "in non-strict replay, skip one matching client frame and send this "
             "plaintext after the captured transcript (or immediately if it "
             "arrives during hold-open); may be repeated for distinct opcodes"
+        ),
+    )
+    replay.add_argument(
+        "--reply-on-client-opcode-from-pcap",
+        dest="reply_on_client_opcode",
+        action="append",
+        type=parse_client_opcode_pcap_reply,
+        metavar="OPCODE=PCAP@STREAM:SERVER_FRAME[?TRANSFORM]",
+        help=(
+            "react to a client opcode with pcap-sourced plaintext; repeated "
+            "entries for one opcode form an ordered response sequence"
+        ),
+    )
+    replay.add_argument(
+        "--client-opcode-reply-delays",
+        action="append",
+        default=[],
+        type=parse_client_opcode_reply_delays,
+        metavar="OPCODE=SECONDS[,SECONDS...]",
+        help=(
+            "delay before each ordered response for one reactive opcode; the "
+            "number of delays must match that opcode's response count"
+        ),
+    )
+    replay.add_argument(
+        "--rewrite-channel-transition-world",
+        action="store_true",
+        help=(
+            "rewrite opcode-402 stage-1 reactive replies with the world id "
+            "from the triggering client opcode-4 selection"
+        ),
+    )
+    replay.add_argument(
+        "--validate-login-state",
+        action="store_true",
+        help="validate interpreted login packet shapes/state before listening",
+    )
+    replay.add_argument(
+        "--rewrite-handoff",
+        type=parse_ipv4_endpoint,
+        metavar="IPV4:PORT",
+        help=(
+            "replace the validated login handoff endpoint while preserving its "
+            "result and selected character id"
+        ),
+    )
+    replay.add_argument(
+        "--drop-client-frame",
+        action="append",
+        default=[],
+        type=parse_non_negative_int,
+        metavar="INDEX",
+        help=(
+            "omit one frame-aligned captured client event before replay; intended "
+            "for launcher-only frames and may be repeated"
         ),
     )
 
@@ -1063,12 +3453,130 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compare_parser.add_argument("first", type=Path)
     compare_parser.add_argument("second", type=Path)
+
+    live_hp_parser = subparsers.add_parser(
+        "inject-current-hp",
+        help=(
+            "plan one typed current-HP packet, inject it through a live replay "
+            "API, and verify the observed gameplay fold"
+        ),
+    )
+    live_hp_parser.add_argument("--transcript", required=True, type=Path)
+    live_hp_parser.add_argument("--current-hp", required=True, type=int)
+    live_hp_parser.add_argument(
+        "--http-api-url",
+        default=DEFAULT_PACKET_API_URL,
+        help="loopback POST /api/v1/server-packets endpoint",
+    )
+    live_hp_parser.add_argument(
+        "--api-timeout-seconds", type=float, default=5.0
+    )
+    live_hp_parser.add_argument(
+        "--verify-timeout-seconds", type=float, default=5.0
+    )
+    live_hp_parser.add_argument("--json", action="store_true")
+
+    analyze_parser = subparsers.add_parser(
+        "analyze-login",
+        help=(
+            "decrypt a transcript or pcap stream, fold interpreted packets into "
+            "login game state, and validate packet shapes"
+        ),
+    )
+    source = analyze_parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--transcript", type=Path)
+    source.add_argument("--pcap", type=Path)
+    analyze_parser.add_argument(
+        "--tcp-stream",
+        type=int,
+        help="Wireshark tcp.stream index (required with --pcap)",
+    )
+    analyze_parser.add_argument(
+        "--tshark", default="tshark", help="tshark executable used for pcap input"
+    )
+    analyze_parser.add_argument("--json", action="store_true")
+    analyze_parser.add_argument(
+        "--packets",
+        action="store_true",
+        help=(
+            "append one structured, frame-aligned decoded packet record to "
+            "the text report for every plaintext frame"
+        ),
+    )
+    analyze_parser.add_argument(
+        "--show-identifiers",
+        action="store_true",
+        help="include account/character numeric identifiers in output",
+    )
+    analyze_parser.add_argument(
+        "--fail-on-invalid",
+        action="store_true",
+        help="exit with status 2 if a shape or state invariant is invalid",
+    )
+
+    gameplay_parser = subparsers.add_parser(
+        "analyze-gameplay",
+        help=(
+            "decrypt a world transcript or pcap stream, fold gameplay events "
+            "into field state, and validate packet shapes"
+        ),
+    )
+    gameplay_source = gameplay_parser.add_mutually_exclusive_group(required=True)
+    gameplay_source.add_argument("--transcript", type=Path)
+    gameplay_source.add_argument("--pcap", type=Path)
+    gameplay_parser.add_argument(
+        "--tcp-stream",
+        type=int,
+        help="Wireshark tcp.stream index (required with --pcap)",
+    )
+    gameplay_parser.add_argument(
+        "--tshark", default="tshark", help="tshark executable used for pcap input"
+    )
+    gameplay_parser.add_argument("--json", action="store_true")
+    gameplay_parser.add_argument(
+        "--events",
+        action="store_true",
+        help="append the timestamped, state-changing gameplay event stream",
+    )
+    gameplay_parser.add_argument(
+        "--packets",
+        action="store_true",
+        help="append one structured packet record for every plaintext frame",
+    )
+    gameplay_parser.add_argument(
+        "--show-identifiers",
+        action="store_true",
+        help="include character and runtime object identifiers in output",
+    )
+    gameplay_parser.add_argument(
+        "--fail-on-invalid",
+        action="store_true",
+        help="exit with status 2 if a shape or state invariant is invalid",
+    )
     return parser
 
 
 def add_listener_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--listen-host", default="127.0.0.1")
     parser.add_argument("--listen-port", required=True, type=int)
+    parser.add_argument(
+        "--http-api-host",
+        default="127.0.0.1",
+        help="loopback address for the optional runtime HTTP API",
+    )
+    parser.add_argument(
+        "--http-api-port",
+        type=int,
+        help="enable the runtime HTTP API on this loopback port",
+    )
+    parser.add_argument(
+        "--enable-http-packet-injection",
+        action="store_true",
+        help=(
+            "allow opt-in plaintext server-packet injection through the "
+            "loopback HTTP API (replay mode only)"
+        ),
+    )
 
 
 def inspect_transcript(path: Path) -> None:
@@ -1167,6 +3675,15 @@ def common_suffix_length(first: bytes, second: bytes) -> int:
 
 
 async def async_main(arguments: argparse.Namespace) -> None:
+    runtime_config: dict[str, object]
+    runtime_protocol: dict[str, object] = {}
+    if arguments.enable_http_packet_injection and arguments.command != "replay":
+        raise ValueError("HTTP packet injection is available only in replay mode")
+    if arguments.enable_http_packet_injection and arguments.http_api_port is None:
+        raise ValueError("HTTP packet injection requires --http-api-port")
+    server_packet_injection = ServerPacketInjection(
+        enabled=arguments.enable_http_packet_injection
+    )
     if arguments.command == "capture-proxy":
         client_result_rewrites = dict(arguments.rewrite_client_opcode_result)
         if len(client_result_rewrites) != len(
@@ -1201,15 +3718,815 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
         )
         handler = functools.partial(capture_proxy_connection, config=config)
+        runtime_config = {
+            "upstream_host": arguments.upstream_host,
+            "upstream_port": arguments.upstream_port,
+            "capture_enabled": True,
+        }
     elif arguments.command == "replay":
-        transcript = Transcript.load(arguments.transcript)
+        if arguments.pcap is not None:
+            if arguments.tcp_stream is None:
+                raise ValueError("--tcp-stream is required with --pcap")
+            transcript = load_pcap_tcp_stream(
+                arguments.pcap,
+                arguments.tcp_stream,
+                tshark=arguments.tshark,
+            )
+        else:
+            if arguments.tcp_stream is not None:
+                raise ValueError("--tcp-stream is only valid with --pcap")
+            transcript = Transcript.load(arguments.transcript)
         server_frame_patches = dict(arguments.server_frame_patch)
         if len(server_frame_patches) != len(arguments.server_frame_patch):
             raise ValueError("Each server frame patch index may be specified only once")
-        client_opcode_replies = dict(arguments.reply_on_client_opcode)
-        if len(client_opcode_replies) != len(arguments.reply_on_client_opcode):
-            raise ValueError("Each reactive client opcode may be specified only once")
-        patch_server_frames(transcript, server_frame_patches)
+        dropped_server_frames = set(arguments.drop_server_frame)
+        if len(dropped_server_frames) != len(arguments.drop_server_frame):
+            raise ValueError("Each dropped server frame index may be specified once")
+        if arguments.keep_world_open:
+            if arguments.hold_open_seconds <= 0:
+                raise ValueError(
+                    "--keep-world-open requires a positive --hold-open-seconds"
+                )
+            termination_index = world_session_termination_frame_index(transcript)
+            if termination_index in server_frame_patches:
+                raise ValueError(
+                    f"terminal server frame {termination_index} is also patched"
+                )
+            dropped_server_frames.add(termination_index)
+        if arguments.world_heartbeat_interval_seconds is not None:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--world-heartbeat-interval-seconds requires "
+                    "--keep-world-open"
+                )
+            if arguments.world_heartbeat_interval_seconds <= 0:
+                raise ValueError(
+                    "--world-heartbeat-interval-seconds must be positive"
+                )
+            heartbeat_analysis = analyze_gameplay_transcript(transcript)
+            if not heartbeat_analysis.valid:
+                raise ValueError(
+                    "world transcript failed packet/state validation"
+                )
+            if heartbeat_analysis.state.heartbeat_probes == 0:
+                raise ValueError(
+                    "world transcript has no modeled server heartbeat probe"
+                )
+            if (
+                heartbeat_analysis.state.unmatched_heartbeat_responses
+                or heartbeat_analysis.state.pending_heartbeat_probes
+            ):
+                raise ValueError(
+                    "world transcript heartbeat probes/responses do not pair"
+                )
+        npc_state_replay_plan = None
+        if arguments.repeat_final_field_npc_state_update:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--repeat-final-field-npc-state-update requires "
+                    "--keep-world-open"
+                )
+            npc_state_replay_plan = plan_final_field_npc_state_replay(transcript)
+            runtime_protocol["npc_state_replay"] = {
+                **npc_state_replay_plan.safe_dict(),
+                "packets_planned": 1,
+                "packets_sent": 0,
+            }
+        current_hp_stat_update_plan = None
+        if arguments.emit_current_hp_update is not None:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--emit-current-hp-update requires --keep-world-open"
+                )
+            current_hp_stat_update_plan = plan_current_hp_stat_update(
+                transcript, arguments.emit_current_hp_update
+            )
+            runtime_protocol["player_stat_update"] = {
+                **current_hp_stat_update_plan.safe_dict(),
+                "packets_planned": 1,
+                "packets_sent": 0,
+            }
+        inventory_quantity_update_plan = None
+        if arguments.emit_inventory_quantity_update is not None:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--emit-inventory-quantity-update requires "
+                    "--keep-world-open"
+                )
+            inventory, slot, quantity = (
+                arguments.emit_inventory_quantity_update
+            )
+            inventory_quantity_update_plan = plan_inventory_quantity_update(
+                transcript,
+                inventory,
+                slot,
+                quantity,
+            )
+            runtime_protocol["inventory_quantity_update"] = {
+                **inventory_quantity_update_plan.safe_dict(),
+                "packets_planned": 1,
+                "packets_sent": 0,
+            }
+        item_use_response_policy = None
+        if arguments.reactive_item_use_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-item-use-responses requires --keep-world-open"
+                )
+            item_use_response_policy = derive_item_use_response_policy(
+                transcript
+            )
+            runtime_protocol["item_use_responses"] = {
+                **item_use_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
+        if (
+            arguments.item_pickup_evidence_transcript is not None
+            or arguments.item_pickup_evidence_tcp_stream is not None
+        ) and not arguments.reactive_item_pickup_responses:
+            raise ValueError(
+                "item-pickup evidence options require "
+                "--reactive-item-pickup-responses"
+            )
+        item_pickup_response_policy = None
+        if arguments.reactive_item_pickup_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-item-pickup-responses requires "
+                    "--keep-world-open"
+                )
+            item_pickup_evidence_transcript = None
+            if arguments.item_pickup_evidence_transcript is not None:
+                item_pickup_evidence_transcript = Transcript.load(
+                    arguments.item_pickup_evidence_transcript
+                )
+            elif arguments.item_pickup_evidence_tcp_stream is not None:
+                if arguments.pcap is None:
+                    raise ValueError(
+                        "--item-pickup-evidence-tcp-stream requires --pcap"
+                    )
+                item_pickup_evidence_transcript = load_pcap_tcp_stream(
+                    arguments.pcap,
+                    arguments.item_pickup_evidence_tcp_stream,
+                    tshark=arguments.tshark,
+                )
+            item_pickup_response_policy = (
+                derive_item_pickup_response_policy(
+                    transcript,
+                    evidence_transcript=item_pickup_evidence_transcript,
+                )
+            )
+            runtime_protocol["item_pickup_responses"] = {
+                **item_pickup_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+            }
+        if (
+            arguments.mob_movement_evidence_transcript is not None
+            or arguments.mob_movement_evidence_tcp_stream is not None
+        ) and not (
+            arguments.reactive_mob_movement_acknowledgements
+            or arguments.emit_mob_movement_broadcast is not None
+            or arguments.emit_mob_movement_path is not None
+            or arguments.emit_mob_movement_auto_path is not None
+            or arguments.emit_mob_movement_composed_path is not None
+        ):
+            raise ValueError(
+                "mob-movement evidence options require "
+                "--reactive-mob-movement-acknowledgements or "
+                "a mob-movement emission option"
+            )
+        movement_evidence_transcript = None
+        if arguments.mob_movement_evidence_transcript is not None:
+            movement_evidence_transcript = Transcript.load(
+                arguments.mob_movement_evidence_transcript
+            )
+        elif arguments.mob_movement_evidence_tcp_stream is not None:
+            if arguments.pcap is None:
+                raise ValueError(
+                    "--mob-movement-evidence-tcp-stream requires --pcap"
+                )
+            movement_evidence_transcript = load_pcap_tcp_stream(
+                arguments.pcap,
+                arguments.mob_movement_evidence_tcp_stream,
+                tshark=arguments.tshark,
+            )
+        mob_movement_acknowledgement_policy = None
+        if arguments.reactive_mob_movement_acknowledgements:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-mob-movement-acknowledgements requires "
+                    "--keep-world-open"
+                )
+            mob_movement_acknowledgement_policy = (
+                derive_mob_movement_acknowledgement_policy(
+                    transcript,
+                    evidence_transcript=movement_evidence_transcript,
+                )
+            )
+            runtime_protocol["mob_movement_acknowledgements"] = {
+                "state": mob_movement_acknowledgement_policy.safe_dict(),
+                "submissions_observed": 0,
+                "responses_sent": 0,
+                "submissions_rejected": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
+        mob_health_response_policy = None
+        if arguments.reactive_mob_health_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-mob-health-responses requires "
+                    "--keep-world-open"
+                )
+            mob_health_response_policy = derive_mob_health_response_policy(
+                transcript
+            )
+            runtime_protocol["mob_health_responses"] = {
+                "state": mob_health_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
+        if arguments.validate_login_state or arguments.rewrite_handoff:
+            analysis = analyze_login_transcript(transcript)
+            print(render_login_analysis(analysis))
+            if not analysis.valid:
+                raise ValueError("login transcript failed packet/state validation")
+        if arguments.rewrite_handoff:
+            handoff_index, handoff_payload = build_handoff_frame_patch(
+                transcript, arguments.rewrite_handoff
+            )
+            if handoff_index in server_frame_patches:
+                raise ValueError(
+                    f"server frame {handoff_index} is set by both "
+                    "--server-frame-patch and --rewrite-handoff"
+                )
+            server_frame_patches[handoff_index] = handoff_payload
+        if (
+            arguments.pcap is not None
+            or arguments.world_heartbeat_interval_seconds is not None
+        ):
+            transcript = normalize_maple_transcript(transcript)
+        elif arguments.drop_client_frame:
+            raise ValueError("--drop-client-frame currently requires --pcap")
+        if len(set(arguments.drop_client_frame)) != len(
+            arguments.drop_client_frame
+        ):
+            raise ValueError("Each dropped client frame index may be specified once")
+        if arguments.drop_client_frame:
+            transcript = drop_normalized_client_frames(
+                transcript, set(arguments.drop_client_frame)
+            )
+        field_drop_position_replay_plan = None
+        if arguments.rewrite_final_field_drop_position is not None:
+            position_x, position_y = (
+                arguments.rewrite_final_field_drop_position
+            )
+            field_drop_position_replay_plan = (
+                plan_final_field_drop_position_rewrite(
+                    transcript,
+                    position_x,
+                    position_y,
+                )
+            )
+            frame_index = field_drop_position_replay_plan.server_frame_index
+            if frame_index in server_frame_patches:
+                raise ValueError(
+                    f"server frame {frame_index} is set by both "
+                    "--server-frame-patch and "
+                    "--rewrite-final-field-drop-position"
+                )
+            server_frame_patches[frame_index] = (
+                field_drop_position_replay_plan.replacement.to_bytes()
+            )
+            runtime_protocol["final_field_drop_position_rewrite"] = {
+                **field_drop_position_replay_plan.safe_dict(),
+                "frames_patched": 1,
+            }
+        field_drop_owner_replay_plan = None
+        if arguments.rewrite_final_field_drop_owner_to_player:
+            field_drop_owner_replay_plan = (
+                plan_final_field_drop_owner_to_player_rewrite(transcript)
+            )
+            frame_index = field_drop_owner_replay_plan.server_frame_index
+            if frame_index in server_frame_patches:
+                if (
+                    field_drop_position_replay_plan is None
+                    or frame_index
+                    != field_drop_position_replay_plan.server_frame_index
+                ):
+                    raise ValueError(
+                        f"server frame {frame_index} is set by both an "
+                        "existing patch and "
+                        "--rewrite-final-field-drop-owner-to-player"
+                    )
+                current = FieldDropSpawn.parse(
+                    server_frame_patches[frame_index]
+                )
+                replacement = replace(
+                    current,
+                    owner_value_1=(
+                        field_drop_owner_replay_plan.replacement.owner_value_1
+                    ),
+                    owner_value_2=(
+                        field_drop_owner_replay_plan.replacement.owner_value_2
+                    ),
+                )
+            else:
+                replacement = field_drop_owner_replay_plan.replacement
+            replacement_payload = replacement.to_bytes()
+            if FieldDropSpawn.parse(replacement_payload) != replacement:
+                raise ValueError(
+                    "composed field-drop rewrite failed packet round-trip "
+                    "validation"
+                )
+            server_frame_patches[frame_index] = replacement_payload
+            runtime_protocol["final_field_drop_owner_rewrite"] = {
+                **field_drop_owner_replay_plan.safe_dict(),
+                "frames_patched": 1,
+                "composed_with_position_rewrite": (
+                    field_drop_position_replay_plan is not None
+                ),
+            }
+        initial_field_replay_plan = None
+        if (
+            arguments.generate_initial_field_snapshot
+            or arguments.rewrite_initial_current_hp is not None
+        ):
+            initial_field_replay_plan = plan_initial_field_snapshot_replay(
+                transcript,
+                arguments.rewrite_initial_current_hp,
+            )
+            if (
+                initial_field_replay_plan.server_frame_index
+                in server_frame_patches
+            ):
+                raise ValueError(
+                    "server frame "
+                    f"{initial_field_replay_plan.server_frame_index} "
+                    "is set by both an explicit patch and the typed initial "
+                    "field emitter"
+                )
+            server_frame_patches[
+                initial_field_replay_plan.server_frame_index
+            ] = initial_field_replay_plan.replacement.to_bytes()
+            protocol_key = (
+                "initial_player_hp_rewrite"
+                if arguments.rewrite_initial_current_hp is not None
+                else "initial_field_snapshot_emitter"
+            )
+            runtime_protocol[protocol_key] = {
+                **initial_field_replay_plan.safe_dict(),
+                "frames_patched": 1,
+            }
+        npc_spawn_replay_plan = None
+        fixed_server_replay_plan = None
+        if arguments.generate_fixed_server_records:
+            fixed_server_replay_plan = plan_fixed_server_record_replay(transcript)
+            for frame in fixed_server_replay_plan.frames:
+                if frame.server_frame_index in server_frame_patches:
+                    raise ValueError(
+                        f"server frame {frame.server_frame_index} is set by "
+                        "both an explicit patch and the typed fixed-server "
+                        "emitter"
+                    )
+                server_frame_patches[frame.server_frame_index] = (
+                    frame.record.to_bytes()
+                )
+            runtime_protocol["fixed_server_record_emitter"] = {
+                **fixed_server_replay_plan.safe_dict(),
+                "frames_patched": len(fixed_server_replay_plan.frames),
+            }
+        variable_server_replay_plan = None
+        if arguments.generate_variable_server_records:
+            variable_server_replay_plan = plan_variable_server_record_replay(
+                transcript
+            )
+            for frame in variable_server_replay_plan.frames:
+                if frame.server_frame_index in server_frame_patches:
+                    raise ValueError(
+                        f"server frame {frame.server_frame_index} is set by "
+                        "both an explicit patch and the typed variable-server "
+                        "emitter"
+                    )
+                server_frame_patches[frame.server_frame_index] = (
+                    frame.record.to_bytes()
+                )
+            runtime_protocol["variable_server_record_emitter"] = {
+                **variable_server_replay_plan.safe_dict(),
+                "frames_patched": len(variable_server_replay_plan.frames),
+            }
+        if arguments.generate_field_npc_spawns:
+            npc_spawn_replay_plan = plan_field_npc_spawn_replay(transcript)
+            for frame in npc_spawn_replay_plan.frames:
+                if frame.server_frame_index in server_frame_patches:
+                    raise ValueError(
+                        f"server frame {frame.server_frame_index} is set by "
+                        "both an explicit patch and the typed NPC spawn emitter"
+                    )
+                server_frame_patches[frame.server_frame_index] = (
+                    frame.spawn.to_bytes()
+                )
+            runtime_protocol["npc_spawn_emitter"] = {
+                **npc_spawn_replay_plan.safe_dict(),
+                "frames_patched": len(npc_spawn_replay_plan.frames),
+            }
+        grouped_client_opcode_replies: dict[int, list[bytes]] = {}
+        for opcode, payload in arguments.reply_on_client_opcode:
+            grouped_client_opcode_replies.setdefault(opcode, []).append(payload)
+        client_opcode_replies = {
+            opcode: tuple(payloads)
+            for opcode, payloads in grouped_client_opcode_replies.items()
+        }
+        if (
+            mob_movement_acknowledgement_policy is not None
+            and 207 in client_opcode_replies
+        ):
+            raise ValueError(
+                "--reactive-mob-movement-acknowledgements conflicts with "
+                "a captured client opcode 207 reply"
+            )
+        if (
+            item_pickup_response_policy is not None
+            and 185 in client_opcode_replies
+        ):
+            raise ValueError(
+                "--reactive-item-pickup-responses conflicts with a captured "
+                "client opcode 185 reply"
+            )
+        if mob_health_response_policy is not None and any(
+            opcode in client_opcode_replies for opcode in (50, 52)
+        ):
+            raise ValueError(
+                "--reactive-mob-health-responses conflicts with captured "
+                "client opcode 50/52 replies"
+            )
+        client_opcode_reply_delays = dict(arguments.client_opcode_reply_delays)
+        if len(client_opcode_reply_delays) != len(
+            arguments.client_opcode_reply_delays
+        ):
+            raise ValueError("Each reactive client opcode may define delays once")
+        for opcode, delays in client_opcode_reply_delays.items():
+            replies = client_opcode_replies.get(opcode)
+            if replies is None:
+                raise ValueError(
+                    f"client opcode {opcode} defines delays but has no replies"
+                )
+            if len(delays) != len(replies):
+                raise ValueError(
+                    f"client opcode {opcode} has {len(replies)} replies but "
+                    f"{len(delays)} delays"
+                )
+        if (
+            arguments.rewrite_channel_transition_world
+            and 4 not in client_opcode_replies
+        ):
+            raise ValueError(
+                "--rewrite-channel-transition-world requires reactive "
+                "client opcode 4 replies"
+            )
+        patch_server_frames(
+            transcript, server_frame_patches, dropped_server_frames
+        )
+        post_transcript_server_frames = tuple(
+            arguments.post_transcript_server_frames
+        )
+        mob_movement_broadcast_plans: tuple[
+            MobMovementBroadcastPlan, ...
+        ] = ()
+        mob_movement_follow_up_targets = tuple(
+            arguments.queue_mob_movement_composed_path
+        )
+        mob_movement_follow_up_policy = (
+            arguments.mob_movement_relative_policy
+        )
+        mob_movement_policy_trigger = (
+            arguments.mob_movement_policy_trigger.replace("-", "_")
+        )
+        mob_movement_proximity_radius = (
+            arguments.mob_movement_proximity_radius
+        )
+        mob_movement_policy_cooldown_seconds = (
+            arguments.mob_movement_policy_cooldown_seconds
+        )
+        if (
+            mob_movement_follow_up_targets
+            and mob_movement_follow_up_policy is not None
+        ):
+            raise ValueError(
+                "--queue-mob-movement-composed-path conflicts with "
+                "--mob-movement-relative-policy"
+            )
+        if (
+            mob_movement_policy_trigger != "immediate"
+            and mob_movement_follow_up_policy is None
+        ):
+            raise ValueError(
+                "event-driven --mob-movement-policy-trigger requires "
+                "--mob-movement-relative-policy"
+            )
+        if (
+            mob_movement_policy_trigger == "matched_heartbeat"
+            and arguments.world_heartbeat_interval_seconds is None
+        ):
+            raise ValueError(
+                "matched-heartbeat movement policy trigger requires "
+                "--world-heartbeat-interval-seconds"
+            )
+        if (
+            mob_movement_policy_trigger == "served_mob_movement"
+            and mob_movement_acknowledgement_policy is None
+        ):
+            raise ValueError(
+                "served-mob-movement movement policy trigger requires "
+                "--reactive-mob-movement-acknowledgements"
+            )
+        if (
+            mob_movement_proximity_radius is not None
+            and not (
+                1
+                <= mob_movement_proximity_radius
+                <= MAX_PLAYER_MOB_PROXIMITY_RADIUS
+            )
+        ):
+            raise ValueError(
+                "--mob-movement-proximity-radius must be in 1..4096"
+            )
+        if (
+            mob_movement_policy_trigger == "player_proximity"
+            and mob_movement_proximity_radius is None
+        ):
+            raise ValueError(
+                "player-proximity movement policy trigger requires "
+                "--mob-movement-proximity-radius"
+            )
+        if (
+            mob_movement_proximity_radius is not None
+            and mob_movement_policy_trigger != "player_proximity"
+        ):
+            raise ValueError(
+                "--mob-movement-proximity-radius requires "
+                "--mob-movement-policy-trigger player-proximity"
+            )
+        if not 0 <= mob_movement_policy_cooldown_seconds <= 3600:
+            raise ValueError(
+                "--mob-movement-policy-cooldown-seconds must be in "
+                "0..3600"
+            )
+        if (
+            mob_movement_policy_cooldown_seconds > 0
+            and mob_movement_policy_trigger == "immediate"
+        ):
+            raise ValueError(
+                "--mob-movement-policy-cooldown-seconds requires an "
+                "event-driven --mob-movement-policy-trigger"
+            )
+        if (
+            (
+                mob_movement_follow_up_targets
+                or mob_movement_follow_up_policy is not None
+            )
+            and arguments.emit_mob_movement_broadcast is None
+            and arguments.emit_mob_movement_path is None
+            and arguments.emit_mob_movement_auto_path is None
+            and arguments.emit_mob_movement_composed_path is None
+        ):
+            raise ValueError(
+                "mob movement follow-up planning requires "
+                "an initial mob-movement emission option"
+            )
+        if (
+            len(mob_movement_follow_up_targets)
+            > MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS
+        ):
+            raise ValueError(
+                "--queue-mob-movement-composed-path may be repeated at "
+                f"most {MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS} times"
+            )
+        mob_movement_baseline_server_frames = (
+            post_transcript_server_frames
+        )
+        mob_movement_planning_context: (
+            MobMovementPlanningContext | None
+        ) = None
+        if (
+            arguments.emit_mob_movement_broadcast is not None
+            or arguments.emit_mob_movement_path is not None
+            or arguments.emit_mob_movement_auto_path is not None
+            or arguments.emit_mob_movement_composed_path is not None
+        ):
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "mob-movement emission requires --keep-world-open"
+                )
+            mob_movement_planning_context = (
+                build_mob_movement_planning_context(
+                    transcript, movement_evidence_transcript
+                )
+            )
+            if arguments.emit_mob_movement_composed_path is not None:
+                max_steps, target_x, target_y, foothold_id = (
+                    arguments.emit_mob_movement_composed_path
+                )
+                sequence_plan = plan_composed_mob_movement_broadcasts(
+                    transcript,
+                    post_transcript_server_frames=(
+                        post_transcript_server_frames
+                    ),
+                    evidence_transcript=movement_evidence_transcript,
+                    target_x=target_x,
+                    target_y=target_y,
+                    foothold_id=foothold_id,
+                    max_steps=max_steps,
+                    planning_context=mob_movement_planning_context,
+                )
+                mob_movement_broadcast_plans = sequence_plan.steps
+                if (
+                    mob_movement_follow_up_targets
+                    or mob_movement_follow_up_policy is not None
+                ):
+                    movement_schedule_preview = (
+                        MobMovementBroadcastDecisionQueue(
+                            transcript,
+                            mob_movement_broadcast_plans,
+                            follow_up_targets=(
+                                mob_movement_follow_up_targets
+                            ),
+                            follow_up_policy=(
+                                mob_movement_follow_up_policy
+                            ),
+                            evidence_transcript=(
+                                movement_evidence_transcript
+                            ),
+                            planning_context=(
+                                mob_movement_planning_context
+                            ),
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
+                else:
+                    movement_schedule_preview = (
+                        MobMovementBroadcastScheduler(
+                            mob_movement_broadcast_plans,
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
+                runtime_protocol["mob_movement_broadcast"] = {
+                    **sequence_plan.safe_dict(),
+                    **movement_schedule_preview.telemetry_dict(),
+                }
+            else:
+                if arguments.emit_mob_movement_broadcast is not None:
+                    target_x, target_y, foothold_id, stance = (
+                        arguments.emit_mob_movement_broadcast
+                    )
+                    path_evidence_server_frame_index = None
+                    auto_select_captured_path = False
+                elif arguments.emit_mob_movement_path is not None:
+                    (
+                        path_evidence_server_frame_index,
+                        target_x,
+                        target_y,
+                        foothold_id,
+                    ) = arguments.emit_mob_movement_path
+                    stance = 4
+                    auto_select_captured_path = False
+                else:
+                    target_x, target_y, foothold_id = (
+                        arguments.emit_mob_movement_auto_path
+                    )
+                    stance = 4
+                    path_evidence_server_frame_index = None
+                    auto_select_captured_path = True
+                mob_movement_broadcast_plan = plan_mob_movement_broadcast(
+                    transcript,
+                    post_transcript_server_frames=(
+                        post_transcript_server_frames
+                    ),
+                    evidence_transcript=movement_evidence_transcript,
+                    target_x=target_x,
+                    target_y=target_y,
+                    foothold_id=foothold_id,
+                    stance=stance,
+                    path_evidence_server_frame_index=(
+                        path_evidence_server_frame_index
+                    ),
+                    auto_select_captured_path=auto_select_captured_path,
+                    planning_context=mob_movement_planning_context,
+                )
+                mob_movement_broadcast_plans = (
+                    mob_movement_broadcast_plan,
+                )
+                if (
+                    mob_movement_follow_up_targets
+                    or mob_movement_follow_up_policy is not None
+                ):
+                    movement_schedule_preview = (
+                        MobMovementBroadcastDecisionQueue(
+                            transcript,
+                            mob_movement_broadcast_plans,
+                            follow_up_targets=(
+                                mob_movement_follow_up_targets
+                            ),
+                            follow_up_policy=(
+                                mob_movement_follow_up_policy
+                            ),
+                            evidence_transcript=(
+                                movement_evidence_transcript
+                            ),
+                            planning_context=(
+                                mob_movement_planning_context
+                            ),
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
+                else:
+                    movement_schedule_preview = (
+                        MobMovementBroadcastScheduler(
+                            mob_movement_broadcast_plans,
+                            baseline_server_frames=(
+                                mob_movement_baseline_server_frames
+                            ),
+                        )
+                    )
+                runtime_protocol["mob_movement_broadcast"] = {
+                    **mob_movement_broadcast_plan.safe_dict(),
+                    **movement_schedule_preview.telemetry_dict(),
+                }
+            runtime_protocol["mob_movement_broadcast"]["planning_cache"] = (
+                mob_movement_planning_context.safe_dict()
+            )
+            runtime_protocol["mob_movement_broadcast"]["policy_trigger"] = {
+                "mode": mob_movement_policy_trigger,
+                "awaiting_event": False,
+                "matched_events_observed": 0,
+                "decisions_started": 0,
+                "decisions_completed": 0,
+                "events_ignored_after_completion": 0,
+                "cooldown_seconds": (
+                    mob_movement_policy_cooldown_seconds
+                ),
+                "events_rejected_by_cooldown": 0,
+                "last_event_outcome": None,
+                "last_cooldown_remaining_seconds": 0.0,
+                "proximity": (
+                    PlayerMobProximityPredicate(
+                        mob_movement_proximity_radius
+                    ).safe_dict()
+                    if mob_movement_proximity_radius is not None
+                    else None
+                ),
+            }
+            post_transcript_server_frames += tuple(
+                plan.broadcast.to_bytes()
+                for plan in mob_movement_broadcast_plans
+            )
+        if arguments.mob_movement_step_delay_seconds is not None:
+            if arguments.mob_movement_step_delay_seconds < 0:
+                raise ValueError(
+                    "--mob-movement-step-delay-seconds cannot be negative"
+                )
+            if not mob_movement_broadcast_plans:
+                raise ValueError(
+                    "--mob-movement-step-delay-seconds requires a "
+                    "mob-movement emission option"
+                )
+        npc_state_replay_plaintext = None
+        if npc_state_replay_plan is not None:
+            npc_state_replay_plaintext = npc_state_replay_plan.update.to_bytes()
+            post_transcript_server_frames += (npc_state_replay_plaintext,)
+        player_stat_update_plaintext = None
+        if current_hp_stat_update_plan is not None:
+            player_stat_update_plaintext = (
+                current_hp_stat_update_plan.update.to_bytes()
+            )
+            post_transcript_server_frames += (player_stat_update_plaintext,)
+        inventory_quantity_update_plaintext = None
+        if inventory_quantity_update_plan is not None:
+            inventory_quantity_update_plaintext = (
+                inventory_quantity_update_plan.update.to_bytes()
+            )
+            post_transcript_server_frames += (
+                inventory_quantity_update_plaintext,
+            )
         handler = functools.partial(
             replay_connection,
             transcript=transcript,
@@ -1220,8 +4537,10 @@ async def async_main(arguments: argparse.Namespace) -> None:
             hold_open_seconds=arguments.hold_open_seconds,
             initial_delay_seconds=arguments.initial_delay_seconds,
             server_frame_patches=server_frame_patches,
-            post_transcript_server_frames=tuple(
-                arguments.post_transcript_server_frames
+            dropped_server_frames=dropped_server_frames,
+            post_transcript_server_frames=post_transcript_server_frames,
+            post_transcript_start_delay_seconds=(
+                arguments.post_transcript_start_delay_seconds
             ),
             post_transcript_frame_delay_seconds=(
                 arguments.post_transcript_frame_delay_seconds
@@ -1231,17 +4550,176 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             post_transcript_replies=tuple(arguments.reply_after_client_frame),
             client_opcode_replies=client_opcode_replies,
+            client_opcode_reply_delays=client_opcode_reply_delays,
+            rewrite_channel_transition_world=(
+                arguments.rewrite_channel_transition_world
+            ),
+            keep_world_open=arguments.keep_world_open,
+            world_heartbeat_interval_seconds=(
+                arguments.world_heartbeat_interval_seconds
+            ),
+            npc_state_replay_plaintext=npc_state_replay_plaintext,
+            player_stat_update_plaintext=player_stat_update_plaintext,
+            inventory_quantity_update_plaintext=(
+                inventory_quantity_update_plaintext
+            ),
+            mob_movement_broadcast_plans=(
+                mob_movement_broadcast_plans
+            ),
+            mob_movement_baseline_server_frames=(
+                mob_movement_baseline_server_frames
+            ),
+            mob_movement_step_delay_seconds=(
+                arguments.mob_movement_step_delay_seconds
+            ),
+            mob_movement_follow_up_targets=(
+                mob_movement_follow_up_targets
+            ),
+            mob_movement_follow_up_policy=(
+                mob_movement_follow_up_policy
+            ),
+            mob_movement_policy_trigger=mob_movement_policy_trigger,
+            mob_movement_proximity_radius=mob_movement_proximity_radius,
+            mob_movement_policy_cooldown_seconds=(
+                mob_movement_policy_cooldown_seconds
+            ),
+            mob_movement_evidence_transcript=(
+                movement_evidence_transcript
+            ),
+            mob_movement_planning_context=(
+                mob_movement_planning_context
+            ),
+            item_pickup_response_policy=item_pickup_response_policy,
+            item_use_response_policy=item_use_response_policy,
+            mob_movement_acknowledgement_policy=(
+                mob_movement_acknowledgement_policy
+            ),
+            mob_health_response_policy=mob_health_response_policy,
+            runtime_protocol=runtime_protocol,
+            server_packet_injection=server_packet_injection,
         )
+        runtime_config = {
+            "source": "pcap" if arguments.pcap is not None else "transcript",
+            "tcp_stream": arguments.tcp_stream,
+            "strict": not arguments.no_strict,
+            "timing_scale": arguments.timing_scale,
+            "hold_open_seconds": arguments.hold_open_seconds,
+            "keep_world_open": arguments.keep_world_open,
+            "world_heartbeat_interval_seconds": (
+                arguments.world_heartbeat_interval_seconds
+            ),
+            "repeat_final_field_npc_state_update": (
+                arguments.repeat_final_field_npc_state_update
+            ),
+            "rewrite_initial_current_hp": (
+                arguments.rewrite_initial_current_hp
+            ),
+            "generate_initial_field_snapshot": (
+                arguments.generate_initial_field_snapshot
+            ),
+            "generate_field_npc_spawns": arguments.generate_field_npc_spawns,
+            "generate_fixed_server_records": (
+                arguments.generate_fixed_server_records
+            ),
+            "generate_variable_server_records": (
+                arguments.generate_variable_server_records
+            ),
+            "rewrite_final_field_drop_position": (
+                arguments.rewrite_final_field_drop_position
+            ),
+            "rewrite_final_field_drop_owner_to_player": (
+                arguments.rewrite_final_field_drop_owner_to_player
+            ),
+            "emit_current_hp_update": arguments.emit_current_hp_update,
+            "emit_inventory_quantity_update": (
+                arguments.emit_inventory_quantity_update
+            ),
+            "reactive_item_use_responses": (
+                arguments.reactive_item_use_responses
+            ),
+            "reactive_item_pickup_responses": (
+                arguments.reactive_item_pickup_responses
+            ),
+            "item_pickup_evidence_tcp_stream": (
+                arguments.item_pickup_evidence_tcp_stream
+            ),
+            "reactive_mob_movement_acknowledgements": (
+                arguments.reactive_mob_movement_acknowledgements
+            ),
+            "mob_movement_evidence_tcp_stream": (
+                arguments.mob_movement_evidence_tcp_stream
+            ),
+            "emit_mob_movement_broadcast": (
+                arguments.emit_mob_movement_broadcast
+            ),
+            "emit_mob_movement_path": arguments.emit_mob_movement_path,
+            "emit_mob_movement_auto_path": (
+                arguments.emit_mob_movement_auto_path
+            ),
+            "emit_mob_movement_composed_path": (
+                arguments.emit_mob_movement_composed_path
+            ),
+            "queue_mob_movement_composed_path": list(
+                mob_movement_follow_up_targets
+            ),
+            "mob_movement_relative_policy": (
+                mob_movement_follow_up_policy.safe_dict()
+                if mob_movement_follow_up_policy is not None
+                else None
+            ),
+            "mob_movement_policy_trigger": mob_movement_policy_trigger,
+            "mob_movement_proximity_radius": (
+                mob_movement_proximity_radius
+            ),
+            "mob_movement_policy_cooldown_seconds": (
+                mob_movement_policy_cooldown_seconds
+            ),
+            "mob_movement_step_delay_seconds": (
+                arguments.mob_movement_step_delay_seconds
+            ),
+            "reactive_mob_health_responses": (
+                arguments.reactive_mob_health_responses
+            ),
+            "dropped_server_frame_indices": sorted(dropped_server_frames),
+            "http_packet_injection_enabled": (
+                arguments.enable_http_packet_injection
+            ),
+        }
+        if arguments.world_heartbeat_interval_seconds is not None:
+            runtime_protocol["world_heartbeat"] = {
+                "interval_seconds": arguments.world_heartbeat_interval_seconds,
+                "probes_sent": 0,
+                "responses_observed": 0,
+                "pending": 0,
+                "last_round_trip_ms": None,
+                "max_round_trip_ms": None,
+            }
     elif arguments.command == "stub":
         handler = functools.partial(
             stub_connection,
             transcript_directory=arguments.transcript_dir,
             listen_port=arguments.listen_port,
         )
+        runtime_config = {"capture_enabled": True}
     else:
         raise ValueError(f"Unknown listener command: {arguments.command}")
 
-    await run_listener(arguments.listen_host, arguments.listen_port, handler)
+    runtime = ServerRuntime(
+        mode=handler_name(handler),
+        listen_host=arguments.listen_host,
+        listen_port=arguments.listen_port,
+        config=runtime_config,
+        protocol=runtime_protocol,
+        server_packet_injection=server_packet_injection,
+    )
+    await run_listener(
+        arguments.listen_host,
+        arguments.listen_port,
+        handler,
+        runtime=runtime,
+        http_api_host=arguments.http_api_host,
+        http_api_port=arguments.http_api_port,
+    )
 
 
 def main() -> None:
@@ -1252,6 +4730,70 @@ def main() -> None:
         return
     if arguments.command == "compare":
         compare_transcripts(arguments.first, arguments.second)
+        return
+    if arguments.command == "inject-current-hp":
+        result = inject_current_hp_live(
+            arguments.transcript,
+            arguments.current_hp,
+            api_url=arguments.http_api_url,
+            api_timeout_seconds=arguments.api_timeout_seconds,
+            verify_timeout_seconds=arguments.verify_timeout_seconds,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    result.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_current_hp_live_replay(result))
+        return
+    if arguments.command in {"analyze-login", "analyze-gameplay"}:
+        if arguments.pcap is not None:
+            if arguments.tcp_stream is None:
+                parser.error("--tcp-stream is required with --pcap")
+            transcript = load_pcap_tcp_stream(
+                arguments.pcap,
+                arguments.tcp_stream,
+                tshark=arguments.tshark,
+            )
+        else:
+            if arguments.tcp_stream is not None:
+                parser.error("--tcp-stream is only valid with --pcap")
+            transcript = Transcript.load(arguments.transcript)
+        if arguments.command == "analyze-login":
+            analysis = analyze_login_transcript(transcript)
+        else:
+            analysis = analyze_gameplay_transcript(transcript)
+        if arguments.json:
+            print(
+                analysis.to_json(
+                    show_identifiers=arguments.show_identifiers
+                )
+            )
+        else:
+            if arguments.command == "analyze-login":
+                print(
+                    render_login_analysis(
+                        analysis,
+                        show_identifiers=arguments.show_identifiers,
+                        show_packets=arguments.packets,
+                    )
+                )
+            else:
+                print(
+                    render_gameplay_analysis(
+                        analysis,
+                        show_identifiers=arguments.show_identifiers,
+                        show_packets=arguments.packets,
+                        show_events=arguments.events,
+                    )
+                )
+        if arguments.fail_on_invalid and not analysis.valid:
+            raise SystemExit(2)
         return
     try:
         asyncio.run(async_main(arguments))

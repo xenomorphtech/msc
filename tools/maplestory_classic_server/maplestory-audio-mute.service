@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep MapleStory Classic PipeWire streams muted
+After=pipewire.service wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python /home/sdancer/ms/tools/maplestory_classic_server/maple_server/audio_mute.py
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

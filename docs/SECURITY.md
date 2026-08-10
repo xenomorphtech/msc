@@ -2,7 +2,7 @@
 
 ## Local `.env`
 
-The account credentials and both supplied proxy profiles are stored in:
+The account credentials and all supplied proxy profiles are stored in:
 
 ```text
 /home/sdancer/ms/.env
@@ -33,7 +33,14 @@ MAPLE_HK_PROXY_PORT
 MAPLE_HK_PROXY_USER
 MAPLE_HK_PROXY_PASSWORD
 
+MAPLE_HK_SOCKS5_PROXY_SCHEME
+MAPLE_HK_SOCKS5_PROXY_HOST
+MAPLE_HK_SOCKS5_PROXY_PORT
+MAPLE_HK_SOCKS5_PROXY_USER
+MAPLE_HK_SOCKS5_PROXY_PASSWORD
+
 MAPLE_PROXY_PROFILE
+MAPLE_PROXY_SCHEME
 MAPLE_PROXY_HOST
 MAPLE_PROXY_PORT
 MAPLE_PROXY_USER
@@ -41,8 +48,9 @@ MAPLE_PROXY_PASSWORD
 ```
 
 The generic `MAPLE_PROXY_*` values are the active/default profile consumed by
-the transparent relay. The region-specific variables preserve both supplied
-profiles.
+the transparent relay. The region-specific variables preserve the supplied
+Taiwan, Hong Kong CONNECT, and Hong Kong SOCKS5 profiles. Set
+`MAPLE_PROXY_SCHEME` when selecting SOCKS5; it defaults to `http` when omitted.
 
 Load the file without displaying it:
 
@@ -60,11 +68,37 @@ it. Do not pass passwords directly on a command line.
 - `.env` contains raw credentials and must never be committed.
 - Protocol JSONL files may contain login tickets, session identifiers, or
   encrypted authentication payloads. Treat them as private even though proxy
-  credentials are not written into them.
+  credentials are not written into them. Custom replay `runtime_event`
+  annotations are deliberately identifier-free, but they share the same file
+  with packet data and do not make that transcript safe to publish.
 - Chromium's `/tmp/maple-proxied-login` profile contains authenticated browser
   state while it exists.
 - Packet captures (`.pcap`), strace logs, Wine logs, and screenshots can reveal
   endpoints, tokens, account identifiers, or window content.
+- Repository-root `./111.pcapng` contains a successful account and
+  character session; `./1-10FS.pcapng` contains a long gameplay session. They
+  are consumed in place, must remain untracked, and must not be converted to
+  committed plaintext fixtures.
+
+## Safe capture analysis
+
+Use `python -m maple_server analyze-login` for structural reports. Its default
+output stores numeric account/character IDs only in memory and renders them as
+`present`; raw plaintext and account strings are not printed. Only use
+`--show-identifiers` in a private terminal when the exact values are required.
+
+PCAP-backed replay options accept references such as
+`PCAP@STREAM:SERVER_FRAME` and resolve plaintext inside the process. Prefer
+these references over placing captured plaintext hex in shell history or
+process arguments. The committed tests use sanitized synthetic records.
+
+The opt-in server-packet HTTP endpoint has no application authentication and
+must remain bound to loopback inside the trusted replay namespace. For current-
+HP experiments, prefer `inject-current-hp`: it rejects non-loopback hosts,
+credentials, alternate paths, query strings, fragments, and HTTPS URLs, and it
+does not print the generated plaintext packet. This URL validation narrows
+accidental use but does not add authentication; any trusted local process that
+can reach the raw endpoint can still mutate the active replay connection.
 
 ## File modes
 

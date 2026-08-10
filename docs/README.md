@@ -2,7 +2,7 @@
 
 These notes preserve the working context for the Taiwan/Hong Kong MapleStory
 Classic Unity client, its Wine environment, network capture setup, and the
-custom-server experiment as of 2026-08-07.
+custom-server experiment as of 2026-08-09.
 
 ## Start here
 
@@ -23,6 +23,8 @@ custom-server experiment as of 2026-08-07.
 
 ```text
 /home/sdancer/ms/
+├── 111.pcapng                    # successful login + gameplay reference; untracked
+├── 1-10FS.pcapng                 # level 1-10 gameplay reference; untracked
 ├── .env                         # credentials and proxy profiles; mode 0600
 ├── .codex_tmp/                  # launch, proxy, Sway, IL2CPP, and RE tools
 ├── docs/                        # these notes
@@ -46,5 +48,5 @@ The MapleStory work is deliberately separate from the Phoenix application in
    those listeners.
 4. Launch `Maplestory_Classic.exe` directly with the placeholder arguments.
    NGM is not required for local protocol iterations.
-5. Re-mute the MapleStory PipeWire stream after every client restart because
-   its node ID can change.
+5. Keep `maplestory-audio-mute.service` active; it discovers and mutes each new
+   MapleStory PipeWire node by application identity after restarts.

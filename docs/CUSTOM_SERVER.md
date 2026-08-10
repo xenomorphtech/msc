@@ -6,8 +6,9 @@
 /home/sdancer/ms/tools/maplestory_classic_server/
 ```
 
-This is a standalone Python standard-library project. It is intentionally not
-part of the Albion Phoenix application.
+This is a standalone Python tool (with PyCryptodome for Maple AES and optional
+`tshark` for PCAP input). It is intentionally not part of the Albion Phoenix
+application.
 
 ## Tests
 
@@ -16,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 31 tests.
+The last run passed all 213 tests.
 
 ## Inspect and compare captures
 
@@ -34,6 +35,265 @@ python -m maple_server compare \
 `inspect` prints structural information without dumping payloads. `compare`
 reports event sizes, common prefixes/suffixes, and equal-position counts while
 keeping sensitive bytes out of terminal output.
+
+For PCAP or JSONL login logs, use the typed state fold instead:
+
+```sh
+python -m maple_server analyze-login \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 83 \
+  --packets \
+  --fail-on-invalid
+```
+
+It reassembles TCP, validates cipher headers and IV progression, parses known
+packet shapes, and applies them to account/world/channel/character/handoff
+state. `--packets` prints frame-aligned decoded fields and timing; `--json`
+emits the same records for tooling. Account and character IDs are redacted
+unless explicitly requested.
+
+World logs use the corresponding gameplay fold:
+
+```sh
+python -m maple_server analyze-gameplay \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --packets \
+  --events \
+  --fail-on-invalid
+```
+
+It validates frame shapes and state invariants, emits typed field events, and
+folds the initial player/map/inventory/progression snapshot plus subsequent
+NPC, mob, movement, transition, termination, and heartbeat traffic.
+
+The repository-root level-1-to-10 corpus is stream `126`:
+
+```sh
+python -m maple_server analyze-gameplay \
+  --pcap /home/sdancer/ms/1-10FS.pcapng \
+  --tcp-stream 126
+```
+
+Normalization removes its measured 14-byte server and 28-byte client
+transport preludes before the Maple greeting. It then decrypts 71,100 frames,
+folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
+all 197 pickup requests against known drops and matching epochs. It now passes
+`--fail-on-invalid`: 26,565 observations are full, 44,295 partial, 240
+unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
+not shape failures: six pickup-effect mismatches and one aggregate warning for
+six delayed combat predictions that differ by one HP.
+The opcode-`158` stage-`0` variant keeps its
+neutral word `1` and nine-byte tail as partial semantic coverage.
+
+Player movement appears as decoded opcode-`182` submissions and opcode-`202`
+broadcasts. The short stream prints one local path ending at `(633,-2677)` and
+two remote-player broadcasts under session-local aliases. The long stream
+validates and round-trips 531 submissions, 113 broadcasts, and all 4,281
+commands, with fixed tags `0/1/3/5` and payload sizes `13/7/5/13` bytes.
+
+Remote-player presence now begins with server opcode `189`, whose IL2CPP-backed
+prefix carries object id, level, and a counted UTF-16 name before a retained
+version-specific body. Opcode `190` is its exact u32-id removal, not a neutral
+fixed record. Across streams `92/114/126`, all 114 entries and 39 leaves
+round-trip exactly, all leaves match current-epoch entries, and every one of
+563 opcode-`202` and 652 server opcode-`217` broadcasts now references a known
+player. Safe events/state expose aliases, level, name length, and optional
+position, but never the captured id or name.
+
+Server opcode `247` is now a fully bounded tutorial-UI instruction: terminated
+counted UTF-16 text, two i16 values, one control byte, and a handler-confirmed
+optional pair of i32 values. Stream `126` contributes 33 exact full-coverage
+packets with 17 redacted localization keys; safe output exposes only code-unit
+and numeric distributions. Two exact packets were accepted by the live client
+and folded without changing its active map/player state. No overlay appeared
+at 100 ms, 400 ms, or one second on the level-12 character, so the client-side
+render remains state-gated and is not claimed.
+
+Server opcode `244` selector `8` is a separate instructional-dialogue request.
+The pinned handler and all 54 stream-`126` packets agree on an exact 15-byte
+shape: selector byte `8` followed by three signed int32 values. The fold emits
+`instructional_dialogue_requested` and retains numeric distributions without
+guessing the three value roles. Injecting exact captured values
+`1036, 2003, 0` into a fresh browser-free level-12 session immediately opened
+an NPC instruction dialogue; its text was partially rendered at 100 ms and
+complete at one second. The packet folded back exactly at full coverage, the
+client stayed active on map `101000000`, and all 11 transcript heartbeats were
+matched.
+
+Server opcodes `320`, `322`, and `323` form a handler-backed positioned-effect
+family. Their exact 15/16/11-byte records retain an aliased primary identifier,
+typed i16 coordinates, and neutral numeric/control values. All 82 stream-`126`
+packets round-trip at full coverage; every opcode-`323` update resolves to a
+current-field entity. A live exact opcode-`322` packet at its captured
+off-screen position made no visible change. Replaying the same typed packet
+with only its position changed to the folded player coordinate `(633,-2677)`
+produced a transient blue `10` over the sprite, gone by one second, while HP
+remained `50/222`. The transcript folded both packets as one aliased entity
+plus one update and matched all 131 heartbeat pairs.
+
+The analyzer also bounds client opcode `47` and server opcode `217` as a
+separate life-movement relay family. Stream `126` contributes 2,585 client
+submissions and 347 server broadcasts, all consuming exactly; stream `92`
+exercises all fixed client-tail variants. Command bytes and neutral control/
+tail roles remain opaque, so these packets are partial rather than full.
+
+Client opcode `13` is shared with the login protocol but persists in gameplay.
+The analyzer now accepts the exact 11-byte type-`1` shape and the existing
+length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
+counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
+packets across all three observed variants, all with exact round trips.
+Server opcode `49` is explicitly split by its byte discriminator: variant `0`
+is the existing pickup-gain notice, while variants `1/3/4/6/10/12` use a
+separate neutral envelope and cannot enter pickup correlation. Across streams
+`92` and `126`, all 503 non-pickup packets now round-trip exactly. Keyed/text,
+keyed-u64, u64, and text branches provide 243 full observations; the 258
+variant-`3` numeric records and two variant-`4` records retain 7,607 total
+opaque bytes and provide 260 partial observations. Decoded text is kept only
+for re-emission: events, reports, safe JSON, and HTTP-derived analysis expose
+its code-unit count but never its contents.
+Server opcode `77` is a separate redacted envelope family. Across streams
+`92`, `114`, and `126`, variants `3/4/5/8` contribute 515 exact round trips.
+Variants `3`, `4`, and `5` fully bound their counted UTF-16 fields and neutral
+control/value suffixes; variant `8` preserves only its 4- or 117-byte tail as
+opaque. The fold emits `server_opcode_77_received` and exposes only variant,
+text-code-unit, control/value, and opaque-byte distributions. Neither packet
+records, events, text reports, JSON, nor HTTP status return captured text.
+
+The neutral server-record fold now also separates opcodes `69`, `93`, `201`,
+and `205`. Across all three reference streams, 145/145 packets consume and
+round-trip exactly. The counted-u32 opcode `93` and numeric opcode `205` add 49
+full observations. Opcode `69` retains its fixed 263-byte table and opcode
+`201` retains its fixed 22-byte suffix, adding 96 partial observations and
+14,162 explicitly counted opaque bytes. Potentially character-like primary
+values are retained for exact re-emission but omitted from safe state, events,
+and reports.
+
+The current tree was also exercised through a fresh browser-free launch on the
+nested Wayland space, using direct seat input without moving the desktop
+cursor. The muted client passed world and character selection and rendered map
+`101000000`. At that point `GET /api/v1/status` reported one active connection,
+zero failures, all 21 fixed-record frames patched, and 13/13 paired heartbeat
+probes.
+
+Opcode `302` now separates the NPC manager's lifecycle control from ordinary
+opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
+object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
+full-coverage `npc_lifecycle_spawn` observations. The pinned handler reads the
+control and object id first, consumes that body only for its matching branch,
+and otherwise calls a compact no-reader helper. The typed control-`0` encoding
+is therefore modeled as a seven-byte removal and is covered by fold tests, but
+remains explicitly unobserved in the reference PCAPs and not yet live-proven.
+
+A composed live control-`1` packet kept the captured object/template shape and
+changed only its typed field placement to the current stream-`114` map. The
+HTTP injector accepted all 23 bytes; the transcript folded it as one additional
+NPC spawn, stayed `active` with ten NPCs, and matched all 360 heartbeat pairs.
+The connection closed at the configured one-hour hold-open boundary rather
+than after the injection. Because the hold expired before the control-`0`
+follow-up could be sent, this run proves client acceptance and predicted fold
+state for the spawn branch but makes no removal or visible-sprite claim.
+
+Server opcode `239` now has capture-bounded selector envelopes. The pinned
+handler confirms selector dispatch, while the two PCAPs establish only four
+branches: selector `3` has a u8 count followed by u32/i32 records, selectors
+`9` and `13` have no body, and selector `21` has terminated counted UTF-16 text
+plus one trailing u32. Stream `126` contributes 59 packets across all four
+branches and 38 records; stream `92` contributes one additional empty
+selector-`13` packet. All 60 consume and round-trip exactly at full coverage.
+The fold emits `server_opcode_239_received`; reports, events, safe JSON, and
+HTTP-derived state expose numeric distributions and text length but never the
+record keys or text. Unobserved selectors remain unknown, and no higher-level
+gameplay/UI role or live-rendering effect is claimed.
+
+Server opcode `348` is a separate redacted text envelope. The pinned handler
+confirms a common u8/i32/u8-selector/i32 prefix before dispatch. All 31
+stream-`126` packets use category `4`, value `0`, and selectors `0`, `3`, `6`,
+or `17`, followed by one terminated counted UTF-16 string. Selector `0` adds
+two control bytes; the other three captured selectors end at the terminator.
+All 31 consume and re-encode exactly at full coverage. Safe reports/events/
+JSON/HTTP expose only structural distributions and omit the six distinct
+primary values plus all string contents. No `111.pcapng` gameplay stream
+contains this opcode, unobserved handler selectors remain unknown, and no live
+effect is claimed because the fresh muted client reached only world selection.
+
+Client opcode `122` is now a capture-bounded redacted selector envelope.
+Stream `126` contains 62 packets across six selector/count shapes: selector
+`1` carries two or three u32 values, selector `2` carries three or four and
+always ends in `0xffffffff`, and selectors `4`/`5` carry three. All 62 consume
+and re-encode exactly at full coverage. The fold exposes only selector/count/
+sentinel distributions and emits redacted structural events; it does not
+assign meanings to the u32 values or accept unobserved shapes.
+
+Server opcode `224` is an exact 22-byte remote-player/mob-template value record:
+u32 player id, fixed marker `0xff`, u32 neutral value, u32 mob template, flag
+`0`/`1`, reserved u16 zero, and the same u32 value again. All 20 stream-`126`
+and nine stream-`92` packets round-trip exactly; every player is active and
+every template has an active mob at packet time. The fold aliases the player,
+reports template/value/flag distributions and active-template counts, and
+does not claim that the still-neutral value is damage.
+
+Server opcodes `285`/`286` now fold the captured single-bit mob temporary-stat
+set/reset pair. Stream `92` contains ten 33-byte sets and five 23-byte resets;
+all reference active template-`3210800` mobs and round-trip exactly. Every set
+matches the target and skill id in the preceding opcode-`219` relay within two
+server frames. The fold records three refreshes, three modeled resets, two
+capture-preexisting resets, four leave-time clears, and zero active statuses at
+the end. The source-level and duration fields remain neutral, other masks stay
+unknown, and no live effect is claimed yet.
+
+Together, these latest modeled families leave the long-corpus totals at 26,565
+full, 44,295 partial, 240 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,400 full, 21,740 partial, 67 unknown, and zero invalid.
+
+Client opcode `217` is modeled separately from server opcode `217`. Its 345
+compact packets are exactly eight bytes. The other 592 packets contain a
+ten-byte opaque prefix, count/format bytes, fixed records (14 bytes for format
+`0`, 11 for format `2`), and an eight-byte opaque trailer. All 937 stream-`126`
+instances round-trip and fold into safe count/format distributions. No active
+mob-id or sub-second server opcode-`219` correlation was found, so the server
+does not synthesize or replay this still-neutral client family.
+
+The analyzer separately matches exact empty server opcode `426` notifications
+to exact empty client opcode `309` acknowledgements. All 299 stream-`126`, 61
+stream-`92`, and one stream-`114` pairs are ordered and matched, with no pending
+or unsolicited member. Pinned client code confirms that handling `426`
+constructs and sends opcode `309` without a body. State and events expose pair
+counts and round-trip timing, while deliberately leaving the higher-level role
+neutral and distinct from the opcode-`10`/`23` heartbeat.
+
+Client opcode `101` is now structurally decoded as an exact 11-byte record
+containing byte/u32/byte/u16/byte values. All 146 stream-`126` and 73
+stream-`92` instances round-trip. Reports expose only numeric distributions;
+the 32-bit field takes two discrete, non-monotonic values, so it remains
+neutral rather than using the shape manifest's tentative `client_tick` label.
+
+Client opcodes `50`/`52`/`54` now fold into one attack-action model. Stream
+`126` has 802 actions and stream `92` has 159. Extended opcode-`50`/`52`
+variants and every opcode-`54` action carry a capture-correlated mob target;
+safe output aliases it and omits client tokens. Targeted `50`/`52` suffixes
+also expose 646 damage words across both captures after a fixed opaque prefix.
+The state fold treats every nonzero word as one hit, matches all 607 opcode-
+`293` responses, clears 32 terminal hits at lifecycle boundaries, and skips
+seven zero-damage words while leaving no pending effects. Server opcodes
+`218`/`219`
+likewise fold as 140 and 43 attack relays, with aliased actors and packed
+target/hit counts. Their bodies expose 194 target records and 254 damage words,
+with aliased mobs and a neutral high-bit marker; active mobs also accumulate
+relay hit/damage telemetry. All 141 opcode-`219`
+relays now expose conditional skill id, display/facing/speed/mastery fields,
+projectile id, and a signed position; the fold compares that position with the
+actor's prior movement state. All 42 opcode-`218` relays expose the common
+metadata fields, with 37 full mastery/auxiliary forms and five strictly checked
+short all-zero target placeholders. Official-client max HP for the 11 attacked
+templates allows exact floor-percentage prediction for 364/370 testable hits;
+the other six differ by exactly one HP after delayed responses. All six have no
+intervening modeled relay hit and infer authoritative-minus-submitted damage
+`+1` five times and `-1` once. Relay tag/unknown/auxiliary roles, damage high
+bit, client target prefix/tail fields, and those delayed differences are still
+not established well enough for the custom server to reproduce captured attack
+relays or official authority adjustments. The narrower exact-HP responder
+documented below is restricted to custom-server-owned mob state.
 
 ## Replay the login capture locally
 
@@ -64,7 +324,1213 @@ sudo ip netns exec mapleproxy sudo -u sdancer python -m maple_server replay \
   --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/login
 ```
 
-## Current staged login/world experiment
+## Current capture-backed login/world experiment
+
+`111.pcapng` stream `83` is a successful login reference and stream `92` is
+its successful world connection. PCAP plaintext is resolved inside the server
+process, so private account/character records never appear as command-line hex
+or committed fixtures. The working login composition is:
+
+1. replay the proven local HK bootstrap/NGS transcript, but omit captured
+   server frame `4` (opcode `23`);
+2. on native client opcode `6`, send successful stream `83` server frame `13`
+   (the six-byte opcode-`23` response);
+3. on native client opcode `13`, send the local acknowledgment followed by
+   successful account frame `3` (opcode rewritten `0` to local handler `1`),
+   world frames `5` through `9`, and sentinel frame `10`;
+4. on client opcode `4`, send frames `15` and `16` with delays `0,2.5`, and
+   rewrite frame `16`'s stage-1 world id from the live selection;
+5. on client opcode `5`, parse/re-emit typed character frame `17` with the
+   `?character-list` transform, then send frames `18` and `19` with delays
+   `0,0,1.0`;
+6. on client opcode `7`, send handoff frame `20` after transforming only its
+   endpoint to `127.0.0.1:12857`.
+
+Repeated `--reply-on-client-opcode-from-pcap` options for one opcode form the
+ordered response sequence. Configure the capture-faithful waits with:
+
+```text
+--drop-server-frame 4
+--reply-on-client-opcode-from-pcap 6=/home/sdancer/ms/111.pcapng@83:13
+--reply-on-client-opcode-from-pcap '5=/home/sdancer/ms/111.pcapng@83:17?character-list'
+--client-opcode-reply-delays 4=0,2.5
+--client-opcode-reply-delays 5=0,0,1.0
+--rewrite-channel-transition-world
+```
+
+Dropping an encrypted server frame is not a ciphertext splice. The replay
+decrypts the original stream with its captured IV progression and re-encrypts
+all emitted later frames after removing one IV step. Reactive frames then use
+the resulting post-transcript IV, so the client remains synchronized.
+
+The live client now renders all five world tabs and their online channels.
+The first untimed run sent both opcode-`402` frames back-to-back: selecting
+world `2` made the client emit opcode `4` twice, receive both `402` frames, and
+then stall without emitting channel opcode `5`. This is the evidence for the
+2.5-second reactive delay, not a guessed UI delay.
+The next timed run exposed a separate packet-shape mismatch: the client chose
+world `1`, while captured frame `16` still named world `4`. The typed fold now
+rejects this combination before replay, and the reactive rewrite binds the
+stage-1 response to the triggering opcode-`4` world id.
+
+The corrected timing and live-world rewrite now produce client opcode `5`
+reliably and reach the character-selection controller. Frames `17` and `18`
+are sufficient to reach that controller. A native authenticated A/B run then
+replayed the same sequence without frame `19`: it reached the identical
+“connecting to server” overlay, and character/start clicks still emitted no
+opcode `7`. The earlier run that did send frame `19` also emitted no later
+packet. Therefore type `7` is neither required to reach character selection nor
+sufficient to complete it; the capture's following type-`6` packets do not by
+themselves prove a request/response security relationship.
+
+Sending the valid transformed handoff frame `20` proactively still only blanks
+the scene: no TCP connection reaches `12857`, and the client exits after the
+login connection closes. This bounded the then-missing requirement to a
+client-side completion/selection transition rather than server validation of
+frame `19`; the ordered opcode-`6` experiment below resolves that transition.
+
+A follow-up live probe sent the successful capture's server opcode `23` again
+after the character list, time, and type-`7` envelope. The client answered with
+an opcode-`13` type-`15` status carrying an empty message, remained at character
+selection, and emitted neither opcode `7` nor another type-`6` packet. That
+proved a late duplicate is insufficient, but it did not test the capture's
+request/response ordering.
+
+The decisive clean run withheld bootstrap server frame `4` until the real
+client opcode `6` appeared. The client then received the same six-byte opcode
+`23`, returned a non-empty type-`15` status, entered world/channel/character
+selection without any synthetic NGSX-success patch, and emitted character
+opcode `7` after the Start click. The typed fold reached valid `handoff_ready`,
+the transformed frame `20` was returned, and the client opened the local world
+replay on port `12857`. Security completion is therefore required, and opcode
+`23` must follow the actual opcode `6`; replaying it by captured event count can
+send it too early when a fresh client emits extra frames.
+
+For subsequent runs, start the listener composition, then launch the client
+without the browser:
+
+```sh
+cd /home/sdancer/ms
+python tools/maplestory_classic_server/tools/launch_local_game.py --restart
+```
+
+The launcher checks both namespace listeners, nested Sway/Xwayland, and the
+persistent Maple-only audio mute service before using the local placeholder
+arguments.
+
+Start the local target for the transformed handoff separately:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 92 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/world
+```
+
+PCAP replay normalizes TCP segments to handshake/frame-aligned transcript
+events before serving them. The login handoff builder validates that the
+selected and handed-off character IDs match before rewriting the endpoint.
+
+## Typed initial-field generation and HP effect validation
+
+The reusable generator uses the complete large opcode-`157` model instead of a
+raw byte offset. Pass `--generate-initial-field-snapshot` to materialize and
+re-emit the captured baseline through character, all nine inventory groups,
+marker-specific progression, and trailer state. The marker-`23` packets from
+`111.pcapng` and the compact marker-`26` packet from `1-10FS.pcapng` all
+round-trip exactly. To apply the separately live-validated HP mutation, start
+the stream-`114` world target inside `mapleproxy` with:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --rewrite-initial-current-hp 1 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/initial_hp_1 \
+  --timing-scale 1 \
+  --hold-open-seconds 300
+```
+
+The planner first requires a valid gameplay fold and exactly one typed initial
+snapshot. It bounds HP by the decoded maximum, replaces only the nested
+`current_hp`, requires the generated packet to retain its length, parses it
+back through both the nested generator and envelope, and refuses a raw patch
+targeting the same server frame. Baseline generation additionally requires
+byte-for-byte equality with the source packet. The loopback status route is:
+
+```sh
+sudo ip netns exec mapleproxy curl \
+  http://127.0.0.1:12858/api/v1/status
+```
+
+The 2026-08-08 real-client run planned captured HP `50/222 -> 1/222`, patched
+one frame, entered map `101000000`, and displayed `HP 1 / 222`. Runtime status
+reported one completed connection, all 29 generated probes answered, and none
+pending. Its observed transcript folded validly to `active`, HP `1/222`, the
+original inventory and progression, nine NPCs, and all 30 heartbeat pairs
+matched including the captured pair. This matches the planner's
+identifier-free prediction across packet, client, and folded-state evidence.
+Baseline generation appears under
+`protocol.initial_field_snapshot_emitter`; HP mutation appears under
+`protocol.initial_player_hp_rewrite`. Both report the frame index, emitter,
+inventory group/item counts, skill count, progression shape/variant,
+original/emitted/max HP, prediction, and patch count.
+
+The 2026-08-09 browser-free baseline run used
+`--generate-initial-field-snapshot` with stream `114`. Runtime status reported
+server frame `3`, one patch, nine inventory groups/54 items, six skills,
+`keyed_properties` variant `2`, and HP `50/222 -> 50/222`. The client entered
+map `101000000` and rendered level `12`, HP `50/222`, MP `97/342`, and EXP
+`1464`. The open observed transcript at
+`downloads/maple_custom_server_observed/initial_field_emitter_live_20260809/world/1786310643434685295_replay_12857.jsonl`
+independently folded validly to `active` with identical player, inventory, and
+progression state and 7/7 generated heartbeat pairs matched. This establishes
+the unchanged emitter as a real client-accepted generator, separately from the
+controlled HP mutation below.
+
+## Typed fixed-width server-record generation
+
+Add `--generate-fixed-server-records` to regenerate all fully modeled
+fixed-width server records at their captured frame indices. The supported
+opcodes are `11`, `24`, `45`, `56`, `58`, `59`, `71`, `72`, `74`, `76`, `89`,
+`96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
+and `398`. The planner requires a valid gameplay fold, round-trips every typed
+record, preserves its packet length, rejects duplicate indices and explicit
+patch conflicts, and does not assume the records occur only during bootstrap.
+Both sustained reference streams contain a second opcode-`96`, repeated empty
+opcode `45`, and repeated opcode-`301` values during later gameplay. Opcode
+`190` is folded separately as a remote-player removal.
+
+For stream `114`, the current flag replaces 21 typed server frames. It composes with
+`--generate-initial-field-snapshot` and `--generate-field-npc-spawns`.
+`protocol.fixed_server_record_emitter` exposes the frame/opcode sequence,
+neutral typed values, field epochs, patch count, and the predicted unchanged
+player/phase state. The opcode-`59` character id is excluded; status reports
+only its flag, zero-reserved invariant, and match against world entry.
+
+The 2026-08-09 browser-free live composition used all three emitters with the
+then-modeled 11-record subset; the additional ten records were still sent as
+their unchanged capture bytes in that same accepted session. The client
+entered map `101000000` and rendered level `12`, HP `50/222`, MP
+`97/342`, the expected NPCs, and the active field. The observed transcript at
+`downloads/maple_custom_server_observed/fixed_server_emitter_live_20260809/world/1786313433938476085_replay_12857.jsonl`
+folds validly to `active`, all 21 records at full coverage, one matching
+character context, nine active/spawned NPCs, and continuously paired
+heartbeats. This validates the original typed subset through the real client;
+the expanded planner emits the identical bytes already accepted for the other
+ten records and has exhaustive PCAP round-trip coverage.
+
+## Typed variable server-record generation
+
+Add `--generate-variable-server-records` for the opcode-`156` and `385`
+records adjacent to field entry. Each packet has a typed opcode and one-byte
+variant discriminator. In `1-10FS.pcapng`, opcode `156` variant `0` and opcode
+`385` variant `1` are complete three-byte packets. In both `111.pcapng` world
+streams, opcode `156` variant `1` carries a packet UTF-16 string, a boolean,
+and three int32 values; opcode `385` variant `0` carries exactly 89 repeated
+`uint8 selector, int32 value` entries. All four branches are fully consumed and
+round-trip exactly. The field names remain neutral; no security or gameplay
+role is assigned from shape alone. A later controlled A/B/A establishes that
+opcode-`385` entry indices are keyboard key codes and selector `1` carries a
+skill id. Index `29` is the evdev Left Ctrl key.
+
+The option performs the same valid-fold, exact-length, reparse, unique-index,
+and patch-conflict checks as the fixed emitter. Runtime status exposes only
+opcode, variant, text length, flag, value/entry counts, field epoch, and frame
+index under `protocol.variable_server_record_emitter`. Opcode-`156` text/raw
+values and unproven opcode-`385` selector values are not included; the proven
+skill-binding count and Left Ctrl skill id are included.
+
+The 2026-08-09 browser-free live run regenerated expanded server frames `9`
+and `11` together with one initial snapshot, 11 fixed records, and nine NPC
+spawns. The client entered and rendered map `101000000`. Transcript
+`downloads/maple_custom_server_observed/variable_server_emitter_live_20260809/world/1786314493694015926_replay_12857.jsonl`
+folds validly to `active`, variants `385:0` and `156:1`, 89 typed entries,
+three typed values, zero opaque bytes, nine NPCs, and paired heartbeat traffic.
+
+The typed PCAP transform
+`?keyboard-skill=KEY_CODE:SKILL_ID` changes only the value of an existing
+selector-`1` binding. It requires expanded opcode `385`, key code `0..88`, a
+captured skill-binding selector at that key, and a non-negative int32 skill id;
+it preserves the selector and all other bindings. For example:
+
+```text
+111.pcapng@114:9?keyboard-skill=29:2001004
+```
+
+## Opt-in live server-packet injection
+
+Replay mode can expose one deliberately narrow mutation endpoint for controlled
+client experiments. It is disabled by default and requires both the loopback
+HTTP listener and the explicit opt-in flag:
+
+```text
+--http-api-port 12858
+--enable-http-packet-injection
+```
+
+The flag is rejected outside replay mode or without `--http-api-port`. The HTTP
+listener still accepts only a numeric loopback address. There is no application-
+level authentication: the trust boundary is the local namespace/OS account, so
+enable the endpoint only while all local callers are trusted.
+
+Send exactly one plaintext server packet as even-length hex. The packet must
+contain at least its two-byte opcode, is capped at 64 KiB, and the JSON body is
+capped at 128 KiB:
+
+```sh
+sudo ip netns exec mapleproxy curl -sS \
+  -H 'Content-Type: application/json' \
+  --data '{"plaintext_hex":"810100"}' \
+  http://127.0.0.1:12858/api/v1/server-packets
+```
+
+The request shape is exact: no fields other than `plaintext_hex` are accepted.
+Success returns `accepted`, opcode, plaintext length, and send time, but never
+packet bytes. Disabled injection returns `403`; no active replay connection or
+multiple ambiguous connections returns `409`; malformed and oversized inputs
+return `400`/`413`. `GET /api/v1/status` exposes only readiness, active-
+connection count, attempts, sends, failures, the last opcode/length/time, and
+the last error.
+
+Do not derive raw HP packet hex by hand. The companion command plans from the
+current live transcript, injects through that endpoint, then polls the same
+transcript until the predicted typed packet and state delta are observed:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u "$USER" \
+  python -m maple_server inject-current-hp \
+  --transcript /path/to/live-world.jsonl \
+  --current-hp 49 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+`inject-current-hp` accepts only the exact packet route over loopback HTTP. It
+round-trips the opcode-`41` shape before sending, requires one new modeled stat
+update afterward, and compares current/max HP, phase, field epoch, map,
+inventory, and progression. API acceptance alone remains insufficient; the
+command succeeds only when the observed fold matches every check. The JSON
+report is identifier-free and does not expose plaintext bytes.
+
+The endpoint does not decode or return opcode-`77` text. If a controlled test
+injects one, `accepted` still proves only a serialized socket write; subsequent
+offline gameplay analysis retains the text internally for exact round-trip
+validation but publishes only redacted lengths and neutral numeric fields.
+
+The selected connection registers only after its replay bootstrap frames and
+unregisters on close. Injected plaintext shares one async lock with generated
+heartbeats and reactive responses, so encryption and socket-write order cannot
+advance the Maple cipher IV out of sequence. Successful sends are also written
+to the replay transcript as packet and `http_server_packet_injected` runtime
+records and pass through the existing modeled-response policies.
+
+The browser-free live proof injected exact captured opcode-`385` and `156`
+expanded packets after the client was active. The client stayed on map
+`101000000` at HP `50/222` and MP `97/342`; 110/110 generated heartbeat probes
+were answered. Transcript
+`downloads/maple_custom_server_observed/http_injection_live_20260809/world/1786315909674330462_replay_12857.jsonl`
+folds validly to four variable records, 178 typed selector/value entries, six
+typed int32 values, zero opaque bytes, and two injection events, matching the
+predicted unchanged player/phase state.
+
+The current remote-player A/B/A used the same endpoint without browser or host
+cursor input. A typed opcode-`202`, composed from a captured remote-player
+control/id and the local player's validated path, moved a white-haired remote
+sprite to predicted position `(629,-2691)`. Injecting its six-byte opcode-`190`
+made the sprite disappear and changed folded active-player state `4 -> 3`.
+Replaying its exact opcode-`189` entry and the same movement made it visible
+again and restored `3 -> 4`. The live transcript at
+`downloads/maple_custom_server_observed/neutral_records_live_20260810/world/1786331780729639306_replay_12857.jsonl`
+folds validly with zero unknown leaves. After restoration the client remained
+active on map `101000000`, the server had no connection failures, and 209/209
+heartbeat probes were paired.
+
+The same live session then accepted two exact 60-byte opcode-`247` tutorial
+instructions. The independent transcript fold reports both as exact full-
+coverage `tutorial_ui_instruction_received` events, with phase/map/player state
+unchanged and no connection failure. Framebuffer samples at 100 ms, 400 ms, and
+one second showed no overlay, so the API result proves safe delivery and
+non-blocking handling but not rendering for this already-progressed character.
+
+The follow-up keyboard experiment used one typed mob and physical evdev input.
+With the captured Left Ctrl binding `29 -> 2001005`, Ctrl emitted opcode-`52`
+variant `18`, two hits, damage `[27,32]`. Injecting
+`111.pcapng@114:9?keyboard-skill=29:2001004` changed only the binding value; Ctrl
+then emitted variant `17`, one hit, damage `[65]`. Injecting the unmodified
+frame restored variant `18`, two hits, damage `[29,25]`. The frozen transcript
+`downloads/maple_custom_server_observed/key_binding_value_live_20260809/world/1786318178544471777_replay_12857.jsonl`
+folds validly with no issues/warnings, three `keyboard_bindings_loaded` events,
+two injection events, final Left Ctrl skill `2001005`, active map `101000000`,
+HP `50`, and 91/91 matched heartbeats. This is a causal key-binding result;
+the other selector families remain unnamed.
+
+A second browser-free A/B/A exercised physical evdev key code `71`. Under the
+captured `71 -> 2001002` binding, the client emitted the exact 13-byte skill-use
+request `opcode 104, tick, skill 2001002, level 1, trailing 0`. Injecting only
+`?keyboard-skill=71:2001004` changed the same key to the modeled opcode-`52`
+variant-`17` attack; restoring the unmodified opcode-`385` frame restored the
+opcode-`104` request. The two opcode-`104` ticks differ by `230024` ms while
+their transcript timestamps differ by `230039.792` ms. The frozen transcript
+is
+`downloads/maple_custom_server_observed/key_binding_71_live_20260809/world/1786320080162364482_replay_12857.jsonl`.
+It folds validly to active map `101000000`, HP `50`, final bindings
+`29 -> 2001005` and `71 -> 2001002`, two full opcode-`104` observations, two
+level/binding correlations, and no issues. It has 38 matched and zero unmatched
+heartbeat responses; its sole warning is one final probe whose response fell
+outside the capture during controlled shutdown. This validates the request
+model and binding-dependent dispatch, not the server-side effect or response
+semantics of skill `2001002`.
+
+### Opcode-42 response probe: decoded prefix, unsafe packet
+
+The next response candidate was tested through the same opt-in injection API.
+Static inspection and a live parser trace establish server opcode `42` as four
+little-endian `uint32` mask words followed, on the all-zero branch, by two
+bytes and one signed `int16`. `LocalTemporaryStatSetHeader` models exactly that
+prefix. The analyzer reports mask patterns, enabled-bit counts, the neutral
+zero-mask suffix value distributions, and opaque-byte totals; it emits a
+partial `local_temporary_stat_set_header` observation plus a
+`local_temporary_stat_set_received` event without changing HP/MP.
+
+The API successfully wrote a 160-byte padded all-zero packet and a later exact
+22-byte minimal packet. That success means only that encryption and socket
+write completed. Heartbeat replies stopped after the padded packet, and the
+minimal packet was sent only after the connection had already stalled, so
+neither packet establishes acceptance or progression. The padded transcript
+entry cleanly folds as the decoded 22-byte prefix plus 138 opaque bytes, and
+both observations carry `network_progression_proven: false`. Opcode `42` is
+absent from reference gameplay streams `92`, `114`, and `126`; no semantic
+skill name or causal response role is assigned.
+
+The fresh control reran the scripted browser-free login, entered map
+`101000000`, sent physical key `71` directly through nested Wayland, observed
+one exact opcode-`104` request for skill id `2001002`/level `1`, and matched
+16/16 generated heartbeat responses with none pending. Treat that control as
+the acceptance baseline. `POST /api/v1/server-packets` returning `accepted`
+must always be followed by client output and heartbeat checks before a packet
+shape is considered safe.
+
+## Typed NPC-spawn generation
+
+Add `--generate-field-npc-spawns` to the world replay command to regenerate
+every fully typed opcode-`300` frame from folded NPC entity state. It composes
+with `--generate-initial-field-snapshot`. For stream `114`, the planner emits
+nine exact 22-byte packets at server frames `20..28`; the status route exposes
+`protocol.npc_spawn_emitter` with nine patches, field epoch `1`, and the
+alias/template/position/range state for `npc:1..npc:9`. Raw runtime object ids
+remain excluded.
+
+The 2026-08-09 browser-free live composition entered map `101000000` and
+rendered the expected visible NPCs. Its observed transcript at
+`downloads/maple_custom_server_observed/npc_spawn_emitter_live_20260809/world/1786311364616674969_replay_12857.jsonl`
+folds validly to `active`, nine active/spawned NPCs, and 10/10 matched generated
+heartbeats. This replaces nine more captured plaintext frames with model-
+generated packets while preserving the client-visible field.
+
+## Typed post-transcript HP update validation
+
+Opcode `41` is the captured player-stat delta family. The model decodes the
+observed INT, LUK, HP, MP, AP, EXP, and 64-bit mesos mask bits, folds each
+field independently, and preserves the neutral request flag and final marker.
+To emit a new current-HP delta after stream `114`:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --emit-current-hp-update 1 \
+  --post-transcript-start-delay-seconds 10 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/current_hp_stat_1 \
+  --timing-scale 1 \
+  --hold-open-seconds 180
+```
+
+The planner validates current/max HP, bounds the requested value, generates
+`29000000040000010000`, parses it back, and publishes
+`protocol.player_stat_update` with its prediction and sent count. The real
+client accepted the packet and displayed `HP 1/222`, while MP remained
+`97/342` and EXP remained `1464`. The recorded exchange folded validly to
+`active`, with one HP event carrying `previous:50` and `current:1`, and all
+nine generated heartbeats matched in the completed transcript. This is a
+post-entry state delta, separate from rewriting the initial snapshot.
+
+## Typed inventory-quantity effect validation
+
+Opcode `39` carries inventory change sets. The decoder handles the observed
+empty, add, stack-quantity, and remove operations, reuses the initial-inventory
+stack/cash record grammar, and applies modifications to known slots. To mutate
+an existing stack after stream `114`:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --emit-inventory-quantity-update use:15:1 \
+  --post-transcript-start-delay-seconds 15 \
+  --transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/inventory_use15_1 \
+  --timing-scale 1 \
+  --hold-open-seconds 180
+```
+
+The planner resolves Use slot `15` to item template `2000000`, validates its
+captured quantity `27`, bounds the replacement, generates
+`2700000101020f000100`, parses it back, and publishes
+`protocol.inventory_quantity_update`. The real inventory window displayed
+quantity `1` in that slot. The completed observed transcript folded validly to
+`active`, recorded `previous_quantity:27` and `quantity:1`, retained the item
+count and player state, resolved every slot, and matched all 18 generated
+heartbeat pairs.
+
+## Reactive consumable-use validation
+
+Client opcode `80` is the capture-validated Use-item request. The typed policy
+checks its signed slot and item template against current inventory state, then
+emits the observed two-packet response: opcode `39` decrements the stack and
+opcode `41` applies the captured HP/MP effect with maximum-stat capping. Only
+red potion `2000000` (`+50 HP`) and blue potion `2000014` (`+80 MP`) are enabled;
+unknown templates, mismatched/empty slots, capped stats, and the still-unknown
+last-item removal shape are rejected.
+
+The live red-potion experiment used:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --world-heartbeat-interval-seconds 10 \
+  --emit-inventory-quantity-update use:15:2 \
+  --post-transcript-start-delay-seconds 15 \
+  --reactive-item-use-responses \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_item_use_red \
+  --timing-scale 1 \
+  --hold-open-seconds 300
+```
+
+Stream `92` supplies 17 independent request/effect examples: 13 blue potions
+and four red potions. All 17 requests are exact 12-byte shapes, match the
+modeled Use slot/template, decrement quantity by one, and match the following
+stat effect. In the live run, the initial typed update visibly changed red
+potions `27 -> 2`; using one produced client opcode `80`. Runtime telemetry
+reported one observed/served request, zero rejections, and two response
+packets. The client displayed quantity `1` and HP `100/222`, exactly matching
+the `2 -> 1` and `50 -> 100` prediction. The completed transcript folded with
+one inventory match, one stat-effect match, zero mismatches/pending requests,
+and 20/20 matched heartbeat pairs.
+
+Reactive item use and pickup now also write bounded runtime request,
+completion, and rejection events. A rejection is folded against the matching
+pending client request and does not close the world connection. A fresh
+browser-free stream-`114` run used direct Wayland PageUp input twice. Frames
+`232`/`234` recorded the first red-potion request and completed `[39,41]`
+response (`2 -> 1`, HP `50 -> 100`); frame `250` recorded and rejected the
+second request at the unvalidated last-item boundary without sending a packet.
+The frozen transcript
+`downloads/maple_custom_server_observed/reactive_item_policy_events_20260809/1786305404534384659_replay_12857.jsonl`
+folds validly with no issues or warnings: two requests, one inventory/effect
+match, one policy rejection, zero pending requests, and 90/90 heartbeat pairs.
+
+## Pickup request/effect validation
+
+The gameplay analyzer now decodes the complete capture-observed pickup chain:
+server opcode `311`, client opcode `185`, the positive opcode-`39` inventory or
+opcode-`41` mesos effect, server opcode `49`, and server opcode `312`. Stream
+`92` contains 125 spawns for 66 unique drops, 54 requests (48 base plus six
+with a 12-byte opaque proof), 54 short result records, and 100 removals. All
+records round-trip. Fifty-nine drops have an exact mode-`1`/mode-`0` refresh
+pair and seven are mode-`2` field-load items. Every pickup request names a
+known active spawn; all 54 result values and all 54 local removals match that
+spawn, with zero pending requests. Reports use field-local `drop:N` aliases and
+do not print runtime drop, owner, source-mob, or actor ids.
+
+Stream `114` ends with one active mode-`2` drop: item template `4000004` at
+`(-863,-1742)`. The final folded player position is `(633,-2677)`, and Etc
+slot `7` contains the same item at quantity `74`. Stream `92` independently
+proves four pickups of template `4000004`, each as an Etc quantity delta of one,
+an item gain notice quantity of one, and a reason-`5` removal whose actor equals
+the spawn's two captured owner values.
+
+The replay now has two typed controls for a real pickup A/B:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --rewrite-final-field-drop-position 633:-2677 \
+  --rewrite-final-field-drop-owner-to-player \
+  --reactive-item-pickup-responses \
+  --item-pickup-evidence-tcp-stream 92 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_item_pickup \
+  --timing-scale 1 \
+  --hold-open-seconds 300
+```
+
+The rewrite changes only the typed coordinates in the 38-byte captured spawn;
+the drop id, item template, ownership-neutral fields, expiration, and flags are
+preserved and round-trip. The reactive policy accepts only the known active
+drop, current field epoch, deterministic captured template effect, and exactly
+one existing stack with capacity. It predicts and emits opcode `39` (`74 ->
+75`), opcode `49` (item `4000004`, quantity `1`), and opcode `312` (reason `5`)
+in that order, then removes the drop from mutable server state. Mesos, special,
+new-slot, ambiguous-stack, and unknown-template cases remain rejected. The
+client still supplies its own validation token; the server does not synthesize
+or assign semantics to it.
+
+Observed pickup requests now receive the same causal transcript treatment as
+item use: request, completed `[39,49,312]` response, or safe rejection. Unit
+coverage proves a second request for an already removed modeled drop is
+rejected without closing the connection and leaves zero pending pickup work.
+
+The owner rewrite is a separate same-length typed patch. It validates exactly
+one initial player and one final field-load item, then changes only the two
+neutral owner words. `protocol.final_field_drop_owner_rewrite` exposes the
+aliased drop, item template, flag, frame/field epoch, patch count, and the
+identifier-free prediction fields `drop_owner_fields: match_initial_player`
+and `pickup_eligibility: requires_additional_client_conditions`.
+
+That conservative prediction follows the real-client result: rewriting the
+mode-`2` owner words did not produce opcode `185`, and neither did a second
+probe that sent a captured-shaped mode-`1`/mode-`0` pair at the final player
+position. The client stayed responsive, the pickup key binding and direct
+Wayland input were verified, and the reactive API recorded zero pickup
+requests. Owner equality and proximity are therefore not sufficient on their
+own; the next experiment must isolate the remaining client eligibility state
+instead of treating a generated response as proof that the client accepted
+the drop.
+
+## Reactive mob-health validation
+
+The custom server can now own a deliberately exact subset of combat state. The
+following proven run kept stream `114` open, injected a typed snail spawn copied
+from stream `92` at the folded player position, and enabled reactive health:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --reactive-mob-health-responses \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=633:-2677:0:0' \
+  --post-transcript-start-delay-seconds 2 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_mob_health_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 3600
+```
+
+The `mob-spawn` transform first parses a validated opcode-`279` packet. It
+changes only signed `x/y` and, when provided, the two uint16 foothold fields.
+The proof preserved template `100100`, initialized it at its referenced `8/8`
+HP, and exposed it as `mob:runtime:1` rather than leaking its wire object id.
+
+Physical evdev key `29` sent directly through nested Wayland produced one real
+opcode-`52` variant-`18` action with damage `[27,32]`. The first hit changed
+`8 -> 0`; the second was already terminal. The server sent opcode `293` with
+percentage `0`, then opcode `280` reason `1`, and removed the mob. Runtime
+status recorded one observed/served request, zero rejections, two response
+packets, and `terminal_hits_skipped: 1`. The client stayed connected and kept
+answering generated heartbeats.
+
+The live transcript
+`reactive_mob_health_20260809/1786281154891058720_replay_12857.jsonl` folds
+validly to `active`: one attack, one matched zero-health effect, one leave,
+zero active mobs, and zero pending combat effects. Generated heartbeat replies
+continued; because this transcript is still being appended, a fold sampled
+between a probe and its response can transiently report one pending probe.
+This is a request/effect/lifecycle validation. It is not another next-
+percentage sample, because the injected spawn had no earlier opcode-`293`
+health observation.
+
+The replay now records the policy side of this chain as the same bounded,
+identifier-free runtime events used by movement scheduling. In the fresh
+browser-free proof, authentic targeted attack frame `85` emitted
+`mob_health_request_observed` with `[27,32]`; after opcode-`293` and
+opcode-`280`, frame `87` emitted `mob_health_response_completed` with
+`8 -> 0`, percentage `[0]`, removal, and one skipped terminal hit. A second
+physical Ctrl swing was untargeted: frame `99` records observation plus the
+safe rejection reason and has no response packet. Transcript
+`reactive_mob_health_policy_events_20260809/1786304902178638016_replay_12857.jsonl`
+folds validly with no warnings: two attacks/59 submitted damage, one matched
+health effect, one zero-health update and leave, no active mob or pending
+effect, and 17/17 matched heartbeats.
+
+Query the read-only status route from the listener's namespace:
+
+```sh
+sudo ip netns exec mapleproxy curl -s \
+  http://127.0.0.1:12858/api/v1/status
+```
+
+`protocol.mob_health_responses.state` contains aliased active mobs with exact
+current/max HP and percentage, source-evidence counts, and the deterministic
+damage/percentage/terminal rules. The parent object contains request and sent-
+packet counters plus `last_response` with damage, HP before/after, emitted
+percentages/opcodes, zero entries, skipped terminal hits, and removal. The API
+also reports the most recent safe `last_rejection`; rejected/untargeted attacks
+receive no modeled response but do not close the held-open connection. The API
+remains loopback-only; status is read-only, while server-packet injection is
+absent unless explicitly enabled under the current local namespace/OS access
+boundary.
+
+Captured official combat still has six delayed ±1 HP authority adjustments.
+The exact responder does not claim to reproduce those, does not synthesize
+opcodes `218`/`219`, and rejects unknown/inactive targets, ambiguous HP,
+missing damage, and high-bit damage rather than guessing.
+
+## Reactive mob-movement acknowledgement validation
+
+Stream `92` contains the large acknowledgement corpus but ends after a field
+reset with no explicit mobs. Stream `114` provides a stable held-open gameplay
+field but no mob evidence. The replay now separates those roles and adopts
+typed post-transcript mob state:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --reactive-mob-movement-acknowledgements \
+  --mob-movement-evidence-tcp-stream 92 \
+  --reactive-mob-health-responses \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=633:-2677:635:635' \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:604?mob-spawn=633:-2677:635:635' \
+  --post-transcript-start-delay-seconds 2 \
+  --post-transcript-frame-delay-seconds 0.1 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/reactive_mob_movement_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 3600
+```
+
+The `mob-spawn` transform accepts either a typed opcode-`279` entry or an
+opcode-`281` controller assignment with embedded spawn data. It changes only
+position and optional footholds, preserving the object, template, controller,
+and remaining spawn fields. The policy learns field-local object/template
+state as those packets are sent.
+
+The direct browser-free login reached the held-open map and stayed active. The
+client submitted 205 opcode-`207` movements for the injected template-`100100`
+snail; 205 generated opcode-`283` acknowledgements copied each object/sequence,
+used status value `0`, derived the flag from control byte zero, and zeroed both
+auxiliary fields. The observed transcript
+`reactive_mob_movement_20260809/1786284358797500712_replay_12857.jsonl`
+folds validly with `submitted:205`, `acknowledged:205`, `matched:205`,
+`unmatched:0`, and `pending:0`. It also contains 69 matched generated
+heartbeats and remained in the active phase until the test listener was
+stopped cleanly.
+
+Reactive acknowledgements now record bounded causal runtime events as well.
+`mob_movement_submission_observed` contains the known-template flag, template,
+sequence, command count, control-byte predicate, and reference/start/end
+coordinates without the runtime object id. A successful drain adds
+`mob_movement_acknowledgement_completed`; a policy refusal instead adds
+`mob_movement_submission_rejected` and its safe reason. Fresh browser-free
+transcript
+`reactive_mob_ack_policy_events_clean_20260809/1786307034810350480_replay_12857.jsonl`
+contains 58 alternating request/completion pairs. Its fold is valid and
+warning-free with 58/58 packet-level movement matches, no pending/unmatched
+movement, and 7/7 matched heartbeats.
+
+`protocol.mob_movement_acknowledgements.state` exposes the evidence mapping,
+field epoch, and identifier-free known/active mob counts. The parent reports
+submission/response/rejection counters, `last_response`, and `last_rejection`.
+Unknown live submissions are rejected without closing transport. A generated
+health-policy opcode-`280` is also applied to movement state so a dead mob is
+removed from both policies consistently.
+
+### Generated opcode-282 placement
+
+The custom server also owns one conservative server-to-client movement
+primitive. `--emit-mob-movement-broadcast X:Y:FOOTHOLD[:STANCE]` selects the
+only active modeled mob after explicit post-transcript frames, validates an
+exact stationary shape in the movement evidence, predicts the state delta, and
+appends one typed opcode `282`. The validated visual run used:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --mob-movement-evidence-tcp-stream 92 \
+  --reactive-mob-health-responses \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=433:-2677:635:635' \
+  --emit-mob-movement-broadcast '833:-2677:635:4' \
+  --post-transcript-start-delay-seconds 2 \
+  --post-transcript-frame-delay-seconds 30 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_broadcast_visual_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 3600
+```
+
+The evidence corpus has 5,284 broadcasts. Prefix `0000ff00000000` occurs in
+5,230; 1,509 of those have one absolute command whose position equals the
+reference, zero velocity, and duration 1,080 ms. The selected stance `4` has
+1,055 exact examples. The plan refuses zero/multiple active mobs, absent
+stance-specific evidence, invalid coordinates/footholds, or an invalid replay
+instead of guessing.
+
+The injected template-`100100` snail started at `(433,-2677)` on foothold
+`635`. After the generated packet, the real client rendered it at the predicted
+right-side target `(833,-2677)`. Runtime API
+`protocol.mob_movement_broadcast` reported the aliased entity/template,
+previous and predicted position/foothold/stance, exact command fields, evidence
+counts, and `packets_planned:1`/`packets_sent:1`. The final transcript
+`generated_mob_broadcast_visual_20260809/1786286736690024914_replay_12857.jsonl`
+folds validly to mob position `(833,-2677)`, stance `4`, one known broadcast,
+one command, and 11 matched heartbeats with none pending.
+
+The mutually exclusive
+`--emit-mob-movement-path EVIDENCE_SERVER_FRAME:X:Y:FOOTHOLD` mode reuses one
+exact multi-command opcode-`282` shape from the movement evidence. It resolves
+the source frame's field-local template, requires that template and the
+dominant control prefix, accepts only two or more absolute commands, translates
+the reference and every command to the requested endpoint, preserves each
+velocity/stance/duration, and rewrites all command footholds only after
+checking continuity with the active mob. The validated run used:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server replay \
+  --listen-host 0.0.0.0 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --no-strict \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --mob-movement-evidence-tcp-stream 92 \
+  --send-after-transcript-from-pcap \
+  '/home/sdancer/ms/111.pcapng@92:563?mob-spawn=785:-2677:635:635' \
+  --emit-mob-movement-path '18818:833:-2677:635' \
+  --post-transcript-start-delay-seconds 2 \
+  --post-transcript-frame-delay-seconds 30 \
+  --world-heartbeat-interval-seconds 10 \
+  --transcript-dir \
+  /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_path_visual_20260809 \
+  --timing-scale 1 \
+  --hold-open-seconds 180
+```
+
+Evidence server-direction frame `18818` has reference `(249,2024)`, endpoint
+`(297,2024)`, five absolute commands, and total duration 1,080 ms. The
+generated packet used reference `(785,-2677)` and command positions
+`(813,-2677)`, `(814,-2677)`, `(821,-2679)`, `(825,-2679)`, and
+`(833,-2677)`. Runtime status reported mode
+`translated_captured_path`, exact relative-motion-shape evidence `1`, one
+planned/sent packet, and the complete safe command list. The real client
+rendered the blue snail at the predicted endpoint. Transcript
+`generated_mob_path_visual_20260809/1786288852728632356_replay_12857.jsonl`
+folds validly with final position `(833,-2677)`, foothold `635`, stance `2`,
+one known broadcast, five type-`0` commands, and 9/9 matched heartbeats. This
+proves one selected captured path and its endpoint effect, not autonomous path
+selection.
+
+For state-driven selection, use
+`--emit-mob-movement-auto-path X:Y:FOOTHOLD`. The planner filters the evidence
+by active template, dominant prefix, multiple absolute commands, and the exact
+requested endpoint displacement. It groups candidates by relative
+position/velocity/stance/duration shape and proceeds only when one distinct
+shape remains. Thus repeated identical observations increase support, while
+two different ways to produce the same displacement are rejected as
+ambiguous. This option is mutually exclusive with both explicit movement
+emission options.
+
+The live automatic run used the same command above except for:
+
+```text
+--emit-mob-movement-auto-path '833:-2677:635'
+--transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_auto_path_visual_20260809
+```
+
+Runtime API `protocol.mob_movement_broadcast` reported mode
+`auto_selected_captured_path`, source server frame `18818`, one matching
+displacement path, one matching relative motion shape, one exact selected
+shape observation, and one planned/sent packet. The real client rendered the
+same predicted endpoint without receiving a frame selection from the caller.
+Transcript
+`generated_mob_auto_path_visual_20260809/1786290456741921955_replay_12857.jsonl`
+folds validly to `(833,-2677)`/foothold `635`/stance `2`, one known broadcast,
+five type-`0` commands, and 13/13 matched heartbeats.
+
+`--emit-mob-movement-composed-path MAX_STEPS:X:Y:FOOTHOLD` plans a bounded
+sequence when no direct unique displacement reaches the target. It excludes
+all ambiguous displacement shapes, searches only moves that strictly reduce
+Manhattan distance, bounds intermediate coordinates to `int16`, and rejects
+zero or multiple shortest sequences. The `MAX_STEPS` bound is `2..8`.
+
+The validated composed run changed the automatic command to:
+
+```text
+--emit-mob-movement-composed-path '2:881:-2677:635'
+--mob-movement-step-delay-seconds 10
+--transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_composed_path_visual_20260809
+```
+
+For the injected template-`100100` snail at `(785,-2677)`, the evidence catalog
+contained 167 usable displacements and excluded 38 ambiguous ones. There was
+no direct `(96,0)` primitive and exactly one shortest composition:
+frame `18818` for `(48,0)`, then the same shape translated from the intermediate
+state for another `(48,0)`. Runtime status reported source frames
+`[18818,18818]`, intermediate `(833,-2677)`, predicted final `(881,-2677)`,
+and two planned/sent packets. The client rendered the snail at that final
+position. Transcript
+`generated_mob_composed_path_visual_20260809/1786292585566000786_replay_12857.jsonl`
+folds validly with two known broadcasts, ten type-`0` commands, no unknown mob,
+final foothold `635`/stance `2`, and 11/11 matched heartbeats.
+
+Generated movement plans now become one mutable scheduler per replay
+connection. Scheduler construction rejects a change of entity, template,
+field epoch, object, or any discontinuity in position, foothold, or stance.
+It begins at the first step's `previous` state and advances only after the
+matching encrypted packet has been written and `drain()` has completed. An
+unexpected or out-of-order plaintext cannot advance it. The confirmed
+movement prefix is retained beside the original post-transcript planning
+baseline, so another in-process planning decision can fold only packets that
+were actually transmitted.
+
+`--mob-movement-step-delay-seconds SECONDS` controls only gaps between
+consecutive scheduled movement packets. A matching explicit
+`--post-transcript-gap-delay-seconds` still wins for that particular gap;
+unrelated post-transcript frames continue to use the ordinary frame delay.
+The option is nonnegative and requires a movement-emission option.
+
+The runtime object keeps the immutable plan/evidence fields and adds:
+
+```text
+protocol.mob_movement_broadcast.packets_planned
+protocol.mob_movement_broadcast.packets_sent
+protocol.mob_movement_broadcast.packets_remaining
+protocol.mob_movement_broadcast.state.phase               # planned/planning/in_progress/complete
+protocol.mob_movement_broadcast.state.current             # x/y/foothold/stance
+protocol.mob_movement_broadcast.state.target
+protocol.mob_movement_broadcast.state.last_sent_step
+protocol.mob_movement_broadcast.state.next_step
+protocol.mob_movement_broadcast.state.confirmed_server_frame_count
+protocol.mob_movement_broadcast.state.planning_server_frame_count
+```
+
+A second real-client run used the dedicated 10-second step delay. Before any
+connection, status was `planned` at `(785,-2677)` with `0/2` packets sent.
+After the first packet, status was `in_progress` at `(833,-2677)`, with one
+packet remaining and step 2 still predicted at `(881,-2677)`. It then became
+`complete` at that final state with `2/2` sent. Transcript
+`generated_mob_scheduler_visual_20260809/1786294591708398631_replay_12857.jsonl`
+folds validly with the two movement events 10.002838 seconds apart, two known
+broadcasts, ten type-`0` commands, final foothold `635`/stance `2`, and 10/10
+matched heartbeats. This validates both client effect and transmission-paced
+state advancement; `drain()` confirms the local write, not a client-level
+movement acknowledgement.
+
+A startup-bounded follow-up queue can now make a second movement decision from
+the transmitted state without exposing a mutation API. Repeat
+`--queue-mob-movement-composed-path MAX_STEPS:X:Y:FOOTHOLD` at most eight
+times after any initial movement-emission option. Each target remains
+unplanned until the preceding decision is complete. The connection then calls
+the existing composed-path planner with exactly the original baseline plus all
+confirmed opcode-`282` packets. Capture analysis runs in a worker thread, so
+the listener, client connection, and read-only HTTP status endpoint remain
+responsive while the next decision is being computed.
+
+The live queue proof used a one-packet automatic decision followed by a
+two-packet composed decision:
+
+```text
+--emit-mob-movement-auto-path '833:-2677:635'
+--queue-mob-movement-composed-path '2:929:-2677:635'
+--mob-movement-step-delay-seconds 10
+--transcript-dir /home/sdancer/ms/downloads/maple_custom_server_observed/generated_mob_decision_queue_async_visual_20260809
+```
+
+After the first drained write, the API remained available in `planning` at
+`(833,-2677)`: one known packet was planned/sent, no known packet remained,
+decision 1 was complete, and `planning_decision_index` was `2`. Once the
+capture-backed worker returned, status changed to three total planned packets
+with decision 2 active and two packets remaining. It then exposed
+`in_progress (881,-2677, 2/3)` and `complete (929,-2677, 3/3)`. The queue state
+adds its eight-decision bound, total/planned/completed/remaining decision
+counts, active/planning decision indices, and the still-unplanned safe target
+list under
+`protocol.mob_movement_broadcast.state.decision_queue`.
+
+Transcript
+`generated_mob_decision_queue_async_visual_20260809/1786296459661295020_replay_12857.jsonl`
+folds validly with exact continuity
+`785 -> 833 -> 881 -> 929`, three known broadcasts, fifteen type-`0` commands,
+final foothold `635`/stance `2`, and 8/8 matched heartbeats. The first-to-second
+movement gap is 42.500916 seconds because it includes the capture fold and the
+configured ten-second pace; the second-to-third gap is 10.001710 seconds. The
+HTTP service answered throughout the planning portion. This is a fixed
+startup queue, not autonomous AI and not an HTTP command surface.
+
+The immutable evidence is now folded once when the listener starts and retained
+in a typed `MobMovementPlanningContext`. It owns the validated replay/evidence
+analyses, all parsed captured paths and broadcasts, and stationary-shape counts.
+Both the initial planner and every connection-local follow-up reuse it; mutable
+mob position still comes only from each scheduler's confirmed frame prefix.
+`protocol.mob_movement_broadcast.planning_cache` reports identifier-free cache
+counts. For the live corpus those are 76 replay frames, 35,207 evidence frames,
+5,284 captured paths/broadcasts, and stationary stance counts `2:17`, `4:1055`,
+`5:437`.
+
+A direct benchmark built the validated context in 10.432799 seconds, then
+planned the initial automatic packet in 0.000360 seconds and the two-packet
+follow-up in 0.005125 seconds. The cached real-client transcript
+`generated_mob_decision_queue_cached_visual_20260809/1786297725914120609_replay_12857.jsonl`
+again folds validly to `785 -> 833 -> 881 -> 929`, with three broadcasts,
+fifteen type-`0` commands, final foothold `635`/stance `2`, and 6/6 matched
+heartbeats. Its movement gaps are 10.008720 and 10.002057 seconds, so the former
+32.5-second replanning pause is gone and only the configured ten-second pace
+remains. The live API moved directly from the first confirmed state to three
+known planned packets between one-second polls.
+
+For a state-derived bounded policy instead of enumerated endpoints, use:
+
+```text
+--emit-mob-movement-auto-path '833:-2677:635'
+--mob-movement-relative-policy '2:2:96:0:635'
+--mob-movement-step-delay-seconds 3
+```
+
+The policy format is `DECISIONS:MAX_STEPS:DX:DY:FOOTHOLD`. Decisions are bound
+to `1..8`, composed steps to `2..8`, and zero displacement is rejected. The
+next endpoint is calculated only when the previous decision is confirmed
+complete; derived coordinates must fit `int16`. It conflicts with explicit
+queued targets and still requires one initial movement emission.
+
+In the real-client proof, the initial automatic packet ended at `833`. Policy
+decision 1 derived target `929` from that confirmed state and composed two
+`(48,0)` packets; only after reaching `929` did decision 2 derive target `1025`
+and compose two more. The API finished with three decisions and five packets
+planned/sent, final foothold `635`/stance `2`, and the safe relative-policy
+parameters under `state.decision_queue`. The client rendered the snail at the
+predicted far-right endpoint. Transcript
+`generated_mob_relative_policy_visual_20260809/1786298675748836952_replay_12857.jsonl`
+folds validly through `785 -> 833 -> 881 -> 929 -> 977 -> 1025`, five known
+broadcasts, twenty-five type-`0` commands, and 6/6 matched heartbeats. The four
+movement gaps are 3.011704, 3.000499, 3.008745, and 3.001274 seconds, matching
+the dedicated three-second pace.
+
+Relative decisions may instead wait for a modeled live event:
+
+```text
+--mob-movement-relative-policy '2:2:96:0:635'
+--mob-movement-policy-trigger matched-heartbeat
+--world-heartbeat-interval-seconds 5
+--mob-movement-step-delay-seconds 1
+```
+
+`matched-heartbeat` requires both a relative policy and periodic world
+heartbeats. One response is matched only when an outstanding server opcode
+`10` probe exists, and each match can start at most one still-pending policy
+decision. It does not gate the initial movement packet. The first packet of an
+authorized decision is sent immediately; `--mob-movement-step-delay-seconds`
+still paces later packets inside that decision. The read-only status route
+exposes `mode`, `awaiting_event`, `matched_events_observed`,
+`decisions_started`, `decisions_completed`, and
+`events_ignored_after_completion` under
+`protocol.mob_movement_broadcast.policy_trigger`.
+
+The real-client heartbeat-gated run reached an observable intermediate state
+after its first match: decision 2 was active at `(881,-2677)`, with `2/3`
+known packets sent, while the trigger counters were one event, one decision
+started, and zero decisions completed. It ultimately reached `(1025,-2677)`
+with all three decisions and five packets complete. Transcript
+`generated_mob_heartbeat_policy_visual_20260809/1786299984499719895_replay_12857.jsonl`
+folds validly with no warnings through
+`785 -> 833 -> 881 -> 929 -> 977 -> 1025`, twenty-five type-`0` commands, and
+21/21 matched heartbeats. The four movement gaps are 5.326966, 1.000527,
+3.999752, and 1.000549 seconds: frames `78 -> 79` and `83 -> 84` show each
+heartbeat response immediately preceding a new decision, while the roughly
+one-second gaps are the configured pace within each two-packet decision.
+
+All three event-driven triggers can share a deterministic post-decision
+cooldown:
+
+```text
+--mob-movement-policy-trigger matched-heartbeat
+--mob-movement-policy-cooldown-seconds 5
+```
+
+The bound is `0..3600` seconds and is rejected with the `immediate` trigger.
+It starts only after every packet in one authorized decision has drained.
+Otherwise-qualifying events inside the window are still counted but cannot
+plan or send another decision; the first qualifying event at or after expiry
+re-arms the pending policy. Safe trigger telemetry adds `cooldown_seconds`,
+`events_rejected_by_cooldown`, `last_event_outcome`, and
+`last_cooldown_remaining_seconds`.
+
+The browser-free live proof used two-second heartbeats, a five-second
+cooldown, and one-second intra-decision pacing. Response frame `78` authorized
+movement frames `79`/`80`; responses `82`, `84`, and `86` arrived about
+0.99, 2.99, and 4.99 seconds after completion and emitted no movement.
+Response `88` arrived after expiry and authorized frames `89`/`90`. At that
+point the API reported two decisions started/completed, three cooldown
+rejections, and one later event ignored after completion. Transcript
+`generated_mob_policy_cooldown_visual_20260809/1786303210604795485_replay_12857.jsonl`
+folds validly with no warnings through
+`785 -> 833 -> 881 -> 929 -> 977 -> 1025`, five broadcasts, twenty-five
+type-`0` commands, and 16/16 matched heartbeats. The live client remained
+connected throughout and kept answering probes.
+
+Recorded replays now preserve the scheduler side of that proof as safe
+`runtime_event` JSONL records. Each qualifying trigger records an observation,
+then a start/completion, cooldown rejection, or completed-queue ignore outcome.
+The records contain only trigger mode, decision index, reason, and bounded
+timing values; they do not contain object or account identifiers. The gameplay
+analyzer merges them into the normal timestamp-ordered event stream with
+`direction: runtime` and the preceding packet's frame index. Writers cap them
+at 16,384 per transcript, report written/dropped totals in the close record,
+and make any dropped annotations an analysis warning.
+
+The browser-free annotation proof is
+`generated_mob_policy_events_visual_20260809/1786304141212541434_replay_12857.jsonl`.
+Its emitted events align the first observation/start with heartbeat-response
+frame `78`, decision-`2` completion with movement frame `80`, three rejections
+with frames `82`/`84`/`86` and exact remaining durations
+`4.006931`/`2.007733`/`0.006772`, the re-armed start with frame `88`, and
+decision-`3` completion with frame `90`. The fold is valid with no warnings,
+ends at `(1025,-2677)`, and contains five broadcasts/twenty-five commands plus
+15/15 matched heartbeats.
+
+For a client-originated gameplay event instead of liveness, use:
+
+```text
+--reactive-mob-movement-acknowledgements
+--mob-movement-relative-policy '1:2:96:0:635'
+--mob-movement-policy-trigger served-mob-movement
+```
+
+This mode requires the typed reactive acknowledgement policy. A client opcode
+`207` authorizes one decision only after its object/template/field checks pass
+and the generated opcode `283` acknowledgement drains. Unknown or rejected
+submissions do not trigger movement. While a relative decision is pending but
+no qualifying event has arrived, `policy_trigger.awaiting_event` is true even
+though the underlying decision queue describes its next unplanned target as
+`planning`.
+
+The bounded real-client proof injected both the typed spawn and controller
+assignment for a template-`100100` snail. One authentic sequence-`1`
+submission was accepted and acknowledged, then one `(+96,0)` decision moved
+the server model from `833` through `881` to `929`. The live API completed
+`3/3` packets with one event/decision and `awaiting_event:false`; periodic
+heartbeats advanced independently. Transcript
+`generated_mob_served_movement_policy_complete_20260809/1786300928969365966_replay_12857.jsonl`
+is valid with no warnings. Frames `78 -> 79 -> 80` are the submission,
+matched acknowledgement, and first generated movement packet; frame `81`
+finishes the decision 1.000714 seconds later. The fold reports three known
+broadcasts, fifteen type-`0` commands, one matched movement pair, no pending or
+unmatched movement, and 4/4 matched heartbeats.
+
+For a geometric gameplay predicate, use:
+
+```text
+--mob-movement-relative-policy '1:2:96:0:635'
+--mob-movement-policy-trigger player-proximity
+--mob-movement-proximity-radius 64
+```
+
+The radius is a required Manhattan-distance bound in `1..4096`. Each typed
+local-player opcode `182` compares its explicit path-end coordinates with the
+movement scheduler's transmission-confirmed mob position. The trigger is
+edge-based: the first in-radius observation, or a later outside-to-inside
+transition, can authorize one decision; repeated observations while already
+inside cannot. Safe `policy_trigger.proximity` telemetry reports the radius,
+observation/entry counts, prior inside state, and the last player/mob
+coordinates, distance, and predicate result.
+
+The real-client negative control used direct nested-Wayland Left input and
+observed player endpoint `(548,-2652)`, distance `310` from mob
+`(833,-2677)`. Two typed observations remained outside, with no entry or
+decision. Direct Right then produced four more observations; frame `107`
+ended at `(855,-2695)`, distance `40`, and became the first entry. Generated
+movement frames `108`/`109` followed 0.009526/1.001263 seconds later and
+completed `833 -> 881 -> 929`. Transcript
+`generated_mob_player_proximity_policy_visual_20260809/1786301943288947015_replay_12857.jsonl`
+folds validly with no warnings: seven total player submissions (one replayed,
+six predicate observations), three known mob broadcasts, fifteen type-`0`
+commands, and 11/11 matched heartbeats.
+
+## Historical synthetic staging experiment
 
 The replay can patch captured server frames, react to a decrypted client
 opcode, append plaintext frames, and control every gap independently. The
@@ -188,13 +1654,106 @@ project's own `README.md` for all options.
 - Uniform post-frame timing delivered world packets during the opcode-`1`
   scene change, before the opcode-`2` handler was active. Per-gap scheduling
   was added specifically to remove that race.
+- The successful PCAP account packet, five full 60-channel worlds, sentinel,
+  selections, and handoff all pass the typed packet/state validator.
+- A live capture-backed replay renders the five world tabs and their online
+  channels. Client opcode `4` identifies the selected world.
+- The two opcode-`402` packets require their observed 2.5-second gap; sending
+  them together stalls before the client emits channel opcode `5`.
+- With the gap and live-world rewrite, the client emits opcode `5` and accepts
+  the character list and server time. Withholding the captured opcode-`23`
+  response until native client opcode `6` completes the security exchange; the
+  client then emits character opcode `7`, accepts the rewritten handoff, and
+  connects to the local world replay.
+- Proactively sending a valid handoff without that gate produces a black scene,
+  no world-port connection, and client exit after the login socket closes.
+- The MapleStory PipeWire stream is kept muted by the enabled
+  `maplestory-audio-mute.service`, using application identity rather than a
+  changing node number.
+- A typed initial opcode-`157` HP rewrite changed `50/222 -> 1/222`; the real
+  HUD and independently folded active game state both reported `1/222` while
+  map, inventory, progression, and client liveness matched the prediction.
+- The gameplay analyzer now emits typed local/remote player movement records
+  and folds their endpoints instead of reporting opcodes `182` and `202` as
+  unknown packets. Those movement families add no validation warnings in
+  either PCAP world stream.
+- The analyzer now structurally decodes life movement opcodes `47`/`217`,
+  folds command and client-tail distributions, redacts the client token, and
+  validates all 2,932 packets from stream `126` without a shape failure.
+- World-session opcode `13` now uses the neutral fixed/length-prefixed envelope
+  decoder, accounting for all 970 long-corpus packets without exposing bodies.
+- Client opcode `217` now has bounded compact and counted-record envelopes,
+  accounting for all 937 long-corpus packets while deliberately remaining out
+  of replay until its effect semantics are established.
+- Empty server opcode `426` and client opcode `309` now fold as a one-for-one
+  notification/acknowledgement pair across all three gameplay streams, with
+  full shape coverage and explicit unmatched/pending telemetry.
+- Client opcode `101` now folds all 219 sustained-capture packets into neutral
+  five-field distributions with exact byte consumption and round trips.
+- Client opcodes `50`/`52`/`54` now fold 961 sustained-capture attack actions
+  with aliased mob targets where present; server opcodes `218`/`219` fold 183
+  attack relays with packed target/hit counts, 194 typed target records, and
+  254 damage words. The 141 ranged relays additionally type skill/projectile/
+  animation metadata and signed positions; all 42 close-range relays type their
+  common/full metadata and short placeholder distinction. The extended client
+  suffixes add 646 typed damage words and 607 per-hit health matches with no
+  pending effects after lifecycle cleanup. Official-client max HP predicts
+  364/370 testable health transitions exactly and bounds the other six to a
+  one-HP difference; none of those six has an intervening modeled relay, and
+  their inferred damage deltas are `{-1: 1, +1: 5}`. Unresolved semantic roles
+  and the delayed differences remain out of generation and replay.
+- All 333 long-stream opcode-`41` stat packets now round-trip and fold into
+  player state. A generated HP-mask packet produced the predicted live
+  `50/222 -> 1/222` HUD and event-state change without disturbing liveness.
+- All 69 stream-`92` opcode-`39` packets now round-trip and fold 71 inventory
+  modifications. A generated Use-slot quantity update produced the predicted
+  live `27 -> 1` inventory UI and event-state effect without losing liveness.
+- All 17 stream-`92` opcode-`80` requests now round-trip and correlate with
+  exact stack decrements plus potion stat effects. A reactive live request
+  produced the predicted red-potion `2 -> 1` and HP `50 -> 100` effects, with
+  zero mismatches and continued heartbeats.
+- All 125 stream-`92` opcode-`311` packets round-trip and fold into 66 drop
+  lifecycles. All 54 pickup requests, gain values, effects, and local removals
+  correlate with an active spawn; stream `114` ends with one modeled active
+  item drop rather than none.
+- The typed stream-`114` pickup plan resolves `drop:1`, item `4000004`, Etc
+  slot `7`, quantity `74`, and the four matching stream-`92` effects. Its
+  position rewrite round-trips at the same 38-byte width, and encrypted replay
+  tests produce the predicted opcodes `39,49,312` and mutable `74 -> 75` state.
+- Live owner-only and captured-shaped animated-drop probes both produced zero
+  opcode-`185` requests, so runtime telemetry now treats owner equality as a
+  modeled field relation rather than proof of pickup eligibility.
+- An opt-in reactive mob-health policy now adopts exact typed mob state and
+  emits per-hit opcode-`293` updates plus opcode-`280` reason `1` on death. A
+  real typed-snail injection received opcode-`52` damage `[27,32]`, produced
+  the predicted `[293,280]` response and `8 -> 0` lifecycle, folded validly,
+  and kept the client/heartbeat exchange active. Official ±1 HP authority
+  adjustments and attack-relay synthesis remain outside that exact policy.
+- Login opcode `4` now parses and re-emits typed character stats, appearance
+  slot maps, optional rankings, and the fixed trailer. The one-record
+  `111.pcapng` and empty `1-10FS.pcapng` variants both round-trip exactly. A
+  browser-free live replay using `?character-list` rendered the predicted
+  level/job/stats, reached character selection without a stall, handed off on
+  opcode `7`, and entered the local gameplay replay; its strict login fold has
+  full character-list coverage and no issues or warnings.
+- Nested UI pointer input now stays on the Sway seat, and the checked-in
+  `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
+  Wayland for Unity raw input without `xdotool` or the host cursor.
 
 ## Next server milestone
 
-Replace transcript replay with stateful handling:
+Replace the remaining opaque replay portions with stateful handling:
 
-1. Dump the one-world/one-channel staging list before the delayed sentinel.
-2. Select its channel and capture the next client operation.
-3. Implement the minimum character list and selection response.
-4. Implement the first map handoff.
-5. Replace the bounded account probe with a fully decoded account payload.
+1. Isolate the additional client-side drop eligibility condition using the
+   now-falsified owner/proximity baseline, then run the reactive pickup effect
+   only after the real client emits opcode `185`.
+2. Type and regenerate the next finite field-bootstrap family before the NPC
+   block; preserve neutral roles until capture comparison or a controlled
+   effect supports semantic names.
+3. Reuse the proven typed final-field mob injection to validate the existing
+   movement-acknowledgement policy through the real client.
+4. Capture a ranked or multi-character account to validate the conditional
+   four-`int32` character ranking branch and record-count loop independently.
+5. Name the remaining neutral account, character-list style/trailer,
+   equipment, progression, and field-trailer fields only when independent
+   captures or controlled effects support them.
