@@ -119,6 +119,20 @@
   learned skills and current bindings, and emits `client_skill_use_submitted`.
   The frozen run remains active and valid with 38 matched heartbeats; its only
   warning is the final shutdown-raced pending probe.
+- Server opcode `42` now has partial structural coverage rather than a raw hex
+  dump. Static client inspection and a live parser trace establish four
+  `uint32` mask words; the all-zero branch then reads two `uint8` values and
+  one signed `int16`. The fold reports mask/bit/value distributions, preserves
+  nonzero bodies and trailing bytes as opaque, emits
+  `local_temporary_stat_set_received`, and leaves modeled HP/MP unchanged for a
+  zero mask. Neither `111.pcapng` gameplay stream nor `1-10FS.pcapng` stream
+  `126` contains opcode `42`. A padded 160-byte zero probe reached the live
+  socket but stopped subsequent heartbeat replies; the later exact 22-byte
+  form was sent only after that stall. Both therefore remain unsafe response
+  candidates with `network_progression_proven: false`, not proof of a skill
+  effect. A fresh browser-free control then reached map `101000000`, emitted
+  one exact opcode-`104` request through direct Wayland key `71`, and matched
+  16/16 heartbeats with none pending.
 - `--generate-field-npc-spawns` now reconstructs every fully typed opcode-`300`
   frame from the folded aliased entity model. It validates exact 22-byte
   re-encoding, reparsing, frame uniqueness, and patch conflicts; runtime status

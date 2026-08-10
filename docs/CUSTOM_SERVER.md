@@ -506,6 +506,35 @@ outside the capture during controlled shutdown. This validates the request
 model and binding-dependent dispatch, not the server-side effect or response
 semantics of skill `2001002`.
 
+### Opcode-42 response probe: decoded prefix, unsafe packet
+
+The next response candidate was tested through the same opt-in injection API.
+Static inspection and a live parser trace establish server opcode `42` as four
+little-endian `uint32` mask words followed, on the all-zero branch, by two
+bytes and one signed `int16`. `LocalTemporaryStatSetHeader` models exactly that
+prefix. The analyzer reports mask patterns, enabled-bit counts, the neutral
+zero-mask suffix value distributions, and opaque-byte totals; it emits a
+partial `local_temporary_stat_set_header` observation plus a
+`local_temporary_stat_set_received` event without changing HP/MP.
+
+The API successfully wrote a 160-byte padded all-zero packet and a later exact
+22-byte minimal packet. That success means only that encryption and socket
+write completed. Heartbeat replies stopped after the padded packet, and the
+minimal packet was sent only after the connection had already stalled, so
+neither packet establishes acceptance or progression. The padded transcript
+entry cleanly folds as the decoded 22-byte prefix plus 138 opaque bytes, and
+both observations carry `network_progression_proven: false`. Opcode `42` is
+absent from reference gameplay streams `92`, `114`, and `126`; no semantic
+skill name or causal response role is assigned.
+
+The fresh control reran the scripted browser-free login, entered map
+`101000000`, sent physical key `71` directly through nested Wayland, observed
+one exact opcode-`104` request for skill id `2001002`/level `1`, and matched
+16/16 generated heartbeat responses with none pending. Treat that control as
+the acceptance baseline. `POST /api/v1/server-packets` returning `accepted`
+must always be followed by client output and heartbeat checks before a packet
+shape is considered safe.
+
 ## Typed NPC-spawn generation
 
 Add `--generate-field-npc-spawns` to the world replay command to regenerate

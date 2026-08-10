@@ -47,6 +47,7 @@ from .packets import (
     ItemUseRequest,
     LifeMovementBroadcast,
     LifeMovementSubmission,
+    LocalTemporaryStatSetHeader,
     MobControllerChange,
     MobEnterField,
     MobHealthPercentageUpdate,
@@ -609,6 +610,23 @@ class GameplayGameState:
     client_skill_use_binding_mismatches: int = 0
     last_client_skill_tick: int | None = None
     client_skill_tick_decreases: int = 0
+    local_temporary_stat_sets: int = 0
+    local_temporary_stat_zero_masks: int = 0
+    local_temporary_stat_nonzero_masks: int = 0
+    local_temporary_stat_enabled_bits: int = 0
+    local_temporary_stat_mask_patterns: Counter[str] = field(
+        default_factory=Counter
+    )
+    local_temporary_stat_zero_flag_a_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    local_temporary_stat_zero_flag_b_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    local_temporary_stat_zero_trailing_i16_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    local_temporary_stat_opaque_bytes: int = 0
     client_opcode_13_messages: int = 0
     client_opcode_13_messages_by_type: Counter[int] = field(
         default_factory=Counter
@@ -3280,6 +3298,33 @@ class GameplayAnalysis:
                     "last_client_tick": self.state.last_client_skill_tick,
                     "tick_decreases": self.state.client_skill_tick_decreases,
                 },
+                "local_temporary_stat_sets": {
+                    "packet_count": self.state.local_temporary_stat_sets,
+                    "zero_mask_packets": (
+                        self.state.local_temporary_stat_zero_masks
+                    ),
+                    "nonzero_mask_packets": (
+                        self.state.local_temporary_stat_nonzero_masks
+                    ),
+                    "enabled_bit_count": (
+                        self.state.local_temporary_stat_enabled_bits
+                    ),
+                    "mask_patterns": dict(
+                        self.state.local_temporary_stat_mask_patterns
+                    ),
+                    "zero_mask_flag_a_values": dict(
+                        self.state.local_temporary_stat_zero_flag_a_values
+                    ),
+                    "zero_mask_flag_b_values": dict(
+                        self.state.local_temporary_stat_zero_flag_b_values
+                    ),
+                    "zero_mask_trailing_i16_values": dict(
+                        self.state.local_temporary_stat_zero_trailing_i16_values
+                    ),
+                    "opaque_bytes": (
+                        self.state.local_temporary_stat_opaque_bytes
+                    ),
+                },
                 "client_opcode_13_messages": (
                     self.state.client_opcode_13_messages
                 ),
@@ -3411,6 +3456,9 @@ class GameplayStateFold:
         self._pending_client_attacks: dict[
             int, deque[PendingClientAttackHit]
         ] = {}
+        self._last_client_skill_use: (
+            tuple[int, int, ClientSkillUseRequest] | None
+        ) = None
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
 
@@ -4314,6 +4362,11 @@ class GameplayStateFold:
             ):
                 self.state.client_skill_tick_decreases += 1
             self.state.last_client_skill_tick = request.client_tick
+            self._last_client_skill_use = (
+                frame.index,
+                frame.timestamp_ns,
+                request,
+            )
             details = {
                 **request.safe_dict(),
                 "field_epoch": self.state.field_epoch,
@@ -4677,6 +4730,96 @@ class GameplayStateFold:
                     "inventory update flag and extended item metadata roles "
                     "remain neutral",
                 ),
+            )
+        if opcode == 42:
+            header = LocalTemporaryStatSetHeader.parse(payload)
+            mask_pattern = ":".join(
+                f"{word:08x}" for word in header.mask_words
+            )
+            enabled_bit_count = len(header.enabled_bit_indices)
+            self.state.local_temporary_stat_sets += 1
+            self.state.local_temporary_stat_enabled_bits += enabled_bit_count
+            self.state.local_temporary_stat_mask_patterns[mask_pattern] += 1
+            self.state.local_temporary_stat_opaque_bytes += len(
+                header.opaque_tail
+            )
+            if header.zero_mask:
+                self.state.local_temporary_stat_zero_masks += 1
+                if header.zero_mask_flag_a is None:
+                    raise PacketShapeError(
+                        "decoded zero-mask temporary stat header has no flag A"
+                    )
+                if header.zero_mask_flag_b is None:
+                    raise PacketShapeError(
+                        "decoded zero-mask temporary stat header has no flag B"
+                    )
+                if header.zero_mask_trailing_i16 is None:
+                    raise PacketShapeError(
+                        "decoded zero-mask temporary stat header has no trailing i16"
+                    )
+                self.state.local_temporary_stat_zero_flag_a_values[
+                    header.zero_mask_flag_a
+                ] += 1
+                self.state.local_temporary_stat_zero_flag_b_values[
+                    header.zero_mask_flag_b
+                ] += 1
+                self.state.local_temporary_stat_zero_trailing_i16_values[
+                    header.zero_mask_trailing_i16
+                ] += 1
+            else:
+                self.state.local_temporary_stat_nonzero_masks += 1
+            preceding_skill_candidate: dict[str, object] | None = None
+            if self._last_client_skill_use is not None:
+                request_frame, request_timestamp_ns, request = (
+                    self._last_client_skill_use
+                )
+                preceding_skill_candidate = {
+                    "request_frame": request_frame,
+                    "skill_id": request.skill_id,
+                    "skill_level": request.skill_level,
+                    "response_ms": round(
+                        (frame.timestamp_ns - request_timestamp_ns) / 1e6, 3
+                    ),
+                    "causal_role_proven": False,
+                }
+            details = {
+                **header.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+                "mask_pattern": mask_pattern,
+                "modeled_state_change": (
+                    "none" if header.zero_mask else "unknown"
+                ),
+                "preceding_skill_candidate": preceding_skill_candidate,
+                "network_progression_proven": False,
+            }
+            self._event(
+                frame,
+                "local_temporary_stat_set_received",
+                details=details,
+            )
+            issues = (
+                (
+                    "zero-mask suffix is structurally decoded, but its semantic "
+                    "roles and safe client progression remain unproven"
+                )
+                if header.zero_mask and not header.opaque_tail
+                else (
+                    "zero-mask suffix is structurally decoded, but trailing "
+                    "bytes remain opaque"
+                )
+                if header.zero_mask
+                else (
+                    "nonzero temporary-stat entry records and suffix remain "
+                    "opaque"
+                )
+            )
+            return self._observation(
+                frame,
+                kind="local_temporary_stat_set_header",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=header,
+                details=details,
+                issues=(issues,),
             )
         if opcode == 41:
             update = CharacterStatUpdate.parse(payload)
@@ -8486,6 +8629,9 @@ def render_gameplay_analysis(
     client_skill_use_trailing_values = json.dumps(
         dict(sorted(state.client_skill_use_trailing_values.items()))
     )
+    local_temporary_stat_mask_patterns = json.dumps(
+        dict(sorted(state.local_temporary_stat_mask_patterns.items()))
+    )
     client_opcode_217_record_formats = json.dumps(
         dict(sorted(state.client_opcode_217_records_by_format.items()))
     )
@@ -8847,6 +8993,15 @@ def render_gameplay_analysis(
             f"binding_mismatches:{state.client_skill_use_binding_mismatches} "
             f"last_tick:{state.last_client_skill_tick} "
             f"tick_decreases:{state.client_skill_tick_decreases}"
+        ),
+        (
+            "local_temporary_stat_sets="
+            f"packets:{state.local_temporary_stat_sets} "
+            f"zero_masks:{state.local_temporary_stat_zero_masks} "
+            f"nonzero_masks:{state.local_temporary_stat_nonzero_masks} "
+            f"enabled_bits:{state.local_temporary_stat_enabled_bits} "
+            f"mask_patterns:{local_temporary_stat_mask_patterns} "
+            f"opaque_bytes:{state.local_temporary_stat_opaque_bytes}"
         ),
         (
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "

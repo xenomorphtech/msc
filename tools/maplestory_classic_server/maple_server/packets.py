@@ -2592,6 +2592,118 @@ class CharacterStatUpdate:
 
 
 @dataclass(frozen=True)
+class LocalTemporaryStatSetHeader:
+    """Structurally decoded prefix of server opcode 42.
+
+    The official client reads four 32-bit mask words before any conditional
+    temporary-stat records.  The all-zero-mask branch then reads two bytes and
+    one signed 16-bit value.  Non-zero record bodies and the semantic roles of
+    the zero-mask suffix remain intentionally opaque.
+    """
+
+    mask_words: tuple[int, int, int, int]
+    zero_mask_flag_a: int | None = None
+    zero_mask_flag_b: int | None = None
+    zero_mask_trailing_i16: int | None = None
+    opaque_tail: bytes = b""
+    opcode: int = 42
+
+    @property
+    def zero_mask(self) -> bool:
+        return not any(self.mask_words)
+
+    @property
+    def enabled_bit_indices(self) -> tuple[int, ...]:
+        return tuple(
+            word_index * 32 + bit_index
+            for word_index, word in enumerate(self.mask_words)
+            for bit_index in range(32)
+            if word & (1 << bit_index)
+        )
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LocalTemporaryStatSetHeader":
+        reader = PacketReader(
+            payload, packet_name="local_temporary_stat_set_header"
+        )
+        _expect_opcode(reader, 42)
+        mask_words = tuple(
+            reader.u32(f"mask_word_{word_index}") for word_index in range(4)
+        )
+        if any(mask_words):
+            return cls(
+                mask_words=mask_words,
+                opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+            )
+        flag_a = reader.u8("zero_mask_flag_a")
+        flag_b = reader.u8("zero_mask_flag_b")
+        trailing_i16 = reader.i16("zero_mask_trailing_i16")
+        return cls(
+            mask_words=mask_words,
+            zero_mask_flag_a=flag_a,
+            zero_mask_flag_b=flag_b,
+            zero_mask_trailing_i16=trailing_i16,
+            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "mask_words": list(self.mask_words),
+            "enabled_bit_indices": list(self.enabled_bit_indices),
+            "enabled_bit_count": len(self.enabled_bit_indices),
+            "zero_mask": self.zero_mask,
+            "zero_mask_flag_a": self.zero_mask_flag_a,
+            "zero_mask_flag_b": self.zero_mask_flag_b,
+            "zero_mask_trailing_i16": self.zero_mask_trailing_i16,
+            "opaque_tail_length": len(self.opaque_tail),
+        }
+
+    def to_bytes(self) -> bytes:
+        if len(self.mask_words) != 4:
+            raise PacketShapeError(
+                "local temporary stat set header needs four mask words"
+            )
+        if any(not 0 <= word <= 0xFFFF_FFFF for word in self.mask_words):
+            raise PacketShapeError(
+                "local temporary stat set mask words must be uint32 values"
+            )
+        suffix_values = (
+            self.zero_mask_flag_a,
+            self.zero_mask_flag_b,
+            self.zero_mask_trailing_i16,
+        )
+        if self.zero_mask:
+            if any(value is None for value in suffix_values):
+                raise PacketShapeError(
+                    "zero-mask local temporary stat set requires its two "
+                    "flags and trailing i16"
+                )
+            flag_a = self.zero_mask_flag_a
+            flag_b = self.zero_mask_flag_b
+            trailing_i16 = self.zero_mask_trailing_i16
+            if flag_a is None or flag_b is None or trailing_i16 is None:
+                raise AssertionError("validated zero-mask suffix is incomplete")
+            try:
+                suffix = struct.pack("<BBh", flag_a, flag_b, trailing_i16)
+            except struct.error as error:
+                raise PacketShapeError(
+                    "zero-mask local temporary stat suffix values are out of range"
+                ) from error
+        else:
+            if any(value is not None for value in suffix_values):
+                raise PacketShapeError(
+                    "nonzero local temporary stat records remain opaque and "
+                    "do not allow zero-mask suffix fields"
+                )
+            suffix = b""
+        return (
+            struct.pack("<H4I", self.opcode, *self.mask_words)
+            + suffix
+            + self.opaque_tail
+        )
+
+
+@dataclass(frozen=True)
 class InventoryModification:
     operation: int
     inventory_type: int

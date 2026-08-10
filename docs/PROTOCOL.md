@@ -704,6 +704,49 @@ the submitted level, tracks tick deltas/decreases and neutral trailing values,
 and emits `client_skill_use_submitted`. It does not yet infer a required server
 response or assign a meaning to `trailing_value` beyond the observed zero.
 
+## Local temporary-stat set prefix (`server 42`, partial)
+
+Static client inspection and a bounded live parser trace establish only this
+prefix:
+
+```text
+uint16 opcode = 42
+uint32 mask_words[4]
+if all mask words are zero:
+    uint8 zero_mask_flag_a       # semantic role unknown
+    uint8 zero_mask_flag_b       # semantic role unknown
+    int16 zero_mask_trailing     # semantic role unknown
+bytes opaque_tail                # any unmodeled remainder
+```
+
+The opcode-`42` client handler at RVA `0xe54150` calls the four-word mask
+decoder before processing temporary-stat records. During a live all-zero probe,
+the traced reads after that mask were two `uint8` values at packet cursors `22`
+and `23`, followed by one `int16` ending at cursor `24`. Accounting for the
+two-byte transport length header outside the plaintext gives an exact 22-byte
+minimal plaintext. The analyzer therefore decodes the mask and zero-mask suffix
+while preserving every remaining byte; nonzero-mask records remain entirely
+opaque after the mask.
+
+This is structural evidence, not a valid skill response. Neither gameplay
+stream `92` nor `114` in `111.pcapng`, nor level-1-through-10 stream `126` in
+`1-10FS.pcapng`, contains opcode `42`. The controlled live run sent a padded
+160-byte all-zero probe and then the 22-byte minimal form. Both reached the
+socket writer, but heartbeat replies stopped after the padded probe; the later
+minimal form was therefore tested only on an already-stalled connection. The
+fold emits partial `local_temporary_stat_set_header` observations and
+`local_temporary_stat_set_received` events, preserves 138 opaque bytes on the
+padded form, leaves HP/MP and other modeled state unchanged for a zero mask,
+and sets `network_progression_proven: false`. A preceding opcode-`104` request
+is exposed only as a non-causal candidate.
+
+A clean browser-free control session subsequently reached map `101000000`,
+produced one fully decoded opcode-`104` request from direct Wayland key `71`,
+and matched all 16 heartbeat probes/responses with none pending. This separates
+normal client progression from the unsafe opcode-`42` experiment. Do not replay
+opcode `42` as a response until a capture-backed nonzero record grammar and a
+fresh-client minimal-packet acceptance test exist.
+
 ## Inventory change sets (`server 39`)
 
 The capture-validated packet grammar is:

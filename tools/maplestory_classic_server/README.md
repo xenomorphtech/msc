@@ -191,6 +191,26 @@ including progression/binding correlations and tick deltas. No opcode-`104`
 sample occurs in reference streams `92`, `114`, or `126`, and no required
 server response is inferred yet.
 
+Server opcode `42` now has a deliberately partial
+`LocalTemporaryStatSetHeader` decoder. It reads four `uint32` mask words; only
+the all-zero branch's following two bytes and signed `int16` are structurally
+decoded, while nonzero records and every remainder stay opaque. The gameplay
+fold emits `local_temporary_stat_set_header` observations and
+`local_temporary_stat_set_received` events, reports mask/value/opaque-byte
+counts, and leaves modeled HP/MP unchanged for a zero mask. The opcode is
+absent from reference streams `92`, `114`, and `126`.
+
+The live probe does not establish a valid response. A 160-byte padded all-zero
+packet reached the HTTP injection writer but was followed by stalled heartbeat
+responses; the exact 22-byte minimal form was sent only after the connection
+was already stalled. The padded packet folds as the modeled prefix plus 138
+opaque bytes, and both observations report `network_progression_proven: false`.
+A fresh browser-free control then reached map `101000000`, emitted one exact
+opcode-`104` request for skill id `2001002`/level `1` from direct nested-Wayland
+key `71`, and matched 16/16 heartbeats with none pending. An HTTP `accepted`
+result proves a serialized socket write only, not client acceptance or semantic
+correctness.
+
 For controlled live experiments, replay mode also accepts
 `--enable-http-packet-injection` together with `--http-api-port`. It enables
 loopback-only `POST /api/v1/server-packets` with exact JSON

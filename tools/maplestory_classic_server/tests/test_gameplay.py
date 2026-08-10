@@ -82,6 +82,7 @@ from maple_server.packets import (  # noqa: E402
     LifeMovementCommand,
     LifeMovementPath,
     LifeMovementSubmission,
+    LocalTemporaryStatSetHeader,
     MobControllerChange,
     MobEnterField,
     MobHealthPercentageUpdate,
@@ -1282,6 +1283,40 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(PacketShapeError, "skill_level"):
             replace(request, skill_level=256).to_bytes()
+
+    def test_local_temporary_stat_zero_mask_header_round_trip(self) -> None:
+        observed = bytes.fromhex("2a00" + "00" * 20)
+        header = LocalTemporaryStatSetHeader(
+            mask_words=(0, 0, 0, 0),
+            zero_mask_flag_a=0,
+            zero_mask_flag_b=0,
+            zero_mask_trailing_i16=0,
+        )
+
+        self.assertEqual(header.to_bytes(), observed)
+        self.assertEqual(LocalTemporaryStatSetHeader.parse(observed), header)
+        self.assertTrue(header.zero_mask)
+        self.assertEqual(header.enabled_bit_indices, ())
+        self.assertEqual(header.safe_dict()["opaque_tail_length"], 0)
+        padded_probe = bytes.fromhex("2a00" + "00" * 158)
+        parsed_probe = LocalTemporaryStatSetHeader.parse(padded_probe)
+        self.assertEqual(len(parsed_probe.opaque_tail), 138)
+        self.assertEqual(parsed_probe.to_bytes(), padded_probe)
+        with self.assertRaisesRegex(PacketShapeError, "needs 2 bytes"):
+            LocalTemporaryStatSetHeader.parse(observed[:-1])
+
+    def test_local_temporary_stat_nonzero_body_stays_opaque(self) -> None:
+        header = LocalTemporaryStatSetHeader(
+            mask_words=(1, 0, 0, 0),
+            opaque_tail=b"opaque-entry-and-suffix",
+        )
+
+        self.assertEqual(
+            LocalTemporaryStatSetHeader.parse(header.to_bytes()), header
+        )
+        self.assertEqual(header.enabled_bit_indices, (0,))
+        with self.assertRaisesRegex(PacketShapeError, "remain opaque"):
+            replace(header, zero_mask_flag_a=0).to_bytes()
 
     def test_item_use_request_round_trip(self) -> None:
         request = ItemUseRequest(
@@ -3167,6 +3202,55 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(safe["level_matches"], 2)
         self.assertIn(
             "client_skill_uses=requests:2",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_local_temporary_stat_zero_mask_without_state_change(
+        self,
+    ) -> None:
+        header = LocalTemporaryStatSetHeader(
+            mask_words=(0, 0, 0, 0),
+            zero_mask_flag_a=0,
+            zero_mask_flag_b=0,
+            zero_mask_trailing_i16=0,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(header.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.current_hp, 70)
+        self.assertEqual(analysis.state.current_mp, 136)
+        self.assertEqual(analysis.state.local_temporary_stat_sets, 1)
+        self.assertEqual(analysis.state.local_temporary_stat_zero_masks, 1)
+        self.assertEqual(analysis.state.local_temporary_stat_nonzero_masks, 0)
+        self.assertEqual(analysis.state.local_temporary_stat_enabled_bits, 0)
+        self.assertEqual(
+            analysis.state.local_temporary_stat_mask_patterns,
+            {"00000000:00000000:00000000:00000000": 1},
+        )
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "local_temporary_stat_set_header"
+        )
+        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(observation.details["modeled_state_change"], "none")
+        self.assertFalse(observation.details["network_progression_proven"])
+        event = next(
+            event
+            for event in analysis.events
+            if event.kind == "local_temporary_stat_set_received"
+        )
+        self.assertEqual(event.details["enabled_bit_count"], 0)
+        safe = analysis.safe_dict()["state"]["local_temporary_stat_sets"]
+        self.assertEqual(safe["packet_count"], 1)
+        self.assertEqual(safe["zero_mask_flag_a_values"], {0: 1})
+        self.assertIn(
+            "local_temporary_stat_sets=packets:1 zero_masks:1",
             render_gameplay_analysis(analysis),
         )
 
