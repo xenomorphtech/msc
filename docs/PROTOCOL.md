@@ -1589,6 +1589,46 @@ closed at its configured one-hour boundary. This validates client acceptance
 and the predicted spawn-state delta; it does not establish visible rendering
 or the compact removal effect.
 
+## Mob temporary-stat set/reset (`server 285`, `server 286`)
+
+The pinned opcode-`285` and opcode-`286` handlers belong to the same client
+type and each directly reads one signed 32-bit object id before delegating the
+body. Stream `92` supplies the only reference instances: ten 33-byte set
+records and five 23-byte reset records. The captured single-bit forms are:
+
+```text
+uint16 opcode = 285
+uint32 mob_object_id                 # field-local; redacted/aliased
+uint32 mask_words[4] = [0, 0, 0, 0x80]  # enabled bit index 103
+uint16 value = 1
+uint32 source_skill_id
+uint16 source_level                  # neutral captured field name
+uint16 duration_value                # units not yet proven
+uint8  flag = 1
+
+uint16 opcode = 286
+uint32 mob_object_id                 # field-local; redacted/aliased
+uint32 mask_words[4] = [0, 0, 0, 0x80]
+uint8  flag = 1
+```
+
+All 15 packets consume and re-encode byte-for-byte. Every object id names an
+active template-`3210800` mob. Each set follows within one or two server frames
+of an opcode-`219` relay that targets the same mob and carries the same source
+skill id, `3101005`; this correlation is 10/10. The set records use source
+levels `5`/`6` and ten distinct duration values from `859` through `1142`, so
+the model retains both names neutrally and does not assert time units.
+
+The fold stores bit `103` on the field-local mob entity. Ten sets include three
+refreshes. Of five resets, three remove a modeled active bit and two occur
+before a corresponding set is visible in the bounded capture. Four remaining
+active bits clear when their mobs leave, and the final active count is zero.
+Events and reports expose the aliased mob, mask, source skill, neutral values,
+and relay match without exposing the object id. Other masks, values, flags, or
+packet widths remain unknown rather than inheriting this capture-bounded
+grammar. No visible immobilization/status effect or safe live-replay claim has
+yet been established.
+
 ## Mob health percentage (`server 293`)
 
 The complete update is seven bytes:
@@ -2471,8 +2511,8 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,565
 full, 44,295 partial, 240 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,385 full, 21,740 partial,
-82 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
+observations. Stream `92` independently reaches 13,400 full, 21,740 partial,
+67 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

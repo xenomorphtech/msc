@@ -96,6 +96,8 @@ from maple_server.packets import (  # noqa: E402
     MobMovementPath,
     MobMovementSubmission,
     MobSpawnData,
+    MobTemporaryStatReset,
+    MobTemporaryStatSet,
     NpcLifecycleControl,
     NpcSpawn,
     NpcStateUpdate,
@@ -2617,6 +2619,47 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaises(PacketShapeError):
             MobMovementPath.parse(bytes(encoded))
 
+    def test_mob_temporary_stat_set_and_reset_round_trip(self) -> None:
+        set_payload = bytes.fromhex(
+            "1d01ea114300000000000000000000000000800000000100"
+            "4d512f000600760401"
+        )
+        reset_payload = bytes.fromhex(
+            "1e01ea1143000000000000000000000000008000000001"
+        )
+        stat_set = MobTemporaryStatSet(
+            object_id=4_395_498,
+            value=1,
+            source_skill_id=3_101_005,
+            source_level=6,
+            duration_value=1_142,
+        )
+        stat_reset = MobTemporaryStatReset(object_id=4_395_498)
+
+        self.assertTrue(MobTemporaryStatSet.is_captured_shape(set_payload))
+        self.assertTrue(
+            MobTemporaryStatReset.is_captured_shape(reset_payload)
+        )
+        self.assertEqual(stat_set.to_bytes(), set_payload)
+        self.assertEqual(MobTemporaryStatSet.parse(set_payload), stat_set)
+        self.assertEqual(stat_reset.to_bytes(), reset_payload)
+        self.assertEqual(
+            MobTemporaryStatReset.parse(reset_payload), stat_reset
+        )
+        self.assertEqual(stat_set.enabled_bit_indices, (103,))
+        self.assertEqual(stat_reset.enabled_bit_indices, (103,))
+        self.assertNotIn("4395498", str(stat_set.safe_dict()))
+        self.assertNotIn("4395498", str(stat_reset.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "captured single-bit"):
+            replace(stat_set, mask_words=(0, 0, 0, 0x40)).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "captured value one"):
+            replace(stat_set, value=2).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "captured value one"):
+            replace(stat_reset, flag=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 1 bytes"):
+            MobTemporaryStatSet.parse(set_payload[:-1])
+
     def test_mob_lifecycle_and_broadcast_round_trip(self) -> None:
         entered = MobEnterField(
             object_id=MOB_OBJECT_ID,
@@ -4779,6 +4822,92 @@ class GameplayStateFoldTest(unittest.TestCase):
         event_kinds = [event.kind for event in analysis.events]
         self.assertEqual(event_kinds.count("remote_player_entered_field"), 3)
         self.assertEqual(event_kinds.count("remote_player_left_field"), 2)
+
+    def test_folds_mob_temporary_stat_set_reset_lifecycle(self) -> None:
+        relay = ServerAttackRelay(
+            object_id=PLAYER_OBJECT_ID,
+            packed_counts=0x11,
+            opaque_body=fixture_attack_relay_body(
+                prefix_length=15,
+                target_count=1,
+                hit_count=1,
+                tail_length=4,
+            ),
+            opcode=219,
+        )
+        first_set = MobTemporaryStatSet(
+            object_id=MOB_OBJECT_ID,
+            value=1,
+            source_skill_id=4_001_344,
+            source_level=8,
+            duration_value=1_000,
+        )
+        refreshed_set = replace(first_set, duration_value=900)
+        reset = MobTemporaryStatReset(object_id=MOB_OBJECT_ID)
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                relay.to_bytes(),
+                first_set.to_bytes(),
+                refreshed_set.to_bytes(),
+                reset.to_bytes(),
+                reset.to_bytes(),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        state = analysis.state
+        self.assertEqual(state.mob_temporary_stat_sets, 2)
+        self.assertEqual(state.mob_temporary_stat_resets, 2)
+        self.assertEqual(state.mob_temporary_stat_sets_for_known_mobs, 2)
+        self.assertEqual(state.mob_temporary_stat_sets_for_unknown_mobs, 0)
+        self.assertEqual(state.mob_temporary_stat_resets_for_known_mobs, 2)
+        self.assertEqual(state.mob_temporary_stat_resets_for_unknown_mobs, 0)
+        self.assertEqual(state.mob_temporary_stat_set_refreshes, 1)
+        self.assertEqual(state.mob_temporary_stat_resets_with_modeled_set, 1)
+        self.assertEqual(
+            state.mob_temporary_stat_resets_without_modeled_set, 1
+        )
+        self.assertEqual(state.mob_temporary_stat_attack_relay_matches, 2)
+        self.assertEqual(
+            state.mob_temporary_stat_mask_patterns,
+            {"00000000:00000000:00000000:00000080": 4},
+        )
+        self.assertEqual(state.mob_temporary_stat_source_skills, {4_001_344: 2})
+        self.assertEqual(state.mob_temporary_stat_source_levels, {8: 2})
+        self.assertEqual(
+            state.mob_temporary_stat_duration_values,
+            {900: 1, 1_000: 1},
+        )
+        self.assertFalse(state.mobs[MOB_OBJECT_ID].temporary_stats)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"mob_temporary_stat_set", "mob_temporary_stat_reset"}
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "mob_temporary_stat_set_received"
+                for event in analysis.events
+            ),
+            2,
+        )
+        safe = str([observation.details for observation in observations])
+        self.assertNotIn(str(MOB_OBJECT_ID), safe)
+        self.assertIn(
+            "mob_temporary_stats=active:0 sets:2 resets:2",
+            render_gameplay_analysis(analysis),
+        )
 
     def test_folds_remote_player_mob_value_records(self) -> None:
         player = RemotePlayerEnterField(

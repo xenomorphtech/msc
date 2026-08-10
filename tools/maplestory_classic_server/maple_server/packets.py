@@ -2498,6 +2498,210 @@ class MobLeaveField:
 
 
 @dataclass(frozen=True)
+class MobTemporaryStatSet:
+    """Capture-bounded opcode-285 single-stat record."""
+
+    object_id: int = field(repr=False)
+    value: int
+    source_skill_id: int
+    source_level: int
+    duration_value: int
+    flag: int = 1
+    mask_words: tuple[int, int, int, int] = (0, 0, 0, 0x80)
+    opcode: int = 285
+
+    CAPTURED_MASK_WORDS = (0, 0, 0, 0x80)
+    CAPTURED_VALUE = 1
+    CAPTURED_FLAG = 1
+
+    @classmethod
+    def is_captured_shape(cls, payload: bytes) -> bool:
+        if len(payload) != 33:
+            return False
+        opcode, _, *mask_words = struct.unpack_from("<HI4I", payload)
+        value = struct.unpack_from("<H", payload, 22)[0]
+        flag = payload[-1]
+        return (
+            opcode == 285
+            and tuple(mask_words) == cls.CAPTURED_MASK_WORDS
+            and value == cls.CAPTURED_VALUE
+            and flag == cls.CAPTURED_FLAG
+        )
+
+    @property
+    def enabled_bit_indices(self) -> tuple[int, ...]:
+        return tuple(
+            word_index * 32 + bit_index
+            for word_index, word in enumerate(self.mask_words)
+            for bit_index in range(32)
+            if word & (1 << bit_index)
+        )
+
+    @property
+    def mask_pattern(self) -> str:
+        return ":".join(f"{word:08x}" for word in self.mask_words)
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobTemporaryStatSet":
+        reader = PacketReader(payload, packet_name="mob_temporary_stat_set")
+        _expect_opcode(reader, 285)
+        record = cls(
+            object_id=reader.u32("object_id"),
+            mask_words=tuple(
+                reader.u32(f"mask_word_{word_index}")
+                for word_index in range(4)
+            ),
+            value=reader.u16("value"),
+            source_skill_id=reader.u32("source_skill_id"),
+            source_level=reader.u16("source_level"),
+            duration_value=reader.u16("duration_value"),
+            flag=reader.u8("flag"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 285:
+            raise PacketShapeError("mob temporary-stat set opcode must be 285")
+        if self.mask_words != self.CAPTURED_MASK_WORDS:
+            raise PacketShapeError(
+                "mob temporary-stat set mask is not the captured single-bit shape"
+            )
+        if self.value != self.CAPTURED_VALUE:
+            raise PacketShapeError(
+                "mob temporary-stat set value must be captured value one"
+            )
+        if self.flag != self.CAPTURED_FLAG:
+            raise PacketShapeError(
+                "mob temporary-stat set flag must be captured value one"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "object_id_redacted": True,
+            "mask_words": list(self.mask_words),
+            "mask_pattern": self.mask_pattern,
+            "enabled_bit_indices": list(self.enabled_bit_indices),
+            "value": self.value,
+            "source_skill_id": self.source_skill_id,
+            "source_level": self.source_level,
+            "duration_value": self.duration_value,
+            "flag": self.flag,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<HI4IHIHHB",
+                self.opcode,
+                self.object_id,
+                *self.mask_words,
+                self.value,
+                self.source_skill_id,
+                self.source_level,
+                self.duration_value,
+                self.flag,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"mob temporary-stat set field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class MobTemporaryStatReset:
+    """Capture-bounded opcode-286 single-stat reset."""
+
+    object_id: int = field(repr=False)
+    flag: int = 1
+    mask_words: tuple[int, int, int, int] = (0, 0, 0, 0x80)
+    opcode: int = 286
+
+    CAPTURED_MASK_WORDS = MobTemporaryStatSet.CAPTURED_MASK_WORDS
+    CAPTURED_FLAG = 1
+
+    @classmethod
+    def is_captured_shape(cls, payload: bytes) -> bool:
+        if len(payload) != 23:
+            return False
+        opcode, _, *mask_words = struct.unpack_from("<HI4I", payload)
+        return (
+            opcode == 286
+            and tuple(mask_words) == cls.CAPTURED_MASK_WORDS
+            and payload[-1] == cls.CAPTURED_FLAG
+        )
+
+    @property
+    def enabled_bit_indices(self) -> tuple[int, ...]:
+        return tuple(
+            word_index * 32 + bit_index
+            for word_index, word in enumerate(self.mask_words)
+            for bit_index in range(32)
+            if word & (1 << bit_index)
+        )
+
+    @property
+    def mask_pattern(self) -> str:
+        return ":".join(f"{word:08x}" for word in self.mask_words)
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "MobTemporaryStatReset":
+        reader = PacketReader(payload, packet_name="mob_temporary_stat_reset")
+        _expect_opcode(reader, 286)
+        record = cls(
+            object_id=reader.u32("object_id"),
+            mask_words=tuple(
+                reader.u32(f"mask_word_{word_index}")
+                for word_index in range(4)
+            ),
+            flag=reader.u8("flag"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 286:
+            raise PacketShapeError(
+                "mob temporary-stat reset opcode must be 286"
+            )
+        if self.mask_words != self.CAPTURED_MASK_WORDS:
+            raise PacketShapeError(
+                "mob temporary-stat reset mask is not the captured single-bit shape"
+            )
+        if self.flag != self.CAPTURED_FLAG:
+            raise PacketShapeError(
+                "mob temporary-stat reset flag must be captured value one"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "object_id_redacted": True,
+            "mask_words": list(self.mask_words),
+            "mask_pattern": self.mask_pattern,
+            "enabled_bit_indices": list(self.enabled_bit_indices),
+            "flag": self.flag,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<HI4IB",
+                self.opcode,
+                self.object_id,
+                *self.mask_words,
+                self.flag,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"mob temporary-stat reset field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class MobHealthPercentageUpdate:
     object_id: int
     health_percentage: int

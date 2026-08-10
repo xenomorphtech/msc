@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 211 tests.
+The last run passed all 213 tests.
 
 ## Inspect and compare captures
 
@@ -233,9 +233,18 @@ every template has an active mob at packet time. The fold aliases the player,
 reports template/value/flag distributions and active-template counts, and
 does not claim that the still-neutral value is damage.
 
+Server opcodes `285`/`286` now fold the captured single-bit mob temporary-stat
+set/reset pair. Stream `92` contains ten 33-byte sets and five 23-byte resets;
+all reference active template-`3210800` mobs and round-trip exactly. Every set
+matches the target and skill id in the preceding opcode-`219` relay within two
+server frames. The fold records three refreshes, three modeled resets, two
+capture-preexisting resets, four leave-time clears, and zero active statuses at
+the end. The source-level and duration fields remain neutral, other masks stay
+unknown, and no live effect is claimed yet.
+
 Together, these latest modeled families leave the long-corpus totals at 26,565
 full, 44,295 partial, 240 unknown-but-lossless, and zero invalid. Stream `92`
-now reaches 13,385 full, 21,740 partial, 82 unknown, and zero invalid.
+now reaches 13,400 full, 21,740 partial, 67 unknown, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

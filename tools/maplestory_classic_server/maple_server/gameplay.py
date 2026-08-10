@@ -60,6 +60,8 @@ from .packets import (
     MobMovementCommand,
     MobMovementSubmission,
     MobSpawnData,
+    MobTemporaryStatReset,
+    MobTemporaryStatSet,
     NpcLifecycleControl,
     NpcSpawn,
     NpcStateUpdate,
@@ -184,6 +186,9 @@ class MobEntity:
     attack_relay_damage: int = 0
     attack_relay_high_bit_markers: int = 0
     last_attack_hit_action: int | None = None
+    temporary_stats: dict[int, MobTemporaryStatSet] = field(
+        default_factory=dict, repr=False
+    )
 
 
 @dataclass
@@ -373,6 +378,36 @@ class GameplayGameState:
     mob_health_zero_updates: int = 0
     mob_health_increases: int = 0
     mob_health_updates_for_unknown_mobs: int = 0
+    mob_temporary_stat_sets: int = 0
+    mob_temporary_stat_resets: int = 0
+    mob_temporary_stat_sets_for_known_mobs: int = 0
+    mob_temporary_stat_sets_for_unknown_mobs: int = 0
+    mob_temporary_stat_resets_for_known_mobs: int = 0
+    mob_temporary_stat_resets_for_unknown_mobs: int = 0
+    mob_temporary_stat_set_refreshes: int = 0
+    mob_temporary_stat_resets_with_modeled_set: int = 0
+    mob_temporary_stat_resets_without_modeled_set: int = 0
+    mob_temporary_stat_attack_relay_matches: int = 0
+    mob_temporary_stats_cleared_on_leave: int = 0
+    mob_temporary_stats_cleared_on_field_change: int = 0
+    mob_temporary_stat_mask_patterns: Counter[str] = field(
+        default_factory=Counter
+    )
+    mob_temporary_stat_source_skills: Counter[int] = field(
+        default_factory=Counter
+    )
+    mob_temporary_stat_source_levels: Counter[int] = field(
+        default_factory=Counter
+    )
+    mob_temporary_stat_duration_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    mob_temporary_stat_set_flags: Counter[int] = field(
+        default_factory=Counter
+    )
+    mob_temporary_stat_reset_flags: Counter[int] = field(
+        default_factory=Counter
+    )
     unknown_mob_leaves: int = 0
     unknown_mob_broadcasts: int = 0
     mob_broadcast_commands: int = 0
@@ -2717,6 +2752,7 @@ class GameplayAnalysis:
                     entity.attack_relay_high_bit_markers
                 ),
                 "last_attack_hit_action": entity.last_attack_hit_action,
+                "temporary_stat_bits": sorted(entity.temporary_stats),
                 "foothold_id": entity.foothold_id,
                 "origin_foothold_id": entity.spawn.origin_foothold_id,
                 "spawn_effect": entity.spawn.spawn_effect,
@@ -2904,6 +2940,62 @@ class GameplayAnalysis:
                 "mob_health_updates_for_unknown_mobs": (
                     self.state.mob_health_updates_for_unknown_mobs
                 ),
+                "mob_temporary_stats": {
+                    "active_count": sum(
+                        len(entity.temporary_stats)
+                        for entity in self.state.mobs.values()
+                    ),
+                    "set_count": self.state.mob_temporary_stat_sets,
+                    "reset_count": self.state.mob_temporary_stat_resets,
+                    "sets_for_known_mobs": (
+                        self.state.mob_temporary_stat_sets_for_known_mobs
+                    ),
+                    "sets_for_unknown_mobs": (
+                        self.state.mob_temporary_stat_sets_for_unknown_mobs
+                    ),
+                    "resets_for_known_mobs": (
+                        self.state.mob_temporary_stat_resets_for_known_mobs
+                    ),
+                    "resets_for_unknown_mobs": (
+                        self.state.mob_temporary_stat_resets_for_unknown_mobs
+                    ),
+                    "set_refreshes": (
+                        self.state.mob_temporary_stat_set_refreshes
+                    ),
+                    "resets_with_modeled_set": (
+                        self.state.mob_temporary_stat_resets_with_modeled_set
+                    ),
+                    "resets_without_modeled_set": (
+                        self.state.mob_temporary_stat_resets_without_modeled_set
+                    ),
+                    "attack_relay_matches": (
+                        self.state.mob_temporary_stat_attack_relay_matches
+                    ),
+                    "cleared_on_leave": (
+                        self.state.mob_temporary_stats_cleared_on_leave
+                    ),
+                    "cleared_on_field_change": (
+                        self.state.mob_temporary_stats_cleared_on_field_change
+                    ),
+                    "mask_patterns": dict(
+                        self.state.mob_temporary_stat_mask_patterns
+                    ),
+                    "source_skills": dict(
+                        self.state.mob_temporary_stat_source_skills
+                    ),
+                    "source_levels": dict(
+                        self.state.mob_temporary_stat_source_levels
+                    ),
+                    "duration_values": dict(
+                        self.state.mob_temporary_stat_duration_values
+                    ),
+                    "set_flags": dict(
+                        self.state.mob_temporary_stat_set_flags
+                    ),
+                    "reset_flags": dict(
+                        self.state.mob_temporary_stat_reset_flags
+                    ),
+                },
                 "unknown_mob_leaves": self.state.unknown_mob_leaves,
                 "unknown_mob_broadcasts": self.state.unknown_mob_broadcasts,
                 "mob_broadcast_commands": self.state.mob_broadcast_commands,
@@ -3779,6 +3871,9 @@ class GameplayStateFold:
         ] = {}
         self._last_client_skill_use: (
             tuple[int, int, ClientSkillUseRequest] | None
+        ) = None
+        self._last_server_attack_relay: (
+            tuple[PlainFrame, ServerAttackRelay] | None
         ) = None
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
@@ -5733,6 +5828,10 @@ class GameplayStateFold:
             )
             cleared_npcs = len(self.state.npcs)
             cleared_mobs = len(self.state.mobs)
+            cleared_mob_temporary_stats = sum(
+                len(entity.temporary_stats)
+                for entity in self.state.mobs.values()
+            )
             cleared_players = len(self.state.observed_players)
             cleared_drops = len(self.state.field_drops)
             cleared_positioned_effects = len(
@@ -5745,6 +5844,9 @@ class GameplayStateFold:
             self.state.field_epoch += 1
             self.state.field_load_stage = None
             self.state.phase = GameplayPhase.FIELD_LOADING
+            self.state.mob_temporary_stats_cleared_on_field_change += (
+                cleared_mob_temporary_stats
+            )
             self.state.npcs.clear()
             self.state.mobs.clear()
             self.state.mob_templates.clear()
@@ -5765,6 +5867,7 @@ class GameplayStateFold:
                 for pending in self._pending_client_attacks.values()
             )
             self._pending_client_attacks.clear()
+            self._last_server_attack_relay = None
             self.state.pending_client_attack_effects = 0
             self.state.client_attack_effects_cleared += (
                 cleared_client_attack_effects
@@ -5774,6 +5877,9 @@ class GameplayStateFold:
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
                 "cleared_npcs": cleared_npcs,
                 "cleared_mobs": cleared_mobs,
+                "cleared_mob_temporary_stats": (
+                    cleared_mob_temporary_stats
+                ),
                 "cleared_players": cleared_players,
                 "cleared_drops": cleared_drops,
                 "cleared_positioned_effects": cleared_positioned_effects,
@@ -6900,7 +7006,16 @@ class GameplayStateFold:
         if opcode == 280:
             left = MobLeaveField.parse(payload)
             alias = self._alias(self._mob_aliases, left.object_id, "mob")
-            known_entity = self.state.mobs.pop(left.object_id, None) is not None
+            removed_entity = self.state.mobs.pop(left.object_id, None)
+            known_entity = removed_entity is not None
+            cleared_temporary_stats = (
+                len(removed_entity.temporary_stats)
+                if removed_entity is not None
+                else 0
+            )
+            self.state.mob_temporary_stats_cleared_on_leave += (
+                cleared_temporary_stats
+            )
             cleared_client_attack_effects = len(
                 self._pending_client_attacks.pop(left.object_id, ())
             )
@@ -6917,6 +7032,7 @@ class GameplayStateFold:
                 "entity": alias,
                 "known_entity": known_entity,
                 "reason": left.reason,
+                "cleared_temporary_stats": cleared_temporary_stats,
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
                 ),
@@ -7368,6 +7484,7 @@ class GameplayStateFold:
             identifiers: dict[str, object] = {"object_id": relay.object_id}
             if target_object_ids:
                 identifiers["target_object_ids"] = target_object_ids
+            self._last_server_attack_relay = (frame, relay)
             self._event(
                 frame,
                 "server_attack_relay_received",
@@ -7391,6 +7508,153 @@ class GameplayStateFold:
                         "high-bit marker remain uninterpreted"
                     ),
                 ),
+            )
+        if opcode == 285 and MobTemporaryStatSet.is_captured_shape(payload):
+            record = MobTemporaryStatSet.parse(payload)
+            alias = self._alias(self._mob_aliases, record.object_id, "mob")
+            entity = self.state.mobs.get(record.object_id)
+            known_entity = entity is not None
+            refreshed_status_count = 0
+            if entity is not None:
+                refreshed_status_count = sum(
+                    bit_index in entity.temporary_stats
+                    for bit_index in record.enabled_bit_indices
+                )
+                for bit_index in record.enabled_bit_indices:
+                    entity.temporary_stats[bit_index] = record
+
+            self.state.mob_temporary_stat_sets += 1
+            if known_entity:
+                self.state.mob_temporary_stat_sets_for_known_mobs += 1
+            else:
+                self.state.mob_temporary_stat_sets_for_unknown_mobs += 1
+            if refreshed_status_count:
+                self.state.mob_temporary_stat_set_refreshes += 1
+            self.state.mob_temporary_stat_mask_patterns[
+                record.mask_pattern
+            ] += 1
+            self.state.mob_temporary_stat_source_skills[
+                record.source_skill_id
+            ] += 1
+            self.state.mob_temporary_stat_source_levels[
+                record.source_level
+            ] += 1
+            self.state.mob_temporary_stat_duration_values[
+                record.duration_value
+            ] += 1
+            self.state.mob_temporary_stat_set_flags[record.flag] += 1
+
+            preceding_relay: dict[str, object] | None = None
+            relay_matches = False
+            if self._last_server_attack_relay is not None:
+                relay_frame, relay = self._last_server_attack_relay
+                metadata = relay.ranged_metadata
+                direction_gap = frame.direction_index - relay_frame.direction_index
+                target_matches = any(
+                    target.object_id == record.object_id
+                    for target in relay.targets
+                )
+                skill_matches = (
+                    metadata is not None
+                    and metadata.skill_id == record.source_skill_id
+                )
+                relay_matches = (
+                    0 < direction_gap <= 2
+                    and target_matches
+                    and skill_matches
+                )
+                preceding_relay = {
+                    "frame_index": relay_frame.index,
+                    "server_direction_gap": direction_gap,
+                    "response_ms": round(
+                        (frame.timestamp_ns - relay_frame.timestamp_ns) / 1e6,
+                        3,
+                    ),
+                    "opcode": relay.opcode,
+                    "target_matches": target_matches,
+                    "source_skill_matches": skill_matches,
+                    "matches": relay_matches,
+                }
+            if relay_matches:
+                self.state.mob_temporary_stat_attack_relay_matches += 1
+
+            details = {
+                **record.safe_dict(),
+                "entity": alias,
+                "known_entity": known_entity,
+                "template_id": (
+                    entity.spawn.template_id if entity is not None else None
+                ),
+                "refreshed_status_count": refreshed_status_count,
+                "active_status_count": (
+                    len(entity.temporary_stats) if entity is not None else 0
+                ),
+                "preceding_attack_relay": preceding_relay,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "mob_temporary_stat_set_received",
+                details=details,
+                identifiers={"object_id": record.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="mob_temporary_stat_set",
+                coverage=ShapeCoverage.FULL,
+                parsed=record,
+                details=details,
+            )
+        if opcode == 286 and MobTemporaryStatReset.is_captured_shape(payload):
+            record = MobTemporaryStatReset.parse(payload)
+            alias = self._alias(self._mob_aliases, record.object_id, "mob")
+            entity = self.state.mobs.get(record.object_id)
+            known_entity = entity is not None
+            reset_status_count = 0
+            if entity is not None:
+                for bit_index in record.enabled_bit_indices:
+                    if entity.temporary_stats.pop(bit_index, None) is not None:
+                        reset_status_count += 1
+
+            self.state.mob_temporary_stat_resets += 1
+            if known_entity:
+                self.state.mob_temporary_stat_resets_for_known_mobs += 1
+            else:
+                self.state.mob_temporary_stat_resets_for_unknown_mobs += 1
+            if reset_status_count:
+                self.state.mob_temporary_stat_resets_with_modeled_set += 1
+            else:
+                self.state.mob_temporary_stat_resets_without_modeled_set += 1
+            self.state.mob_temporary_stat_mask_patterns[
+                record.mask_pattern
+            ] += 1
+            self.state.mob_temporary_stat_reset_flags[record.flag] += 1
+
+            details = {
+                **record.safe_dict(),
+                "entity": alias,
+                "known_entity": known_entity,
+                "template_id": (
+                    entity.spawn.template_id if entity is not None else None
+                ),
+                "reset_status_count": reset_status_count,
+                "active_status_count": (
+                    len(entity.temporary_stats) if entity is not None else 0
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "mob_temporary_stat_reset_received",
+                details=details,
+                identifiers={"object_id": record.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="mob_temporary_stat_reset",
+                coverage=ShapeCoverage.FULL,
+                parsed=record,
+                details=details,
             )
         if opcode == 293:
             update = MobHealthPercentageUpdate.parse(payload)
@@ -9739,6 +10003,43 @@ def render_gameplay_analysis(
             "health_unknown_active_mob:"
             f"{state.mob_health_updates_for_unknown_mobs} "
             f"field_known_templates:{len(state.mob_templates)}"
+        ),
+        (
+            "mob_temporary_stats=active:"
+            f"{sum(len(entity.temporary_stats) for entity in state.mobs.values())} "
+            f"sets:{state.mob_temporary_stat_sets} "
+            f"resets:{state.mob_temporary_stat_resets} "
+            "sets_known:"
+            f"{state.mob_temporary_stat_sets_for_known_mobs} "
+            "sets_unknown:"
+            f"{state.mob_temporary_stat_sets_for_unknown_mobs} "
+            "resets_known:"
+            f"{state.mob_temporary_stat_resets_for_known_mobs} "
+            "resets_unknown:"
+            f"{state.mob_temporary_stat_resets_for_unknown_mobs} "
+            f"refreshes:{state.mob_temporary_stat_set_refreshes} "
+            "resets_with_modeled_set:"
+            f"{state.mob_temporary_stat_resets_with_modeled_set} "
+            "resets_without_modeled_set:"
+            f"{state.mob_temporary_stat_resets_without_modeled_set} "
+            "attack_relay_matches:"
+            f"{state.mob_temporary_stat_attack_relay_matches} "
+            "cleared_on_leave:"
+            f"{state.mob_temporary_stats_cleared_on_leave} "
+            "cleared_on_field_change:"
+            f"{state.mob_temporary_stats_cleared_on_field_change} "
+            "masks:"
+            f"{dict(sorted(state.mob_temporary_stat_mask_patterns.items()))} "
+            "source_skills:"
+            f"{dict(sorted(state.mob_temporary_stat_source_skills.items()))} "
+            "source_levels:"
+            f"{dict(sorted(state.mob_temporary_stat_source_levels.items()))} "
+            "duration_values:"
+            f"{dict(sorted(state.mob_temporary_stat_duration_values.items()))} "
+            "set_flags:"
+            f"{dict(sorted(state.mob_temporary_stat_set_flags.items()))} "
+            "reset_flags:"
+            f"{dict(sorted(state.mob_temporary_stat_reset_flags.items()))}"
         ),
         (
             f"player_movement=position:{state.player_x},{state.player_y} "

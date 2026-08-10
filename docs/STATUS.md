@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 211 tests.
+- The custom-server suite currently passes all 213 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -53,8 +53,8 @@
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   26,565 full, 44,295 partial, 240 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,385 full, 21,740 partial,
-  82 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
+  packet observations. Stream `92` now reports 13,400 full, 21,740 partial,
+  67 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `201`, and `205` are separated into neutral,
@@ -74,6 +74,13 @@
   names at least one active mob. Marker `0xff`, flag `0`/`1`, reserved u16 zero,
   and repeated-value equality are enforced. The player id is aliased/redacted,
   while the value remains neutrally named pending live-effect evidence.
+- Server opcodes `285`/`286` now form a capture-bounded single-bit mob
+  temporary-stat set/reset pair. All ten sets and five resets in stream `92`
+  round-trip exactly and reference active template-`3210800` mobs. Every set
+  matches the target and skill id of the preceding opcode-`219` relay within
+  two server frames; the fold records three refreshes, three modeled resets,
+  two capture-preexisting resets, and four leave-time clears. Source-level and
+  duration units remain neutral, and no live visual/status effect is claimed.
 - Server opcode `247` is fully decoded as a tutorial-UI instruction with
   redacted terminated UTF-16 text, two signed 16-bit values, a control byte,
   and an optional signed-32 pair confirmed by the pinned handler. All 33

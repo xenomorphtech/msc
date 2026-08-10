@@ -412,8 +412,8 @@ gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,565 full,
 44,295 partial, 240 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,385 full, 21,740 partial,
-82 unknown, and zero invalid observations; short stream `114` reaches 43 full,
+metadata. Stream `92` independently passes with 13,400 full, 21,740 partial,
+67 unknown, and zero invalid observations; short stream `114` reaches 43 full,
 20 partial, 13 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
@@ -487,6 +487,10 @@ The gameplay fold currently models these capture-backed boundaries:
   fixed `0xff` marker, a repeated neutral u32 value, flag `0`/`1`, and zero
   reserved u16; the fold requires no meaning for the value but correlates the
   aliased player and active mob template,
+- server opcodes `285`/`286`: capture-bounded single-bit mob temporary-stat
+  set/reset records with an aliased active-mob id, four-word mask, source skill,
+  neutral source-level/duration values, and relay/refresh/reset/lifecycle
+  correlation; unobserved masks and values remain unknown,
 - server opcode `217`: structurally exact life-movement broadcast with an
   aliased object id and the same fixed-width command stream as opcode `47`,
 - server opcode `239`: capture-bounded selector envelopes for counted
@@ -1572,3 +1576,7 @@ preserve distinct Unity scan codes in this setup.
 52. Decode all 29 cross-corpus opcode-`224` records, prove that each references
     an active remote player and active mob template, enforce the marker/flag/
     reserved/repeated-value invariants, and keep the shared u32 value neutral.
+53. Decode the ten opcode-`285` sets and five opcode-`286` resets, fold the
+    captured status bit into field-local mob state, match every set to its
+    preceding attack-relay target/skill, and preserve source-level/duration
+    values as neutral pending a live effect test.
