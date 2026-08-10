@@ -86,11 +86,12 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 90 semantic/manual shapes and 96 explicitly
+manifest currently declares 91 semantic/manual shapes and 96 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
-the effective shape set. The added widths found only in `1-10FS` leave 175
-active shapes and 85 active opaque pins. Opcode `94` is no longer an
+the effective shape set. Opcode `276` adds a twelfth overlap. The added widths
+found only in `1-10FS` leave 175 active shapes and 84 active opaque pins.
+Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
 form and four `datetime/i64` values. Opcode `148` is represented by one
@@ -145,5 +146,11 @@ matching `111` pins and two add widths seen only in `1-10FS`. Targeted native
 validation consumes all 12 packets with zero unsupported or consumption
 failures; higher-level analysis keeps them partial because the client handler
 does not assign readable roles to the tails.
+Server opcode `276` adds one direct generated `bool` read. Both gameplay
+captures encode true as byte `0x05`; the pinned reader's ISIL calls
+`BitConverter.ToBoolean`, so native boolean validation normalizes zero to false
+and every nonzero byte to true before constant/branch checks. The semantic
+three-byte shape suppresses the matching opaque pin, and targeted validation
+consumes both cross-corpus packets without failure.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

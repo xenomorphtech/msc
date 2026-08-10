@@ -95,6 +95,23 @@ def encode_utf16_string(value: str, *, trailing_byte: bool) -> bytes:
     )
 
 
+def _il2cpp_boolean_byte(
+    value: bool, raw_value: int | None, *, field_name: str
+) -> int:
+    """Preserve a parsed IL2CPP boolean byte while checking its truth value."""
+
+    if type(value) is not bool:
+        raise PacketShapeError(f"{field_name} must be a boolean")
+    encoded = int(value) if raw_value is None else raw_value
+    if not 0 <= encoded <= 0xFF:
+        raise PacketShapeError(f"{field_name} raw byte is out of range")
+    if (encoded != 0) != value:
+        raise PacketShapeError(
+            f"{field_name} raw byte does not match its boolean value"
+        )
+    return encoded
+
+
 def _expect_opcode(reader: PacketReader, expected: int) -> None:
     actual = reader.u16("opcode")
     if actual != expected:
@@ -7534,6 +7551,8 @@ class ServerOpcode142TextLedgerEntry:
     flag_2: bool
     value_1: int = field(repr=False)
     value_2: int = field(repr=False)
+    raw_flag_1: int | None = field(default=None, repr=False, compare=False)
+    raw_flag_2: int | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def parse_from(
@@ -7551,11 +7570,6 @@ class ServerOpcode142TextLedgerEntry:
             reader.u8(f"entries[{index}].flag_1"),
             reader.u8(f"entries[{index}].flag_2"),
         )
-        if any(value not in {0, 1} for value in flag_values):
-            raise PacketShapeError(
-                "server opcode-142 entry flags must be boolean 0 or 1: "
-                f"{flag_values[0]}/{flag_values[1]}"
-            )
         return cls(
             key=key,
             control=control,
@@ -7565,6 +7579,8 @@ class ServerOpcode142TextLedgerEntry:
             flag_2=bool(flag_values[1]),
             value_1=reader.i32(f"entries[{index}].value_1"),
             value_2=reader.i32(f"entries[{index}].value_2"),
+            raw_flag_1=flag_values[0],
+            raw_flag_2=flag_values[1],
         )
 
     @property
@@ -7575,14 +7591,24 @@ class ServerOpcode142TextLedgerEntry:
         ) // 2
 
     def to_bytes(self) -> bytes:
-        if type(self.flag_1) is not bool or type(self.flag_2) is not bool:
-            raise PacketShapeError(
-                "server opcode-142 entry flags must be booleans"
-            )
+        encoded_flag_1 = _il2cpp_boolean_byte(
+            self.flag_1,
+            self.raw_flag_1,
+            field_name="server opcode-142 entry flag_1",
+        )
+        encoded_flag_2 = _il2cpp_boolean_byte(
+            self.flag_2,
+            self.raw_flag_2,
+            field_name="server opcode-142 entry flag_2",
+        )
         try:
             prefix = struct.pack("<ii", self.key, self.control)
             suffix = struct.pack(
-                "<??ii", self.flag_1, self.flag_2, self.value_1, self.value_2
+                "<BBii",
+                encoded_flag_1,
+                encoded_flag_2,
+                self.value_1,
+                self.value_2,
             )
         except struct.error as error:
             raise PacketShapeError(
@@ -7606,20 +7632,21 @@ class ServerOpcode142TextLedger:
     header_text: str | None = field(repr=False)
     entries: tuple[ServerOpcode142TextLedgerEntry, ...]
     opcode: int = 142
+    raw_enabled: int | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def parse(cls, payload: bytes) -> "ServerOpcode142TextLedger":
         reader = PacketReader(payload, packet_name="server_opcode_142")
         _expect_opcode(reader, 142)
         enabled_value = reader.u8("enabled")
-        if enabled_value not in {0, 1}:
-            raise PacketShapeError(
-                "server opcode-142 enabled flag must be boolean 0 or 1: "
-                f"{enabled_value}"
-            )
         if not enabled_value:
             reader.finish()
-            return cls(enabled=False, header_text=None, entries=())
+            return cls(
+                enabled=False,
+                header_text=None,
+                entries=(),
+                raw_enabled=enabled_value,
+            )
         header_text = reader.utf16_string("header_text", trailing_byte=True)
         entry_count = reader.i32("entry_count")
         if entry_count < 0 or entry_count > reader.remaining // 24:
@@ -7632,7 +7659,12 @@ class ServerOpcode142TextLedger:
             for index in range(entry_count)
         )
         reader.finish()
-        return cls(enabled=True, header_text=header_text, entries=entries)
+        return cls(
+            enabled=True,
+            header_text=header_text,
+            entries=entries,
+            raw_enabled=enabled_value,
+        )
 
     @property
     def header_text_code_units(self) -> int:
@@ -7661,11 +7693,12 @@ class ServerOpcode142TextLedger:
             raise PacketShapeError(
                 "server opcode-142 ledger opcode must be 142"
             )
-        if type(self.enabled) is not bool:
-            raise PacketShapeError(
-                "server opcode-142 enabled flag must be a boolean"
-            )
-        prefix = struct.pack("<H?", self.opcode, self.enabled)
+        encoded_enabled = _il2cpp_boolean_byte(
+            self.enabled,
+            self.raw_enabled,
+            field_name="server opcode-142 enabled flag",
+        )
+        prefix = struct.pack("<HB", self.opcode, encoded_enabled)
         if not self.enabled:
             if self.header_text is not None or self.entries:
                 raise PacketShapeError(
@@ -7830,6 +7863,8 @@ class ServerOpcode272LedgerEntry:
     flag_2: bool
     group_1: tuple[tuple[int, int, int], ...] = field(repr=False)
     group_2: tuple[tuple[int, int, int], ...] = field(repr=False)
+    raw_flag_1: int | None = field(default=None, repr=False, compare=False)
+    raw_flag_2: int | None = field(default=None, repr=False, compare=False)
 
     @staticmethod
     def _read_group(
@@ -7858,11 +7893,6 @@ class ServerOpcode272LedgerEntry:
             reader.u8(f"entries[{index}].flag_1"),
             reader.u8(f"entries[{index}].flag_2"),
         )
-        if any(value not in {0, 1} for value in flag_values):
-            raise PacketShapeError(
-                "server opcode-272 entry flags must be boolean 0 or 1: "
-                f"{flag_values[0]}/{flag_values[1]}"
-            )
         return cls(
             selector=selector,
             flag_1=bool(flag_values[0]),
@@ -7873,13 +7903,21 @@ class ServerOpcode272LedgerEntry:
             group_2=cls._read_group(
                 reader, field_name=f"entries[{index}].group_2"
             ),
+            raw_flag_1=flag_values[0],
+            raw_flag_2=flag_values[1],
         )
 
     def to_bytes(self) -> bytes:
-        if type(self.flag_1) is not bool or type(self.flag_2) is not bool:
-            raise PacketShapeError(
-                "server opcode-272 entry flags must be booleans"
-            )
+        encoded_flag_1 = _il2cpp_boolean_byte(
+            self.flag_1,
+            self.raw_flag_1,
+            field_name="server opcode-272 entry flag_1",
+        )
+        encoded_flag_2 = _il2cpp_boolean_byte(
+            self.flag_2,
+            self.raw_flag_2,
+            field_name="server opcode-272 entry flag_2",
+        )
         if len(self.group_1) > 0x7FFF_FFFF or len(self.group_2) > 0x7FFF_FFFF:
             raise PacketShapeError(
                 "server opcode-272 group count exceeds signed i32"
@@ -7888,10 +7926,10 @@ class ServerOpcode272LedgerEntry:
         try:
             parts.append(
                 struct.pack(
-                    "<i??i",
+                    "<iBBi",
                     self.selector,
-                    self.flag_1,
-                    self.flag_2,
+                    encoded_flag_1,
+                    encoded_flag_2,
                     len(self.group_1),
                 )
             )
@@ -8292,20 +8330,18 @@ class ServerOpcode94Record:
     primary_value: int
     secondary_value: int
     opcode: int = 94
+    raw_flag: int | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def parse(cls, payload: bytes) -> "ServerOpcode94Record":
         reader = PacketReader(payload, packet_name="server_opcode_94_record")
         _expect_opcode(reader, 94)
         raw_flag = reader.u8("flag")
-        if raw_flag not in {0, 1}:
-            raise PacketShapeError(
-                "server opcode-94 flag must be encoded as zero or one"
-            )
         record = cls(
             flag=bool(raw_flag),
             primary_value=reader.i32("primary_value"),
             secondary_value=reader.i32("secondary_value"),
+            raw_flag=raw_flag,
         )
         reader.finish()
         return record
@@ -8322,13 +8358,16 @@ class ServerOpcode94Record:
     def to_bytes(self) -> bytes:
         if self.opcode != 94:
             raise PacketShapeError("server opcode-94 record opcode must be 94")
-        if not isinstance(self.flag, bool):
-            raise PacketShapeError("server opcode-94 flag must be a bool")
+        encoded_flag = _il2cpp_boolean_byte(
+            self.flag,
+            self.raw_flag,
+            field_name="server opcode-94 flag",
+        )
         try:
             return struct.pack(
                 "<HBii",
                 self.opcode,
-                int(self.flag),
+                encoded_flag,
                 self.primary_value,
                 self.secondary_value,
             )
@@ -8583,6 +8622,46 @@ class ServerOpcode205Record:
         except struct.error as error:
             raise PacketShapeError(
                 f"server opcode-205 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode276BooleanFlag:
+    """Fully bounded opcode-276 IL2CPP boolean with its raw wire byte."""
+
+    raw_flag: int
+    opcode: int = 276
+
+    @property
+    def enabled(self) -> bool:
+        """Match BitConverter.ToBoolean: every nonzero byte is true."""
+
+        return self.raw_flag != 0
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode276BooleanFlag":
+        reader = PacketReader(payload, packet_name="server_opcode_276_flag")
+        _expect_opcode(reader, 276)
+        record = cls(raw_flag=reader.u8("raw_flag"))
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "raw_flag": self.raw_flag,
+            "enabled": self.enabled,
+            "typed_value_count": 1,
+            "opaque_tail_length": 0,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 276:
+            raise PacketShapeError("server opcode-276 flag opcode must be 276")
+        try:
+            return struct.pack("<HB", self.opcode, self.raw_flag)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-276 flag is out of range: {error}"
             ) from error
 
 

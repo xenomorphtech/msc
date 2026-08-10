@@ -53,13 +53,13 @@
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   26,659 full, 44,380 partial, 61 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,410 full, 21,760 partial,
-  37 unknown, and zero invalid; stream `114` reports 49/20/7/0. Seven
+  packet observations. Stream `92` now reports 13,411 full, 21,760 partial,
+  36 unknown, and zero invalid; stream `114` reports 50/20/6/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
-- Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, and `379` are
-  separated into neutral, capture-bounded records. All 176 reference packets
-  consume and round-trip exactly; typed branches add 79 full observations,
+- Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, `276`, and `379` are
+  separated into neutral, capture-bounded records. All 178 reference packets
+  consume and round-trip exactly; typed branches add 81 full observations,
   while the 97 records with fixed unknown regions remain partial and redact
   potentially identifying primary values from safe state, events, reports, and
   HTTP-derived analysis.
@@ -112,6 +112,17 @@
   Primary values and tails are omitted from safe analysis. Cross-state live
   replay is intentionally deferred because the leading value may be a
   session-local identifier and the ignored tails are not yet typed.
+- Server opcode `276` is now a full automatic-dump-backed boolean record. Its
+  two captured payloads use raw byte `0x05`; ISIL proves the pinned reader calls
+  `BitConverter.ToBoolean`, so the shared native validator now treats every
+  nonzero byte as true and the typed codecs preserve noncanonical raw bytes for
+  exact re-emission. The two packets validate and fold at full coverage,
+  raising stream `92` to `13,411/21,760/36/0` and stream `114` to
+  `50/20/6/0`. Exact live replay produced the predicted second neutral event,
+  left the core-state digest, active phase, map `101000000`, and field epoch
+  unchanged, and was followed by matched heartbeats with no pending probe or
+  injection failure. The nested-Sway client stayed focused and its mute service
+  remained active.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

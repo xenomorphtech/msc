@@ -1101,6 +1101,14 @@
       ]
     },
     {
+      "name":"server_opcode_276_boolean_flag","direction":"server_to_client","opcode":276,"length":3,
+      "source":"generated opcode-276 handler reads one bool; the pinned IL2CPP reader calls BitConverter.ToBoolean and both gameplay captures carry the valid true byte 0x05",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":276},
+        {"op":"read","name":"enabled","kind":"bool","equals":1}
+      ]
+    },
+    {
       "name":"server_opcode_148_envelope","direction":"server_to_client","opcode":148,
       "source":"IL2CPP opcode-148 handler acda95d7... delegates to manager c5b43350...; variants 9/10/12/13 and exact bounded branches verified across 1-10FS stream 126 and 111 stream 92",
       "operations":[

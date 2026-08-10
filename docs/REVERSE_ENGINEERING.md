@@ -38,7 +38,11 @@ the observed payload. The current increment proves server opcode `60` as one
 signed `i32`, opcode `94` as `bool + i32 + i32`, and opcode `379` as a `u8`
 branch with four `datetime/i64` reads on variant `36`. Fourteen reference
 packets consume exactly under those shapes. The Rust validator has a native
-boolean primitive and rejects bytes other than `0` or `1`.
+boolean primitive matching the pinned reader's `BitConverter.ToBoolean` call:
+zero is false and every nonzero byte is true. The validator normalizes that
+truth value for branch/constant checks while typed Python codecs retain a
+noncanonical raw byte for lossless re-emission. Captured opcode `276` provides
+the concrete cross-corpus case: wire byte `0x05` is accepted as true.
 
 Exported plaintext JSONL under `target/private/` is evidence, not source: it
 contains private captured bytes, remains ignored, and must not be committed or

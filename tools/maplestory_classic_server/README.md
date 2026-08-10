@@ -440,9 +440,9 @@ gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,659 full,
 44,380 partial, 61 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,410 full, 21,760 partial,
-37 unknown, and zero invalid observations; short stream `114` reaches 49 full,
-20 partial, 7 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,411 full, 21,760 partial,
+36 unknown, and zero invalid observations; short stream `114` reaches 50 full,
+20 partial, 6 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -549,11 +549,12 @@ The gameplay fold currently models these capture-backed boundaries:
   selector/status pair and one redacted optional u32 on the captured `6/1`
   branch; the fold matches same-selector requests FIFO, emits acknowledgement
   events, and reports pending/unmatched transactions and round-trip timing,
-- server opcodes `69`/`93`/`94`/`148`/`201`/`205`/`379`: capture-bounded neutral
+- server opcodes `69`/`93`/`94`/`148`/`201`/`205`/`276`/`379`: capture-bounded neutral
   record families; numeric fields are typed, potentially identifying primary
   values are omitted from safe output, fixed unknown regions remain explicit, and the
-  opcode-`94`/`148`/`379` layouts come directly from the generated IL2CPP read
-  dump; opcode `148` retains one legacy nonempty record body as opaque,
+  opcode-`94`/`148`/`276`/`379` layouts come directly from the generated IL2CPP
+  read dump; opcode `276` preserves captured boolean byte `0x05` while folding
+  it as true, and opcode `148` retains one legacy nonempty record body as opaque,
 - server opcode `27`: a counted integer/control/text ledger with required
   trailing-zero UTF-16 strings; safe state reports only entry and text-length
   distributions,
@@ -561,8 +562,9 @@ The gameplay fold currently models these capture-backed boundaries:
   trailing-zero UTF-16 strings per record; all keys, values, and text remain
   redacted,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
-  records with two validated booleans and two signed values per entry; the
-  three-byte disabled branch is also modeled,
+  records with two raw-byte-preserving IL2CPP booleans and two signed values per
+  entry; zero is false and every nonzero byte is true, and the three-byte
+  disabled branch is also modeled,
 - server opcode `147`: two signed-`i32` rectangles followed by a counted
   signed-`i32` vector; the fold redacts vector values while reporting the
   rectangle and count shapes,

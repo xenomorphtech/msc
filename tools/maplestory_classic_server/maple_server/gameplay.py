@@ -94,6 +94,7 @@ from .packets import (
     ServerOpcode239Envelope,
     ServerOpcode244DialogueInstruction,
     ServerOpcode272Ledger,
+    ServerOpcode276BooleanFlag,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
@@ -1047,6 +1048,7 @@ NeutralServerRecord = (
     | ServerOpcode148Envelope
     | ServerOpcode201Record
     | ServerOpcode205Record
+    | ServerOpcode276BooleanFlag
     | ServerOpcode379Record
     | ServerU32OpaqueTailEnvelope
 )
@@ -7351,6 +7353,7 @@ class GameplayStateFold:
             232,
             234,
             235,
+            276,
             379,
         }:
             if opcode in ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS:
@@ -7369,6 +7372,8 @@ class GameplayStateFold:
                 neutral_record = ServerOpcode201Record.parse(payload)
             elif opcode == 205:
                 neutral_record = ServerOpcode205Record.parse(payload)
+            elif opcode == 276:
+                neutral_record = ServerOpcode276BooleanFlag.parse(payload)
             else:
                 neutral_record = ServerOpcode379Record.parse(payload)
             details: dict[str, object] = {

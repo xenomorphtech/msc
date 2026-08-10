@@ -136,6 +136,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode244DialogueInstruction,
     ServerOpcode272Ledger,
     ServerOpcode272LedgerEntry,
+    ServerOpcode276BooleanFlag,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
@@ -2159,10 +2160,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertNotIn("134115660000000000", safe)
         self.assertTrue(ledger.safe_dict()["numeric_values_redacted"])
 
-        invalid_flag = bytearray(ledger.to_bytes())
-        invalid_flag[50] = 2
-        with self.assertRaisesRegex(PacketShapeError, "flags must be boolean"):
-            ServerOpcode272Ledger.parse(bytes(invalid_flag))
+        noncanonical_flag = bytearray(ledger.to_bytes())
+        noncanonical_flag[50] = 2
+        parsed_noncanonical = ServerOpcode272Ledger.parse(
+            bytes(noncanonical_flag)
+        )
+        self.assertTrue(parsed_noncanonical.entries[0].flag_1)
+        self.assertEqual(parsed_noncanonical.to_bytes(), bytes(noncanonical_flag))
         invalid_count = bytearray(ledger.to_bytes())
         invalid_count[42:46] = (-1).to_bytes(4, "little", signed=True)
         with self.assertRaisesRegex(PacketShapeError, "entry count"):
@@ -2252,7 +2256,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertIn("'value_count': 12", safe)
         self.assertIn("'trailer': [0, 0, 1, 1]", safe)
 
-        invalid_142_flag = bytearray(ledger_142.to_bytes())
+        noncanonical_142_flag = bytearray(ledger_142.to_bytes())
         first_entry_flag_offset = len(
             struct.pack("<H?", ledger_142.opcode, ledger_142.enabled)
             + struct.pack(
@@ -2273,9 +2277,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
             + ledger_142.entries[0].text_2.encode("utf-16-le")
             + b"\x00"
         )
-        invalid_142_flag[first_entry_flag_offset] = 2
-        with self.assertRaisesRegex(PacketShapeError, "flags must be boolean"):
-            ServerOpcode142TextLedger.parse(bytes(invalid_142_flag))
+        noncanonical_142_flag[first_entry_flag_offset] = 2
+        parsed_noncanonical_142 = ServerOpcode142TextLedger.parse(
+            bytes(noncanonical_142_flag)
+        )
+        self.assertTrue(parsed_noncanonical_142.entries[0].flag_1)
+        self.assertEqual(
+            parsed_noncanonical_142.to_bytes(), bytes(noncanonical_142_flag)
+        )
         invalid_425_count = bytearray(ledger_425.to_bytes())
         invalid_425_count[2:4] = (13).to_bytes(2, "little")
         with self.assertRaisesRegex(PacketShapeError, "value count"):
@@ -2629,6 +2638,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 numeric_value=1_386_640,
                 trailing_value=0,
             ),
+            ServerOpcode276BooleanFlag(raw_flag=5),
             ServerOpcode379Record(variant=35),
             ServerOpcode379Record(
                 variant=36,
@@ -2646,6 +2656,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             "5e0001e050240002000000",
             "c900189c04000000000001016e4b4c000000009028150000000000480220f5004d02",
             "cd00189c040000000000902815000000000000",
+            "140105",
             "7b0123",
             "7b0124008005bb46e61702008005bb46e617020040e0fd3b374f010040e0fd3b374f01",
         )
@@ -2661,10 +2672,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(records[0], opaque_tail=b"\x00" * 262).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "exactly 22"):
             replace(records[3], opaque_tail=b"\x00" * 21).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "zero or one"):
-            ServerOpcode94Record.parse(
-                bytes.fromhex("5e0002e050240002000000")
-            )
+        noncanonical_94 = bytes.fromhex("5e0002e050240002000000")
+        parsed_noncanonical_94 = ServerOpcode94Record.parse(noncanonical_94)
+        self.assertTrue(parsed_noncanonical_94.flag)
+        self.assertEqual(parsed_noncanonical_94.to_bytes(), noncanonical_94)
+        self.assertTrue(records[5].enabled)
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            replace(records[5], raw_flag=256).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "requires exactly 4"):
             replace(records[-1], time_values=()).to_bytes()
 
@@ -5536,6 +5550,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 numeric_value=1_386_640,
                 trailing_value=0,
             ),
+            ServerOpcode276BooleanFlag(raw_flag=5),
             ServerOpcode379Record(variant=35),
             ServerOpcode379Record(
                 variant=36,
@@ -5575,7 +5590,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 19)
+        self.assertEqual(analysis.state.neutral_server_records, 20)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
             {
@@ -5591,10 +5606,11 @@ class GameplayStateFoldTest(unittest.TestCase):
                 232: 1,
                 234: 1,
                 235: 1,
+                276: 1,
                 379: 2,
             },
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 40)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 41)
         self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_974)
         observations = [
             observation
@@ -5608,6 +5624,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "full",
                 "full",
                 "partial",
+                "full",
                 "full",
                 "full",
                 "full",
@@ -5633,11 +5650,11 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            19,
+            20,
         )
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:19 opcodes:",
+            "neutral_server_records=packets:20 opcodes:",
             render_gameplay_analysis(analysis),
         )
 

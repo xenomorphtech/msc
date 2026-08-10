@@ -148,13 +148,17 @@ impl<'a> Cursor<'a> {
             match operation {
                 ShapeOp::Read { name, kind, equals } => {
                     let bytes = self.take(kind.width(), name)?;
-                    let value = decode_integer(bytes, kind.signed());
-                    if matches!(*kind, ReadKind::Bool) && value > 1 {
-                        return Err(format!(
-                            "{name} is {value}, expected boolean 0 or 1 at offset {}",
-                            self.offset - kind.width()
-                        ));
-                    }
+                    let raw_value = decode_integer(bytes, kind.signed());
+                    // The pinned IL2CPP reader delegates to
+                    // BitConverter.ToBoolean, whose wire semantics are zero
+                    // for false and any nonzero byte for true.  Store the
+                    // normalized value so equals/switch/repeat conditions see
+                    // the same value as the client.
+                    let value = if matches!(*kind, ReadKind::Bool) {
+                        i128::from(raw_value != 0)
+                    } else {
+                        raw_value
+                    };
                     if let Some(expected) = equals
                         && value != i128::from(*expected)
                     {
@@ -480,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn bool_rejects_non_boolean_bytes() {
+    fn bool_normalizes_nonzero_bytes() {
         let shape = ShapeSpec {
             name: "boolean".into(),
             direction: Direction::ServerToClient,
@@ -490,12 +494,12 @@ mod tests {
             operations: vec![ShapeOp::Read {
                 name: "flag".into(),
                 kind: ReadKind::Bool,
-                equals: None,
+                equals: Some(1),
             }],
         };
-        assert_eq!(validate_raw(&[0], &shape), "ok");
         assert_eq!(validate_raw(&[1], &shape), "ok");
-        assert!(validate_raw(&[2], &shape).contains("expected boolean 0 or 1"));
+        assert_eq!(validate_raw(&[5], &shape), "ok");
+        assert!(validate_raw(&[0], &shape).contains("expected 1"));
     }
 
     #[test]
