@@ -113,6 +113,8 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode93Record,
     ServerOpcode201Record,
     ServerOpcode205Record,
+    ServerOpcode239Envelope,
+    ServerOpcode239ValueRecord,
     ServerOpcode244DialogueInstruction,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
@@ -1933,6 +1935,51 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode244DialogueInstruction.parse(encoded + b"\x00")
+
+    def test_server_opcode_239_envelope_variants_round_trip(self) -> None:
+        record_set = ServerOpcode239Envelope(
+            selector=3,
+            records=(
+                ServerOpcode239ValueRecord(key=4_031_792, value=10),
+            ),
+        )
+        empty_9 = ServerOpcode239Envelope(selector=9)
+        empty_13 = ServerOpcode239Envelope(selector=13)
+        text = ServerOpcode239Envelope(
+            selector=21,
+            text="UI/tutorial/28",
+            trailing_value=1,
+        )
+
+        self.assertEqual(
+            record_set.to_bytes().hex(),
+            "ef00030130853d000a000000",
+        )
+        self.assertEqual(empty_9.to_bytes().hex(), "ef0009")
+        self.assertEqual(empty_13.to_bytes().hex(), "ef000d")
+        self.assertEqual(
+            text.to_bytes().hex(),
+            "ef00150e00550049002f007400750074006f007200690061006c002f00"
+            "320038000001000000",
+        )
+        for envelope in (record_set, empty_9, empty_13, text):
+            self.assertEqual(
+                ServerOpcode239Envelope.parse(envelope.to_bytes()),
+                envelope,
+            )
+        self.assertEqual(text.text_code_units, 14)
+        safe = str(record_set.safe_dict())
+        self.assertNotIn("4031792", safe)
+        self.assertNotIn("UI/tutorial/28", str(text.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "selector must"):
+            ServerOpcode239Envelope.parse(bytes.fromhex("ef0001"))
+        with self.assertRaisesRegex(PacketShapeError, "needs 4 bytes"):
+            ServerOpcode239Envelope.parse(record_set.to_bytes()[:-1])
+        with self.assertRaisesRegex(PacketShapeError, "cannot include a body"):
+            replace(empty_9, records=record_set.records).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires text"):
+            ServerOpcode239Envelope(selector=21).to_bytes()
 
     def test_positioned_effect_records_round_trip_and_redact_primary(self) -> None:
         records = (
@@ -4004,6 +4051,77 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "instructional_dialogue_requests=packets:2",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_server_opcode_239_envelope_variants(self) -> None:
+        records = (
+            ServerOpcode239Envelope(selector=9),
+            ServerOpcode239Envelope(selector=13),
+            ServerOpcode239Envelope(
+                selector=3,
+                records=(
+                    ServerOpcode239ValueRecord(key=2_345_678, value=5),
+                    ServerOpcode239ValueRecord(key=2_345_679, value=5),
+                    ServerOpcode239ValueRecord(key=4_123_456, value=-1),
+                ),
+            ),
+            ServerOpcode239Envelope(
+                selector=21,
+                text="UI/tutorial/28",
+                trailing_value=1,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(record.to_bytes() for record in records),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_239_packets, 4)
+        self.assertEqual(
+            analysis.state.server_opcode_239_selectors,
+            {3: 1, 9: 1, 13: 1, 21: 1},
+        )
+        self.assertEqual(analysis.state.server_opcode_239_records, 3)
+        self.assertEqual(
+            analysis.state.server_opcode_239_record_values,
+            {5: 2, -1: 1},
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_239_text_code_units,
+            {14: 1},
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_239_trailing_values,
+            {1: 1},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_239_envelope"
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "server_opcode_239_received"
+                for event in analysis.events
+            ),
+            4,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("UI/tutorial/28", safe)
+        self.assertNotIn("2345678", safe)
+        self.assertIn(
+            "server_opcode_239=packets:4 selectors:{3: 1, 9: 1, 13: 1, 21: 1}",
             render_gameplay_analysis(analysis),
         )
 

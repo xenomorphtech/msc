@@ -76,6 +76,7 @@ from .packets import (
     ServerOpcode93Record,
     ServerOpcode201Record,
     ServerOpcode205Record,
+    ServerOpcode239Envelope,
     ServerOpcode244DialogueInstruction,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
@@ -708,6 +709,18 @@ class GameplayGameState:
     tutorial_ui_value_2: Counter[int] = field(default_factory=Counter)
     tutorial_ui_control_values: Counter[int] = field(default_factory=Counter)
     tutorial_ui_extended_instructions: int = 0
+    server_opcode_239_packets: int = 0
+    server_opcode_239_selectors: Counter[int] = field(default_factory=Counter)
+    server_opcode_239_records: int = 0
+    server_opcode_239_record_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_239_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_239_trailing_values: Counter[int] = field(
+        default_factory=Counter
+    )
     instructional_dialogue_requests: int = 0
     instructional_dialogue_value_1: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_2: Counter[int] = field(default_factory=Counter)
@@ -3563,6 +3576,20 @@ class GameplayAnalysis:
                     "value_2": dict(self.state.instructional_dialogue_value_2),
                     "value_3": dict(self.state.instructional_dialogue_value_3),
                 },
+                "server_opcode_239": {
+                    "packet_count": self.state.server_opcode_239_packets,
+                    "selectors": dict(self.state.server_opcode_239_selectors),
+                    "record_count": self.state.server_opcode_239_records,
+                    "record_values": dict(
+                        self.state.server_opcode_239_record_values
+                    ),
+                    "text_code_units": dict(
+                        self.state.server_opcode_239_text_code_units
+                    ),
+                    "trailing_values": dict(
+                        self.state.server_opcode_239_trailing_values
+                    ),
+                },
                 "positioned_effect_records": {
                     "packet_count": self.state.positioned_effect_records,
                     "by_opcode": dict(
@@ -6055,6 +6082,47 @@ class GameplayStateFold:
                 kind="tutorial_ui_instruction",
                 coverage=ShapeCoverage.FULL,
                 parsed=instruction,
+                details=details,
+            )
+        if (
+            opcode == 239
+            and len(payload) >= 3
+            and payload[2]
+            in {
+                ServerOpcode239Envelope.RECORD_SELECTOR,
+                *ServerOpcode239Envelope.EMPTY_SELECTORS,
+                ServerOpcode239Envelope.TEXT_SELECTOR,
+            }
+        ):
+            record = ServerOpcode239Envelope.parse(payload)
+            self.state.server_opcode_239_packets += 1
+            self.state.server_opcode_239_selectors[record.selector] += 1
+            self.state.server_opcode_239_records += len(record.records)
+            self.state.server_opcode_239_record_values.update(
+                member.value for member in record.records
+            )
+            if record.text is not None:
+                self.state.server_opcode_239_text_code_units[
+                    record.text_code_units
+                ] += 1
+            if record.trailing_value is not None:
+                self.state.server_opcode_239_trailing_values[
+                    record.trailing_value
+                ] += 1
+            details = {
+                **record.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_239_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_239_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=record,
                 details=details,
             )
         if opcode == 244 and len(payload) == 15 and payload[2] == 8:
@@ -9743,6 +9811,19 @@ def render_gameplay_analysis(
             f"value_2:{tutorial_ui_value_2} "
             f"controls:{tutorial_ui_control_values} "
             f"extended:{state.tutorial_ui_extended_instructions}"
+        ),
+        (
+            "server_opcode_239="
+            f"packets:{state.server_opcode_239_packets} "
+            "selectors:"
+            f"{dict(sorted(state.server_opcode_239_selectors.items()))} "
+            f"records:{state.server_opcode_239_records} "
+            "record_values:"
+            f"{dict(sorted(state.server_opcode_239_record_values.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_239_text_code_units.items()))} "
+            "trailing_values:"
+            f"{dict(sorted(state.server_opcode_239_trailing_values.items()))}"
         ),
         (
             "instructional_dialogue_requests="

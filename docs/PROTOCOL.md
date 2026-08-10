@@ -597,6 +597,46 @@ movement made it visible again and restored `3 -> 4`. The final transcript is
 valid with zero unknown leaves. The client remained active on map `101000000`
 with no connection failures and 209/209 paired heartbeat probes.
 
+## Capture-bounded selector envelope (`239`)
+
+The pinned version-300 opcode-`239` handler reads one selector byte and
+dispatches through a larger branch table. The reference captures exercise four
+selectors with these exact bodies:
+
+```text
+uint16 opcode = 239
+uint8  selector
+
+selector 3:
+    uint8 record_count
+    repeat record_count:
+        uint32 key                 # retained for re-emission; redacted
+        int32  value
+
+selector 9 or 13:
+    # no body
+
+selector 21:
+    uint16 text_code_units
+    utf16le[text_code_units] text  # retained for re-emission; redacted
+    uint8 text_terminator = 0
+    uint32 trailing_value
+```
+
+Stream `126` contains 59 packets: 29 selector-`3` lists with 38 total records,
+27 selector-`9` packets, two selector-`13` packets, and one selector-`21`
+packet. That string has 14 UTF-16 code units and its trailing value is `1`.
+Stream `92` contributes one more empty selector-`13` packet; stream `114`
+contains none. All 60 packets consume and re-encode exactly at full coverage.
+
+The fold emits `server_opcode_239_received` and records selector/count, signed
+record-value, text-length, and trailing-value distributions. Safe state,
+events, reports, JSON, and HTTP-derived analysis omit all record keys and text.
+The fields remain neutral: packet shape and handler dispatch do not establish
+whether a branch represents UI, inventory, progression, or another subsystem.
+Selectors not observed in the two captures remain unknown rather than being
+accepted by one of these codecs.
+
 ## Tutorial UI instruction (`247`)
 
 The pinned version-300 opcode-`247` handler reads a terminated counted UTF-16
@@ -2321,10 +2361,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,393
-full, 44,295 partial, 412 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,375 full, 21,740 partial,
-92 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,452
+full, 44,295 partial, 353 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,376 full, 21,740 partial,
+91 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

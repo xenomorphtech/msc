@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 199 tests.
+- The custom-server suite currently passes all 201 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,393 full, 44,295 partial, 412 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,375 full, 21,740 partial,
-  92 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
+  26,452 full, 44,295 partial, 353 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,376 full, 21,740 partial,
+  91 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `201`, and `205` are separated into neutral,
@@ -102,6 +102,14 @@
   live-proven. One live composed control-`1` packet was accepted, folded the
   active NPC count from nine to ten, and left all 360 heartbeat pairs matched
   until the configured one-hour replay hold expired.
+- Server opcode `239` now has full structural coverage for every observed
+  selector branch. Stream `126` supplies 29 selector-`3` record lists with 38
+  u32/i32 members, 27 empty selector-`9` packets, two empty selector-`13`
+  packets, and one selector-`21` terminated counted UTF-16 packet; stream `92`
+  adds one empty selector-`13` packet. All 60 reference packets round-trip and
+  fold exactly. Record keys and text are retained only for re-emission and are
+  redacted from safe state/events/reports/HTTP; the handler-backed selector
+  dispatch does not justify a higher-level semantic or live-effect claim.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,

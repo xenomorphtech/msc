@@ -6121,6 +6121,141 @@ class TutorialUiInstruction:
 
 
 @dataclass(frozen=True)
+class ServerOpcode239ValueRecord:
+    """One redacted key/value member of opcode-239 selector 3."""
+
+    key: int = field(repr=False)
+    value: int
+
+
+@dataclass(frozen=True)
+class ServerOpcode239Envelope:
+    """Capture-bounded selector variants of server opcode 239."""
+
+    selector: int
+    records: tuple[ServerOpcode239ValueRecord, ...] = field(
+        default=(), repr=False
+    )
+    text: str | None = field(default=None, repr=False)
+    trailing_value: int | None = None
+    opcode: int = 239
+
+    RECORD_SELECTOR = 3
+    EMPTY_SELECTORS = frozenset({9, 13})
+    TEXT_SELECTOR = 21
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode239Envelope":
+        reader = PacketReader(payload, packet_name="server_opcode_239_envelope")
+        _expect_opcode(reader, 239)
+        selector = reader.u8("selector")
+        if selector == cls.RECORD_SELECTOR:
+            record_count = reader.u8("record_count")
+            records = tuple(
+                ServerOpcode239ValueRecord(
+                    key=reader.u32(f"records[{index}].key"),
+                    value=reader.i32(f"records[{index}].value"),
+                )
+                for index in range(record_count)
+            )
+            envelope = cls(selector=selector, records=records)
+        elif selector in cls.EMPTY_SELECTORS:
+            envelope = cls(selector=selector)
+        elif selector == cls.TEXT_SELECTOR:
+            envelope = cls(
+                selector=selector,
+                text=reader.utf16_string("text", trailing_byte=True),
+                trailing_value=reader.u32("trailing_value"),
+            )
+        else:
+            raise PacketShapeError(
+                "server opcode-239 selector must be captured value "
+                f"3, 9, 13, or 21, got {selector}"
+            )
+        reader.finish()
+        return envelope
+
+    @property
+    def text_code_units(self) -> int:
+        if self.text is None:
+            return 0
+        return len(self.text.encode("utf-16-le")) // 2
+
+    def safe_dict(self) -> dict[str, int | bool | list[int] | None]:
+        return {
+            "selector": self.selector,
+            "record_count": len(self.records),
+            "record_keys_redacted": bool(self.records),
+            "record_values": [record.value for record in self.records],
+            "text_present": self.text is not None,
+            "text_code_units": self.text_code_units,
+            "trailing_value": self.trailing_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 239:
+            raise PacketShapeError("server opcode-239 envelope opcode must be 239")
+        try:
+            encoded = struct.pack("<HB", self.opcode, self.selector)
+            if self.selector == self.RECORD_SELECTOR:
+                if any(
+                    value is not None
+                    for value in (
+                        self.text,
+                        self.trailing_value,
+                    )
+                ):
+                    raise PacketShapeError(
+                        "server opcode-239 selector 3 cannot include text fields"
+                    )
+                if len(self.records) > 0xFF:
+                    raise PacketShapeError(
+                        "server opcode-239 selector 3 has more than 255 records"
+                    )
+                encoded += struct.pack("<B", len(self.records))
+                encoded += b"".join(
+                    struct.pack("<Ii", record.key, record.value)
+                    for record in self.records
+                )
+                return encoded
+            if self.selector in self.EMPTY_SELECTORS:
+                if self.records or any(
+                    value is not None
+                    for value in (
+                        self.text,
+                        self.trailing_value,
+                    )
+                ):
+                    raise PacketShapeError(
+                        "server opcode-239 empty selector cannot include a body"
+                    )
+                return encoded
+            if self.selector == self.TEXT_SELECTOR:
+                if self.records:
+                    raise PacketShapeError(
+                        "server opcode-239 selector 21 cannot include records"
+                    )
+                if self.text is None or self.trailing_value is None:
+                    raise PacketShapeError(
+                        "server opcode-239 selector 21 requires text and a "
+                        "trailing value"
+                    )
+                return (
+                    encoded
+                    + encode_utf16_string(self.text, trailing_byte=True)
+                    + struct.pack("<I", self.trailing_value)
+                )
+            raise PacketShapeError(
+                "server opcode-239 selector must be captured value 3, 9, 13, "
+                f"or 21, got {self.selector}"
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-239 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode244DialogueInstruction:
     """Live-validated selector-8 instructional-dialogue branch of opcode 244."""
 
