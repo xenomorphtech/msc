@@ -100,6 +100,16 @@ does not print the generated plaintext packet. This URL validation narrows
 accidental use but does not add authentication; any trusted local process that
 can reach the raw endpoint can still mutate the active replay connection.
 
+For mob temporary-stat experiments, prefer `inject-mob-temporary-stat`. It
+accepts only the same fixed loopback packet route, validates the generated
+IL2CPP shape dump and exported JSONL metadata/hashes, redacts the runtime object
+id, and requires observed spawn/set/reset/leave folds plus invariant checks.
+The IL2CPP `export-pcap` JSONL still contains decrypted packet hex and private
+capture metadata: keep it under an ignored private/target directory, never
+paste it into command output, and never commit it. A best-effort leave after an
+error reduces stale client state but is not a security boundary or proof of
+cleanup if the replay connection has already closed.
+
 ## File modes
 
 The capture implementation creates directories as `0700` and transcripts as

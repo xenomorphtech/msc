@@ -242,6 +242,34 @@ a numeric loopback address. Its safe result contains the typed prediction, API
 acceptance metadata, the matched decoded frame, and invariant checks; it omits
 packet bytes and private identifiers.
 
+Mob temporary-stat experiments have a similarly typed path that consumes the
+automatically generated IL2CPP shape dump and its private exported packet
+JSONL. It verifies matching version/protocol metadata, payload hashes, exact
+generated shapes, and a captured template-`3210800` spawn/set/reset pair. It
+prefers the 48-byte base spawn over the 56-byte extended-status variant,
+rewrites only the field-local object id and placement, and cleans the mob up
+with typed opcode `280` after observing set and reset in the live fold:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u "$USER" \
+  python -m maple_server inject-mob-temporary-stat \
+  --transcript /path/to/live-world.jsonl \
+  --il2cpp-shape-dump /path/to/current-il2cpp-packets.json \
+  --evidence-jsonl /path/to/private/111.streams-83-92-114.jsonl \
+  --evidence-tcp-stream 92 \
+  --spawn-hold-seconds 2 \
+  --set-hold-seconds 2 \
+  --reset-hold-seconds 2 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+The optional holds make direct client observation possible without changing
+the modeled packet order. Success requires four observed folds—spawn, bit-103
+set, bit-103 reset, and leave—plus exact counter deltas and unchanged phase,
+field epoch, map, player state, inventory, and progression. A disappearing
+connection or HTTP `409` is a failed experiment, not API acceptance.
+
 `--generate-field-npc-spawns` applies the same boundary to every fully typed
 opcode-`300` observation. It validates the complete fold, reconstructs each
 22-byte NPC spawn from its aliased entity state, reparses it, checks frame

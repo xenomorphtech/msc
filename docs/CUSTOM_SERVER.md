@@ -625,6 +625,35 @@ inventory, and progression. API acceptance alone remains insufficient; the
 command succeeds only when the observed fold matches every check. The JSON
 report is identifier-free and does not expose plaintext bytes.
 
+For mob opcode-`285`/`286` experiments, use the generated-evidence validator
+instead of copying packet hex. First run the pinned IL2CPP dumper's `verify`,
+`dump`, `export-pcap`, and `validate --require-all-supported` commands from its
+README. Keep the exported plaintext JSONL private. Then run:
+
+```sh
+sudo ip netns exec mapleproxy sudo -u "$USER" \
+  python -m maple_server inject-mob-temporary-stat \
+  --transcript /path/to/live-world.jsonl \
+  --il2cpp-shape-dump /path/to/current-il2cpp-packets.json \
+  --evidence-jsonl /path/to/private/111.streams-83-92-114.jsonl \
+  --evidence-tcp-stream 92 \
+  --spawn-hold-seconds 2 \
+  --set-hold-seconds 2 \
+  --reset-hold-seconds 2 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+The command checks the dump/JSONL version and protocol, every selected payload
+hash, and the generated shape entry for opcodes `279`, `285`, `286`, and `280`.
+It selects a captured matched lifecycle (preferring the shorter base spawn),
+allocates a collision-free redacted object id, and places the mob on the
+player's last observed foothold. Each packet is posted only after the previous
+one folds as predicted. On failure after spawn it attempts typed leave cleanup;
+it still returns failure if the connection disappears or cleanup is impossible.
+The safe report contains only aliases, template/shape/position fields, evidence
+indices, API metadata, and invariant checks.
+
 The endpoint does not decode or return opcode-`77` text. If a controlled test
 injects one, `accepted` still proves only a serialized socket write; subsequent
 offline gameplay analysis retains the text internally for exact round-trip

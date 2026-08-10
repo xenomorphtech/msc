@@ -189,6 +189,16 @@
   `neutral_records_live_20260810/world/1786346118785123354_replay_12857.jsonl`,
   the final command and fold matched `50 -> 49` at frame `775`; the same command
   then matched restoration `49 -> 50` at frame `777`, both on map `101000000`.
+- `inject-mob-temporary-stat` now consumes the pinned IL2CPP-generated shape
+  dump plus its private packet JSONL and performs a typed
+  `279 -> 285 -> 286 -> 280` lifecycle. It verifies version/protocol/hash/shape
+  evidence, prefers a captured 48-byte base spawn, rewrites only the redacted
+  object id and current foothold placement, polls each folded state, and checks
+  cleanup plus unchanged world/player/inventory/progression state. The live
+  base-spawn run matched frames `1516/1518/1522/1523`, toggled active bit `103`
+  `0 -> 1 -> 0`, rendered and removed template `3210800`, and retained
+  1,424/1,424 heartbeat pairs. No unique visual marker distinguished the set
+  interval, so the bit's specific client-visible meaning remains neutral.
 - `?keyboard-skill=KEY_CODE:SKILL_ID` now performs a typed single-value change
   to an existing opcode-`385` selector-`1` binding. On a fresh client, Left Ctrl
   under `2001005` emitted opcode-`52` variant `18` with two hits `[27,32]`;

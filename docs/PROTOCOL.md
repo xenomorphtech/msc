@@ -1626,8 +1626,29 @@ active bits clear when their mobs leave, and the final active count is zero.
 Events and reports expose the aliased mob, mask, source skill, neutral values,
 and relay match without exposing the object id. Other masks, values, flags, or
 packet widths remain unknown rather than inheriting this capture-bounded
-grammar. No visible immobilization/status effect or safe live-replay claim has
-yet been established.
+grammar.
+
+The typed live validator now joins this semantic model to the independently
+generated IL2CPP shape dump. The pinned dump/export/validation covered all
+35,316 packets from `111.pcapng` streams `83`, `92`, and `114`, with zero
+unsupported packets or consumption failures. The validator selected the
+captured base-spawn/set/reset sequence at server direction indices
+`11006/11438/11506`, matched generated shapes
+`mob_enter_field_short_status`, `server_opcode_285`, `server_opcode_286`, and
+`mob_leave_field`, then rewrote only a redacted runtime object id and current-
+map placement.
+
+On the live map-`101000000` transcript, the base-spawn run folded opcode `279`
+at frame `1516`, bit-103 set at `1518`, reset at `1522`, and leave at `1523`.
+The active-status count followed `0 -> 1 -> 0`; the mob was present for set and
+reset and absent after leave; all predicted counter deltas matched; phase,
+field epoch, map, player state, inventory, and progression were unchanged; and
+the control remained healthy at 1,424/1,424 heartbeats. The client visibly
+rendered the spawned template and removed it after leave. Sampled spawn-only
+and set-active frames showed the same sprite pose and no unique status marker,
+so a specific visible immobilization/status meaning for bit `103` remains
+unproven even though client acceptance and the folded lifecycle are now live-
+validated.
 
 ## Mob health percentage (`server 293`)
 
