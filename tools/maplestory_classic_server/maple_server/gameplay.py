@@ -89,6 +89,7 @@ from .packets import (
     ServerOpcode27IntegerLedger,
     ServerOpcode28TextLedger,
     ServerOpcode29TextLedger,
+    ServerOpcode135BootstrapLedger,
     ServerOpcode142TextLedger,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
@@ -868,6 +869,33 @@ class GameplayGameState:
         default_factory=Counter
     )
     server_opcode_29_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_packets: int = 0
+    server_opcode_135_section_a_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_a_enabled_count: int = 0
+    server_opcode_135_section_a_value_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_b_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_b_enabled_count: int = 0
+    server_opcode_135_section_b_pair_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_c_pair_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_d_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_d_group_1_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_d_group_2_counts: Counter[int] = field(
         default_factory=Counter
     )
     server_opcode_142_packets: int = 0
@@ -4036,6 +4064,39 @@ class GameplayAnalysis:
                         self.state.server_opcode_29_text_code_units
                     ),
                 },
+                "server_opcode_135": {
+                    "packet_count": self.state.server_opcode_135_packets,
+                    "section_a_entry_counts": dict(
+                        self.state.server_opcode_135_section_a_entry_counts
+                    ),
+                    "section_a_enabled_count": (
+                        self.state.server_opcode_135_section_a_enabled_count
+                    ),
+                    "section_a_value_counts": dict(
+                        self.state.server_opcode_135_section_a_value_counts
+                    ),
+                    "section_b_entry_counts": dict(
+                        self.state.server_opcode_135_section_b_entry_counts
+                    ),
+                    "section_b_enabled_count": (
+                        self.state.server_opcode_135_section_b_enabled_count
+                    ),
+                    "section_b_pair_counts": dict(
+                        self.state.server_opcode_135_section_b_pair_counts
+                    ),
+                    "section_c_pair_counts": dict(
+                        self.state.server_opcode_135_section_c_pair_counts
+                    ),
+                    "section_d_entry_counts": dict(
+                        self.state.server_opcode_135_section_d_entry_counts
+                    ),
+                    "section_d_group_1_counts": dict(
+                        self.state.server_opcode_135_section_d_group_1_counts
+                    ),
+                    "section_d_group_2_counts": dict(
+                        self.state.server_opcode_135_section_d_group_2_counts
+                    ),
+                },
                 "server_opcode_142": {
                     "packet_count": self.state.server_opcode_142_packets,
                     "enabled_packet_count": (
@@ -7108,6 +7169,55 @@ class GameplayStateFold:
                 kind="server_opcode_29_text_ledger",
                 coverage=ShapeCoverage.FULL,
                 parsed=ledger_29,
+                details=details,
+            )
+        if opcode == 135:
+            ledger_135 = ServerOpcode135BootstrapLedger.parse(payload)
+            self.state.server_opcode_135_packets += 1
+            self.state.server_opcode_135_section_a_entry_counts[
+                len(ledger_135.section_a)
+            ] += 1
+            self.state.server_opcode_135_section_a_enabled_count += sum(
+                entry.enabled for entry in ledger_135.section_a
+            )
+            self.state.server_opcode_135_section_a_value_counts[
+                ledger_135.section_a_value_count
+            ] += 1
+            self.state.server_opcode_135_section_b_entry_counts[
+                len(ledger_135.section_b)
+            ] += 1
+            self.state.server_opcode_135_section_b_enabled_count += sum(
+                entry.enabled for entry in ledger_135.section_b
+            )
+            self.state.server_opcode_135_section_b_pair_counts[
+                ledger_135.section_b_pair_count
+            ] += 1
+            self.state.server_opcode_135_section_c_pair_counts[
+                len(ledger_135.section_c_pairs)
+            ] += 1
+            self.state.server_opcode_135_section_d_entry_counts[
+                len(ledger_135.section_d)
+            ] += 1
+            self.state.server_opcode_135_section_d_group_1_counts[
+                ledger_135.section_d_group_1_count
+            ] += 1
+            self.state.server_opcode_135_section_d_group_2_counts[
+                ledger_135.section_d_group_2_count
+            ] += 1
+            details = {
+                **ledger_135.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_135_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_135_bootstrap_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_135,
                 details=details,
             )
         if opcode == 142:
@@ -11403,6 +11513,26 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_29_entry_counts.items()))} "
             "text_code_units:"
             f"{dict(sorted(state.server_opcode_29_text_code_units.items()))}"
+        ),
+        (
+            "server_opcode_135="
+            f"packets:{state.server_opcode_135_packets} "
+            "section_a_entries:"
+            f"{dict(sorted(state.server_opcode_135_section_a_entry_counts.items()))} "
+            "section_a_values:"
+            f"{dict(sorted(state.server_opcode_135_section_a_value_counts.items()))} "
+            "section_b_entries:"
+            f"{dict(sorted(state.server_opcode_135_section_b_entry_counts.items()))} "
+            "section_b_pairs:"
+            f"{dict(sorted(state.server_opcode_135_section_b_pair_counts.items()))} "
+            "section_c_pairs:"
+            f"{dict(sorted(state.server_opcode_135_section_c_pair_counts.items()))} "
+            "section_d_entries:"
+            f"{dict(sorted(state.server_opcode_135_section_d_entry_counts.items()))} "
+            "section_d_group_1:"
+            f"{dict(sorted(state.server_opcode_135_section_d_group_1_counts.items()))} "
+            "section_d_group_2:"
+            f"{dict(sorted(state.server_opcode_135_section_d_group_2_counts.items()))}"
         ),
         (
             "server_opcode_142="

@@ -1176,6 +1176,73 @@ stream remains `26,660/44,381/59/0`. No live replay is claimed because the
 obfuscated numeric fields and captured text have not yet been shown safe across
 sessions.
 
+## Server opcode `135` bootstrap ledger
+
+The generated opcode table maps server opcode `135` to handler
+`aecdc2fee9fbe41bb513947bf2cc9b43154d7eb6d73fbc67a79d1f3b2aa4810`.
+Its flattened read list contains `u8`, IL2CPP `bool`, `i16`, and `i32` calls
+from mutually nested loops. A non-stalling in-process trace on the local Wine
+client recorded every executed non-`i16` primitive for the exact captured
+packet: 1,305 calls on one packet object, monotonically advancing from framed
+cursor `6` to `3729`. The only 45 unhooked spans are two bytes each; inserting
+the generated `i16` primitive at those spans produces this exact grammar:
+
+```text
+uint16 opcode = 135
+uint8  section_a_entry_count
+repeat section_a_entry_count:
+    bool    enabled
+    int32   value                         # redacted, role unproven
+    int32   value_count
+    repeat value_count:
+        int32 value                       # redacted
+
+uint8  section_b_entry_count
+repeat section_b_entry_count:
+    bool    enabled
+    int32   value_1                       # redacted, role unproven
+    uint8   value_2                       # redacted, role unproven
+    int16   pair_count
+    repeat pair_count:
+        int32 value_1                     # redacted
+        int32 value_2                     # redacted
+
+uint8  section_c_value                    # redacted, role unproven
+int16  section_c_pair_count
+repeat section_c_pair_count:
+    int32 value_1                         # redacted
+    int32 value_2                         # redacted
+
+int32  section_d_entry_count
+repeat section_d_entry_count:
+    int32 value                           # redacted, role unproven
+    int16 group_1_count
+    repeat group_1_count:
+        int32 value_1                     # redacted
+        uint8 value_2                     # redacted
+    int16 group_2_count
+    repeat group_2_count:
+        int32 value_1                     # redacted
+        uint8 value_2                     # redacted
+```
+
+The sole `111.pcapng` stream-`114` packet is 3,725 plaintext bytes. Section A
+contains two entries and 166 repeated values; section B contains two entries
+and 21 pairs; section C contains ten pairs; section D contains 21 entries with
+260 members in each nested group. The Python codec consumes all bytes and
+re-emits the original packet exactly, while the generated manifest independently
+validates the same count grammar. Safe analysis omits every numeric value and
+exposes only entry/group counts, enabled counts, redaction flags, and field
+epoch.
+
+The fold emits `server_opcode_135_ledger_received` and a full
+`server_opcode_135_bootstrap_ledger` observation, moving stream `114` to
+`52/20/4/0`. The exact captured plaintext was also sent through loopback-only
+`POST /api/v1/server-packets` while the local Wine client was the sole replay
+peer. The client processed the ledger and retained its field connection and
+heartbeat exchange. This proves packet shape and non-blocking handling, not the
+meaning or cross-session safety of the redacted values.
+
 ## Field-bootstrap ledgers (`147`, `272`)
 
 Each opcode occurs once and byte-identically across gameplay streams `92`,
@@ -3050,7 +3117,7 @@ word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,660
 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,412 full, 21,762 partial,
-33 unknown, and zero invalid; stream `114` reaches 51/20/5/0. The long fold
+33 unknown, and zero invalid; stream `114` reaches 52/20/4/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

@@ -441,8 +441,8 @@ gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,660 full,
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,412 full, 21,762 partial,
-33 unknown, and zero invalid observations; short stream `114` reaches 51 full,
-20 partial, 5 unknown, and zero invalid.
+33 unknown, and zero invalid observations; short stream `114` reaches 52 full,
+20 partial, 4 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -572,6 +572,10 @@ The gameplay fold currently models these capture-backed boundaries:
   integer, and a neutral signed 16-bit value; both byte-identical stream-`92`/`114`
   packets consume and round-trip exactly while safe output exposes only counts
   and text lengths,
+- server opcode `135`: a four-section bootstrap ledger proven by the automatic
+  handler dump plus an executed local-Wine reader trace; nested `u8`, `i16`, and
+  `i32` counts bound integer vectors, integer pairs, and two integer/byte groups,
+  while safe output exposes only structural totals and boolean counts,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
   records with two raw-byte-preserving IL2CPP booleans and two signed values per
   entry; zero is false and every nonzero byte is true, and the three-byte
@@ -1698,3 +1702,8 @@ preserve distinct Unity scan codes in this setup.
     widths without inventing semantics, and move all 12 packets from unknown
     to redacted partial neutral events. Defer live replay because the leading
     value and tails may be session-local state.
+62. Replace the 3,725-byte opcode-`135` opaque pin with the automatic handler's
+    complete four-section count grammar, validate its 1,350 primitive reads and
+    exact Python/Rust consumption, fold only redacted structural totals, and
+    replay the captured plaintext through the sole local-Wine connection with
+    the world socket and generated heartbeats still active.

@@ -129,6 +129,10 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode28TextLedgerEntry,
     ServerOpcode29TextLedger,
     ServerOpcode29TextLedgerEntry,
+    ServerOpcode135BootstrapLedger,
+    ServerOpcode135SectionAEntry,
+    ServerOpcode135SectionBEntry,
+    ServerOpcode135SectionDEntry,
     ServerOpcode142TextLedger,
     ServerOpcode142TextLedgerEntry,
     ServerOpcode147BoundsLedger,
@@ -2213,6 +2217,39 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 ),
             )
         )
+        ledger_135 = ServerOpcode135BootstrapLedger(
+            section_a=(
+                ServerOpcode135SectionAEntry(
+                    enabled=True,
+                    value=5_123_456,
+                    values=(612_345_678, 623_456_789),
+                ),
+            ),
+            section_b=(
+                ServerOpcode135SectionBEntry(
+                    enabled=False,
+                    value_1=6_234_567,
+                    value_2=201,
+                    pairs=((712_345_678, 723_456_789),),
+                ),
+            ),
+            section_c_value=202,
+            section_c_pairs=((812_345_678, 823_456_789),),
+            section_d=(
+                ServerOpcode135SectionDEntry(
+                    value=7_345_678,
+                    group_1=((912_345_678, 203),),
+                    group_2=((923_456_789, 204),),
+                ),
+            ),
+        )
+        empty_135 = ServerOpcode135BootstrapLedger(
+            section_a=(),
+            section_b=(),
+            section_c_value=0,
+            section_c_pairs=(),
+            section_d=(),
+        )
         ledger_142 = ServerOpcode142TextLedger(
             enabled=True,
             header_text="hidden header",
@@ -2243,6 +2280,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
             (ServerOpcode27IntegerLedger, ledger_27),
             (ServerOpcode28TextLedger, ledger_28),
             (ServerOpcode29TextLedger, ledger_29),
+            (ServerOpcode135BootstrapLedger, ledger_135),
+            (ServerOpcode135BootstrapLedger, empty_135),
             (ServerOpcode142TextLedger, ledger_142),
             (ServerOpcode142TextLedger, disabled_142),
             (ServerOpcode425ValueLedger, ledger_425),
@@ -2254,6 +2293,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "opcode_27": ledger_27.safe_dict(),
                 "opcode_28": ledger_28.safe_dict(),
                 "opcode_29": ledger_29.safe_dict(),
+                "opcode_135": ledger_135.safe_dict(),
                 "opcode_142": ledger_142.safe_dict(),
                 "opcode_425": ledger_425.safe_dict(),
             }
@@ -2268,6 +2308,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
             "4123456",
             "654123789",
             "hidden delegated ledger text",
+            "5123456",
+            "612345678",
+            "623456789",
+            "6234567",
+            "712345678",
+            "723456789",
+            "812345678",
+            "823456789",
+            "7345678",
+            "912345678",
+            "923456789",
             "4567890",
             "654321098",
             "hidden feature text",
@@ -2275,6 +2326,20 @@ class GameplayPacketShapeTest(unittest.TestCase):
             self.assertNotIn(secret, safe)
         self.assertIn("'value_count': 12", safe)
         self.assertIn("'trailer': [0, 0, 1, 1]", safe)
+
+        noncanonical_135_flag = bytearray(ledger_135.to_bytes())
+        noncanonical_135_flag[3] = 2
+        parsed_noncanonical_135 = ServerOpcode135BootstrapLedger.parse(
+            bytes(noncanonical_135_flag)
+        )
+        self.assertTrue(parsed_noncanonical_135.section_a[0].enabled)
+        self.assertEqual(
+            parsed_noncanonical_135.to_bytes(), bytes(noncanonical_135_flag)
+        )
+        invalid_135_count = bytearray(ledger_135.to_bytes())
+        invalid_135_count[8:12] = (-1).to_bytes(4, "little", signed=True)
+        with self.assertRaisesRegex(PacketShapeError, "section_a value count"):
+            ServerOpcode135BootstrapLedger.parse(bytes(invalid_135_count))
 
         noncanonical_142_flag = bytearray(ledger_142.to_bytes())
         first_entry_flag_offset = len(
@@ -4925,6 +4990,29 @@ class GameplayStateFoldTest(unittest.TestCase):
                 ServerOpcode29TextLedgerEntry(13, 23, "nopq", 33, 43),
             )
         )
+        ledger_135 = ServerOpcode135BootstrapLedger(
+            section_a=(
+                ServerOpcode135SectionAEntry(True, 14, (24, 34)),
+                ServerOpcode135SectionAEntry(False, 15, (25,)),
+            ),
+            section_b=(
+                ServerOpcode135SectionBEntry(
+                    True,
+                    16,
+                    26,
+                    ((36, 46), (56, 66)),
+                ),
+            ),
+            section_c_value=17,
+            section_c_pairs=((27, 37),),
+            section_d=(
+                ServerOpcode135SectionDEntry(
+                    18,
+                    ((28, 38), (48, 58)),
+                    ((68, 78),),
+                ),
+            ),
+        )
         ledger_142 = ServerOpcode142TextLedger(
             enabled=True,
             header_text="head",
@@ -4953,6 +5041,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                     ledger_27,
                     ledger_28,
                     ledger_29,
+                    ledger_135,
                     ledger_142,
                     ledger_425,
                 )
@@ -4976,6 +5065,37 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.server_opcode_29_text_code_units, {4: 1}
         )
+        self.assertEqual(analysis.state.server_opcode_135_packets, 1)
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_a_entry_counts, {2: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_a_enabled_count, 1
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_a_value_counts, {3: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_b_entry_counts, {1: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_b_enabled_count, 1
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_b_pair_counts, {2: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_c_pair_counts, {1: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_d_entry_counts, {1: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_d_group_1_counts, {2: 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_135_section_d_group_2_counts, {1: 1}
+        )
         self.assertEqual(analysis.state.server_opcode_142_packets, 1)
         self.assertEqual(analysis.state.server_opcode_142_enabled_packets, 1)
         self.assertEqual(analysis.state.server_opcode_142_entry_counts, {1: 1})
@@ -4996,7 +5116,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         observation_kinds = {
             observation.kind
             for observation in analysis.observations
-            if observation.opcode in {27, 28, 29, 142, 425}
+            if observation.opcode in {27, 28, 29, 135, 142, 425}
         }
         self.assertEqual(
             observation_kinds,
@@ -5004,6 +5124,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "server_opcode_27_integer_ledger",
                 "server_opcode_28_text_ledger",
                 "server_opcode_29_text_ledger",
+                "server_opcode_135_bootstrap_ledger",
                 "server_opcode_142_text_ledger",
                 "server_opcode_425_value_ledger",
             },
@@ -5018,6 +5139,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "server_opcode_27_ledger_received",
                 "server_opcode_28_ledger_received",
                 "server_opcode_29_ledger_received",
+                "server_opcode_135_ledger_received",
                 "server_opcode_142_ledger_received",
                 "server_opcode_425_ledger_received",
             }.issubset(event_kinds)
@@ -5026,6 +5148,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("server_opcode_27=packets:1 entry_counts:{1: 1}", report)
         self.assertIn("server_opcode_28=packets:1 entry_counts:{1: 1}", report)
         self.assertIn("server_opcode_29=packets:1 entry_counts:{1: 1}", report)
+        self.assertIn(
+            "server_opcode_135=packets:1 section_a_entries:{2: 1}", report
+        )
         self.assertIn("server_opcode_142=packets:1 enabled:1", report)
         self.assertIn("server_opcode_425=packets:1 value_counts:{12: 1}", report)
 

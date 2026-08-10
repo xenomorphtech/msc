@@ -63,6 +63,22 @@ records the proven delegated grammar while the generated handler entry remains
 the authoritative evidence that the top-level handler itself has no direct
 reader calls.
 
+Opcode `135` adds an executed-loop case. Generated handler `aecdc2fe...`
+contains flattened `u8/bool/i16/i32` call sites across several nested branches.
+The IL2CPP code is copied into an anonymous executable mapping under Wine, so
+file-backed perf uprobes correctly produced no samples; a long-lived GDB attach
+also blocked Unity scheduling. A version-bound shared-object hook was instead
+loaded in one brief attach, patched four candidate primitive readers, and
+detached before replay. It logged packet pointer, pre-read cursor, opcode, and
+caller without payload values. One local-client replay produced 1,305 ordered
+`u8/bool/i32` records on a single opcode-`135` packet object. The sequence is
+strictly monotonic from framed cursor `6` through `3729`; its 45 gaps are all
+two bytes, the generated `u16` reader never executes, and the generated `i16`
+reader supplies exactly those 45 reads. Replaying the reconstructed 1,350-read
+grammar against the private plaintext consumes all 3,725 bytes and re-emits it
+byte-for-byte. The checked-in manifest records only this structural grammar and
+redacted count evidence; the private trace and plaintext remain ignored.
+
 Exported plaintext JSONL under `target/private/` is evidence, not source: it
 contains private captured bytes, remains ignored, and must not be committed or
 pasted into reports. The checked-in manifest and deterministic dump describe

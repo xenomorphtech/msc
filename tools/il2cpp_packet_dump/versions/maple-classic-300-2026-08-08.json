@@ -1018,6 +1018,53 @@
       ]
     },
     {
+      "name":"server_opcode_135_bootstrap_ledger","direction":"server_to_client","opcode":135,"length":3725,
+      "source":"generated opcode-135 handler aecdc2fe... plus a detached local-Wine primitive-reader trace: 1,305 hooked u8/bool/i32 reads and 45 exact two-byte gaps assigned to the generated i16 reader form a 1,350-read ledger through framed cursor 3729; the 111 packet fully decodes and re-emits with section totals 2/166, 2/21, 10, and 21/260/260",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":135},
+        {"op":"read","name":"section_a_entry_count","kind":"u8"},
+        {"op":"repeat","count_from":"section_a_entry_count","operations":[
+          {"op":"read","name":"section_a_enabled","kind":"bool"},
+          {"op":"read","name":"section_a_value","kind":"i32"},
+          {"op":"read","name":"section_a_value_count","kind":"i32"},
+          {"op":"repeat","count_from":"section_a_value_count","operations":[
+            {"op":"read","name":"section_a_repeated_value","kind":"i32"}
+          ]}
+        ]},
+        {"op":"read","name":"section_b_entry_count","kind":"u8"},
+        {"op":"repeat","count_from":"section_b_entry_count","operations":[
+          {"op":"read","name":"section_b_enabled","kind":"bool"},
+          {"op":"read","name":"section_b_value_1","kind":"i32"},
+          {"op":"read","name":"section_b_value_2","kind":"u8"},
+          {"op":"read","name":"section_b_pair_count","kind":"i16"},
+          {"op":"repeat","count_from":"section_b_pair_count","operations":[
+            {"op":"read","name":"section_b_pair_value_1","kind":"i32"},
+            {"op":"read","name":"section_b_pair_value_2","kind":"i32"}
+          ]}
+        ]},
+        {"op":"read","name":"section_c_value","kind":"u8"},
+        {"op":"read","name":"section_c_pair_count","kind":"i16"},
+        {"op":"repeat","count_from":"section_c_pair_count","operations":[
+          {"op":"read","name":"section_c_pair_value_1","kind":"i32"},
+          {"op":"read","name":"section_c_pair_value_2","kind":"i32"}
+        ]},
+        {"op":"read","name":"section_d_entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"section_d_entry_count","operations":[
+          {"op":"read","name":"section_d_value","kind":"i32"},
+          {"op":"read","name":"section_d_group_1_count","kind":"i16"},
+          {"op":"repeat","count_from":"section_d_group_1_count","operations":[
+            {"op":"read","name":"section_d_group_1_value_1","kind":"i32"},
+            {"op":"read","name":"section_d_group_1_value_2","kind":"u8"}
+          ]},
+          {"op":"read","name":"section_d_group_2_count","kind":"i16"},
+          {"op":"repeat","count_from":"section_d_group_2_count","operations":[
+            {"op":"read","name":"section_d_group_2_value_1","kind":"i32"},
+            {"op":"read","name":"section_d_group_2_value_2","kind":"u8"}
+          ]}
+        ]}
+      ]
+    },
+    {
       "name":"server_opcode_142_text_ledger_large","direction":"server_to_client","opcode":142,"length":254,
       "source":"generated opcode-142 handler reads a bool then delegates when true; exact 111 gameplay packet decodes as header UTF-16 plus counted keyed text/control entries",
       "operations":[

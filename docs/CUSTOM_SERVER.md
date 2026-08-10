@@ -310,6 +310,27 @@ from the fold inherit the same redaction; no packet-injection endpoint action
 is claimed because the captured values remain neutral and cross-session safety
 is unproven.
 
+Opcode `135` closes the next large bootstrap boundary. The automatic dump maps
+handler `aecdc2fe...` to `u8/bool/i16/i32` readers; a detachable hook on the
+local Wine process recorded 1,305 executed non-`i16` reads without holding the
+Unity process under a debugger. Every one of the remaining 45 cursor gaps is
+exactly two bytes and matches the generated `i16` primitive. The resulting
+four-section grammar performs 1,350 reads, reaches framed cursor `3729`, and
+round-trips the sole 3,725-byte stream-`114` packet exactly. Safe gamestate and
+events expose section totals `2/166`, `2/21`, `10`, and `21/260/260`, never the
+stored numeric values. The fold emits a full
+`server_opcode_135_bootstrap_ledger` observation and
+`server_opcode_135_ledger_received`, moving stream `114` to `52/20/4/0`.
+
+For the live proof, the remote `192.168.2.6` world socket was explicitly
+closed and the browser-free local Wine client became the only replay peer at
+`127.0.0.1`. Loopback-only `POST /api/v1/server-packets` accepted the exact
+captured plaintext, the traced reader sequence consumed it, and the client
+remained rendered in map `101000000` with the world socket and generated
+heartbeat exchange active. The programmatic audio-mute service remained
+active. Because the visible field state did not identify a bounded effect,
+replay safety is limited to this exact packet-shape/non-stall result.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -395,7 +416,7 @@ unknown, and no live effect is claimed yet.
 Together, the currently modeled families leave the long-corpus totals at
 26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid. Stream
 `92` now reaches 13,412 full, 21,762 partial, 33 unknown, and zero invalid;
-stream `114` reaches 51/20/5/0.
+stream `114` reaches 52/20/4/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
 client has a sequence byte followed by either an opaque identifier, counted
@@ -2007,7 +2028,7 @@ Replace the remaining opaque replay portions with stateful handling:
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
 2. Continue the finite automatic-dump pass with the remaining server opcodes
-   `13`, `135`, and `394`; separate direct primitive reads
+   `13` and `394`; separate direct primitive reads
    from delegated bodies and preserve neutral roles until capture comparison or
    a controlled effect supports semantic names.
 3. Reuse the proven typed final-field mob injection to validate the existing

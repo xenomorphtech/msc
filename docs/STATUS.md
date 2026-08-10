@@ -54,7 +54,7 @@
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,412 full, 21,762 partial,
-  33 unknown, and zero invalid; stream `114` reports 51/20/5/0. Seven
+  33 unknown, and zero invalid; stream `114` reports 52/20/4/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -151,6 +151,20 @@
   `51/20/5/0`; stream `126` remains `26,660/44,381/59/0`. Live replay is
   deferred until the neutral bootstrap values have a bounded cross-session
   role.
+- Server opcode `135` is no longer a 3,725-byte opaque bootstrap packet. The
+  generated handler `aecdc2fe...` identified the four possible primitive
+  readers, and a detachable trace on the local Wine client recorded 1,305
+  ordered `u8/bool/i32` calls from framed cursor `6` through `3729`. The 45
+  remaining cursor gaps are each exactly two bytes and align with the generated
+  `i16` reader, yielding a 1,350-read, four-section grammar. The sole stream-`114`
+  packet round-trips exactly with section totals `2/166`, `2/21`, `10`, and
+  `21/260/260`. It now folds as a full
+  `server_opcode_135_bootstrap_ledger`, emits
+  `server_opcode_135_ledger_received`, and publishes only counts and redaction
+  flags. Stream `114` moves to `52/20/4/0`. An exact replay through the
+  loopback packet API was processed by the local Wine client without dropping
+  the world socket or heartbeat exchange; numeric roles remain neutral because
+  no bounded visible effect was observed.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`
