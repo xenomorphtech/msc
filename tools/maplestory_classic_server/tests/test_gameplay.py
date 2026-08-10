@@ -112,6 +112,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode93Record,
     ServerOpcode201Record,
     ServerOpcode205Record,
+    ServerOpcode244DialogueInstruction,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -1904,6 +1905,30 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
         with self.assertRaisesRegex(PacketShapeError, "zero or eight"):
             TutorialUiInstruction.parse(encoded + b"\x00")
+
+    def test_server_opcode_244_dialogue_instruction_round_trip(self) -> None:
+        record = ServerOpcode244DialogueInstruction(
+            value_1=1036,
+            value_2=2003,
+            value_3=0,
+        )
+
+        encoded = record.to_bytes()
+
+        self.assertEqual(
+            encoded.hex(),
+            "f400080c040000d307000000000000",
+        )
+        self.assertEqual(
+            ServerOpcode244DialogueInstruction.parse(encoded),
+            record,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "requires selector 8"):
+            ServerOpcode244DialogueInstruction.parse(
+                encoded[:2] + b"\x07" + encoded[3:]
+            )
+        with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
+            ServerOpcode244DialogueInstruction.parse(encoded + b"\x00")
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,
@@ -3740,6 +3765,68 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("SCRIPTSTRING", str(analysis.safe_dict()))
         self.assertIn(
             "tutorial_ui_instructions=packets:2",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_server_opcode_244_dialogue_instructions(self) -> None:
+        records = (
+            ServerOpcode244DialogueInstruction(
+                value_1=1036,
+                value_2=2003,
+                value_3=0,
+            ),
+            ServerOpcode244DialogueInstruction(
+                value_1=1032,
+                value_2=2001,
+                value_3=1033,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(record.to_bytes() for record in records),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.instructional_dialogue_requests, 2)
+        self.assertEqual(
+            analysis.state.instructional_dialogue_value_1,
+            {1036: 1, 1032: 1},
+        )
+        self.assertEqual(
+            analysis.state.instructional_dialogue_value_2,
+            {2003: 1, 2001: 1},
+        )
+        self.assertEqual(
+            analysis.state.instructional_dialogue_value_3,
+            {0: 1, 1033: 1},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_244_dialogue_instruction"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            len(
+                [
+                    event
+                    for event in analysis.events
+                    if event.kind
+                    == "instructional_dialogue_requested"
+                ]
+            ),
+            2,
+        )
+        self.assertIn(
+            "instructional_dialogue_requests=packets:2",
             render_gameplay_analysis(analysis),
         )
 

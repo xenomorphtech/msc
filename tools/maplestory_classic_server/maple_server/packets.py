@@ -6043,6 +6043,69 @@ class TutorialUiInstruction:
 
 
 @dataclass(frozen=True)
+class ServerOpcode244DialogueInstruction:
+    """Live-validated selector-8 instructional-dialogue branch of opcode 244."""
+
+    value_1: int
+    value_2: int
+    value_3: int
+    selector: int = 8
+    opcode: int = 244
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode244DialogueInstruction":
+        reader = PacketReader(
+            payload, packet_name="server_opcode_244_dialogue_instruction"
+        )
+        _expect_opcode(reader, 244)
+        selector = reader.u8("selector")
+        if selector != 8:
+            raise PacketShapeError(
+                "server opcode-244 modeled branch requires selector 8, "
+                f"got {selector}"
+            )
+        record = cls(
+            selector=selector,
+            value_1=reader.i32("value_1"),
+            value_2=reader.i32("value_2"),
+            value_3=reader.i32("value_3"),
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "selector": self.selector,
+            "value_1": self.value_1,
+            "value_2": self.value_2,
+            "value_3": self.value_3,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 244:
+            raise PacketShapeError(
+                "server opcode-244 dialogue instruction opcode must be 244"
+            )
+        if self.selector != 8:
+            raise PacketShapeError(
+                "server opcode-244 modeled branch requires selector 8"
+            )
+        try:
+            return struct.pack(
+                "<HBiii",
+                self.opcode,
+                self.selector,
+                self.value_1,
+                self.value_2,
+                self.value_3,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-244 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode69Record:
     """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
 

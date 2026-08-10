@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 193 tests.
+The last run passed all 195 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,221 observations are full, 44,295 partial, 584
+`--fail-on-invalid`: 26,275 observations are full, 44,295 partial, 530
 unknown-but-lossless, and none invalid. The original 12 warnings are state
 correlations, not shape failures. The combat model adds one aggregate warning
 for six delayed predictions that differ by one HP, so the current total is 13.
@@ -109,6 +109,17 @@ and numeric distributions. Two exact packets were accepted by the live client
 and folded without changing its active map/player state. No overlay appeared
 at 100 ms, 400 ms, or one second on the level-12 character, so the client-side
 render remains state-gated and is not claimed.
+
+Server opcode `244` selector `8` is a separate instructional-dialogue request.
+The pinned handler and all 54 stream-`126` packets agree on an exact 15-byte
+shape: selector byte `8` followed by three signed int32 values. The fold emits
+`instructional_dialogue_requested` and retains numeric distributions without
+guessing the three value roles. Injecting exact captured values
+`1036, 2003, 0` into a fresh browser-free level-12 session immediately opened
+an NPC instruction dialogue; its text was partially rendered at 100 ms and
+complete at one second. The packet folded back exactly at full coverage, the
+client stayed active on map `101000000`, and all 11 transcript heartbeats were
+matched.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
@@ -154,8 +165,8 @@ cursor. The muted client passed world and character selection and rendered map
 zero failures, all 21 fixed-record frames patched, and 13/13 paired heartbeat
 probes.
 
-Together, these latest modeled families leave the long-corpus totals at 26,221
-full, 44,295 partial, 584 unknown-but-lossless, and zero invalid.
+Together, these latest modeled families leave the long-corpus totals at 26,275
+full, 44,295 partial, 530 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

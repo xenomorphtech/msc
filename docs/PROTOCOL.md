@@ -630,6 +630,37 @@ Framebuffers sampled at 100 ms, 400 ms, and one second showed no new overlay,
 so rendering is state-gated in this client state and is not claimed. The live
 test validates packet shape, encryption/order, and non-blocking handling only.
 
+## Instructional dialogue request (`244`, selector `8`)
+
+The pinned version-300 opcode-`244` handler first reads a selector byte. Its
+selector-`8` branch performs three signed 32-bit reads, exactly matching the
+only branch present in the reference captures:
+
+```text
+uint16 opcode = 244
+uint8 selector = 8
+int32 value_1
+int32 value_2
+int32 value_3
+```
+
+Stream `126` contains 54 such packets, all exactly 15 bytes. They consume and
+round-trip exactly at full coverage. `value_1`, `value_2`, and `value_3` have
+28, 19, and 13 distinct values respectively; `value_3` is zero in 42 packets.
+Those roles remain neutral because width and UI effect do not establish their
+higher-level identifiers. Other selector or length branches stay unknown
+rather than being forced through the selector-`8` codec.
+
+An exact captured packet with values `1036, 2003, 0` was injected into a fresh
+level-12 live client. It immediately opened an instructional NPC dialogue:
+the 100 ms framebuffer showed partially rendered text and the one-second frame
+showed the complete message. The injected packet reappeared in the transcript
+as one exact full-coverage `instructional_dialogue_requested` event. The fold
+remained valid and active on map `101000000`, all 11 observed heartbeat pairs
+matched, and runtime reported no connection failure. This validates the
+dialogue-request effect while deliberately leaving its numeric value roles
+unnamed.
+
 ## Fixed-width neutral server records
 
 Three independent gameplay streams share a small fixed-width server-record
@@ -2183,8 +2214,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,221
-full, 44,295 partial, 584 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,275
+full, 44,295 partial, 530 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,375 full, 21,740 partial,
 92 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

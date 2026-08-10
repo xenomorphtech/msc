@@ -75,6 +75,7 @@ from .packets import (
     ServerOpcode93Record,
     ServerOpcode201Record,
     ServerOpcode205Record,
+    ServerOpcode244DialogueInstruction,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -692,6 +693,10 @@ class GameplayGameState:
     tutorial_ui_value_2: Counter[int] = field(default_factory=Counter)
     tutorial_ui_control_values: Counter[int] = field(default_factory=Counter)
     tutorial_ui_extended_instructions: int = 0
+    instructional_dialogue_requests: int = 0
+    instructional_dialogue_value_1: Counter[int] = field(default_factory=Counter)
+    instructional_dialogue_value_2: Counter[int] = field(default_factory=Counter)
+    instructional_dialogue_value_3: Counter[int] = field(default_factory=Counter)
     fixed_server_records: int = 0
     fixed_server_records_by_opcode: Counter[int] = field(
         default_factory=Counter
@@ -3499,6 +3504,14 @@ class GameplayAnalysis:
                         self.state.tutorial_ui_extended_instructions
                     ),
                 },
+                "instructional_dialogue_requests": {
+                    "packet_count": self.state.instructional_dialogue_requests,
+                    "opcode": 244,
+                    "selector": 8,
+                    "value_1": dict(self.state.instructional_dialogue_value_1),
+                    "value_2": dict(self.state.instructional_dialogue_value_2),
+                    "value_3": dict(self.state.instructional_dialogue_value_3),
+                },
                 "fixed_server_records": (
                     self.state.fixed_server_records
                 ),
@@ -5969,6 +5982,28 @@ class GameplayStateFold:
                 kind="tutorial_ui_instruction",
                 coverage=ShapeCoverage.FULL,
                 parsed=instruction,
+                details=details,
+            )
+        if opcode == 244 and len(payload) == 15 and payload[2] == 8:
+            record = ServerOpcode244DialogueInstruction.parse(payload)
+            details = {
+                **record.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self.state.instructional_dialogue_requests += 1
+            self.state.instructional_dialogue_value_1[record.value_1] += 1
+            self.state.instructional_dialogue_value_2[record.value_2] += 1
+            self.state.instructional_dialogue_value_3[record.value_3] += 1
+            self._event(
+                frame,
+                "instructional_dialogue_requested",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_244_dialogue_instruction",
+                coverage=ShapeCoverage.FULL,
+                parsed=record,
                 details=details,
             )
         if opcode in {69, 93, 201, 205}:
@@ -9502,6 +9537,13 @@ def render_gameplay_analysis(
             f"value_2:{tutorial_ui_value_2} "
             f"controls:{tutorial_ui_control_values} "
             f"extended:{state.tutorial_ui_extended_instructions}"
+        ),
+        (
+            "instructional_dialogue_requests="
+            f"packets:{state.instructional_dialogue_requests} "
+            f"value_1:{dict(sorted(state.instructional_dialogue_value_1.items()))} "
+            f"value_2:{dict(sorted(state.instructional_dialogue_value_2.items()))} "
+            f"value_3:{dict(sorted(state.instructional_dialogue_value_3.items()))}"
         ),
         (
             f"client_opcode_217=packets:{state.client_opcode_217_packets} "

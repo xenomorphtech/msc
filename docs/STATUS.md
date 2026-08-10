@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 193 tests.
+- The custom-server suite currently passes all 195 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,221 full, 44,295 partial, 584 unknown-but-lossless, and zero invalid
+  26,275 full, 44,295 partial, 530 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,375 full, 21,740 partial,
   92 unknown, and zero invalid; stream `114` reports 43/20/13/0. Thirteen
   long-corpus state-correlation warnings remain: the prior 12 plus one
@@ -75,6 +75,14 @@
   were accepted and folded by the active live client without blocking it; no
   overlay appeared in samples through one second, so visual rendering remains
   explicitly state-gated rather than inferred from packet acceptance.
+- Server opcode `244` selector `8` is fully decoded as three signed int32
+  values after the selector. All 54 stream-`126` packets are exact full-
+  coverage round trips. A fresh browser-free injection of captured values
+  `1036, 2003, 0` opened an instructional NPC dialogue whose text progressed
+  from partial at 100 ms to complete at one second. The live transcript folds
+  one exact `instructional_dialogue_requested` event, stays active on map
+  `101000000`, and matches all 11 heartbeat pairs without assigning meanings
+  to the three numeric values.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,
