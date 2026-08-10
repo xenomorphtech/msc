@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 213 tests.
+- The custom-server suite currently passes all 219 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,16 +52,57 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,565 full, 44,295 partial, 240 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,400 full, 21,740 partial,
-  67 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
+  26,655 full, 44,373 partial, 72 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,406 full, 21,755 partial,
+  46 unknown, and zero invalid; stream `114` reports 46/20/10/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
-- Server opcodes `69`, `93`, `201`, and `205` are separated into neutral,
-  capture-bounded records. All 145 reference packets consume and round-trip
-  exactly; numeric branches add 49 full observations, while the 96 records
-  with fixed unknown regions remain partial and redact potentially identifying
-  primary values from safe state, events, reports, and HTTP-derived analysis.
+- Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, and `379` are
+  separated into neutral, capture-bounded records. All 176 reference packets
+  consume and round-trip exactly; typed branches add 79 full observations,
+  while the 97 records with fixed unknown regions remain partial and redact
+  potentially identifying primary values from safe state, events, reports, and
+  HTTP-derived analysis.
+  The automatic IL2CPP dump proves opcode `94` reads `bool + i32 + i32` and
+  opcode `379` reads a discriminator plus four datetimes on variant `36`; its
+  delegated opcode-`148` handler supplies variants `9`/`10`/`12`/`13`. One
+  legacy nonempty variant-`9` body remains explicitly opaque because it does
+  not consume under the current build's mask `0x9`.
+  A typed opcode-`94` live replay produced exactly one predicted neutral event,
+  changed no modeled world/player/inventory/progression state, and left the
+  browser-free client active with 244/244 heartbeat probes matched.
+  A fresh direct-Wayland replay of empty opcode-`148` variant `10` likewise
+  produced one full neutral event, left core state unchanged, advanced matched
+  heartbeats from 11 to 18, and retained one active connection with no failures.
+- Server opcodes `147` and `272` now use the automatic IL2CPP packet dump as
+  their shape source rather than the older observed-opaque width pins. Opcode
+  `147` is two four-`i32` rectangles plus a counted `i32` vector. A focused
+  live primitive-reader trace closes opcode `272` as a neutral header, 11
+  counted entries with two booleans and two counted triple groups, and one
+  terminal `i32`. The three packets for each opcode are byte-identical across
+  streams `92`, `114`, and `126`; all six round-trip natively and fold at full
+  coverage with identifiers and values redacted. Two exact live opcode-`272`
+  injections were accepted; the
+  current transcript folds the original plus both injections as three full
+  events, remains `active` on map `101000000`, keeps core state unchanged, and
+  runtime status reports one active connection, zero injection failures, and
+  advancing heartbeat responses. The debugger pause accounts for the one
+  36.6-second heartbeat outlier.
+- Client/server opcode `43` now uses two redacted client envelopes and one
+  fixed server envelope instead of a sequence-keyed stream-specific switch.
+  All 45 client and three server packets across streams `92` and `126`
+  round-trip exactly as partial observations; sequence, variant, text length,
+  message type, and opaque-byte counts are safe, while identifiers, text, and
+  bodies remain omitted. An exact server packet live replay left core state
+  unchanged, advanced matched heartbeats `173 -> 176`, retained one active
+  connection with zero failures, and produced no client opcode-`43` response.
+- Client opcode `114` now consumes and round-trips all 44 long-corpus packets
+  as a redacted `u8 + counted UTF-16 + zero + u32` envelope. Text lengths
+  `8/9/11` explain the exact `26/28/32` packet widths. Safe state/events expose
+  only control and text-length distributions plus an omitted-value count;
+  indirect tutorial/UI timing is documented as a hypothesis, not a semantic
+  name. The active idle custom-server client emits none, so no reverse-direction
+  replay is claimed.
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly, every leave matches the
   current field epoch, and all opcode-`202`/`217` movement broadcasts now
@@ -128,9 +169,19 @@
   u8/i32/selector/i32 prefix plus terminated counted UTF-16 text; selector `0`
   has two trailing control bytes, while selectors `3`/`6`/`17` do not. Every
   packet round-trips exactly. State/events/reports/HTTP omit the primary values
-  and text, future selectors stay unknown, and no live effect is claimed: the
-  newly launched browser-free, programmatically muted client validly reached
-  world selection but not a held-open world connection for injection.
+  and text, and future selectors stay unknown.
+- Client opcode `66` now gives those 31 envelopes a complete capture-local
+  transaction model. Every server packet is followed by exactly one
+  same-selector response; 25 packets are four-byte selector/status records and
+  six selector-`6`/status-`1` packets add one redacted u32. Native shape
+  validation and Python parsing consume all 31 exactly, while the gamestate
+  fold reports 31 matched, zero unmatched, zero pending, and round trips from
+  `728.174` to `10,436.006` ms. A cross-state live replay of one exact
+  selector-`0` server packet into the active level-12 short-stream client
+  produced no opcode `66` and the world connection closed after one further
+  heartbeat. The browser-free launcher/direct Wayland seat restored the client
+  to an active field with 719/719 matched heartbeats; opcode `348` therefore
+  remains state-gated rather than generally replay-safe.
 - Client opcode `122` now has full structural coverage for all 62 stream-`126`
   packets. The six observed selector/count shapes contain two to four u32
   values; selector `2` always ends in `0xffffffff`. Every packet round-trips
@@ -146,10 +197,12 @@
   decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
   spawns also validate after preserving the facing byte values `0/1/2/4/5`.
 - The common fixed-width server family now has complete typed codecs for
-  opcodes `11`, `24`, `56`, `58`, `59`, `96`, `105`, `178`, `386`, `388`, and
-  `389`. Stream `114` has 11 full records; streams `92` and `126` each have 12
-  because opcode `96` recurs later in gameplay. Opcode `59` matches world-entry
-  character state, and all other value roles remain neutral.
+  opcodes `11`, `24`, `45`, `56`, `58`, `59`, `60`, `71`, `72`, `74`, `76`,
+  `89`, `96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
+  and `398`. Streams `114`, `92`, and `126` contain 21, 69, and 94 full records
+  respectively. Opcode `60` adds six signed-`i32` long-corpus records; opcode
+  `59` matches world-entry character state, and all other value roles remain
+  neutral.
 - `--generate-fixed-server-records` reconstructs every such occurrence,
   validates reparse/length/index/patch invariants, and exposes identifier-free
   plans under `protocol.fixed_server_record_emitter`. A browser-free live run
@@ -189,6 +242,16 @@
   `neutral_records_live_20260810/world/1786346118785123354_replay_12857.jsonl`,
   the final command and fold matched `50 -> 49` at frame `775`; the same command
   then matched restoration `49 -> 50` at frame `777`, both on map `101000000`.
+- `inject-mob-temporary-stat` now consumes the pinned IL2CPP-generated shape
+  dump plus its private packet JSONL and performs a typed
+  `279 -> 285 -> 286 -> 280` lifecycle. It verifies version/protocol/hash/shape
+  evidence, prefers a captured 48-byte base spawn, rewrites only the redacted
+  object id and current foothold placement, polls each folded state, and checks
+  cleanup plus unchanged world/player/inventory/progression state. The live
+  base-spawn run matched frames `1516/1518/1522/1523`, toggled active bit `103`
+  `0 -> 1 -> 0`, rendered and removed template `3210800`, and retained
+  1,424/1,424 heartbeat pairs. No unique visual marker distinguished the set
+  interval, so the bit's specific client-visible meaning remains neutral.
 - `?keyboard-skill=KEY_CODE:SKILL_ID` now performs a typed single-value change
   to an existing opcode-`385` selector-`1` binding. On a fresh client, Left Ctrl
   under `2001005` emitted opcode-`52` variant `18` with two hits `[27,32]`;
@@ -349,6 +412,22 @@
   round-trips this packet and both `111.pcapng` marker-`23` variants exactly;
   the fold emits `progression_shape` and includes compact skills, maps, and
   clock state.
+- The long capture's skill-record transaction is now fully typed. Eight client
+  opcode-`103` level-change requests correlate by skill id with eight
+  one-record server opcode-`46` updates; a ninth zero-record update exercises
+  the empty branch, and all nine updates receive client opcode-`293`
+  acknowledgements. The fold updates skill levels, emits all three lifecycle
+  events, tracks request/ack timing, and finishes with no pending transaction.
+  The automatic IL2CPP manifest carries these shapes and exactly consumes all
+  26 family packets exported from stream `126`.
+- `inject-skill-record` now plans either the captured zero-record opcode-`46`
+  form or a one-record update for an existing folded skill, submits it only
+  through the opt-in loopback packet API, and requires the real client's
+  matched opcode-`293` acknowledgement before comparing all predicted state
+  invariants. A browser-free live stream-`114` run delivered two of each form:
+  all four acknowledgements matched with control `346`, no transaction remained
+  pending, the client stayed responsive, and player/map/inventory/progression
+  plus skill `2001005 = 6` remained unchanged with 61/61 heartbeats paired.
 - `--generate-initial-field-snapshot` now reconstructs the complete nested
   opcode-`157` state before replay, verifies same-length byte equality for the
   unmodified baseline, reparses both envelope and nested forms, and exposes

@@ -45,7 +45,10 @@ from maple_server.gamestate import PlainFrame  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAttackAction,
+    ClientOpcode43Envelope,
+    ClientOpcode66Acknowledgement,
     ClientOpcode101Record,
+    ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
@@ -56,6 +59,7 @@ from maple_server.packets import (  # noqa: E402
     FieldDropRemoval,
     FieldDropSpawn,
     FixedServerEmptyRecord,
+    FixedServerI32Record,
     FixedServerOpcode11Record,
     FixedServerU16PairRecord,
     FixedServerU16Record,
@@ -113,20 +117,31 @@ from maple_server.packets import (  # noqa: E402
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
     ServerAttackRelay,
+    ServerOpcode43Envelope,
     ServerOpcode69Record,
     ServerOpcode93Record,
+    ServerOpcode94Record,
+    ServerOpcode147BoundsLedger,
+    ServerOpcode148Envelope,
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
     ServerOpcode239ValueRecord,
     ServerOpcode244DialogueInstruction,
+    ServerOpcode272Ledger,
+    ServerOpcode272LedgerEntry,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
+    ServerOpcode379Record,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    SkillLevelChangeRequest,
+    SkillRecordEntry,
+    SkillRecordUpdate,
+    SkillRecordUpdateAcknowledgement,
     TutorialUiInstruction,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
@@ -226,6 +241,7 @@ def fixture_fixed_server_records() -> tuple[object, ...]:
         FixedServerU8Record(opcode=121, value=0),
         FixedServerU16Record(opcode=72, value=7),
         FixedServerU16Record(opcode=74, value=26),
+        FixedServerI32Record(opcode=60, value=1_037),
         FixedServerU32Record(opcode=112, value=0),
         FixedServerU32Record(opcode=131, value=0),
         FixedServerU32Record(opcode=301, value=3_290),
@@ -649,6 +665,7 @@ def fixture_gameplay_transcript(
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
     opcode_426_acknowledgement: bool = False,
+    skill_record_lifecycle: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
     item_use: bool = False,
@@ -1271,6 +1288,54 @@ def fixture_gameplay_transcript(
             "client_to_server",
             ClientOpcode309Acknowledgement().to_bytes(),
         )
+    if skill_record_lifecycle:
+        append(
+            "client_to_server",
+            SkillLevelChangeRequest(
+                client_tick=200_000,
+                skill_id=2_001_005,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            SkillRecordUpdate(
+                flag_a=True,
+                flag_b=False,
+                records=(
+                    SkillRecordEntry(
+                        skill_id=2_001_005,
+                        level=7,
+                        auxiliary_value=0,
+                    ),
+                ),
+                trailing_value=2,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            SkillRecordUpdateAcknowledgement(
+                control_value=346,
+                client_tick=200_450,
+                trailing_value=0,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            SkillRecordUpdate(
+                flag_a=False,
+                flag_b=False,
+                records=(),
+                trailing_value=4,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            SkillRecordUpdateAcknowledgement(
+                control_value=346,
+                client_tick=200_451,
+                trailing_value=0,
+            ).to_bytes(),
+        )
     append("server_to_client", HeartbeatProbe().to_bytes())
     append(
         "client_to_server",
@@ -1305,6 +1370,63 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_skill_record_change_lifecycle_round_trip(self) -> None:
+        request_bytes = bytes.fromhex("6700affa0200e8030000")
+        update_bytes = bytes.fromhex(
+            "2e0001000100e8030000010000000000000002"
+        )
+        empty_update_bytes = bytes.fromhex("2e000000000002")
+        acknowledgement_bytes = bytes.fromhex(
+            "25015a01000071fc02000000"
+        )
+        request = SkillLevelChangeRequest(
+            client_tick=195_247,
+            skill_id=1_000,
+        )
+        update = SkillRecordUpdate(
+            flag_a=True,
+            flag_b=False,
+            records=(
+                SkillRecordEntry(
+                    skill_id=1_000,
+                    level=1,
+                    auxiliary_value=0,
+                ),
+            ),
+            trailing_value=2,
+        )
+        empty_update = SkillRecordUpdate(
+            flag_a=False,
+            flag_b=False,
+            records=(),
+            trailing_value=2,
+        )
+        acknowledgement = SkillRecordUpdateAcknowledgement(
+            control_value=346,
+            client_tick=195_697,
+            trailing_value=0,
+        )
+
+        self.assertEqual(request.to_bytes(), request_bytes)
+        self.assertEqual(SkillLevelChangeRequest.parse(request_bytes), request)
+        self.assertEqual(update.to_bytes(), update_bytes)
+        self.assertEqual(SkillRecordUpdate.parse(update_bytes), update)
+        self.assertEqual(empty_update.to_bytes(), empty_update_bytes)
+        self.assertEqual(
+            SkillRecordUpdate.parse(empty_update_bytes), empty_update
+        )
+        self.assertEqual(
+            acknowledgement.to_bytes(), acknowledgement_bytes
+        )
+        self.assertEqual(
+            SkillRecordUpdateAcknowledgement.parse(acknowledgement_bytes),
+            acknowledgement,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "boolean"):
+            SkillRecordUpdate.parse(bytes.fromhex("2e000200000002"))
+        with self.assertRaisesRegex(PacketShapeError, "non-negative"):
+            SkillRecordUpdate.parse(bytes.fromhex("2e000000ffff02"))
+
     def test_client_skill_use_request_round_trip(self) -> None:
         observed = bytes.fromhex("6800a40106006a881e00010000")
         restored = bytes.fromhex("68002c8409006a881e00010000")
@@ -1873,6 +1995,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
         captured = {
             45: "2d00",
+            60: "3c000d040000",
             71: "470035",
             72: "48000700",
             74: "4a001a00",
@@ -1985,6 +2108,189 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(empty_9, records=record_set.records).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "requires text"):
             ServerOpcode239Envelope(selector=21).to_bytes()
+
+    def test_field_bootstrap_ledgers_round_trip_and_redact(self) -> None:
+        bounds = ServerOpcode147BoundsLedger(
+            rectangle_1=(-300, -370, 300, 220),
+            rectangle_2=(-300, -405, 300, 290),
+            values=(80_000_619, 80_000_645, 80_014_063),
+        )
+        ledger = ServerOpcode272Ledger(
+            header_value=987_654_321,
+            start_ticks=134_115_660_000_000_000,
+            end_ticks=134_747_711_400_000_000,
+            header_values=(4_102_002, 503_333, 66_969, 66_166, 66_167),
+            entries=(
+                ServerOpcode272LedgerEntry(
+                    selector=3_456_789,
+                    flag_1=True,
+                    flag_2=False,
+                    group_1=((10, 20, 30),),
+                    group_2=(),
+                ),
+                ServerOpcode272LedgerEntry(
+                    selector=30,
+                    flag_1=False,
+                    flag_2=True,
+                    group_1=(),
+                    group_2=((40, 50, 60), (70, 80, 90)),
+                ),
+            ),
+            trailer_value=0,
+        )
+
+        self.assertEqual(
+            ServerOpcode147BoundsLedger.parse(bounds.to_bytes()), bounds
+        )
+        self.assertEqual(ServerOpcode272Ledger.parse(ledger.to_bytes()), ledger)
+        self.assertEqual(ledger.group_1_count, 1)
+        self.assertEqual(ledger.group_2_count, 2)
+        safe = str(ledger.safe_dict())
+        self.assertNotIn("987654321", safe)
+        self.assertNotIn("3456789", safe)
+        self.assertNotIn("134115660000000000", safe)
+        self.assertTrue(ledger.safe_dict()["numeric_values_redacted"])
+
+        invalid_flag = bytearray(ledger.to_bytes())
+        invalid_flag[50] = 2
+        with self.assertRaisesRegex(PacketShapeError, "flags must be boolean"):
+            ServerOpcode272Ledger.parse(bytes(invalid_flag))
+        invalid_count = bytearray(ledger.to_bytes())
+        invalid_count[42:46] = (-1).to_bytes(4, "little", signed=True)
+        with self.assertRaisesRegex(PacketShapeError, "entry count"):
+            ServerOpcode272Ledger.parse(bytes(invalid_count))
+        with self.assertRaisesRegex(PacketShapeError, "three i32"):
+            replace(
+                ledger.entries[0],
+                group_1=((1, 2),),  # type: ignore[arg-type]
+            ).to_bytes()
+
+    def test_client_opcode_43_variants_round_trip_and_redact(self) -> None:
+        compact = ClientOpcode43Envelope(
+            sequence=4,
+            opaque_compact_body=bytes(range(9)),
+        )
+        identified = ClientOpcode43Envelope(
+            sequence=35,
+            opaque_identifier=3_456_789,
+            opaque_text="hidden",
+            opaque_tail=b"ABCDEF",
+        )
+
+        for envelope in (compact, identified):
+            payload = envelope.to_bytes()
+            self.assertEqual(ClientOpcode43Envelope.parse(payload), envelope)
+        self.assertEqual(len(compact.to_bytes()), 12)
+        self.assertEqual(len(identified.to_bytes()), 28)
+        self.assertEqual(compact.variant, "compact")
+        self.assertEqual(identified.variant, "identified_text")
+        self.assertEqual(identified.text_code_units, 6)
+        self.assertEqual(identified.opaque_byte_count, 6)
+        safe = str(identified.safe_dict())
+        self.assertNotIn("3456789", safe)
+        self.assertNotIn("hidden", safe)
+
+        server = ServerOpcode43Envelope(
+            message_type=0,
+            opaque_body=bytes(range(16)),
+        )
+        self.assertEqual(ServerOpcode43Envelope.parse(server.to_bytes()), server)
+        self.assertEqual(len(server.to_bytes()), 19)
+        self.assertNotIn(bytes(range(16)).hex(), str(server.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "needs 9 opaque"):
+            replace(compact, opaque_compact_body=b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs text"):
+            replace(identified, opaque_text=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "6-byte tail"):
+            replace(identified, opaque_tail=b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in u8"):
+            replace(compact, sequence=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 2 bytes"):
+            ClientOpcode43Envelope.parse(bytes.fromhex("2b00010000000000"))
+        with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
+            replace(server, opaque_body=b"short").to_bytes()
+
+    def test_client_opcode_66_acknowledgement_variants_round_trip(self) -> None:
+        acknowledgements = tuple(
+            ClientOpcode66Acknowledgement(
+                selector=selector,
+                status_value=status_value,
+            )
+            for selector, status_value in (
+                (0, 1),
+                (0, 0xFF),
+                (3, 1),
+                (6, 0),
+                (17, 1),
+            )
+        ) + (
+            ClientOpcode66Acknowledgement(
+                selector=6,
+                status_value=1,
+                optional_value=3_456_789,
+            ),
+        )
+
+        for acknowledgement in acknowledgements:
+            payload = acknowledgement.to_bytes()
+            self.assertEqual(
+                ClientOpcode66Acknowledgement.parse(payload),
+                acknowledgement,
+            )
+        self.assertTrue(
+            all(len(packet.to_bytes()) == 4 for packet in acknowledgements[:-1])
+        )
+        self.assertEqual(len(acknowledgements[-1].to_bytes()), 8)
+        safe = str(acknowledgements[-1].safe_dict())
+        self.assertNotIn("3456789", safe)
+        self.assertIn("optional_value_redacted", safe)
+
+        with self.assertRaisesRegex(PacketShapeError, "not a captured"):
+            ClientOpcode66Acknowledgement(selector=3, status_value=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires selector 6"):
+            replace(acknowledgements[-1], selector=3).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "one u32"):
+            ClientOpcode66Acknowledgement.parse(bytes.fromhex("420006010000"))
+        with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
+            replace(
+                acknowledgements[-1], optional_value=0x1_0000_0000
+            ).to_bytes()
+
+    def test_client_opcode_114_text_envelope_round_trip_and_redact(self) -> None:
+        envelopes = (
+            ClientOpcode114TextEnvelope(
+                control_value=32,
+                opaque_text="secret01",
+                opaque_value=3_456_789,
+            ),
+            ClientOpcode114TextEnvelope(
+                control_value=1,
+                opaque_text="hidden-text",
+                opaque_value=4_567_890,
+            ),
+        )
+
+        for envelope in envelopes:
+            payload = envelope.to_bytes()
+            self.assertEqual(
+                ClientOpcode114TextEnvelope.parse(payload), envelope
+            )
+        self.assertEqual(len(envelopes[0].to_bytes()), 26)
+        self.assertEqual(len(envelopes[1].to_bytes()), 32)
+        self.assertEqual(envelopes[0].text_code_units, 8)
+        safe = str(envelopes[0].safe_dict())
+        self.assertNotIn("secret01", safe)
+        self.assertNotIn("3456789", safe)
+
+        invalid_terminator = bytearray(envelopes[0].to_bytes())
+        invalid_terminator[-5] = 1
+        with self.assertRaisesRegex(PacketShapeError, "expected 0"):
+            ClientOpcode114TextEnvelope.parse(bytes(invalid_terminator))
+        with self.assertRaisesRegex(PacketShapeError, "fit in u8"):
+            replace(envelopes[0], control_value=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
+            replace(envelopes[0], opaque_value=0x1_0000_0000).to_bytes()
 
     def test_client_opcode_122_captured_variants_round_trip(self) -> None:
         payloads = (
@@ -2187,6 +2493,11 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ServerOpcode93Record(
                 values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
             ),
+            ServerOpcode94Record(
+                flag=True,
+                primary_value=2_380_000,
+                secondary_value=2,
+            ),
             ServerOpcode201Record(
                 primary_value=302_104,
                 secondary_value=0,
@@ -2202,12 +2513,25 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 numeric_value=1_386_640,
                 trailing_value=0,
             ),
+            ServerOpcode379Record(variant=35),
+            ServerOpcode379Record(
+                variant=36,
+                time_values=(
+                    150_842_304_000_000_000,
+                    150_842_304_000_000_000,
+                    94_354_848_000_000_000,
+                    94_354_848_000_000_000,
+                ),
+            ),
         )
         expected_hex = (
             "450007000000" + "00" * 263,
             "5d000451548900b9241f0095980f0055548900",
+            "5e0001e050240002000000",
             "c900189c04000000000001016e4b4c000000009028150000000000480220f5004d02",
             "cd00189c040000000000902815000000000000",
+            "7b0123",
+            "7b0124008005bb46e61702008005bb46e617020040e0fd3b374f010040e0fd3b374f01",
         )
 
         for record, expected in zip(records, expected_hex, strict=True):
@@ -2220,7 +2544,61 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "exactly 263"):
             replace(records[0], opaque_tail=b"\x00" * 262).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "exactly 22"):
-            replace(records[2], opaque_tail=b"\x00" * 21).to_bytes()
+            replace(records[3], opaque_tail=b"\x00" * 21).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "zero or one"):
+            ServerOpcode94Record.parse(
+                bytes.fromhex("5e0002e050240002000000")
+            )
+        with self.assertRaisesRegex(PacketShapeError, "requires exactly 4"):
+            replace(records[-1], time_values=()).to_bytes()
+
+    def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
+        self,
+    ) -> None:
+        records = (
+            ServerOpcode148Envelope(variant=9, record_count=0),
+            ServerOpcode148Envelope(variant=10),
+            ServerOpcode148Envelope(
+                variant=12, primary_value=4, secondary_value=5
+            ),
+            ServerOpcode148Envelope(
+                variant=13, primary_value=3, secondary_value=24
+            ),
+            ServerOpcode148Envelope(
+                variant=9,
+                record_count=12,
+                records_blob=b"\xa5" * 1_632,
+            ),
+        )
+        expected_prefixes = (
+            "94000900000000",
+            "94000a",
+            "94000c0400000005000000",
+            "94000d0300000018000000",
+            "9400090c000000",
+        )
+
+        for record, expected_prefix in zip(
+            records, expected_prefixes, strict=True
+        ):
+            with self.subTest(variant=record.variant, count=record.record_count):
+                encoded = record.to_bytes()
+                self.assertTrue(encoded.hex().startswith(expected_prefix))
+                self.assertEqual(ServerOpcode148Envelope.parse(encoded), record)
+                self.assertNotIn("primary_value", str(record.safe_dict()))
+                self.assertNotIn("secondary_value", str(record.safe_dict()))
+
+        self.assertTrue(records[0].fully_bounded)
+        self.assertFalse(records[-1].fully_bounded)
+        self.assertEqual(records[-1].safe_dict()["opaque_tail_length"], 1_632)
+        with self.assertRaisesRegex(PacketShapeError, "captured value"):
+            ServerOpcode148Envelope.parse(bytes.fromhex("94000b"))
+        with self.assertRaisesRegex(PacketShapeError, "zero-record"):
+            replace(records[0], records_blob=b"\x00").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires a body"):
+            replace(records[-1], records_blob=b"").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires two"):
+            replace(records[2], secondary_value=None).to_bytes()
 
     def test_variable_server_records_round_trip(self) -> None:
         records = fixture_variable_server_records()
@@ -4214,6 +4592,91 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
+    def test_folds_field_bootstrap_ledgers(self) -> None:
+        bounds = ServerOpcode147BoundsLedger(
+            rectangle_1=(-300, -370, 300, 220),
+            rectangle_2=(-300, -405, 300, 290),
+            values=(80_000_619, 80_000_645),
+        )
+        ledger = ServerOpcode272Ledger(
+            header_value=987_654_321,
+            start_ticks=134_115_660_000_000_000,
+            end_ticks=134_747_711_400_000_000,
+            header_values=(4_102_002, 503_333, 66_969, 66_166, 66_167),
+            entries=(
+                ServerOpcode272LedgerEntry(
+                    selector=10,
+                    flag_1=True,
+                    flag_2=False,
+                    group_1=((1, 2, 3),),
+                    group_2=(),
+                ),
+                ServerOpcode272LedgerEntry(
+                    selector=12,
+                    flag_1=False,
+                    flag_2=True,
+                    group_1=((4, 5, 6), (7, 8, 9)),
+                    group_2=((10, 11, 12),),
+                ),
+            ),
+            trailer_value=0,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(bounds.to_bytes(), ledger.to_bytes()),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_147_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_147_value_counts, {2: 1})
+        self.assertEqual(analysis.state.server_opcode_272_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_272_entry_counts, {2: 1})
+        self.assertEqual(analysis.state.server_opcode_272_group_1_count, 3)
+        self.assertEqual(analysis.state.server_opcode_272_group_2_count, 1)
+        self.assertEqual(analysis.state.server_opcode_272_flag_1_true_count, 1)
+        self.assertEqual(analysis.state.server_opcode_272_flag_2_true_count, 1)
+        self.assertEqual(
+            analysis.state.server_opcode_272_trailer_values, {0: 1}
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {
+                "server_opcode_147_bounds_ledger",
+                "server_opcode_272_ledger",
+            }
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "field_bounds_ledger_received"
+                for event in analysis.events
+            ),
+            1,
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "field_configuration_ledger_received"
+                for event in analysis.events
+            ),
+            1,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("987654321", safe)
+        self.assertNotIn("134115660000000000", safe)
+        report = render_gameplay_analysis(analysis)
+        self.assertIn("server_opcode_147=packets:1 value_counts:{2: 1}", report)
+        self.assertIn("server_opcode_272=packets:1 entry_counts:{2: 1}", report)
+
     def test_folds_server_opcode_239_envelope_variants(self) -> None:
         records = (
             ServerOpcode239Envelope(selector=9),
@@ -4282,6 +4745,242 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("2345678", safe)
         self.assertIn(
             "server_opcode_239=packets:4 selectors:{3: 1, 9: 1, 13: 1, 21: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_43_neutral_envelopes(self) -> None:
+        envelopes = (
+            ClientOpcode43Envelope(
+                sequence=4,
+                opaque_compact_body=bytes(range(9)),
+            ),
+            ClientOpcode43Envelope(
+                sequence=35,
+                opaque_identifier=3_456_789,
+                opaque_text="sensitive-label",
+                opaque_tail=b"ABCDEF",
+            ),
+        )
+        server = ServerOpcode43Envelope(
+            message_type=0,
+            opaque_body=bytes(range(16)),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(server.to_bytes(),),
+            extra_client_plaintexts=tuple(
+                envelope.to_bytes() for envelope in envelopes
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_opcode_43_packets, 2)
+        self.assertEqual(analysis.state.client_opcode_43_sequences, {4: 1, 35: 1})
+        self.assertEqual(
+            analysis.state.client_opcode_43_variants,
+            {"compact": 1, "identified_text": 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_43_text_code_units,
+            {0: 1, 15: 1},
+        )
+        self.assertEqual(analysis.state.client_opcode_43_opaque_bytes, 15)
+        self.assertEqual(analysis.state.server_opcode_43_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_43_message_types, {0: 1})
+        self.assertEqual(analysis.state.server_opcode_43_opaque_bytes, 16)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_43_envelope"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "partial"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "client_opcode_43_submitted"
+                for event in analysis.events
+            ),
+            2,
+        )
+        server_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_43_envelope"
+        ]
+        self.assertEqual(len(server_observations), 1)
+        self.assertEqual(server_observations[0].coverage.value, "partial")
+        self.assertEqual(
+            sum(
+                event.kind == "server_opcode_43_received"
+                for event in analysis.events
+            ),
+            1,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("3456789", safe)
+        self.assertNotIn("sensitive-label", safe)
+        self.assertNotIn(bytes(range(16)).hex(), safe)
+        self.assertIn(
+            "client_opcode_43=packets:2 sequences:{4: 1, 35: 1}",
+            render_gameplay_analysis(analysis),
+        )
+        self.assertIn(
+            "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:16",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_correlates_client_opcode_66_with_server_opcode_348(self) -> None:
+        requests = tuple(
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_000_000 + selector,
+                selector=selector,
+                value=0,
+                text=f"secret-{selector}",
+                control_1=0 if selector == 0 else None,
+                control_2=1 if selector == 0 else None,
+            )
+            for selector in (0, 3, 6, 17)
+        )
+        acknowledgements = (
+            ClientOpcode66Acknowledgement(selector=0, status_value=1),
+            ClientOpcode66Acknowledgement(selector=3, status_value=1),
+            ClientOpcode66Acknowledgement(
+                selector=6,
+                status_value=1,
+                optional_value=3_456_789,
+            ),
+            ClientOpcode66Acknowledgement(selector=17, status_value=1),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                request.to_bytes() for request in requests
+            ),
+            extra_client_plaintexts=tuple(
+                acknowledgement.to_bytes()
+                for acknowledgement in acknowledgements
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_348_packets, 4)
+        self.assertEqual(analysis.state.client_opcode_66_acknowledgements, 4)
+        self.assertEqual(
+            analysis.state.client_opcode_66_selectors,
+            {0: 1, 3: 1, 6: 1, 17: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_66_status_values,
+            {1: 4},
+        )
+        self.assertEqual(analysis.state.client_opcode_66_optional_values, 1)
+        self.assertEqual(
+            analysis.state.matched_client_opcode_66_acknowledgements, 4
+        )
+        self.assertEqual(
+            analysis.state.unmatched_client_opcode_66_acknowledgements, 0
+        )
+        self.assertEqual(analysis.state.pending_server_opcode_348_requests, 0)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_66_acknowledgement"
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                and observation.details["matched_request"]
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "server_opcode_348_acknowledged"
+                for event in analysis.events
+            ),
+            4,
+        )
+        self.assertFalse(
+            any("opcode-348" in warning for warning in analysis.warnings)
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("secret-", safe)
+        self.assertNotIn("3456789", safe)
+        self.assertIn(
+            "client_opcode_66=packets:4 selectors:{0: 1, 3: 1, 6: 1, 17: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_114_redacted_text_envelopes(self) -> None:
+        envelopes = (
+            ClientOpcode114TextEnvelope(
+                control_value=1,
+                opaque_text="hidden-one",
+                opaque_value=3_456_789,
+            ),
+            ClientOpcode114TextEnvelope(
+                control_value=32,
+                opaque_text="secret02",
+                opaque_value=4_567_890,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_client_plaintexts=tuple(
+                envelope.to_bytes() for envelope in envelopes
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_opcode_114_packets, 2)
+        self.assertEqual(
+            analysis.state.client_opcode_114_control_values,
+            {1: 1, 32: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_114_text_code_units,
+            {10: 1, 8: 1},
+        )
+        self.assertEqual(analysis.state.client_opcode_114_redacted_values, 2)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_114_text_envelope"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "partial"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "client_opcode_114_submitted"
+                for event in analysis.events
+            ),
+            2,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("hidden-one", safe)
+        self.assertNotIn("secret02", safe)
+        self.assertNotIn("3456789", safe)
+        self.assertNotIn("4567890", safe)
+        self.assertIn(
+            "client_opcode_114=packets:2 control_values:{1: 1, 32: 1}",
             render_gameplay_analysis(analysis),
         )
 
@@ -4561,6 +5260,11 @@ class GameplayStateFoldTest(unittest.TestCase):
             ServerOpcode93Record(
                 values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
             ),
+            ServerOpcode94Record(
+                flag=True,
+                primary_value=2_380_000,
+                secondary_value=2,
+            ),
             ServerOpcode201Record(
                 primary_value=302_104,
                 secondary_value=0,
@@ -4574,6 +5278,29 @@ class GameplayStateFoldTest(unittest.TestCase):
                 numeric_value=1_386_640,
                 trailing_value=0,
             ),
+            ServerOpcode379Record(variant=35),
+            ServerOpcode379Record(
+                variant=36,
+                time_values=(
+                    150_842_304_000_000_000,
+                    150_842_304_000_000_000,
+                    94_354_848_000_000_000,
+                    94_354_848_000_000_000,
+                ),
+            ),
+            ServerOpcode148Envelope(variant=9, record_count=0),
+            ServerOpcode148Envelope(variant=10),
+            ServerOpcode148Envelope(
+                variant=12, primary_value=4, secondary_value=5
+            ),
+            ServerOpcode148Envelope(
+                variant=13, primary_value=3, secondary_value=24
+            ),
+            ServerOpcode148Envelope(
+                variant=9,
+                record_count=12,
+                records_blob=b"\xa5" * 1_632,
+            ),
         )
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -4583,13 +5310,13 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 4)
+        self.assertEqual(analysis.state.neutral_server_records, 12)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
-            {69: 1, 93: 1, 201: 1, 205: 1},
+            {69: 1, 93: 1, 94: 1, 148: 5, 201: 1, 205: 1, 379: 2},
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 13)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 285)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 33)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_917)
         observations = [
             observation
             for observation in analysis.observations
@@ -4597,7 +5324,20 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            ["partial", "full", "partial", "full"],
+            [
+                "partial",
+                "full",
+                "full",
+                "partial",
+                "full",
+                "full",
+                "full",
+                "full",
+                "full",
+                "full",
+                "full",
+                "partial",
+            ],
         )
         self.assertEqual(
             len(
@@ -4607,11 +5347,11 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            4,
+            12,
         )
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:4 opcodes:",
+            "neutral_server_records=packets:12 opcodes:",
             render_gameplay_analysis(analysis),
         )
 
@@ -4762,6 +5502,71 @@ class GameplayStateFoldTest(unittest.TestCase):
             observation.details["compact_variant_header_hex"], "00" * 7
         )
         self.assertIn("partially opaque", observation.issues[0])
+
+    def test_folds_skill_record_request_update_acknowledgement_lifecycle(
+        self,
+    ) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                skill_record_lifecycle=True,
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.skill_levels[2_001_005], 7)
+        self.assertEqual(analysis.state.skill_level_change_requests, 1)
+        self.assertEqual(analysis.state.skill_record_updates, 2)
+        self.assertEqual(analysis.state.skill_record_update_records, 1)
+        self.assertEqual(analysis.state.skill_record_request_matches, 1)
+        self.assertEqual(analysis.state.skill_record_request_mismatches, 0)
+        self.assertEqual(analysis.state.skill_record_updates_without_request, 0)
+        self.assertEqual(analysis.state.pending_skill_level_change_requests, 0)
+        self.assertEqual(
+            analysis.state.skill_record_update_acknowledgements, 2
+        )
+        self.assertEqual(
+            analysis.state.matched_skill_record_update_acknowledgements, 2
+        )
+        self.assertEqual(
+            analysis.state.unmatched_skill_record_update_acknowledgements, 0
+        )
+        self.assertEqual(
+            analysis.state.pending_skill_record_update_acknowledgements, 0
+        )
+        self.assertEqual(
+            analysis.state.skill_record_updates_by_flags,
+            {"1:0": 1, "0:0": 1},
+        )
+        self.assertEqual(
+            analysis.state.skill_record_acknowledgement_control_values,
+            {346: 2},
+        )
+        kinds = [event.kind for event in analysis.events]
+        self.assertEqual(kinds.count("skill_level_change_requested"), 1)
+        self.assertEqual(kinds.count("skill_records_updated"), 2)
+        self.assertEqual(kinds.count("skill_record_update_acknowledged"), 2)
+        progression = analysis.safe_dict()["state"]["progression"]
+        self.assertEqual(
+            progression["skill_record_updates"]["request_matches"], 1
+        )
+        observations = {
+            item.kind: item
+            for item in analysis.observations
+            if item.kind
+            in {
+                "skill_level_change_request",
+                "skill_record_update",
+                "skill_record_update_acknowledgement",
+            }
+        }
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations.values()
+            )
+        )
 
     def test_folds_remote_player_entry_refresh_and_leave_lifecycle(
         self,

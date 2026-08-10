@@ -2736,6 +2736,124 @@ class MobHealthPercentageUpdate:
 
 
 @dataclass(frozen=True)
+class SkillRecordEntry:
+    skill_id: int
+    level: int
+    auxiliary_value: int
+
+    def _validate(self) -> None:
+        if not 0 <= self.skill_id <= 0x7FFF_FFFF:
+            raise PacketShapeError("skill record id must fit a non-negative int32")
+        for name, value in (
+            ("level", self.level),
+            ("auxiliary_value", self.auxiliary_value),
+        ):
+            if not -0x8000_0000 <= value <= 0x7FFF_FFFF:
+                raise PacketShapeError(f"skill record {name} must fit int32")
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack(
+            "<iii", self.skill_id, self.level, self.auxiliary_value
+        )
+
+
+@dataclass(frozen=True)
+class SkillRecordUpdate:
+    flag_a: bool
+    flag_b: bool
+    records: tuple[SkillRecordEntry, ...]
+    trailing_value: int
+    opcode: int = 46
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SkillRecordUpdate":
+        reader = PacketReader(payload, packet_name="skill_record_update")
+        _expect_opcode(reader, 46)
+        flag_a_raw = reader.u8("flag_a")
+        flag_b_raw = reader.u8("flag_b")
+        for name, value in (("flag_a", flag_a_raw), ("flag_b", flag_b_raw)):
+            if value not in {0, 1}:
+                raise PacketShapeError(
+                    f"skill_record_update.{name} is {value}, expected boolean 0 or 1"
+                )
+        record_count = reader.i16("record_count")
+        if record_count < 0:
+            raise PacketShapeError(
+                "skill_record_update.record_count must be non-negative"
+            )
+        records = tuple(
+            SkillRecordEntry(
+                skill_id=reader.i32(f"records[{index}].skill_id"),
+                level=reader.i32(f"records[{index}].level"),
+                auxiliary_value=reader.i32(
+                    f"records[{index}].auxiliary_value"
+                ),
+            )
+            for index in range(record_count)
+        )
+        trailing_value = reader.u8("trailing_value")
+        reader.finish()
+        update = cls(
+            flag_a=bool(flag_a_raw),
+            flag_b=bool(flag_b_raw),
+            records=records,
+            trailing_value=trailing_value,
+        )
+        update._validate()
+        return update
+
+    def _validate(self) -> None:
+        if len(self.records) > 0x7FFF:
+            raise PacketShapeError(
+                "skill record update has more than 32767 records"
+            )
+        if not 0 <= self.trailing_value <= 0xFF:
+            raise PacketShapeError(
+                "skill record update trailing value must fit uint8"
+            )
+        for record in self.records:
+            record._validate()
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "flag_a": self.flag_a,
+            "flag_b": self.flag_b,
+            "record_count": len(self.records),
+            "records": [
+                {
+                    "skill_id": record.skill_id,
+                    "level": record.level,
+                    "auxiliary_value": record.auxiliary_value,
+                }
+                for record in self.records
+            ],
+            "trailing_value": self.trailing_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return b"".join(
+                (
+                    struct.pack(
+                        "<HBBh",
+                        self.opcode,
+                        int(self.flag_a),
+                        int(self.flag_b),
+                        len(self.records),
+                    ),
+                    *(record.to_bytes() for record in self.records),
+                    struct.pack("<B", self.trailing_value),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"skill record update field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class CharacterStatUpdate:
     request_flag: int
     stat_mask: int
@@ -4964,6 +5082,38 @@ class ServerAttackRelay:
 
 
 @dataclass(frozen=True)
+class SkillLevelChangeRequest:
+    client_tick: int
+    skill_id: int
+    opcode: int = 103
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SkillLevelChangeRequest":
+        reader = PacketReader(payload, packet_name="skill_level_change_request")
+        _expect_opcode(reader, 103)
+        request = cls(
+            client_tick=reader.u32("client_tick"),
+            skill_id=reader.u32("skill_id"),
+        )
+        reader.finish()
+        return request
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "client_tick": self.client_tick,
+            "skill_id": self.skill_id,
+        }
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack("<HII", self.opcode, self.client_tick, self.skill_id)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"skill level change request field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ClientSkillUseRequest:
     client_tick: int
     skill_id: int
@@ -5011,6 +5161,294 @@ class ClientSkillUseRequest:
             self.skill_id,
             self.skill_level,
             self.trailing_value,
+        )
+
+
+@dataclass(frozen=True)
+class ClientOpcode43Envelope:
+    """Capture-bounded neutral envelopes for client opcode 43."""
+
+    sequence: int
+    opaque_identifier: int | None = field(default=None, repr=False)
+    opaque_text: str | None = field(default=None, repr=False)
+    opaque_tail: bytes = field(default=b"", repr=False)
+    opaque_compact_body: bytes = field(default=b"", repr=False)
+    opcode: int = 43
+
+    @property
+    def variant(self) -> str:
+        return "compact" if self.opaque_identifier is None else "identified_text"
+
+    @property
+    def text_code_units(self) -> int:
+        if self.opaque_text is None:
+            return 0
+        return len(self.opaque_text.encode("utf-16-le")) // 2
+
+    @property
+    def opaque_byte_count(self) -> int:
+        return len(self.opaque_compact_body) + len(self.opaque_tail)
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode43Envelope":
+        reader = PacketReader(payload, packet_name="client_opcode_43")
+        _expect_opcode(reader, 43)
+        sequence = reader.u8("sequence")
+        if reader.remaining == 9:
+            opaque_compact_body = reader.bytes(9, "opaque_compact_body")
+            reader.finish()
+            return cls(
+                sequence=sequence,
+                opaque_compact_body=opaque_compact_body,
+            )
+
+        opaque_identifier = reader.u32("opaque_identifier")
+        opaque_text = reader.utf16_string("opaque_text", trailing_byte=True)
+        opaque_tail = reader.bytes(6, "opaque_tail")
+        reader.finish()
+        return cls(
+            sequence=sequence,
+            opaque_identifier=opaque_identifier,
+            opaque_text=opaque_text,
+            opaque_tail=opaque_tail,
+        )
+
+    def safe_dict(self) -> dict[str, int | bool | str]:
+        return {
+            "sequence": self.sequence,
+            "variant": self.variant,
+            "identifier_present": self.opaque_identifier is not None,
+            "text_code_units": self.text_code_units,
+            "text_redacted": self.opaque_text is not None,
+            "opaque_bytes": self.opaque_byte_count,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 43:
+            raise PacketShapeError("client opcode-43 envelope opcode must be 43")
+        if not 0 <= self.sequence <= 0xFF:
+            raise PacketShapeError("client opcode-43 sequence must fit in u8")
+
+        prefix = struct.pack("<HB", self.opcode, self.sequence)
+        if self.opaque_identifier is None:
+            if self.opaque_text is not None or self.opaque_tail:
+                raise PacketShapeError(
+                    "client opcode-43 compact envelope cannot contain text "
+                    "or a tail"
+                )
+            if len(self.opaque_compact_body) != 9:
+                raise PacketShapeError(
+                    "client opcode-43 compact envelope needs 9 opaque bytes"
+                )
+            return prefix + self.opaque_compact_body
+
+        if not 0 <= self.opaque_identifier <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-43 identifier must fit in u32"
+            )
+        if self.opaque_text is None:
+            raise PacketShapeError(
+                "client opcode-43 identified-text envelope needs text"
+            )
+        if len(self.opaque_tail) != 6:
+            raise PacketShapeError(
+                "client opcode-43 identified-text envelope needs a "
+                "6-byte tail"
+            )
+        if self.opaque_compact_body:
+            raise PacketShapeError(
+                "client opcode-43 identified-text envelope cannot contain "
+                "a compact body"
+            )
+        return (
+            prefix
+            + struct.pack("<I", self.opaque_identifier)
+            + encode_utf16_string(self.opaque_text, trailing_byte=True)
+            + self.opaque_tail
+        )
+
+
+@dataclass(frozen=True)
+class ServerOpcode43Envelope:
+    """Capture-bounded neutral fixed server response for opcode 43."""
+
+    message_type: int
+    opaque_body: bytes = field(repr=False)
+    opcode: int = 43
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode43Envelope":
+        reader = PacketReader(payload, packet_name="server_opcode_43")
+        _expect_opcode(reader, 43)
+        envelope = cls(
+            message_type=reader.u8("message_type"),
+            opaque_body=reader.bytes(16, "opaque_body"),
+        )
+        reader.finish()
+        return envelope
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "message_type": self.message_type,
+            "opaque_bytes": len(self.opaque_body),
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 43:
+            raise PacketShapeError("server opcode-43 envelope opcode must be 43")
+        if not 0 <= self.message_type <= 0xFF:
+            raise PacketShapeError("server opcode-43 message type must fit in u8")
+        if len(self.opaque_body) != 16:
+            raise PacketShapeError(
+                "server opcode-43 envelope needs a 16-byte opaque body"
+            )
+        return struct.pack("<HB", self.opcode, self.message_type) + self.opaque_body
+
+
+@dataclass(frozen=True)
+class ClientOpcode66Acknowledgement:
+    """Capture-bounded acknowledgement for server opcode 348."""
+
+    selector: int
+    status_value: int
+    optional_value: int | None = field(default=None, repr=False)
+    opcode: int = 66
+
+    _CAPTURED_SHORT_PAIRS = frozenset(
+        {
+            (0, 1),
+            (0, 0xFF),
+            (3, 1),
+            (6, 0),
+            (17, 1),
+        }
+    )
+    _CAPTURED_VALUE_PAIR = (6, 1)
+
+    @property
+    def shape(self) -> str:
+        suffix = "value" if self.optional_value is not None else "short"
+        return f"selector={self.selector}:status={self.status_value}:{suffix}"
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode66Acknowledgement":
+        reader = PacketReader(payload, packet_name="client_opcode_66")
+        _expect_opcode(reader, 66)
+        selector = reader.u8("selector")
+        status_value = reader.u8("status_value")
+        pair = (selector, status_value)
+        if reader.remaining == 0:
+            if pair not in cls._CAPTURED_SHORT_PAIRS:
+                raise PacketShapeError(
+                    "client opcode-66 selector/status pair is not a captured "
+                    f"short shape: {selector}/{status_value}"
+                )
+            return cls(selector=selector, status_value=status_value)
+        if pair != cls._CAPTURED_VALUE_PAIR or reader.remaining != 4:
+            raise PacketShapeError(
+                "client opcode-66 optional-value shape requires selector 6, "
+                "status 1, and one u32"
+            )
+        optional_value = reader.u32("optional_value")
+        reader.finish()
+        return cls(
+            selector=selector,
+            status_value=status_value,
+            optional_value=optional_value,
+        )
+
+    def safe_dict(self) -> dict[str, int | bool | str]:
+        return {
+            "selector": self.selector,
+            "status_value": self.status_value,
+            "shape": self.shape,
+            "optional_value_present": self.optional_value is not None,
+            "optional_value_redacted": self.optional_value is not None,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 66:
+            raise PacketShapeError(
+                "client opcode-66 acknowledgement opcode must be 66"
+            )
+        pair = (self.selector, self.status_value)
+        try:
+            prefix = struct.pack("<HBB", self.opcode, *pair)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-66 selector/status is out of range: {error}"
+            ) from error
+        if self.optional_value is None:
+            if pair not in self._CAPTURED_SHORT_PAIRS:
+                raise PacketShapeError(
+                    "client opcode-66 selector/status pair is not a captured "
+                    f"short shape: {self.selector}/{self.status_value}"
+                )
+            return prefix
+        if pair != self._CAPTURED_VALUE_PAIR:
+            raise PacketShapeError(
+                "client opcode-66 optional value requires selector 6 and "
+                "status 1"
+            )
+        if not 0 <= self.optional_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-66 optional value must fit in u32"
+            )
+        return prefix + struct.pack("<I", self.optional_value)
+
+
+@dataclass(frozen=True)
+class ClientOpcode114TextEnvelope:
+    """Capture-bounded redacted text envelope for client opcode 114."""
+
+    control_value: int
+    opaque_text: str = field(repr=False)
+    opaque_value: int = field(repr=False)
+    opcode: int = 114
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.opaque_text.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode114TextEnvelope":
+        reader = PacketReader(payload, packet_name="client_opcode_114")
+        _expect_opcode(reader, 114)
+        envelope = cls(
+            control_value=reader.u8("control_value"),
+            opaque_text=reader.utf16_string(
+                "opaque_text", trailing_byte=True
+            ),
+            opaque_value=reader.u32("opaque_value"),
+        )
+        reader.finish()
+        return envelope
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "control_value": self.control_value,
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+            "opaque_value_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 114:
+            raise PacketShapeError(
+                "client opcode-114 envelope opcode must be 114"
+            )
+        if not 0 <= self.control_value <= 0xFF:
+            raise PacketShapeError(
+                "client opcode-114 control value must fit in u8"
+            )
+        if not 0 <= self.opaque_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-114 opaque value must fit in u32"
+            )
+        return (
+            struct.pack("<HB", self.opcode, self.control_value)
+            + encode_utf16_string(self.opaque_text, trailing_byte=True)
+            + struct.pack("<I", self.opaque_value)
         )
 
 
@@ -6895,6 +7333,264 @@ class ServerOpcode323PositionedEffectRecord:
 
 
 @dataclass(frozen=True)
+class ServerOpcode147BoundsLedger:
+    """Handler-bounded rectangles and counted values from opcode 147."""
+
+    rectangle_1: tuple[int, int, int, int]
+    rectangle_2: tuple[int, int, int, int]
+    values: tuple[int, ...] = field(repr=False)
+    opcode: int = 147
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode147BoundsLedger":
+        reader = PacketReader(payload, packet_name="server_opcode_147")
+        _expect_opcode(reader, 147)
+        rectangle_1 = tuple(
+            reader.i32(f"rectangle_1[{index}]") for index in range(4)
+        )
+        rectangle_2 = tuple(
+            reader.i32(f"rectangle_2[{index}]") for index in range(4)
+        )
+        value_count = reader.i32("value_count")
+        if value_count < 0 or value_count > reader.remaining // 4:
+            raise PacketShapeError(
+                "server opcode-147 value count does not fit the packet: "
+                f"{value_count} with {reader.remaining} bytes remaining"
+            )
+        values = tuple(
+            reader.i32(f"values[{index}]") for index in range(value_count)
+        )
+        reader.finish()
+        return cls(
+            rectangle_1=rectangle_1,  # type: ignore[arg-type]
+            rectangle_2=rectangle_2,  # type: ignore[arg-type]
+            values=values,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "rectangles": [list(self.rectangle_1), list(self.rectangle_2)],
+            "value_count": len(self.values),
+            "values_redacted": bool(self.values),
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 147:
+            raise PacketShapeError("server opcode-147 ledger opcode must be 147")
+        if len(self.rectangle_1) != 4 or len(self.rectangle_2) != 4:
+            raise PacketShapeError(
+                "server opcode-147 rectangles must contain four i32 values"
+            )
+        if len(self.values) > 0x7FFF_FFFF:
+            raise PacketShapeError(
+                "server opcode-147 value count exceeds signed i32"
+            )
+        try:
+            prefix = struct.pack(
+                "<H8ii",
+                self.opcode,
+                *self.rectangle_1,
+                *self.rectangle_2,
+                len(self.values),
+            )
+            return prefix + struct.pack(
+                f"<{len(self.values)}i", *self.values
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-147 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode272LedgerEntry:
+    """One counted, neutral opcode-272 ledger entry."""
+
+    selector: int = field(repr=False)
+    flag_1: bool
+    flag_2: bool
+    group_1: tuple[tuple[int, int, int], ...] = field(repr=False)
+    group_2: tuple[tuple[int, int, int], ...] = field(repr=False)
+
+    @staticmethod
+    def _read_group(
+        reader: PacketReader, *, field_name: str
+    ) -> tuple[tuple[int, int, int], ...]:
+        count = reader.i32(f"{field_name}.count")
+        if count < 0 or count > reader.remaining // 12:
+            raise PacketShapeError(
+                f"server opcode-272 {field_name} count does not fit the "
+                f"packet: {count} with {reader.remaining} bytes remaining"
+            )
+        return tuple(
+            tuple(
+                reader.i32(f"{field_name}[{index}][{member}]")
+                for member in range(3)
+            )
+            for index in range(count)
+        )  # type: ignore[return-value]
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, index: int
+    ) -> "ServerOpcode272LedgerEntry":
+        selector = reader.i32(f"entries[{index}].selector")
+        flag_values = (
+            reader.u8(f"entries[{index}].flag_1"),
+            reader.u8(f"entries[{index}].flag_2"),
+        )
+        if any(value not in {0, 1} for value in flag_values):
+            raise PacketShapeError(
+                "server opcode-272 entry flags must be boolean 0 or 1: "
+                f"{flag_values[0]}/{flag_values[1]}"
+            )
+        return cls(
+            selector=selector,
+            flag_1=bool(flag_values[0]),
+            flag_2=bool(flag_values[1]),
+            group_1=cls._read_group(
+                reader, field_name=f"entries[{index}].group_1"
+            ),
+            group_2=cls._read_group(
+                reader, field_name=f"entries[{index}].group_2"
+            ),
+        )
+
+    def to_bytes(self) -> bytes:
+        if type(self.flag_1) is not bool or type(self.flag_2) is not bool:
+            raise PacketShapeError(
+                "server opcode-272 entry flags must be booleans"
+            )
+        if len(self.group_1) > 0x7FFF_FFFF or len(self.group_2) > 0x7FFF_FFFF:
+            raise PacketShapeError(
+                "server opcode-272 group count exceeds signed i32"
+            )
+        parts: list[bytes] = []
+        try:
+            parts.append(
+                struct.pack(
+                    "<i??i",
+                    self.selector,
+                    self.flag_1,
+                    self.flag_2,
+                    len(self.group_1),
+                )
+            )
+            for group in self.group_1:
+                if len(group) != 3:
+                    raise PacketShapeError(
+                        "server opcode-272 group members must contain three i32 values"
+                    )
+                parts.append(struct.pack("<3i", *group))
+            parts.append(struct.pack("<i", len(self.group_2)))
+            for group in self.group_2:
+                if len(group) != 3:
+                    raise PacketShapeError(
+                        "server opcode-272 group members must contain three i32 values"
+                    )
+                parts.append(struct.pack("<3i", *group))
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-272 entry value is out of range: {error}"
+            ) from error
+        return b"".join(parts)
+
+
+@dataclass(frozen=True)
+class ServerOpcode272Ledger:
+    """Primitive-traced, fully consumed opcode-272 field ledger."""
+
+    header_value: int = field(repr=False)
+    start_ticks: int = field(repr=False)
+    end_ticks: int = field(repr=False)
+    header_values: tuple[int, int, int, int, int] = field(repr=False)
+    entries: tuple[ServerOpcode272LedgerEntry, ...]
+    trailer_value: int
+    opcode: int = 272
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode272Ledger":
+        reader = PacketReader(payload, packet_name="server_opcode_272")
+        _expect_opcode(reader, 272)
+        header_value = reader.i32("header_value")
+        start_ticks = reader.i64("start_ticks")
+        end_ticks = reader.i64("end_ticks")
+        header_values = tuple(
+            reader.i32(f"header_values[{index}]") for index in range(5)
+        )
+        entry_count = reader.i32("entry_count")
+        if entry_count < 0 or entry_count > max(0, (reader.remaining - 4) // 14):
+            raise PacketShapeError(
+                "server opcode-272 entry count does not fit the packet: "
+                f"{entry_count} with {reader.remaining} bytes remaining"
+            )
+        entries = tuple(
+            ServerOpcode272LedgerEntry.parse_from(reader, index=index)
+            for index in range(entry_count)
+        )
+        trailer_value = reader.i32("trailer_value")
+        reader.finish()
+        return cls(
+            header_value=header_value,
+            start_ticks=start_ticks,
+            end_ticks=end_ticks,
+            header_values=header_values,  # type: ignore[arg-type]
+            entries=entries,
+            trailer_value=trailer_value,
+        )
+
+    @property
+    def group_1_count(self) -> int:
+        return sum(len(entry.group_1) for entry in self.entries)
+
+    @property
+    def group_2_count(self) -> int:
+        return sum(len(entry.group_2) for entry in self.entries)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "entry_count": len(self.entries),
+            "flag_1_true_count": sum(entry.flag_1 for entry in self.entries),
+            "flag_2_true_count": sum(entry.flag_2 for entry in self.entries),
+            "group_1_count": self.group_1_count,
+            "group_2_count": self.group_2_count,
+            "group_1_sizes": [len(entry.group_1) for entry in self.entries],
+            "group_2_sizes": [len(entry.group_2) for entry in self.entries],
+            "trailer_value": self.trailer_value,
+            "datetime_values_redacted": True,
+            "numeric_values_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 272:
+            raise PacketShapeError("server opcode-272 ledger opcode must be 272")
+        if len(self.header_values) != 5:
+            raise PacketShapeError(
+                "server opcode-272 header must contain five i32 values"
+            )
+        if len(self.entries) > 0x7FFF_FFFF:
+            raise PacketShapeError(
+                "server opcode-272 entry count exceeds signed i32"
+            )
+        try:
+            prefix = struct.pack(
+                "<Hiqq5ii",
+                self.opcode,
+                self.header_value,
+                self.start_ticks,
+                self.end_ticks,
+                *self.header_values,
+                len(self.entries),
+            )
+            trailer = struct.pack("<i", self.trailer_value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-272 value is out of range: {error}"
+            ) from error
+        return prefix + b"".join(entry.to_bytes() for entry in self.entries) + trailer
+
+
+@dataclass(frozen=True)
 class ServerOpcode348TextEnvelope:
     """Capture-bounded, identifier-safe text branches of server opcode 348."""
 
@@ -7097,6 +7793,193 @@ class ServerOpcode93Record:
 
 
 @dataclass(frozen=True)
+class ServerOpcode94Record:
+    """Fully bounded opcode-94 flag and signed integer pair."""
+
+    flag: bool
+    primary_value: int
+    secondary_value: int
+    opcode: int = 94
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode94Record":
+        reader = PacketReader(payload, packet_name="server_opcode_94_record")
+        _expect_opcode(reader, 94)
+        raw_flag = reader.u8("flag")
+        if raw_flag not in {0, 1}:
+            raise PacketShapeError(
+                "server opcode-94 flag must be encoded as zero or one"
+            )
+        record = cls(
+            flag=bool(raw_flag),
+            primary_value=reader.i32("primary_value"),
+            secondary_value=reader.i32("secondary_value"),
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "flag": self.flag,
+            "primary_value": self.primary_value,
+            "secondary_value": self.secondary_value,
+            "typed_value_count": 3,
+            "opaque_tail_length": 0,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 94:
+            raise PacketShapeError("server opcode-94 record opcode must be 94")
+        if not isinstance(self.flag, bool):
+            raise PacketShapeError("server opcode-94 flag must be a bool")
+        try:
+            return struct.pack(
+                "<HBii",
+                self.opcode,
+                int(self.flag),
+                self.primary_value,
+                self.secondary_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-94 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode148Envelope:
+    """Opcode-148 list/control variants with a lossless legacy record body."""
+
+    variant: int
+    record_count: int | None = None
+    primary_value: int | None = field(default=None, repr=False)
+    secondary_value: int | None = field(default=None, repr=False)
+    records_blob: bytes = field(default=b"", repr=False)
+    opcode: int = 148
+
+    RECORDS_VARIANT = 9
+    EMPTY_VARIANT = 10
+    PAIR_VARIANTS = frozenset({12, 13})
+    CURRENT_IL2CPP_RECORD_MASK = 0x9
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode148Envelope":
+        reader = PacketReader(payload, packet_name="server_opcode_148_envelope")
+        _expect_opcode(reader, 148)
+        variant = reader.u8("variant")
+        if variant == cls.RECORDS_VARIANT:
+            record = cls(
+                variant=variant,
+                record_count=reader.i32("record_count"),
+                records_blob=reader.bytes(reader.remaining, "records_blob"),
+            )
+        elif variant == cls.EMPTY_VARIANT:
+            record = cls(variant=variant)
+        elif variant in cls.PAIR_VARIANTS:
+            record = cls(
+                variant=variant,
+                primary_value=reader.i32("primary_value"),
+                secondary_value=reader.i32("secondary_value"),
+            )
+        else:
+            raise PacketShapeError(
+                "server opcode-148 variant must be captured value 9, 10, "
+                f"12, or 13, got {variant}"
+            )
+        reader.finish()
+        record._validate()
+        return record
+
+    @property
+    def fully_bounded(self) -> bool:
+        return not self.records_blob
+
+    def _validate(self) -> None:
+        if self.opcode != 148:
+            raise PacketShapeError("server opcode-148 envelope opcode must be 148")
+        if self.variant == self.RECORDS_VARIANT:
+            if self.record_count is None or self.record_count < 0:
+                raise PacketShapeError(
+                    "server opcode-148 record count must be non-negative"
+                )
+            if self.primary_value is not None or self.secondary_value is not None:
+                raise PacketShapeError(
+                    "server opcode-148 records variant cannot include pair values"
+                )
+            if self.record_count == 0 and self.records_blob:
+                raise PacketShapeError(
+                    "server opcode-148 zero-record variant cannot include a body"
+                )
+            if self.record_count > 0 and not self.records_blob:
+                raise PacketShapeError(
+                    "server opcode-148 non-empty record variant requires a body"
+                )
+            return
+        if self.variant == self.EMPTY_VARIANT:
+            if (
+                self.record_count is not None
+                or self.primary_value is not None
+                or self.secondary_value is not None
+                or self.records_blob
+            ):
+                raise PacketShapeError(
+                    "server opcode-148 empty variant cannot include values or a body"
+                )
+            return
+        if self.variant in self.PAIR_VARIANTS:
+            if self.primary_value is None or self.secondary_value is None:
+                raise PacketShapeError(
+                    "server opcode-148 pair variant requires two signed integers"
+                )
+            if self.record_count is not None or self.records_blob:
+                raise PacketShapeError(
+                    "server opcode-148 pair variant cannot include records"
+                )
+            return
+        raise PacketShapeError(
+            "server opcode-148 variant must be captured value 9, 10, 12, or 13"
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        details: dict[str, object] = {
+            "variant": self.variant,
+            "current_il2cpp_record_mask": self.CURRENT_IL2CPP_RECORD_MASK,
+            "typed_value_count": 1,
+            "opaque_tail_length": len(self.records_blob),
+        }
+        if self.variant == self.RECORDS_VARIANT:
+            details["record_count"] = self.record_count
+            details["typed_value_count"] = 2
+        elif self.variant in self.PAIR_VARIANTS:
+            details["pair_values_redacted"] = True
+            details["typed_value_count"] = 3
+        return details
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            encoded = struct.pack("<HB", self.opcode, self.variant)
+            if self.variant == self.RECORDS_VARIANT:
+                assert self.record_count is not None
+                return (
+                    encoded
+                    + struct.pack("<i", self.record_count)
+                    + bytes(self.records_blob)
+                )
+            if self.variant in self.PAIR_VARIANTS:
+                assert self.primary_value is not None
+                assert self.secondary_value is not None
+                return encoded + struct.pack(
+                    "<ii", self.primary_value, self.secondary_value
+                )
+            return encoded
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-148 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode201Record:
     """Opcode-201 typed prefix with a capture-fixed opaque suffix."""
 
@@ -7212,6 +8095,73 @@ class ServerOpcode205Record:
 
 
 @dataclass(frozen=True)
+class ServerOpcode379Record:
+    """Opcode-379 discriminator with its optional four datetime values."""
+
+    variant: int
+    time_values: tuple[int, ...] = ()
+    opcode: int = 379
+
+    SHORT_VARIANT = 35
+    TIMESTAMPS_VARIANT = 36
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode379Record":
+        reader = PacketReader(payload, packet_name="server_opcode_379_record")
+        _expect_opcode(reader, 379)
+        variant = reader.u8("variant")
+        time_values: tuple[int, ...] = ()
+        if variant == cls.TIMESTAMPS_VARIANT:
+            time_values = tuple(
+                reader.i64(f"time_values[{index}]") for index in range(4)
+            )
+        elif variant != cls.SHORT_VARIANT:
+            raise PacketShapeError(
+                "server opcode-379 variant must be captured value 35 or 36"
+            )
+        record = cls(variant=variant, time_values=time_values)
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 379:
+            raise PacketShapeError("server opcode-379 record opcode must be 379")
+        expected_count = 4 if self.variant == self.TIMESTAMPS_VARIANT else 0
+        if self.variant not in {self.SHORT_VARIANT, self.TIMESTAMPS_VARIANT}:
+            raise PacketShapeError(
+                "server opcode-379 variant must be captured value 35 or 36"
+            )
+        if len(self.time_values) != expected_count:
+            raise PacketShapeError(
+                f"server opcode-379 variant {self.variant} requires exactly "
+                f"{expected_count} datetime values"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "variant": self.variant,
+            "time_values": list(self.time_values),
+            "typed_value_count": 1 + len(self.time_values),
+            "opaque_tail_length": 0,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                f"<HB{len(self.time_values)}q",
+                self.opcode,
+                self.variant,
+                *self.time_values,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-379 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class FixedServerEmptyRecord:
     opcode: int
 
@@ -7293,6 +8243,37 @@ class FixedServerU16Record:
         except struct.error as error:
             raise PacketShapeError(
                 f"fixed-server uint16 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class FixedServerI32Record:
+    opcode: int
+    value: int
+
+    SUPPORTED_OPCODES = {60}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerI32Record":
+        reader = PacketReader(payload, packet_name="fixed_server_i32_record")
+        record = cls(opcode=reader.u16("opcode"), value=reader.i32("value"))
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported int32 fixed-server opcode {self.opcode}"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<Hi", self.opcode, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"fixed-server int32 value is out of range: {error}"
             ) from error
 
 
@@ -7797,6 +8778,50 @@ class ClientOpcode309Acknowledgement:
 
     def to_bytes(self) -> bytes:
         return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
+class SkillRecordUpdateAcknowledgement:
+    control_value: int
+    client_tick: int
+    trailing_value: int
+    opcode: int = 293
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SkillRecordUpdateAcknowledgement":
+        reader = PacketReader(
+            payload, packet_name="skill_record_update_acknowledgement"
+        )
+        _expect_opcode(reader, 293)
+        acknowledgement = cls(
+            control_value=reader.u32("control_value"),
+            client_tick=reader.u32("client_tick"),
+            trailing_value=reader.u16("trailing_value"),
+        )
+        reader.finish()
+        return acknowledgement
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "control_value": self.control_value,
+            "client_tick": self.client_tick,
+            "trailing_value": self.trailing_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack(
+                "<HIIH",
+                self.opcode,
+                self.control_value,
+                self.client_tick,
+                self.trailing_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                "skill record update acknowledgement field is out of range: "
+                f"{error}"
+            ) from error
 
 
 @dataclass(frozen=True)

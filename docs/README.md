@@ -2,7 +2,7 @@
 
 These notes preserve the working context for the Taiwan/Hong Kong MapleStory
 Classic Unity client, its Wine environment, network capture setup, and the
-custom-server experiment as of 2026-08-09.
+custom-server experiment as of 2026-08-10.
 
 ## Start here
 
@@ -34,7 +34,9 @@ custom-server experiment as of 2026-08-09.
 │   ├── maplestory_classic_il2cpp/
 │   ├── maple_protocol_captures/
 │   └── maple_custom_server_observed/
-└── tools/maplestory_classic_server/
+└── tools/
+    ├── maplestory_classic_server/
+    └── il2cpp_packet_dump/      # pinned handler/shape dump and validator
 ```
 
 The MapleStory work is deliberately separate from the Phoenix application in

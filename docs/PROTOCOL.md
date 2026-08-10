@@ -128,6 +128,88 @@ type-`1` envelopes. Every packet consumes exactly and round-trips byte-for-byte;
 the fold emits type and opaque-byte counts without exposing any body. The
 payload meanings remain partial rather than being labeled as security traffic.
 
+## World opcode `43` neutral envelopes
+
+Client and server opcode `43` use separate capture-bounded envelopes. The
+leading client byte is named only as a sequence: values `1..12` occur once in
+stream `92`, while stream `126` contains `1..29` and `32..35`. Identical values
+do not select a stable layout across the captures, so the decoder branches on
+the complete packet shape rather than inventing discriminator semantics:
+
+```text
+client identified-text envelope:
+  uint16 opcode = 43
+  uint8 sequence
+  uint32 opaque_identifier          # redacted
+  uint16 text_code_units
+  utf16le[text_code_units] opaque_text
+  uint8 zero_terminator = 0
+  byte[6] opaque_tail
+
+client compact envelope:
+  uint16 opcode = 43
+  uint8 sequence
+  byte[9] opaque_body
+
+server envelope:
+  uint16 opcode = 43
+  uint8 message_type
+  byte[16] opaque_body
+```
+
+Stream `92` contributes nine identified-text clients, three compact clients,
+and three server packets; all server message types are zero. Stream `126`
+contributes 33 identified-text clients. Text lengths are `0:3`, `4:5`, `5:9`,
+`6:27`, and `8:1` code units across client packets; zero represents the compact
+form, not captured text. All 48 packets round-trip exactly as partial semantic
+observations. Safe state/events expose only sequence, variant, text length,
+message type, and opaque-byte counts; the identifier, text, and byte bodies are
+never emitted.
+
+The automatic shape manifest now uses two competing client candidates rather
+than the earlier stream-`92` switch, which incorrectly treated sequence values
+`4`, `8`, and `12` as compact-only. Exact packet length makes the candidates
+unambiguous, and native validation consumes all 45 client packets without a
+short read, trailing byte, unsupported variant, or ambiguity.
+
+An exact captured 19-byte server envelope was injected into an already active
+browser-free custom-server session. The fold added one partial opcode-`43`
+event, core phase/map/player/inventory/progression state stayed unchanged,
+matched heartbeats advanced from 173 to 176, and the connection remained
+active with zero failures. No client opcode-`43` response appeared, so this
+proves bounded non-stalling acceptance only—not security, status, or
+request/response semantics.
+
+## Client opcode `114` redacted text envelope
+
+All 44 stream-`126` packets use one exact variable-width grammar:
+
+```text
+uint16 opcode = 114
+uint8 control_value
+uint16 text_code_units
+utf16le[text_code_units] opaque_text
+uint8 zero_terminator = 0
+uint32 opaque_value
+```
+
+Text lengths `8`, `9`, and `11` produce total packet lengths `26`, `28`, and
+`32`; their counts are `2`, `8`, and `34`. The control values span `1..34`
+across 26 observed values and are nondecreasing in capture order, but that alone
+does not establish a sequence or tutorial-step role. There are 13 distinct
+redacted strings and 43 distinct trailing values; the trailing values decrease
+22 times, so they are not modeled as a monotonic client tick.
+
+Forty-three packets have prior opcode-`244`/`247` tutorial/UI traffic, with 29
+within 30 seconds and a median gap of 15.285 seconds. That supports a possible
+UI relationship but is too indirect to call the packet an acknowledgement.
+The fold therefore emits neutral `client_opcode_114_submitted` events and
+publishes only control and text-length distributions plus a redacted-value
+count. Python and native manifest validators consume and re-emit all 44 packets
+without ambiguity or failure. Because the family is client-originated and the
+active idle level-12 client emits none, no server-to-client live replay or
+client-visible effect is claimed.
+
 The captured server frame at index `3` is a second opcode-`0` message with
 plaintext result byte `2`. It is the direct source of the replayed
 account-policy dialog: replacing only this frame with heartbeat `0a00` removes
@@ -815,7 +897,37 @@ The fold emits `server_opcode_348_received` and exposes category, selector,
 value, text-code-unit, and control-pair distributions. Safe state, events,
 reports, JSON, and HTTP-derived analysis omit the primary value and text.
 Their higher-level roles remain neutral, and handler selectors absent from the
-captures stay unknown. No live client effect has been established.
+captures stay unknown.
+
+Every one of those 31 server packets is followed by exactly one same-selector
+client opcode `66` packet, with no pending or unmatched transaction when
+processed chronologically. Its capture-bounded grammar is:
+
+```text
+uint16 opcode = 66
+uint8  selector
+uint8  status
+if selector == 6 and status == 1:
+    uint32 optional_value            # retained for re-emission; redacted
+```
+
+The four-byte selector/status forms are `0/1` (19), `0/255` (1), `3/1` (2),
+`6/0` (1), and `17/1` (2). Six `6/1` packets use the eight-byte form; their
+optional value is `5` five times and `1` once. Same-selector FIFO round trips
+range from `728.174` to `10,436.006` ms with a `1,561.373` ms median. The fold
+emits `server_opcode_348_acknowledged`, exposes only selector/status/shape,
+redacted-value presence, pending counts, and timing, and warns on unmatched or
+unfinished transactions. All 31 packets parse, re-encode, and validate through
+the generated native shape without exposing the text or optional value.
+
+A cross-state live replay does not establish that arbitrary opcode-`348`
+packets are safe. The custom server wrote one exact 63-byte selector-`0` packet
+from the level-1-to-10 stream to an active level-12 client bootstrapped from
+short stream `114`. The client emitted no opcode `66`; after one more heartbeat
+it closed the world connection and displayed a black framebuffer. The launcher
+and direct nested-Wayland seat restored the same client to an active field with
+719/719 heartbeats. This is negative state/build-gating evidence, not a
+contradiction of the capture-local one-to-one transaction correlation.
 
 ## Fixed-width neutral server records
 
@@ -826,6 +938,7 @@ family. Their complete grammars, including the two-byte opcode, are:
 opcode 24, 45, 178:                 uint16 opcode
 opcode 58, 71, 89, 105, 121:        uint16 opcode; uint8 value
 opcode 56, 72, 74:                  uint16 opcode; uint16 value
+opcode 60:                          uint16 opcode; int32 value
 opcode 112, 131, 301,
        386, 388, 389:               uint16 opcode; uint32 value
 opcode 96:                          uint16 opcode; uint16 value_1;
@@ -844,17 +957,20 @@ opcode 59:                          uint16 opcode; uint32 character_id;
 Opcode `59` is the only member with an established state relationship: its
 character id equals the preceding world-entry character id in streams `92`,
 `114`, and `126`. Normal reports retain only the match boolean. The remaining
-values stay semantically neutral. In particular, stream `126` proves opcode
-`388` is not a reserved-zero record (`value=0xfde04000`). Variable-width
+values stay semantically neutral. The generated IL2CPP dump proves that opcode
+`60` performs one direct signed-`i32` read; its six stream-`126` values are
+`1037, 1039, 1042, 1043, 1044, 2132`. Each appears in a mob-reward packet batch,
+but adjacency does not establish the field's meaning. Stream `126` also proves
+opcode `388` is not a reserved-zero record (`value=0xfde04000`). Variable-width
 opcodes `156` and `385` are bounded separately below and are not included in
 this family.
 
 Short stream `114` contains 21 records: one of every supported opcode except
-the sustained-session opcode `301`. Streams `92` and `126` contain 69 and 88
-records respectively, including a second opcode-`96`, repeated empty opcode
-`45`, and repeated opcode-`301` values later in gameplay. Opcode `190` is now
+the sustained-session opcodes `60` and `301`. Streams `92` and `126` contain
+69 and 94 records respectively, including a second opcode-`96`, repeated empty
+opcode `45`, and repeated opcode-`301` values later in gameplay. Opcode `190` is now
 the remote-player removal described above rather than a neutral numeric
-record. All 178 remaining fixed-record observations parse at full
+record. All 184 remaining fixed-record observations parse at full
 coverage, round-trip exactly, update opcode counters, and emit
 `fixed_server_record_received` or `initial_character_context_received` events
 with the current field epoch.
@@ -874,9 +990,9 @@ probes. The status API reported `frames_patched:21` and the exact 21-opcode
 plan. The expanded emitter also has exhaustive byte-for-byte PCAP round-trip
 coverage.
 
-## Neutral server records (`69`, `93`, `201`, `205`)
+## Neutral server records (`69`, `93`, `94`, `148`, `201`, `205`, `379`)
 
-These four opcodes recur with identical boundaries in all three gameplay
+These seven opcodes recur with capture-bounded layouts in the gameplay
 streams. Their semantic roles remain neutral, and fields that may carry a
 character/session value are redacted from safe output:
 
@@ -890,6 +1006,19 @@ opcode 93:
     uint16 opcode
     uint8 value_count
     repeat value_count: uint32 value
+
+opcode 94:
+    uint16 opcode
+    bool flag
+    int32 primary_value
+    int32 secondary_value
+
+opcode 148:
+    uint16 opcode
+    uint8 variant
+    variant 9: int32 record_count; byte[] records_blob when nonzero
+    variant 10: no body
+    variant 12 or 13: int32 primary_value; int32 secondary_value
 
 opcode 201:
     uint16 opcode
@@ -905,19 +1034,120 @@ opcode 205:
     uint32 secondary_value
     uint64 numeric_value
     uint8 trailing_value
+
+opcode 379, variant 35:
+    uint16 opcode
+    uint8 variant
+
+opcode 379, variant 36:
+    uint16 opcode
+    uint8 variant
+    int64 time_1
+    int64 time_2
+    int64 time_3
+    int64 time_4
 ```
 
-Streams `92/114/126` contribute `45/4/96` records respectively. By opcode,
-the combined counts are `69:50`, `93:7`, `201:46`, and `205:42`. Every
+Streams `92/114/126` contribute `49/5/122` records respectively. By opcode,
+the combined counts are `69:50`, `93:7`, `94:3`, `148:23`, `201:46`, `205:42`,
+and `379:5`. Every
 opcode-`69` header is `7` and all 263 retained bytes are zero in these
 captures. Every opcode-`93` packet counts four u32 values. Opcode `205` is
-fully bounded, as is the counted opcode-`93` vector, so those 49 observations
-are full coverage. Opcodes `69` and `201` retain 14,162 bytes across their 96
-packets and remain partial rather than receiving invented suffix semantics.
+fully bounded, as is the counted opcode-`93` vector. The generated handler dump
+independently supplies the exact direct-read sequences for opcodes `94` and
+`379`; both opcode-`379` short packets use variant `35`, and its three
+four-datetime packets use variant `36`. Opcode `148` contributes one empty
+variant-`9`, nine empty variant-`10`, nine variant-`12`, three variant-`13`, and
+one nonempty variant-`9` packet. The current delegated IL2CPP record mask is
+`0x9`; the legacy nonempty body does not consume under that current parser and
+therefore retains 1,632 record bytes as one explicit partial observation.
+Together the family provides 79 full and 97 partial observations with 15,794
+opaque bytes rather than inventing suffix or record semantics.
 
 The gamestate fold emits `neutral_server_record_received`, tracks packets by
 opcode, typed-value counts, and opaque-byte totals, and exposes only redacted
-safe details. All 145 packets reparse and round-trip byte-for-byte.
+safe details. All 176 packets reparse and round-trip byte-for-byte.
+
+A typed live replay of captured opcode-`94` values (`flag=true`, primary
+`2380000`, secondary `2`) added exactly one neutral event while phase, field
+epoch, map, player, inventory, progression, skills, and fixed-record state
+remained unchanged. The browser-free client answered the next generated
+heartbeat and remained on map `101000000`; this proves non-stalling acceptance,
+not a higher-level meaning for either integer.
+
+A fresh browser-free direct-Wayland run also accepted a generated three-byte
+opcode-`148` variant-`10` packet. Its transcript added one full
+`neutral_server_record_received` event, left the folded core state unchanged,
+advanced matched heartbeat probes from 11 to 18, and retained one active world
+connection with zero injection failures. This validates the bounded empty
+branch and predicted neutral fold only.
+
+## Field-bootstrap ledgers (`147`, `272`)
+
+Each opcode occurs once and byte-identically across gameplay streams `92`,
+`114`, and `126`, immediately after the initial field snapshot and the earlier
+fixed/variable bootstrap records. The generated opcode-`147` handler directly
+reads two rectangles followed by a counted integer vector:
+
+```text
+uint16 opcode = 147
+int32 rectangle_1[4]
+int32 rectangle_2[4]
+int32 value_count
+repeat value_count:
+    int32 value
+```
+
+The captured packet is exactly 94 bytes. Its rectangles are
+`(-300,-370,300,220)` and `(-300,-405,300,290)`, and `value_count` is `14`.
+The vector values remain neutrally named and are omitted from safe output.
+
+Opcode `272` delegates from its generated top-level handler. A focused live
+primitive-reader trace over the exact 1,056-byte captured plaintext supplies
+the complete nested grammar:
+
+```text
+uint16 opcode = 272
+int32 header_value
+int64 start_ticks
+int64 end_ticks
+int32 header_values[5]
+int32 entry_count
+repeat entry_count:
+    int32 selector
+    bool8 flag_1
+    bool8 flag_2
+    int32 group_1_count
+    repeat group_1_count:
+        int32 values[3]
+    int32 group_2_count
+    repeat group_2_count:
+        int32 values[3]
+int32 trailer_value
+```
+
+The reference has 11 entries, both flags false in every entry, 28 total
+group-1 triples, 43 total group-2 triples, and trailer zero. Selectors and all
+header/triple values are retained only for exact re-emission and redacted from
+safe state and events. Counts are bounded before allocation, booleans accept
+only wire values `0` and `1`, and the decoder requires exact final-cursor
+consumption.
+
+The fold emits `field_bounds_ledger_received` and
+`field_configuration_ledger_received`, records rectangle/count/group/flag and
+trailer distributions, and marks both observations full. The native manifest
+keeps the original opaque width pins as raw evidence but suppresses them when
+the matching semantic opcode/length shape is active, avoiding ambiguity. All
+six cross-corpus packets parse and re-emit exactly through both implementations.
+
+Two exact post-bootstrap opcode-`272` writes through the opt-in loopback packet
+API were accepted by the active browser-free client. The resulting transcript
+folds the original plus both injections as three full ledger events, remains
+`active` on map `101000000`, and leaves player, inventory, progression, skills,
+NPCs, and phase unchanged. Heartbeat responses continued after detach; the
+focused debugger pause accounts for the 36.6-second maximum round trip. This
+validates packet acceptance and the predicted neutral fold, not a semantic name
+for the ledger fields.
 
 ## Variable server records (`156`, `385`)
 
@@ -992,6 +1222,60 @@ valid and warning-free, ends active on map `101000000` at HP `50`, records the
 binding sequence `2001005 -> 2001004 -> 2001005`, and matches 91/91 heartbeats
 with no pending or unmatched response. This proves the key/value relationship
 without assigning meanings to the other selector families.
+
+## Skill-record change transaction (`client 103`, `server 46`, `client 293`)
+
+The level-1-through-10 capture contains a complete request/update/acknowledgement
+transaction distinct from skill use:
+
+```text
+client opcode 103 (10 bytes):
+  uint16 opcode = 103
+  uint32 client_tick
+  uint32 skill_id
+
+server opcode 46:
+  uint16 opcode = 46
+  uint8  flag_a                 # boolean; semantic role remains neutral
+  uint8  flag_b                 # boolean; semantic role remains neutral
+  int16  record_count           # non-negative
+  repeat record_count:
+    int32 skill_id
+    int32 level
+    int32 auxiliary_value       # semantic role remains neutral
+  uint8  trailing_value         # semantic role remains neutral
+
+client opcode 293 (12 bytes):
+  uint16 opcode = 293
+  uint32 control_value          # 346 in all captured acknowledgements
+  uint32 client_tick
+  uint16 trailing_value         # zero in all captured acknowledgements
+```
+
+Stream `126` contains eight opcode-`103` requests, eight matching one-record
+opcode-`46` updates, one additional zero-record update, and nine opcode-`293`
+acknowledgements. Every request is followed by an update for the same skill id;
+every update is acknowledged. The maximum observed request-to-update interval
+is `691.152` ms and the maximum update-to-acknowledgement interval is `16.933`
+ms. Folding the records yields skill levels `{12:0, 1000:1, 2001004:1,
+2001005:6}` with no pending requests or acknowledgements.
+
+The fold gives all three packets full structural coverage, emits
+`skill_level_change_requested`, `skill_records_updated`, and
+`skill_record_update_acknowledged`, and reports request/ack correlations and
+timing. The opcode-`46` trailing byte is deliberately not interpreted as skill
+points: surrounding opcode-`41` stat updates independently change that stat.
+
+A browser-free real-client stream-`114` replay then tested the server packet in
+both captured forms. Two zero-record packets and two one-record packets that
+reasserted existing skill `2001005` at level `6` all produced client opcode
+`293` with control `346` and trailing value `0`. The four acknowledgements took
+`11.297` to `864.607` ms; none remained pending or unmatched. The immutable
+fold stayed valid and warning-free on map `101000000`, with HP `50`, skill
+levels, player state, inventory, and all other progression unchanged, while
+61/61 generated heartbeats were paired. `inject-skill-record` now automates
+typed construction, API submission, acknowledgement correlation, and these
+invariant checks for either the empty form or one existing skill.
 
 ## Client skill-use request (`104`)
 
@@ -1626,8 +1910,29 @@ active bits clear when their mobs leave, and the final active count is zero.
 Events and reports expose the aliased mob, mask, source skill, neutral values,
 and relay match without exposing the object id. Other masks, values, flags, or
 packet widths remain unknown rather than inheriting this capture-bounded
-grammar. No visible immobilization/status effect or safe live-replay claim has
-yet been established.
+grammar.
+
+The typed live validator now joins this semantic model to the independently
+generated IL2CPP shape dump. The pinned dump/export/validation covered all
+35,316 packets from `111.pcapng` streams `83`, `92`, and `114`, with zero
+unsupported packets or consumption failures. The validator selected the
+captured base-spawn/set/reset sequence at server direction indices
+`11006/11438/11506`, matched generated shapes
+`mob_enter_field_short_status`, `server_opcode_285`, `server_opcode_286`, and
+`mob_leave_field`, then rewrote only a redacted runtime object id and current-
+map placement.
+
+On the live map-`101000000` transcript, the base-spawn run folded opcode `279`
+at frame `1516`, bit-103 set at `1518`, reset at `1522`, and leave at `1523`.
+The active-status count followed `0 -> 1 -> 0`; the mob was present for set and
+reset and absent after leave; all predicted counter deltas matched; phase,
+field epoch, map, player state, inventory, and progression were unchanged; and
+the control remained healthy at 1,424/1,424 heartbeats. The client visibly
+rendered the spawned template and removed it after leave. Sampled spawn-only
+and set-active frames showed the same sprite pose and no unique status marker,
+so a specific visible immobilization/status meaning for bit `103` remains
+unproven even though client acceptance and the folded lifecycle are now live-
+validated.
 
 ## Mob health percentage (`server 293`)
 
@@ -2501,7 +2806,8 @@ transcript metadata. The resulting session contains 71,100 decrypted frames
 (31,345 client and 39,755 server), one marker-`26` initial snapshot, 35 later
 field snapshots, 841 stat updates, 256 inventory change sets, 78 direct NPC
 spawns, 36 NPC lifecycle spawns,
-436 drop-spawn packets, and 197 pickup requests.
+436 drop-spawn packets, 197 pickup requests, eight skill-level requests, nine
+skill-record updates, and nine skill-record acknowledgements.
 
 All 197 pickup requests resolve to a known active drop, match their field
 epoch after the marker-`26` initial snapshot is folded, and target a final
@@ -2509,10 +2815,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,565
-full, 44,295 partial, 240 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,400 full, 21,740 partial,
-67 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,655
+full, 44,373 partial, 72 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,406 full, 21,755 partial,
+46 unknown, and zero invalid; stream `114` reaches 46/20/10/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

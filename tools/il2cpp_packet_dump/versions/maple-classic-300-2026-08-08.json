@@ -53,8 +53,14 @@
     },
     {
       "name": "capture_111",
-      "path": "/home/sdancer/Downloads/111.pcapng",
+      "path": "111.pcapng",
       "sha256": "6f98e4aa1e1f432740d14b5f6df86761bf00bd7d544f759436a68c67a63a17ef",
+      "required": false
+    },
+    {
+      "name": "capture_1_10FS",
+      "path": "1-10FS.pcapng",
+      "sha256": "51f0d75c898c46740f742f8faf3f13fdb3d277e3eea10b424d0f14c0bc339cf4",
       "required": false
     }
   ],
@@ -85,7 +91,7 @@
       {"method":"c58f82ceee46f64f11ac7ba9c02f80d4e14685cb309effac8005de7255c000a","rva":30215392,"kind":"string","width":null}
     ]
   },
-  "observed_opaque_shapes": [{"direction":"client_to_server","opcode":6,"length":1836,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":8,"length":66,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":31,"length":183,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":46,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":75,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":100,"length":26,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":115,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":241,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":274,"length":1698,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":279,"length":120,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":307,"length":14,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":308,"length":74,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":311,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":0,"length":63,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":4,"length":170,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":9,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":11,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":20,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":21,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":22,"length":34447,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":23,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":24,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":27,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":28,"length":260,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":29,"length":327,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":56,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":58,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":59,"length":19,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":71,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":72,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":74,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":76,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":89,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":94,"length":11,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":105,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":112,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":121,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":131,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":135,"length":3725,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":137,"length":84,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":142,"length":254,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":147,"length":94,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":148,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":156,"length":21,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4464,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4506,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":161,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":178,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":189,"length":326,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":328,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":330,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":331,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":332,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":333,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":339,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":344,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":348,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":353,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":360,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":361,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":363,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":366,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":367,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":370,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":372,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":373,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":378,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":380,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":386,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":388,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":395,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":400,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":407,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":419,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":218,"length":27,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":219,"length":26,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":31,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":35,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":39,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":44,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":53,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":62,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":228,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":230,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":232,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":234,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":235,"length":12,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":239,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":272,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":276,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":385,"length":448,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":386,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":388,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":389,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":394,"length":119,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":398,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":425,"length":68,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"}],
+  "observed_opaque_shapes": [{"direction":"client_to_server","opcode":6,"length":1836,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":8,"length":66,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":31,"length":183,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":46,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":75,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":100,"length":26,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":115,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":241,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":274,"length":1698,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":279,"length":120,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":307,"length":14,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":308,"length":74,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":311,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":0,"length":63,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":4,"length":170,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":9,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":11,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":20,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":21,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":22,"length":34447,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":23,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":24,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":27,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":28,"length":260,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":29,"length":327,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":56,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":58,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":59,"length":19,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":71,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":72,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":74,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":76,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":89,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":105,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":112,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":121,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":131,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":135,"length":3725,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":137,"length":84,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":142,"length":254,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":147,"length":94,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":148,"length":1639,"source":"1-10FS stream 126 legacy non-empty variant-9 record body: exact opcode, direction, and width; the current delegated IL2CPP mask-0x9 parser does not consume this captured body"},{"direction":"server_to_client","opcode":156,"length":21,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4464,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4506,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":161,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":178,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":189,"length":326,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":328,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":330,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":331,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":332,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":333,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":339,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":344,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":348,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":353,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":360,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":361,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":363,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":366,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":367,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":370,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":372,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":373,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":378,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":380,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":386,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":388,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":395,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":400,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":407,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":419,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":218,"length":27,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":219,"length":26,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":31,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":35,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":39,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":44,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":53,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":62,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":228,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":230,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":232,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":234,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":235,"length":12,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":239,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":272,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":276,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":385,"length":448,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":386,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":388,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":389,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":394,"length":119,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":398,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":425,"length":68,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"}],
   "manual_shapes": [
     {
       "name":"world_selection","direction":"client_to_server","opcode":4,"length":6,
@@ -454,6 +460,41 @@
       ]
     },
     {
+      "name":"skill_level_change_request","direction":"client_to_server","opcode":103,"length":10,
+      "source":"packets.py:SkillLevelChangeRequest; all eight 1-10FS stream-126 requests precede a matching opcode-46 skill id",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":103},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"skill_id","kind":"u32"}
+      ]
+    },
+    {
+      "name":"skill_record_update","direction":"server_to_client","opcode":46,
+      "source":"IL2CPP opcode-46 handler c18f6ae2... direct bool/bool/i16/i32/i32/i32/u8 reads; 1-10FS stream-126 validates one zero-record and eight one-record packets",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":46},
+        {"op":"read","name":"flag_a","kind":"u8"},
+        {"op":"read","name":"flag_b","kind":"u8"},
+        {"op":"read","name":"record_count","kind":"i16"},
+        {"op":"repeat","count_from":"record_count","operations":[
+          {"op":"read","name":"skill_id","kind":"i32"},
+          {"op":"read","name":"level","kind":"i32"},
+          {"op":"read","name":"auxiliary_value","kind":"i32"}
+        ]},
+        {"op":"read","name":"trailing_value","kind":"u8"}
+      ]
+    },
+    {
+      "name":"skill_record_update_acknowledgement","direction":"client_to_server","opcode":293,"length":12,
+      "source":"packets.py:SkillRecordUpdateAcknowledgement; all nine 1-10FS stream-126 packets immediately acknowledge opcode 46",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":293},
+        {"op":"read","name":"control_value","kind":"u32"},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"trailing_value","kind":"u16"}
+      ]
+    },
+    {
       "name":"inventory_change_set","direction":"server_to_client","opcode":39,
       "source":"InventoryChangeSet/InventoryModification; all four capture-111 widths exercise empty, quantity, stack-add, and cash-add/remove branches",
       "operations":[
@@ -744,30 +785,71 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":45}]
     },
     {
-      "name":"client_opcode_43","direction":"client_to_server","opcode":43,
-      "source":"capture-111 u8-discriminated client status branches; opcode-43 handler d43559a5... begins with the same u8 discriminator",
+      "name":"client_opcode_43_identified_text","direction":"client_to_server","opcode":43,
+      "source":"capture-111 and 1-10FS shared u8/u32/counted-UTF16/trailing-zero/six-byte-tail envelope; opcode-43 handler d43559a5... begins with the same u8 direct read",
       "operations":[
-        {"op":"read","name":"opcode","kind":"u16","equals":43},{"op":"read","name":"message_type","kind":"u8"},
-        {"op":"switch","field":"message_type","cases":[
-          {"equals":1,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":2,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":3,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":4,"operations":[{"op":"bytes","name":"status","length":9}]},
-          {"equals":5,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":6,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":7,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":8,"operations":[{"op":"bytes","name":"status","length":9}]},
-          {"equals":9,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":10,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":11,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":12,"operations":[{"op":"bytes","name":"status","length":9}]}
-        ]}
+        {"op":"read","name":"opcode","kind":"u16","equals":43},
+        {"op":"read","name":"sequence","kind":"u8"},
+        {"op":"read","name":"opaque_identifier","kind":"u32"},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"bytes","name":"opaque_tail","length":6}
+      ]
+    },
+    {
+      "name":"client_opcode_43_compact","direction":"client_to_server","opcode":43,"length":12,
+      "source":"capture-111 compact u8 plus nine-byte body; kept separate because the same u8 values use the identified-text envelope in 1-10FS",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":43},
+        {"op":"read","name":"sequence","kind":"u8"},
+        {"op":"bytes","name":"opaque_body","length":9}
       ]
     },
     {
       "name":"server_opcode_43","direction":"server_to_client","opcode":43,"length":19,
       "source":"IL2CPP opcode-43 handler d43559a5...; capture-111 fixed server branch",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":43},{"op":"read","name":"message_type","kind":"u8"},{"op":"bytes","name":"body","length":16}]
+    },
+    {
+      "name":"client_opcode_66_server_348_acknowledgement","direction":"client_to_server","opcode":66,
+      "source":"1-10FS stream-126 selector/status branches; all 31 packets FIFO-match one same-selector server opcode-348 packet",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":66},
+        {"op":"read","name":"selector","kind":"u8"},
+        {"op":"switch","field":"selector","cases":[
+          {"equals":0,"operations":[
+            {"op":"read","name":"status_value","kind":"u8"},
+            {"op":"switch","field":"status_value","cases":[
+              {"equals":1,"operations":[]},
+              {"equals":255,"operations":[]}
+            ]}
+          ]},
+          {"equals":3,"operations":[
+            {"op":"read","name":"status_value","kind":"u8","equals":1}
+          ]},
+          {"equals":6,"operations":[
+            {"op":"read","name":"status_value","kind":"u8"},
+            {"op":"switch","field":"status_value","cases":[
+              {"equals":0,"operations":[]},
+              {"equals":1,"operations":[
+                {"op":"read","name":"optional_value","kind":"u32"}
+              ]}
+            ]}
+          ]},
+          {"equals":17,"operations":[
+            {"op":"read","name":"status_value","kind":"u8","equals":1}
+          ]}
+        ]}
+      ]
+    },
+    {
+      "name":"client_opcode_114_text_envelope","direction":"client_to_server","opcode":114,
+      "source":"1-10FS stream-126 common u8/counted-UTF16/trailing-zero/u32 grammar across all 44 length-26/28/32 packets",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":114},
+        {"op":"read","name":"control_value","kind":"u8"},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"read","name":"opaque_value","kind":"u32"}
+      ]
     },
     {
       "name":"client_opcode_54","direction":"client_to_server","opcode":54,"length":24,
@@ -808,6 +890,83 @@
       "name":"server_opcode_93","direction":"server_to_client","opcode":93,"length":19,
       "source":"five capture frames compared at fixed object/value offsets",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":93},{"op":"read","name":"object_id","kind":"u32"},{"op":"bytes","name":"state","length":13}]
+    },
+    {
+      "name":"server_opcode_60_i32","direction":"server_to_client","opcode":60,"length":6,
+      "source":"IL2CPP opcode-60 handler b437064f... direct i32 read; six 1-10FS frames exactly width 6",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":60},{"op":"read","name":"value","kind":"i32"}]
+    },
+    {
+      "name":"server_opcode_94_record","direction":"server_to_client","opcode":94,"length":11,
+      "source":"IL2CPP opcode-94 handler f83fbf3d... direct bool/i32/i32 reads; three reference-capture frames exactly width 11",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":94},{"op":"read","name":"flag","kind":"bool"},{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]
+    },
+    {
+      "name":"server_opcode_147_bounds_ledger","direction":"server_to_client","opcode":147,"length":94,
+      "source":"IL2CPP opcode-147 handler a1b62634... reads two Rect values, an i32 count, and repeated i32 values; all gameplay captures share the exact 14-value form",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":147},
+        {"op":"read","name":"rectangle_1_x","kind":"i32"},
+        {"op":"read","name":"rectangle_1_y","kind":"i32"},
+        {"op":"read","name":"rectangle_1_width","kind":"i32"},
+        {"op":"read","name":"rectangle_1_height","kind":"i32"},
+        {"op":"read","name":"rectangle_2_x","kind":"i32"},
+        {"op":"read","name":"rectangle_2_y","kind":"i32"},
+        {"op":"read","name":"rectangle_2_width","kind":"i32"},
+        {"op":"read","name":"rectangle_2_height","kind":"i32"},
+        {"op":"read","name":"value_count","kind":"i32"},
+        {"op":"repeat","count_from":"value_count","operations":[
+          {"op":"read","name":"value","kind":"i32"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_272_field_ledger","direction":"server_to_client","opcode":272,"length":1056,
+      "source":"live primitive-reader trace through cursor 1060 plus identical 111/1-10FS packet: i32/datetime header, counted entries, boolean flags, two counted triple groups, and i32 trailer",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":272},
+        {"op":"read","name":"header_value","kind":"i32"},
+        {"op":"read","name":"start_ticks","kind":"i64"},
+        {"op":"read","name":"end_ticks","kind":"i64"},
+        {"op":"read","name":"header_value_1","kind":"i32"},
+        {"op":"read","name":"header_value_2","kind":"i32"},
+        {"op":"read","name":"header_value_3","kind":"i32"},
+        {"op":"read","name":"header_value_4","kind":"i32"},
+        {"op":"read","name":"header_value_5","kind":"i32"},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"selector","kind":"i32"},
+          {"op":"read","name":"flag_1","kind":"bool"},
+          {"op":"read","name":"flag_2","kind":"bool"},
+          {"op":"read","name":"group_1_count","kind":"i32"},
+          {"op":"repeat","count_from":"group_1_count","operations":[
+            {"op":"read","name":"group_1_value_1","kind":"i32"},
+            {"op":"read","name":"group_1_value_2","kind":"i32"},
+            {"op":"read","name":"group_1_value_3","kind":"i32"}
+          ]},
+          {"op":"read","name":"group_2_count","kind":"i32"},
+          {"op":"repeat","count_from":"group_2_count","operations":[
+            {"op":"read","name":"group_2_value_1","kind":"i32"},
+            {"op":"read","name":"group_2_value_2","kind":"i32"},
+            {"op":"read","name":"group_2_value_3","kind":"i32"}
+          ]}
+        ]},
+        {"op":"read","name":"trailer_value","kind":"i32"}
+      ]
+    },
+    {
+      "name":"server_opcode_148_envelope","direction":"server_to_client","opcode":148,
+      "source":"IL2CPP opcode-148 handler acda95d7... delegates to manager c5b43350...; variants 9/10/12/13 and exact bounded branches verified across 1-10FS stream 126 and 111 stream 92",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":148},
+        {"op":"read","name":"variant","kind":"u8"},
+        {"op":"switch","field":"variant","cases":[
+          {"equals":9,"operations":[{"op":"read","name":"record_count","kind":"i32","equals":0}]},
+          {"equals":10,"operations":[]},
+          {"equals":12,"operations":[{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]},
+          {"equals":13,"operations":[{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]}
+        ]}
+      ]
     },
     {
       "name":"server_opcode_96","direction":"server_to_client","opcode":96,"length":6,

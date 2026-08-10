@@ -16,6 +16,35 @@ The `.codex_tmp/Cpp2IL` directory is a nested Git checkout. Its
 honor `CPP2IL_ASSEMBLY_FILTER`, allowing focused Framework output. Do not reset
 that checkout casually.
 
+## Reproducible packet-shape dump
+
+`tools/il2cpp_packet_dump` is the version-pinned structural source of truth for
+opcodes, attributed handlers, and ordered direct packet-reader calls. Its
+manifest binds protocol `300` to the current `GameAssembly.dll`, metadata,
+generated C#/ISIL trees, and the SHA-256 identities of `111.pcapng` and
+`1-10FS.pcapng`. Regenerate and validate it with:
+
+```sh
+cd /home/sdancer/ms/tools/il2cpp_packet_dump
+cargo run --release -- verify \
+  --manifest versions/maple-classic-300-2026-08-08.json
+cargo run --release -- dump \
+  --manifest versions/maple-classic-300-2026-08-08.json \
+  --output target/current-il2cpp-packets.json
+```
+
+The gameplay model uses these generated reads only where they exactly consume
+the observed payload. The current increment proves server opcode `60` as one
+signed `i32`, opcode `94` as `bool + i32 + i32`, and opcode `379` as a `u8`
+branch with four `datetime/i64` reads on variant `36`. Fourteen reference
+packets consume exactly under those shapes. The Rust validator has a native
+boolean primitive and rejects bytes other than `0` or `1`.
+
+Exported plaintext JSONL under `target/private/` is evidence, not source: it
+contains private captured bytes, remains ignored, and must not be committed or
+pasted into reports. The checked-in manifest and deterministic dump describe
+structure without carrying those payloads.
+
 ## Identified IL2CPP types
 
 Original metadata/source-path strings established these names:
@@ -248,6 +277,76 @@ map/player-state change and continued pairing heartbeats. These traces prove
 field widths, repetition counts, and complete consumption only; names remain
 neutral and no security interpretation is attached.
 
+The next generated-shape pass closed two more finite field-bootstrap records.
+Opcode `147` needs no live trace: its generated handler performs eight direct
+signed-`i32` reads for two rectangles, then an `i32` count and that many
+signed-`i32` values. Its exact 94-byte packet is byte-identical in streams
+`92`, `114`, and `126`. Opcode `272` delegates immediately, so the generated
+top-level dump supplied the handler boundary and a focused live
+primitive-reader trace supplied the body. Starting at framed cursor `6`, the
+trace consumed one `i32`, two `i64`, five `i32`, an entry count, then 11
+entries. Each entry reads an `i32` selector, two booleans, and two independently
+counted lists of three-`i32` records. One final `i32` ended exactly at framed
+cursor `1,060`, the end of the 1,056-byte plaintext plus framing cursor bias.
+Offline parse/re-emission and the native manifest consume all six cross-corpus
+packets exactly. The active client accepted the same opcode-`272` plaintext
+twice after bootstrap and continued heartbeats; the GDB pause, not packet
+processing, explains the observed 36.6-second round-trip outlier. This evidence
+establishes widths and repetition only, so selectors and values stay redacted
+and semantically neutral.
+
+The automatic `tools/il2cpp_packet_dump` output now also drives opcode `148`
+instead of leaving every occurrence as a hex prefix. Its top-level handler
+delegates to a manager parser and exposes variants `9`, `10`, `12`, and `13`.
+The current GameAssembly data value resolves the delegated record mask to
+`0x9`; the same value was confirmed in a short live process read. That evidence
+bounds count-zero variant `9`, empty variant `10`, and the two signed-`i32`
+variants `12`/`13`. One 1,639-byte legacy variant-`9` packet with 12 records
+does not consume under the current parser, so the generated manifest keeps its
+1,632-byte record region as an explicit capture-pinned opaque shape rather than
+claiming a false decode. All other 22 cross-corpus packets use the semantic
+switch shape. A live replay of variant `10` matched the predicted neutral fold,
+left core state unchanged, and kept the client and heartbeats active.
+
+Cross-corpus validation also corrected the automatic manifest's manual client
+opcode-`43` layer. Stream `92` alone made values `4`, `8`, and `12` look like
+compact discriminators, but stream `126` uses those same leading bytes in the
+counted UTF-16 form and continues through `35`. The byte is therefore retained
+as a neutral sequence. Two candidate shapes now share the opcode: a variable
+`u8, u32, counted UTF-16, zero, byte[6]` form and a fixed
+`u8, byte[9]` form. Total packet length distinguishes them without ambiguity.
+Native validation consumes all 45 client packets, and the existing fixed
+server shape consumes its three `u8, byte[16]` responses. The model does not
+name the redacted identifier, string, or opaque bytes as security state.
+
+Client opcode `114` is bounded directly from all 44 long-corpus packets rather
+than from a server handler. Offsets `3..4` are a little-endian UTF-16 code-unit
+count, followed by exactly that many code units, a required zero byte, and one
+final u32. Counts `8/9/11` explain all observed lengths `26/28/32` under the
+same grammar. The leading u8 is nondecreasing, but the trailing u32 decreases
+22 times and cannot be retained as a client-tick interpretation. The manifest
+therefore uses neutral names and the gameplay fold redacts both text and final
+value. Timing near tutorial/UI packets remains hypothesis-only evidence.
+
+Client opcode `66` closes the adjacent server opcode-`348` envelope at the
+capture level. Selector counts match exactly (`0:20, 3:2, 6:7, 17:2`), and a
+chronological per-selector FIFO leaves all 31 transactions matched with no
+orphan on either side. Twenty-five client packets are only `u16 opcode, u8
+selector, u8 status`; six selector-`6`/status-`1` packets add one u32. The
+automatic manifest represents the observed selector/status branches as one
+nested switch, and native validation consumes all 31 without ambiguity. The
+u32 remains redacted because correlation proves the response boundary, not its
+meaning. Round trips span `728.174..10,436.006` ms (median `1,561.373` ms).
+
+Live replay also found a necessary state boundary. Sending one exact
+selector-`0` opcode-`348` packet from the level-1-to-10 session to the active
+level-12 short-stream client produced no opcode `66`; the client answered one
+more heartbeat and then closed the world connection. Recovery through the
+browser-free launcher and direct nested-Wayland seat returned it to the field
+with 719/719 matched heartbeats. This negative cross-state result prevents the
+offline adjacency from being generalized into a state-independent injection
+recipe.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte
@@ -270,10 +369,10 @@ captured boundary. Its 23-byte base and 35-byte extended forms, the three short
 opcode-`49` result variants, and all three opcode-`312` removal widths
 round-trip across stream `92`. FIFO inventory/mesos effect correlation plus
 exact drop-id removal correlation matches all 54 local pickup chains. The
-remaining useful trace target is opcode `311`, which must establish a typed
-field-drop spawn before a safe live pickup can be generated. Keep the opcode
-`185` validation token, optional proof, opcode-`49` flags, and opcode-`312`
-reason/actor roles neutral.
+opcode-`311` drop spawn is already fully typed across its animated item/mesos
+and field-load item/mesos variants; no additional primitive trace is required
+for its captured boundary. Keep the opcode `185` validation token, optional
+proof, opcode-`49` flags, and opcode-`312` reason/actor roles neutral.
 
 ## Next debugger work
 
@@ -281,11 +380,13 @@ reason/actor roles neutral.
    opcode-`4` response and name its exact fields.
 2. Trace the two opcode-`402` branches only if the capture-faithful 2.5-second
    sequence still fails to produce client opcode `5`.
-3. Trace opcode-`311` field-drop spawn to enable a controlled live pickup;
-   trace the bounded five-byte player-movement type-`3` command only if a
-   controlled effect requires its semantics. The opcode-`41` stat-delta,
-   opcode-`39` inventory-effect, opcode-`80` consumable-use, and opcode-`185`
-   pickup-request grammars are complete at their evidenced boundaries.
+3. Trace the remaining finite field-bootstrap opcodes `27`, `28`, `142`, and
+   `425`, preferring a generated direct-read ledger where available. Trace the
+   bounded five-byte player-movement type-`3` command only if a controlled
+   effect requires its semantics. The opcode-`41` stat-delta, opcode-`39`
+   inventory-effect, opcode-`80` consumable-use, opcode-`185` pickup-request,
+   and opcode-`311` drop-spawn grammars are complete at their evidenced
+   boundaries.
 4. Keep all patches process-local and validate prologue bytes before writing.
 
 ## Managed array layout confirmed in memory

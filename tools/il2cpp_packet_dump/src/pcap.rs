@@ -10,6 +10,14 @@ use crate::manifest::sha256_file;
 use crate::maple::{Handshake, decrypt_direction, parse_handshake};
 use crate::{Direction, PacketJsonl};
 
+const MAX_HANDSHAKE_SEARCH_OFFSET: usize = 4096;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TransportPreludeBytes {
+    pub client_to_server: usize,
+    pub server_to_client: usize,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StreamSummary {
     pub tcp_stream: u32,
@@ -20,6 +28,7 @@ pub struct StreamSummary {
     pub server_version_mask: u16,
     pub client_packets: usize,
     pub server_packets: usize,
+    pub transport_prelude_bytes: TransportPreludeBytes,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +56,77 @@ struct Segment {
     destination: Endpoint,
     sequence: u64,
     payload: Vec<u8>,
+}
+
+fn maple_handshake_offset(data: &[u8]) -> Option<(usize, Handshake)> {
+    let maximum_offset = data
+        .len()
+        .saturating_sub(6)
+        .min(MAX_HANDSHAKE_SEARCH_OFFSET);
+    (0..=maximum_offset).find_map(|offset| {
+        parse_handshake(&data[offset..]).ok().and_then(|handshake| {
+            (handshake.version > 0
+                && handshake.version < 10_000
+                && handshake.wire_length() > 0
+                && handshake.wire_length() <= 256
+                && handshake
+                    .subversion
+                    .chars()
+                    .all(|character| !character.is_control()))
+            .then_some((offset, handshake))
+        })
+    })
+}
+
+fn client_transport_prelude_bytes(
+    segments: &[Segment],
+    client: &Endpoint,
+    server: &Endpoint,
+    server_handshake_offset: usize,
+) -> Result<usize> {
+    if server_handshake_offset == 0 {
+        return Ok(0);
+    }
+    let server_first_sequence = segments
+        .iter()
+        .filter(|segment| &segment.source == server)
+        .map(|segment| segment.sequence)
+        .min()
+        .context("Maple server direction has no TCP sequence")?;
+    let handshake_sequence = server_first_sequence
+        .checked_add(u64::try_from(server_handshake_offset)?)
+        .context("Maple handshake TCP sequence overflow")?;
+    let handshake_frame = segments
+        .iter()
+        .filter(|segment| {
+            &segment.source == server
+                && segment.sequence <= handshake_sequence
+                && handshake_sequence
+                    < segment
+                        .sequence
+                        .saturating_add(segment.payload.len() as u64)
+        })
+        .map(|segment| segment.frame)
+        .min()
+        .context("could not locate the Maple greeting TCP segment")?;
+    let client_first_sequence = segments
+        .iter()
+        .filter(|segment| &segment.source == client)
+        .map(|segment| segment.sequence)
+        .min()
+        .context("Maple client direction has no TCP sequence")?;
+    let client_post_handshake_sequence = segments
+        .iter()
+        .filter(|segment| &segment.source == client && segment.frame > handshake_frame)
+        .map(|segment| segment.sequence)
+        .min()
+        .context("transport prelude has no post-greeting client data")?;
+    usize::try_from(
+        client_post_handshake_sequence
+            .checked_sub(client_first_sequence)
+            .context("post-greeting client sequence precedes transport prelude")?,
+    )
+    .context("client transport prelude length does not fit usize")
 }
 
 /// Extract, reassemble, identify, and decrypt one `tcp.stream` from a PCAP.
@@ -88,16 +168,8 @@ pub fn export_stream(
     let candidates = streams
         .iter()
         .filter_map(|(endpoint, data)| {
-            parse_handshake(data).ok().and_then(|handshake| {
-                (handshake.version > 0
-                    && handshake.version < 10_000
-                    && handshake.wire_length() <= 256
-                    && handshake
-                        .subversion
-                        .chars()
-                        .all(|character| !character.is_control()))
-                .then_some((endpoint.clone(), handshake))
-            })
+            maple_handshake_offset(data)
+                .map(|(offset, handshake)| (endpoint.clone(), offset, handshake))
         })
         .collect::<Vec<_>>();
     if candidates.len() != 1 {
@@ -106,7 +178,7 @@ pub fn export_stream(
             candidates.len()
         );
     }
-    let (server, handshake) = candidates[0].clone();
+    let (server, server_transport_prelude, handshake) = candidates[0].clone();
     if handshake.version != expected_protocol_version {
         bail!(
             "TCP stream {tcp_stream} protocol version is {}, manifest expects {expected_protocol_version}",
@@ -118,10 +190,15 @@ pub fn export_stream(
         .find(|endpoint| **endpoint != server)
         .context("client endpoint is missing")?
         .clone();
-    let client_encrypted = streams.get(&client).context("client stream is missing")?;
+    let client_transport_prelude =
+        client_transport_prelude_bytes(&segments, &client, &server, server_transport_prelude)?;
+    let client_stream = streams.get(&client).context("client stream is missing")?;
+    let client_encrypted = client_stream
+        .get(client_transport_prelude..)
+        .context("client transport prelude exceeds the reassembled stream")?;
     let server_stream = streams.get(&server).context("server stream is missing")?;
     let server_encrypted = server_stream
-        .get(handshake.wire_length()..)
+        .get(server_transport_prelude.saturating_add(handshake.wire_length())..)
         .context("server stream is shorter than handshake")?;
     let client_plain = decrypt_direction(client_encrypted, handshake.first_iv)?;
     let server_plain = decrypt_direction(server_encrypted, handshake.second_iv)?;
@@ -156,6 +233,10 @@ pub fn export_stream(
             server_version_mask: server_plain.version_mask,
             client_packets: client_plain.plaintexts.len(),
             server_packets: server_plain.plaintexts.len(),
+            transport_prelude_bytes: TransportPreludeBytes {
+                client_to_server: client_transport_prelude,
+                server_to_client: server_transport_prelude,
+            },
         },
         packets,
     })
@@ -334,5 +415,68 @@ mod tests {
     fn rejects_sequence_gaps() {
         let error = reassemble(&[segment(1, 100, b"a"), segment(2, 102, b"c")]).unwrap_err();
         assert!(error.to_string().contains("gap"));
+    }
+
+    #[test]
+    fn finds_handshake_after_bounded_transport_prelude() {
+        let handshake = hex::decode(concat!(
+            "1f002c0103003300300030006e3c795a885db95804",
+            "2c0100002c01000000000000"
+        ))
+        .unwrap();
+        let mut stream = b"transport!".to_vec();
+        stream.extend_from_slice(&handshake);
+
+        let (offset, parsed) = maple_handshake_offset(&stream).unwrap();
+        assert_eq!(offset, 10);
+        assert_eq!(parsed.version, 300);
+        assert_eq!(parsed.subversion, "300");
+    }
+
+    #[test]
+    fn derives_client_prelude_from_first_post_greeting_segment() {
+        let client = Endpoint {
+            address: "client".into(),
+            port: 1,
+        };
+        let server = Endpoint {
+            address: "server".into(),
+            port: 2,
+        };
+        let segments = vec![
+            Segment {
+                frame: 1,
+                source: client.clone(),
+                destination: server.clone(),
+                sequence: 10,
+                payload: b"pre!".to_vec(),
+            },
+            Segment {
+                frame: 2,
+                source: server.clone(),
+                destination: client.clone(),
+                sequence: 100,
+                payload: b"hello".to_vec(),
+            },
+            Segment {
+                frame: 3,
+                source: server.clone(),
+                destination: client.clone(),
+                sequence: 105,
+                payload: b"greeting".to_vec(),
+            },
+            Segment {
+                frame: 4,
+                source: client.clone(),
+                destination: server.clone(),
+                sequence: 14,
+                payload: b"data".to_vec(),
+            },
+        ];
+
+        assert_eq!(
+            client_transport_prelude_bytes(&segments, &client, &server, 5).unwrap(),
+            4
+        );
     }
 }

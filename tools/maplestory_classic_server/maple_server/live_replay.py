@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import hashlib
 from ipaddress import ip_address
 import json
 import math
 from pathlib import Path
 import time
+from typing import Callable
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -15,6 +17,14 @@ from .gameplay import (
     GameplayAnalysis,
     analyze_gameplay_transcript,
     plan_current_hp_stat_update,
+)
+from .packets import (
+    MobEnterField,
+    MobLeaveField,
+    MobTemporaryStatReset,
+    MobTemporaryStatSet,
+    SkillRecordEntry,
+    SkillRecordUpdate,
 )
 from .transcript import Transcript
 
@@ -58,6 +68,208 @@ class CurrentHpLiveReplayResult:
                 },
             },
         }
+
+
+@dataclass(frozen=True)
+class SkillRecordLiveReplayPlan:
+    update: SkillRecordUpdate = field(repr=False)
+    original_skill_level: int | None
+    emitted_skill_level: int | None
+
+    def safe_dict(self) -> dict[str, object]:
+        records = self.update.records
+        return {
+            "opcode": self.update.opcode,
+            "length": len(self.update.to_bytes()),
+            "mode": "empty" if not records else "existing_skill",
+            "flag_a": self.update.flag_a,
+            "flag_b": self.update.flag_b,
+            "record_count": len(records),
+            "skill_id": None if not records else records[0].skill_id,
+            "original_skill_level": self.original_skill_level,
+            "emitted_skill_level": self.emitted_skill_level,
+            "auxiliary_value": None if not records else records[0].auxiliary_value,
+            "trailing_value": self.update.trailing_value,
+            "prediction": {
+                "skill_record_updates_delta": 1,
+                "skill_record_update_records_delta": len(records),
+                "matched_acknowledgements_delta": 1,
+                "updates_without_request_delta": int(bool(records)),
+                "skill_level": (
+                    "unchanged" if not records else self.emitted_skill_level
+                ),
+                "phase": "unchanged",
+                "field_epoch": "unchanged",
+                "map_id": "unchanged",
+                "player_state": "unchanged",
+                "inventory": "unchanged",
+                "other_progression": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SkillRecordLiveReplayResult:
+    plan: SkillRecordLiveReplayPlan = field(repr=False)
+    api_response: dict[str, object]
+    observed_update: dict[str, object]
+    observed_acknowledgement: dict[str, object]
+    polls: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "accepted": True,
+            "operation": "skill_record_update",
+            "plan": self.plan.safe_dict(),
+            "api": self.api_response,
+            "verification": {
+                "matched": True,
+                "polls": self.polls,
+                "observed_update": self.observed_update,
+                "observed_acknowledgement": self.observed_acknowledgement,
+                "checks": {
+                    "typed_packet_round_trip": True,
+                    "typed_update_observed": True,
+                    "client_acknowledgement_observed": True,
+                    "acknowledgement_matched_update": True,
+                    "counter_deltas_match": True,
+                    "skill_levels_match": True,
+                    "phase_unchanged": True,
+                    "field_epoch_unchanged": True,
+                    "map_id_unchanged": True,
+                    "player_state_unchanged": True,
+                    "inventory_unchanged": True,
+                    "other_progression_unchanged": True,
+                },
+            },
+        }
+
+
+@dataclass(frozen=True)
+class MobTemporaryStatLiveReplayPlan:
+    spawn: MobEnterField = field(repr=False)
+    set_stat: MobTemporaryStatSet = field(repr=False)
+    reset_stat: MobTemporaryStatReset = field(repr=False)
+    leave: MobLeaveField = field(repr=False)
+    version_id: str
+    protocol_version: int
+    evidence_tcp_stream: int
+    evidence_spawn_direction_index: int
+    evidence_set_direction_index: int
+    evidence_reset_direction_index: int
+    shape_names: tuple[str, str, str, str]
+
+    def safe_dict(self) -> dict[str, object]:
+        spawn = self.spawn.spawn
+        return {
+            "version_id": self.version_id,
+            "protocol_version": self.protocol_version,
+            "evidence_tcp_stream": self.evidence_tcp_stream,
+            "evidence_direction_indices": {
+                "spawn": self.evidence_spawn_direction_index,
+                "set": self.evidence_set_direction_index,
+                "reset": self.evidence_reset_direction_index,
+            },
+            "shape_names": list(self.shape_names),
+            "runtime_object_id_redacted": True,
+            "spawn": {
+                "opcode": self.spawn.opcode,
+                "length": len(self.spawn.to_bytes()),
+                "template_id": spawn.template_id,
+                "x": spawn.x,
+                "y": spawn.y,
+                "stance": spawn.stance,
+                "foothold_id": spawn.foothold_id,
+                "origin_foothold_id": spawn.origin_foothold_id,
+                "spawn_effect": spawn.spawn_effect,
+            },
+            "set": {
+                "opcode": self.set_stat.opcode,
+                "length": len(self.set_stat.to_bytes()),
+                **self.set_stat.safe_dict(),
+            },
+            "reset": {
+                "opcode": self.reset_stat.opcode,
+                "length": len(self.reset_stat.to_bytes()),
+                **self.reset_stat.safe_dict(),
+            },
+            "cleanup": {
+                "opcode": self.leave.opcode,
+                "reason": self.leave.reason,
+            },
+            "prediction": {
+                "mob_entries_delta": 1,
+                "temporary_stat_sets_delta": 1,
+                "temporary_stat_resets_delta": 1,
+                "modeled_resets_delta": 1,
+                "mob_leaves_delta": 1,
+                "final_active_mob_count": "unchanged",
+                "final_active_temporary_stat_count": "unchanged",
+                "phase": "unchanged",
+                "field_epoch": "unchanged",
+                "map_id": "unchanged",
+                "player_state": "unchanged",
+                "inventory": "unchanged",
+                "progression": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class MobTemporaryStatLiveReplayResult:
+    plan: MobTemporaryStatLiveReplayPlan = field(repr=False)
+    api_responses: tuple[dict[str, object], ...]
+    observed_packets: tuple[dict[str, object], ...]
+    polls: int
+    spawn_hold_seconds: float
+    set_hold_seconds: float
+    reset_hold_seconds: float
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "accepted": True,
+            "operation": "mob_temporary_stat_lifecycle",
+            "plan": self.plan.safe_dict(),
+            "api": list(self.api_responses),
+            "verification": {
+                "matched": True,
+                "polls": self.polls,
+                "spawn_hold_seconds": self.spawn_hold_seconds,
+                "set_hold_seconds": self.set_hold_seconds,
+                "reset_hold_seconds": self.reset_hold_seconds,
+                "observed_packets": list(self.observed_packets),
+                "checks": {
+                    "generated_shapes_matched": True,
+                    "captured_packets_reparsed": True,
+                    "spawn_observed": True,
+                    "set_observed": True,
+                    "status_became_active": True,
+                    "reset_observed": True,
+                    "status_became_inactive": True,
+                    "leave_observed": True,
+                    "mob_removed": True,
+                    "counter_deltas_match": True,
+                    "phase_unchanged": True,
+                    "field_epoch_unchanged": True,
+                    "map_id_unchanged": True,
+                    "player_state_unchanged": True,
+                    "inventory_unchanged": True,
+                    "progression_unchanged": True,
+                },
+            },
+        }
+
+
+@dataclass(frozen=True)
+class _CapturedMobTemporaryStatLifecycle:
+    spawn: MobEnterField
+    set_stat: MobTemporaryStatSet
+    reset_stat: MobTemporaryStatReset
+    spawn_direction_index: int
+    set_direction_index: int
+    reset_direction_index: int
+    version_id: str
+    protocol_version: int
 
 
 def validate_packet_api_url(value: str) -> str:
@@ -147,6 +359,884 @@ def _progression_snapshot(analysis: GameplayAnalysis) -> tuple[object, ...]:
         state.skill_points,
         state.fame,
         state.mesos,
+    )
+
+
+def _progression_snapshot_without_skill_levels(
+    analysis: GameplayAnalysis,
+) -> tuple[object, ...]:
+    return _progression_snapshot(analysis)[1:]
+
+
+def _load_json_object(path: Path, *, description: str) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"could not load {description}: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"{description} must contain one JSON object")
+    return value
+
+
+def _generated_shape_name(
+    shape_dump: dict[str, object],
+    *,
+    direction: str,
+    opcode: int,
+    length: int,
+) -> str:
+    packet_shapes = shape_dump.get("packet_shapes")
+    if not isinstance(packet_shapes, list):
+        raise ValueError("IL2CPP shape dump has no packet_shapes array")
+    matches = [
+        shape
+        for shape in packet_shapes
+        if isinstance(shape, dict)
+        and shape.get("direction") == direction
+        and shape.get("opcode") == opcode
+        and shape.get("length") == length
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "IL2CPP shape dump must contain exactly one "
+            f"{direction} opcode-{opcode} length-{length} shape; "
+            f"found {len(matches)}"
+        )
+    name = matches[0].get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError("IL2CPP packet shape has no non-empty name")
+    return name
+
+
+def _captured_mob_temporary_stat_lifecycle(
+    evidence_jsonl_path: Path,
+    *,
+    tcp_stream: int,
+    expected_version_id: str,
+    expected_protocol_version: int,
+) -> _CapturedMobTemporaryStatLifecycle:
+    if tcp_stream < 0:
+        raise ValueError("evidence TCP stream must be non-negative")
+    active_spawns: dict[int, tuple[MobEnterField, int]] = {}
+    pending_sets: dict[
+        int, tuple[MobEnterField, int, MobTemporaryStatSet, int]
+    ] = {}
+    extended_fallback: _CapturedMobTemporaryStatLifecycle | None = None
+    last_direction_index = -1
+    try:
+        source = evidence_jsonl_path.open(encoding="utf-8")
+    except OSError as error:
+        raise ValueError(f"could not open IL2CPP packet JSONL: {error}") from error
+    with source:
+        for line_number, line in enumerate(source, start=1):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"IL2CPP packet JSONL line {line_number} is invalid JSON"
+                ) from error
+            if not isinstance(row, dict):
+                raise ValueError(
+                    f"IL2CPP packet JSONL line {line_number} is not an object"
+                )
+            if (
+                row.get("tcp_stream") != tcp_stream
+                or row.get("direction") != "server_to_client"
+            ):
+                continue
+            opcode = row.get("opcode")
+            if opcode not in {279, 280, 285, 286}:
+                continue
+            if row.get("version_id") != expected_version_id:
+                raise ValueError("packet JSONL and shape dump version ids differ")
+            if row.get("protocol_version") != expected_protocol_version:
+                raise ValueError(
+                    "packet JSONL and shape dump protocol versions differ"
+                )
+            direction_index = row.get("direction_index")
+            if type(direction_index) is not int or direction_index < 0:
+                raise ValueError("packet JSONL direction_index must be non-negative")
+            if direction_index <= last_direction_index:
+                raise ValueError(
+                    "packet JSONL server direction indices must increase"
+                )
+            last_direction_index = direction_index
+            payload_hex = row.get("payload_hex")
+            if not isinstance(payload_hex, str):
+                raise ValueError("packet JSONL payload_hex must be a string")
+            try:
+                payload = bytes.fromhex(payload_hex)
+            except ValueError as error:
+                raise ValueError("packet JSONL payload_hex is invalid") from error
+            if row.get("length") != len(payload):
+                raise ValueError("packet JSONL payload length does not match metadata")
+            if row.get("payload_sha256") != hashlib.sha256(payload).hexdigest():
+                raise ValueError("packet JSONL payload hash does not match metadata")
+
+            if opcode == 279:
+                packet = MobEnterField.parse(payload)
+                active_spawns[packet.object_id] = (packet, direction_index)
+                pending_sets.pop(packet.object_id, None)
+                continue
+            if opcode == 280:
+                packet = MobLeaveField.parse(payload)
+                active_spawns.pop(packet.object_id, None)
+                pending_sets.pop(packet.object_id, None)
+                continue
+            if opcode == 285:
+                packet = MobTemporaryStatSet.parse(payload)
+                spawn_record = active_spawns.get(packet.object_id)
+                if spawn_record is not None:
+                    pending_sets[packet.object_id] = (
+                        spawn_record[0],
+                        spawn_record[1],
+                        packet,
+                        direction_index,
+                    )
+                continue
+
+            packet = MobTemporaryStatReset.parse(payload)
+            matched = pending_sets.pop(packet.object_id, None)
+            if matched is None:
+                continue
+            spawn, spawn_index, set_stat, set_index = matched
+            if spawn.spawn.template_id != 3210800:
+                continue
+            lifecycle = _CapturedMobTemporaryStatLifecycle(
+                spawn=spawn,
+                set_stat=set_stat,
+                reset_stat=packet,
+                spawn_direction_index=spawn_index,
+                set_direction_index=set_index,
+                reset_direction_index=direction_index,
+                version_id=expected_version_id,
+                protocol_version=expected_protocol_version,
+            )
+            if len(spawn.to_bytes()) == 48:
+                return lifecycle
+            if extended_fallback is None:
+                extended_fallback = lifecycle
+    if extended_fallback is not None:
+        return extended_fallback
+    raise ValueError(
+        "IL2CPP packet JSONL contains no captured template-3210800 "
+        "spawn/set/reset lifecycle"
+    )
+
+
+def _allocate_runtime_object_id(analysis: GameplayAnalysis) -> int:
+    state = analysis.state
+    occupied = {
+        *state.npcs,
+        *state.mobs,
+        *state.observed_players,
+        *state.field_drops,
+        *state.positioned_effect_entities,
+    }
+    if state.entry_character_id is not None:
+        occupied.add(state.entry_character_id)
+    for candidate in range(0x7FFF0001, 0x7FFE0000, -1):
+        if candidate not in occupied:
+            return candidate
+    raise ValueError("could not allocate a collision-free runtime mob object id")
+
+
+def _current_player_foothold(analysis: GameplayAnalysis) -> tuple[int, int, int]:
+    state = analysis.state
+    if state.player_x is None or state.player_y is None:
+        raise ValueError("live state has no modeled player position")
+    for event in reversed(analysis.events):
+        if event.kind != "player_movement_submitted":
+            continue
+        commands = event.details.get("commands")
+        if not isinstance(commands, list):
+            continue
+        for command in reversed(commands):
+            if not isinstance(command, dict):
+                continue
+            foothold_id = command.get("foothold_id")
+            position_y = command.get("position_y")
+            if type(foothold_id) is int and type(position_y) is int:
+                return state.player_x, position_y, foothold_id
+    raise ValueError(
+        "live state has no player movement foothold; move once before replay"
+    )
+
+
+def plan_mob_temporary_stat_live_replay(
+    analysis: GameplayAnalysis,
+    shape_dump_path: Path,
+    evidence_jsonl_path: Path,
+    *,
+    evidence_tcp_stream: int = 92,
+    x_offset: int = 120,
+) -> MobTemporaryStatLiveReplayPlan:
+    """Compose one capture-backed mob spawn/set/reset/leave experiment."""
+    if not analysis.valid:
+        raise ValueError("live world transcript failed packet/state validation")
+    if analysis.state.phase.value != "active":
+        raise ValueError("live world state must be active")
+    if not -2000 <= x_offset <= 2000:
+        raise ValueError("mob x offset must be between -2000 and 2000")
+    shape_dump = _load_json_object(
+        shape_dump_path, description="IL2CPP packet shape dump"
+    )
+    version_id = shape_dump.get("version_id")
+    protocol_version = shape_dump.get("protocol_version")
+    if not isinstance(version_id, str) or not version_id:
+        raise ValueError("IL2CPP shape dump has no version_id")
+    if type(protocol_version) is not int or protocol_version <= 0:
+        raise ValueError("IL2CPP shape dump has no valid protocol_version")
+    captured = _captured_mob_temporary_stat_lifecycle(
+        evidence_jsonl_path,
+        tcp_stream=evidence_tcp_stream,
+        expected_version_id=version_id,
+        expected_protocol_version=protocol_version,
+    )
+    player_x, player_y, foothold_id = _current_player_foothold(analysis)
+    target_x = player_x + x_offset
+    if not -0x8000 <= target_x <= 0x7FFF:
+        raise ValueError("planned mob x coordinate exceeds int16 range")
+    if not -0x8000 <= player_y <= 0x7FFF:
+        raise ValueError("planned mob y coordinate exceeds int16 range")
+    if not 0 <= foothold_id <= 0xFFFF:
+        raise ValueError("planned mob foothold exceeds uint16 range")
+    object_id = _allocate_runtime_object_id(analysis)
+    spawn_data = replace(
+        captured.spawn.spawn,
+        x=target_x,
+        y=player_y,
+        foothold_id=foothold_id,
+        origin_foothold_id=foothold_id,
+    )
+    spawn = MobEnterField(object_id=object_id, spawn=spawn_data)
+    set_stat = replace(captured.set_stat, object_id=object_id)
+    reset_stat = replace(captured.reset_stat, object_id=object_id)
+    leave = MobLeaveField(object_id=object_id, reason=1)
+    for packet_type, packet in (
+        (MobEnterField, spawn),
+        (MobTemporaryStatSet, set_stat),
+        (MobTemporaryStatReset, reset_stat),
+        (MobLeaveField, leave),
+    ):
+        if packet_type.parse(packet.to_bytes()).to_bytes() != packet.to_bytes():
+            raise ValueError("typed live mob packet did not round-trip exactly")
+    shape_names = (
+        _generated_shape_name(
+            shape_dump,
+            direction="server_to_client",
+            opcode=spawn.opcode,
+            length=len(spawn.to_bytes()),
+        ),
+        _generated_shape_name(
+            shape_dump,
+            direction="server_to_client",
+            opcode=set_stat.opcode,
+            length=len(set_stat.to_bytes()),
+        ),
+        _generated_shape_name(
+            shape_dump,
+            direction="server_to_client",
+            opcode=reset_stat.opcode,
+            length=len(reset_stat.to_bytes()),
+        ),
+        _generated_shape_name(
+            shape_dump,
+            direction="server_to_client",
+            opcode=leave.opcode,
+            length=len(leave.to_bytes()),
+        ),
+    )
+    return MobTemporaryStatLiveReplayPlan(
+        spawn=spawn,
+        set_stat=set_stat,
+        reset_stat=reset_stat,
+        leave=leave,
+        version_id=captured.version_id,
+        protocol_version=captured.protocol_version,
+        evidence_tcp_stream=evidence_tcp_stream,
+        evidence_spawn_direction_index=captured.spawn_direction_index,
+        evidence_set_direction_index=captured.set_direction_index,
+        evidence_reset_direction_index=captured.reset_direction_index,
+        shape_names=shape_names,
+    )
+
+
+def _mob_observation(
+    analysis: GameplayAnalysis,
+    *,
+    first_observation: int,
+    opcode: int,
+    kind: str,
+) -> dict[str, object] | None:
+    for observation in reversed(analysis.observations[first_observation:]):
+        if (
+            observation.direction != "server_to_client"
+            or observation.opcode != opcode
+            or observation.kind != kind
+        ):
+            continue
+        details = observation.details
+        record: dict[str, object] = {
+            "frame_index": observation.frame_index,
+            "opcode": observation.opcode,
+            "length": observation.length,
+            "kind": observation.kind,
+            "coverage": observation.coverage.value,
+            "entity": details.get("entity"),
+            "template_id": details.get("template_id"),
+        }
+        for name in (
+            "x",
+            "y",
+            "foothold_id",
+            "mask_pattern",
+            "enabled_bit_indices",
+            "source_skill_id",
+            "source_level",
+            "duration_value",
+            "active_status_count",
+            "reset_status_count",
+            "reason",
+        ):
+            if name in details:
+                record[name] = details[name]
+        return record
+    return None
+
+
+def _wait_for_mob_fold(
+    transcript_path: Path,
+    *,
+    first_observation: int,
+    opcode: int,
+    kind: str,
+    predicate: Callable[[GameplayAnalysis], bool],
+    timeout_seconds: float,
+) -> tuple[GameplayAnalysis, dict[str, object], int]:
+    deadline = time.monotonic() + timeout_seconds
+    polls = 0
+    while time.monotonic() < deadline:
+        polls += 1
+        time.sleep(0.05)
+        analysis = analyze_gameplay_transcript(Transcript.load(transcript_path))
+        if not analysis.valid:
+            raise RuntimeError("injected transcript failed packet/state validation")
+        observation = _mob_observation(
+            analysis,
+            first_observation=first_observation,
+            opcode=opcode,
+            kind=kind,
+        )
+        if observation is not None and predicate(analysis):
+            return analysis, observation, polls
+    raise TimeoutError(
+        f"packet API accepted opcode {opcode}, but the live transcript did not "
+        f"observe the predicted {kind} fold within {timeout_seconds:g} seconds"
+    )
+
+
+def _player_state_snapshot(analysis: GameplayAnalysis) -> tuple[object, ...]:
+    state = analysis.state
+    return (
+        state.current_hp,
+        state.max_hp,
+        state.current_mp,
+        state.max_mp,
+        state.character_level,
+        state.job_id,
+        state.strength,
+        state.dexterity,
+        state.intelligence,
+        state.luck,
+        state.ability_points,
+        state.skill_points,
+        state.experience,
+        state.fame,
+        state.mesos,
+    )
+
+
+def inject_mob_temporary_stat_live(
+    transcript_path: Path,
+    shape_dump_path: Path,
+    evidence_jsonl_path: Path,
+    *,
+    evidence_tcp_stream: int = 92,
+    x_offset: int = 120,
+    spawn_hold_seconds: float = 0.0,
+    set_hold_seconds: float = 1.0,
+    reset_hold_seconds: float = 0.0,
+    api_url: str = DEFAULT_PACKET_API_URL,
+    api_timeout_seconds: float = 5.0,
+    verify_timeout_seconds: float = 5.0,
+) -> MobTemporaryStatLiveReplayResult:
+    """Inject and fold one generated-shape-backed mob status lifecycle."""
+    for name, value, allow_zero in (
+        ("API timeout", api_timeout_seconds, False),
+        ("verification timeout", verify_timeout_seconds, False),
+        ("spawn hold", spawn_hold_seconds, True),
+        ("set hold", set_hold_seconds, True),
+        ("reset hold", reset_hold_seconds, True),
+    ):
+        if not math.isfinite(value) or value < 0 or (not allow_zero and value == 0):
+            qualifier = "non-negative" if allow_zero else "positive"
+            raise ValueError(f"{name} must be {qualifier}")
+    validate_packet_api_url(api_url)
+    baseline = analyze_gameplay_transcript(Transcript.load(transcript_path))
+    plan = plan_mob_temporary_stat_live_replay(
+        baseline,
+        shape_dump_path,
+        evidence_jsonl_path,
+        evidence_tcp_stream=evidence_tcp_stream,
+        x_offset=x_offset,
+    )
+    object_id = plan.spawn.object_id
+    enabled_bits = set(plan.set_stat.enabled_bit_indices)
+    baseline_inventory = baseline.state.inventory_items
+    baseline_progression = _progression_snapshot(baseline)
+    baseline_player = _player_state_snapshot(baseline)
+    baseline_mob_ids = set(baseline.state.mobs)
+    baseline_active_stats = sum(
+        len(entity.temporary_stats) for entity in baseline.state.mobs.values()
+    )
+    first_observation = len(baseline.observations)
+    api_responses: list[dict[str, object]] = []
+    observed_packets: list[dict[str, object]] = []
+    polls = 0
+    spawn_sent = False
+    cleaned_up = False
+    try:
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.spawn.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        spawn_sent = True
+        spawned, observation, step_polls = _wait_for_mob_fold(
+            transcript_path,
+            first_observation=first_observation,
+            opcode=279,
+            kind="mob_enter_field",
+            predicate=lambda analysis: (
+                object_id in analysis.state.mobs
+                and analysis.state.mobs[object_id].spawn.template_id
+                == plan.spawn.spawn.template_id
+            ),
+            timeout_seconds=verify_timeout_seconds,
+        )
+        polls += step_polls
+        observed_packets.append(observation)
+        first_observation = len(spawned.observations)
+        if spawn_hold_seconds:
+            time.sleep(spawn_hold_seconds)
+
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.set_stat.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        status_set, observation, step_polls = _wait_for_mob_fold(
+            transcript_path,
+            first_observation=first_observation,
+            opcode=285,
+            kind="mob_temporary_stat_set",
+            predicate=lambda analysis: (
+                object_id in analysis.state.mobs
+                and enabled_bits.issubset(
+                    analysis.state.mobs[object_id].temporary_stats
+                )
+            ),
+            timeout_seconds=verify_timeout_seconds,
+        )
+        polls += step_polls
+        observed_packets.append(observation)
+        first_observation = len(status_set.observations)
+        if set_hold_seconds:
+            time.sleep(set_hold_seconds)
+
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.reset_stat.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        status_reset, observation, step_polls = _wait_for_mob_fold(
+            transcript_path,
+            first_observation=first_observation,
+            opcode=286,
+            kind="mob_temporary_stat_reset",
+            predicate=lambda analysis: (
+                object_id in analysis.state.mobs
+                and enabled_bits.isdisjoint(
+                    analysis.state.mobs[object_id].temporary_stats
+                )
+            ),
+            timeout_seconds=verify_timeout_seconds,
+        )
+        polls += step_polls
+        observed_packets.append(observation)
+        first_observation = len(status_reset.observations)
+        if reset_hold_seconds:
+            time.sleep(reset_hold_seconds)
+
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.leave.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        final, observation, step_polls = _wait_for_mob_fold(
+            transcript_path,
+            first_observation=first_observation,
+            opcode=280,
+            kind="mob_leave_field",
+            predicate=lambda analysis: object_id not in analysis.state.mobs,
+            timeout_seconds=verify_timeout_seconds,
+        )
+        cleaned_up = True
+        polls += step_polls
+        observed_packets.append(observation)
+    except BaseException:
+        if spawn_sent and not cleaned_up:
+            try:
+                _post_plaintext_packet(
+                    api_url,
+                    plan.leave.to_bytes(),
+                    timeout_seconds=api_timeout_seconds,
+                )
+            except Exception:
+                pass
+        raise
+
+    state = final.state
+    counter_checks = {
+        "mob_entries": state.mob_entries - baseline.state.mob_entries == 1,
+        "mob_leaves": state.mob_leaves - baseline.state.mob_leaves == 1,
+        "sets": (
+            state.mob_temporary_stat_sets
+            - baseline.state.mob_temporary_stat_sets
+            == 1
+        ),
+        "resets": (
+            state.mob_temporary_stat_resets
+            - baseline.state.mob_temporary_stat_resets
+            == 1
+        ),
+        "known_sets": (
+            state.mob_temporary_stat_sets_for_known_mobs
+            - baseline.state.mob_temporary_stat_sets_for_known_mobs
+            == 1
+        ),
+        "known_resets": (
+            state.mob_temporary_stat_resets_for_known_mobs
+            - baseline.state.mob_temporary_stat_resets_for_known_mobs
+            == 1
+        ),
+        "modeled_resets": (
+            state.mob_temporary_stat_resets_with_modeled_set
+            - baseline.state.mob_temporary_stat_resets_with_modeled_set
+            == 1
+        ),
+        "unknown_sets": (
+            state.mob_temporary_stat_sets_for_unknown_mobs
+            == baseline.state.mob_temporary_stat_sets_for_unknown_mobs
+        ),
+        "unknown_resets": (
+            state.mob_temporary_stat_resets_for_unknown_mobs
+            == baseline.state.mob_temporary_stat_resets_for_unknown_mobs
+        ),
+    }
+    final_active_stats = sum(
+        len(entity.temporary_stats) for entity in state.mobs.values()
+    )
+    invariant_checks = {
+        "mob_membership": set(state.mobs) == baseline_mob_ids,
+        "active_temporary_stats": final_active_stats == baseline_active_stats,
+        "phase": state.phase == baseline.state.phase,
+        "field_epoch": state.field_epoch == baseline.state.field_epoch,
+        "map_id": state.map_id == baseline.state.map_id,
+        "player": _player_state_snapshot(final) == baseline_player,
+        "inventory": state.inventory_items == baseline_inventory,
+        "progression": _progression_snapshot(final) == baseline_progression,
+    }
+    failed = [
+        name
+        for name, matched in {**counter_checks, **invariant_checks}.items()
+        if not matched
+    ]
+    if failed:
+        raise RuntimeError(
+            "typed mob temporary-stat replay violated predicted checks: "
+            + ", ".join(failed)
+        )
+    return MobTemporaryStatLiveReplayResult(
+        plan=plan,
+        api_responses=tuple(api_responses),
+        observed_packets=tuple(observed_packets),
+        polls=polls,
+        spawn_hold_seconds=spawn_hold_seconds,
+        set_hold_seconds=set_hold_seconds,
+        reset_hold_seconds=reset_hold_seconds,
+    )
+
+
+def plan_skill_record_update_live(
+    analysis: GameplayAnalysis,
+    *,
+    skill_id: int | None = None,
+    level: int | None = None,
+) -> SkillRecordLiveReplayPlan:
+    """Build one captured-form empty or existing-skill record update."""
+    if not analysis.valid:
+        raise ValueError("live world transcript failed packet/state validation")
+    if skill_id is None:
+        if level is not None:
+            raise ValueError("skill level requires a skill id")
+        update = SkillRecordUpdate(
+            flag_a=False,
+            flag_b=False,
+            records=(),
+            trailing_value=2,
+        )
+        original_level = None
+        emitted_level = None
+    else:
+        if skill_id not in analysis.state.skill_levels:
+            raise ValueError("skill id is not present in the live progression state")
+        original_level = analysis.state.skill_levels[skill_id]
+        emitted_level = original_level if level is None else level
+        if not 0 <= emitted_level <= 0x7FFF_FFFF:
+            raise ValueError("skill level must fit a non-negative int32")
+        update = SkillRecordUpdate(
+            flag_a=True,
+            flag_b=False,
+            records=(
+                SkillRecordEntry(
+                    skill_id=skill_id,
+                    level=emitted_level,
+                    auxiliary_value=0,
+                ),
+            ),
+            trailing_value=2,
+        )
+    payload = update.to_bytes()
+    if SkillRecordUpdate.parse(payload) != update:
+        raise RuntimeError("skill-record update failed typed packet round trip")
+    return SkillRecordLiveReplayPlan(
+        update=update,
+        original_skill_level=original_level,
+        emitted_skill_level=emitted_level,
+    )
+
+
+def _matching_skill_record_transaction(
+    analysis: GameplayAnalysis,
+    *,
+    first_observation: int,
+    update: SkillRecordUpdate,
+) -> tuple[dict[str, object], dict[str, object]] | None:
+    expected_shape = update.safe_dict()
+    update_observation = None
+    for observation in analysis.observations[first_observation:]:
+        if update_observation is None:
+            if (
+                observation.direction != "server_to_client"
+                or observation.opcode != 46
+                or observation.kind != "skill_record_update"
+            ):
+                continue
+            observed_shape = {
+                name: observation.details.get(name)
+                for name in (
+                    "flag_a",
+                    "flag_b",
+                    "record_count",
+                    "records",
+                    "trailing_value",
+                )
+            }
+            if observed_shape != expected_shape:
+                continue
+            update_observation = observation
+            continue
+        if (
+            observation.direction != "client_to_server"
+            or observation.opcode != 293
+            or observation.kind != "skill_record_update_acknowledgement"
+            or observation.details.get("matched_update") is not True
+            or observation.details.get("update_frame")
+            != update_observation.frame_index
+        ):
+            continue
+        return (
+            {
+                "frame_index": update_observation.frame_index,
+                "opcode": update_observation.opcode,
+                "kind": update_observation.kind,
+                "coverage": update_observation.coverage.value,
+                **expected_shape,
+                "record_changes": update_observation.details.get(
+                    "record_changes"
+                ),
+            },
+            {
+                "frame_index": observation.frame_index,
+                "opcode": observation.opcode,
+                "kind": observation.kind,
+                "coverage": observation.coverage.value,
+                "control_value": observation.details.get("control_value"),
+                "client_tick": observation.details.get("client_tick"),
+                "trailing_value": observation.details.get("trailing_value"),
+                "matched_update": True,
+                "update_frame": observation.details.get("update_frame"),
+                "round_trip_ms": observation.details.get("round_trip_ms"),
+            },
+        )
+    return None
+
+
+def inject_skill_record_live(
+    transcript_path: Path,
+    *,
+    skill_id: int | None = None,
+    level: int | None = None,
+    api_url: str = DEFAULT_PACKET_API_URL,
+    api_timeout_seconds: float = 5.0,
+    verify_timeout_seconds: float = 5.0,
+) -> SkillRecordLiveReplayResult:
+    """Plan, inject, and verify one typed skill-record transaction."""
+    if not math.isfinite(api_timeout_seconds) or api_timeout_seconds <= 0:
+        raise ValueError("API timeout must be positive")
+    if not math.isfinite(verify_timeout_seconds) or verify_timeout_seconds <= 0:
+        raise ValueError("verification timeout must be positive")
+    validate_packet_api_url(api_url)
+    baseline = analyze_gameplay_transcript(Transcript.load(transcript_path))
+    if not baseline.valid:
+        raise ValueError("live world transcript failed packet/state validation")
+    if baseline.state.pending_skill_level_change_requests:
+        raise ValueError("live state has pending skill-level change requests")
+    if baseline.state.pending_skill_record_update_acknowledgements:
+        raise ValueError("live state has pending skill-record acknowledgements")
+    plan = plan_skill_record_update_live(
+        baseline,
+        skill_id=skill_id,
+        level=level,
+    )
+    baseline_observations = len(baseline.observations)
+    baseline_inventory = baseline.state.inventory_items
+    baseline_player = _player_state_snapshot(baseline)
+    baseline_other_progression = _progression_snapshot_without_skill_levels(
+        baseline
+    )
+    expected_skill_levels = dict(baseline.state.skill_levels)
+    if plan.update.records:
+        record = plan.update.records[0]
+        expected_skill_levels[record.skill_id] = record.level
+    api_response = _post_plaintext_packet(
+        api_url,
+        plan.update.to_bytes(),
+        timeout_seconds=api_timeout_seconds,
+    )
+
+    deadline = time.monotonic() + verify_timeout_seconds
+    polls = 0
+    last_analysis = baseline
+    while time.monotonic() < deadline:
+        polls += 1
+        time.sleep(0.05)
+        last_analysis = analyze_gameplay_transcript(
+            Transcript.load(transcript_path)
+        )
+        if not last_analysis.valid:
+            raise RuntimeError("injected transcript failed packet/state validation")
+        transaction = _matching_skill_record_transaction(
+            last_analysis,
+            first_observation=baseline_observations,
+            update=plan.update,
+        )
+        if transaction is None:
+            continue
+        state = last_analysis.state
+        expected_records = len(plan.update.records)
+        counter_checks = {
+            "skill_record_updates": (
+                state.skill_record_updates
+                == baseline.state.skill_record_updates + 1
+            ),
+            "skill_record_update_records": (
+                state.skill_record_update_records
+                == baseline.state.skill_record_update_records + expected_records
+            ),
+            "acknowledgements": (
+                state.skill_record_update_acknowledgements
+                == baseline.state.skill_record_update_acknowledgements + 1
+            ),
+            "matched_acknowledgements": (
+                state.matched_skill_record_update_acknowledgements
+                == baseline.state.matched_skill_record_update_acknowledgements + 1
+            ),
+            "unmatched_acknowledgements": (
+                state.unmatched_skill_record_update_acknowledgements
+                == baseline.state.unmatched_skill_record_update_acknowledgements
+            ),
+            "pending_acknowledgements": (
+                state.pending_skill_record_update_acknowledgements == 0
+            ),
+            "updates_without_request": (
+                state.skill_record_updates_without_request
+                == baseline.state.skill_record_updates_without_request
+                + int(bool(expected_records))
+            ),
+            "requests": (
+                state.skill_level_change_requests
+                == baseline.state.skill_level_change_requests
+            ),
+            "pending_requests": state.pending_skill_level_change_requests == 0,
+        }
+        invariant_checks = {
+            "skill_levels": state.skill_levels == expected_skill_levels,
+            "phase": state.phase == baseline.state.phase,
+            "field_epoch": state.field_epoch == baseline.state.field_epoch,
+            "map_id": state.map_id == baseline.state.map_id,
+            "player": _player_state_snapshot(last_analysis) == baseline_player,
+            "inventory": state.inventory_items == baseline_inventory,
+            "other_progression": (
+                _progression_snapshot_without_skill_levels(last_analysis)
+                == baseline_other_progression
+            ),
+        }
+        failed = [
+            name
+            for name, matched in {**counter_checks, **invariant_checks}.items()
+            if not matched
+        ]
+        if failed:
+            raise RuntimeError(
+                "typed skill-record replay violated predicted checks: "
+                + ", ".join(failed)
+            )
+        observed_update, observed_acknowledgement = transaction
+        return SkillRecordLiveReplayResult(
+            plan=plan,
+            api_response=api_response,
+            observed_update=observed_update,
+            observed_acknowledgement=observed_acknowledgement,
+            polls=polls,
+        )
+    raise TimeoutError(
+        "packet API accepted the skill-record update, but the live transcript "
+        "did not observe its matched client acknowledgement within "
+        f"{verify_timeout_seconds:g} seconds; last counters were "
+        f"updates={last_analysis.state.skill_record_updates}, "
+        "acknowledgements="
+        f"{last_analysis.state.skill_record_update_acknowledgements}"
     )
 
 
@@ -259,6 +1349,36 @@ def inject_current_hp_live(
     )
 
 
+def render_skill_record_live_replay(
+    result: SkillRecordLiveReplayResult,
+) -> str:
+    plan = result.plan.safe_dict()
+    acknowledgement = result.observed_acknowledgement
+    if plan["record_count"]:
+        prediction = (
+            f"skill {plan['skill_id']} "
+            f"{plan['original_skill_level']} -> {plan['emitted_skill_level']}"
+        )
+    else:
+        prediction = "zero records; progression unchanged"
+    return "\n".join(
+        (
+            "live skill-record replay: matched",
+            f"  predicted: {prediction}",
+            (
+                "  observed: opcode 46 frame "
+                f"{result.observed_update['frame_index']} -> opcode 293 frame "
+                f"{acknowledgement['frame_index']} in "
+                f"{acknowledgement['round_trip_ms']} ms"
+            ),
+            (
+                "  unchanged: phase, field epoch, map, player, inventory, "
+                "other progression"
+            ),
+        )
+    )
+
+
 def render_current_hp_live_replay(result: CurrentHpLiveReplayResult) -> str:
     plan = result.plan.safe_dict()
     return "\n".join(
@@ -276,5 +1396,34 @@ def render_current_hp_live_replay(result: CurrentHpLiveReplayResult) -> str:
                 f"{result.observed_packet['frame_index']}"
             ),
             "  unchanged: phase, field epoch, map, inventory, progression",
+        )
+    )
+
+
+def render_mob_temporary_stat_live_replay(
+    result: MobTemporaryStatLiveReplayResult,
+) -> str:
+    plan = result.plan.safe_dict()
+    observed = result.observed_packets
+    return "\n".join(
+        (
+            "live mob temporary-stat replay: matched",
+            (
+                "  evidence: "
+                f"{plan['version_id']} stream {plan['evidence_tcp_stream']} "
+                f"frames {plan['evidence_direction_indices']}"
+            ),
+            (
+                "  predicted: spawn -> set bit "
+                f"{plan['set']['enabled_bit_indices']} -> reset -> leave"
+            ),
+            (
+                "  observed: "
+                + " -> ".join(
+                    f"{packet['kind']}@{packet['frame_index']}"
+                    for packet in observed
+                )
+            ),
+            "  unchanged: phase, field epoch, map, player, inventory, progression",
         )
     )

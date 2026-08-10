@@ -14,8 +14,8 @@ Classic's IL2CPP packet surface. It has three deliberately separate layers:
 
 The current manifest pins protocol 300, the 2026-08-08 client binaries, the
 obfuscated enum/attribute identities, reader method RVAs, and the SHA-256 of
-capture `111.pcapng`. A mismatched binary, metadata file, enum file, or capture
-is rejected.
+both reference captures, `111.pcapng` and `1-10FS.pcapng`. A mismatched binary,
+metadata file, enum file, or capture is rejected.
 
 ## Build and dump
 
@@ -38,7 +38,10 @@ handlers, files, and reads have deterministic ordering.
 The exporter asks `tshark` only for TCP segments. Rust performs endpoint
 identification, overlap-checked TCP reassembly, handshake parsing, Maple
 AES-OFB decryption, IV advancement, frame-header validation, and JSONL
-serialization itself.
+serialization itself. It also locates a valid Maple greeting within the first
+4,096 reassembled bytes and removes the corresponding per-direction transport
+preludes. This is required for `1-10FS.pcapng` stream `126`, whose measured
+preludes are 28 client bytes and 14 server bytes.
 
 ```sh
 cargo run --release -- export-pcap \
@@ -53,6 +56,13 @@ cargo run --release -- validate \
   --input tests/private/111.streams-83-92-114.jsonl \
   --output target/111.shape-report.json \
   --require-all-supported
+
+cargo run --release -- export-pcap \
+  --manifest versions/maple-classic-300-2026-08-08.json \
+  --pcap ../../1-10FS.pcapng \
+  --stream 126 \
+  --output target/private/1-10FS.stream-126.jsonl \
+  --summary target/1-10FS.stream-126.summary.json
 ```
 
 Each JSONL row includes plaintext hex and therefore can contain private
@@ -61,7 +71,8 @@ ignored; do not commit or paste it into logs. Rows also carry the capture hash,
 stream, direction/index, opcode, byte length, and plaintext hash.
 
 The validator fails on a short read, trailing/extra bytes, a wrong expected
-constant, payload hash mismatch, ambiguous shape, or (with
+constant, a non-`0`/`1` generated `bool`, payload hash mismatch, ambiguous
+shape, or (with
 `--require-all-supported`) any absent opcode/length variant. Semantic shapes
 and observed-opaque width pins are distinct in the manifest: an opaque variant
 proves framing and exact total consumption, but does not pretend that its body
@@ -75,5 +86,48 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently contains 65 semantic/manual shapes and 97 explicitly
-observed-opaque exact-width variants.
+manifest currently declares 76 semantic/manual shapes and 96 explicitly
+observed-opaque exact-width variants. Two exact-width opaque pins overlap the
+semantic opcode-`147` and opcode-`272` shapes and are retained as raw capture
+evidence but suppressed from the effective shape set, leaving 170 active
+shapes and 94 active opaque pins. Opcode `94` is no longer an
+opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
+`60` reads one signed `i32` and opcode `379` selects between a one-byte short
+form and four `datetime/i64` values. Opcode `148` is represented by one
+semantic switch shape: variant `9` with count zero, empty variant `10`, and
+variants `12`/`13` with two signed `i32` values. The legacy nonempty variant-`9`
+capture remains an explicit 1,639-byte opaque pin because its body does not
+consume under the current build's delegated record mask `0x9`. The gameplay
+transaction shapes cover
+client opcode `103`, server opcode `46`, and client opcode `293`; all 26
+occurrences of that family in `1-10FS.pcapng` stream `126` are exactly consumed.
+Opcodes `60`, `94`, and `379` contribute 14 exact reference frames: ten in
+stream `126` and four across `111.pcapng` streams `92`/`114`.
+Targeted native validation also consumes all 23 opcode-`148` frames: 22 through
+the semantic shape and the one legacy body through its exact opaque pin.
+The client opcode-`43` shape is no longer a stream-`92` switch keyed by its
+leading byte. Two unambiguous candidates now describe the real cross-corpus
+boundary: `u8 + u32 + counted UTF-16 + zero + six bytes`, or the 12-byte
+compact `u8 + nine bytes` envelope. All 45 client packets validate natively,
+including sequences `13..35` from stream `126`; the existing 19-byte server
+shape covers the other three opcode-`43` packets.
+Client opcode `114` adds one variable-width redacted shape: a neutral `u8`, a
+counted UTF-16 field with required zero terminator, and a trailing `u32`. It
+consumes all 44 stream-`126` packets at lengths `26`, `28`, and `32`; text and
+the final value remain omitted from safe gameplay analysis.
+Client opcode `66` adds one selector/status switch shape correlated with server
+opcode `348`. The five captured four-byte forms are selector/status `0/1`,
+`0/255`, `3/1`, `6/0`, and `17/1`; selector/status `6/1` adds one redacted
+`u32`. Native validation exactly consumes all 31 packets, and the manifest
+rejects unobserved selector/status/length combinations.
+Server opcode `147` adds the generated handler's two four-`i32` rectangles and
+counted `i32` vector. Server opcode `272` adds the delegated handler's
+live-traced header, counted nested ledgers, two validated booleans per entry,
+and terminal `i32`. The semantic shapes replace only the matching 94- and
+1,056-byte opaque pins in the effective set. Targeted native validation
+consumes and re-emits all six cross-corpus packets (three identical packets per
+opcode) without an
+unsupported, short-read, trailing-byte, constant, boolean, or ambiguity
+failure.
+The complete 71,100-frame stream intentionally remains a broader modeling
+corpus rather than an all-opcode manifest regression.

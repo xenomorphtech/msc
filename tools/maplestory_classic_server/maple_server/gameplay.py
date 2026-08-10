@@ -16,7 +16,10 @@ from .gamestate import (
 from .packets import (
     CharacterStatUpdate,
     ClientAttackAction,
+    ClientOpcode43Envelope,
+    ClientOpcode66Acknowledgement,
     ClientOpcode101Record,
+    ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
@@ -27,6 +30,7 @@ from .packets import (
     FieldDropRemoval,
     FieldDropSpawn,
     FixedServerEmptyRecord,
+    FixedServerI32Record,
     FixedServerOpcode11Record,
     FixedServerU16PairRecord,
     FixedServerU16Record,
@@ -76,19 +80,28 @@ from .packets import (
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
     ServerAttackRelay,
+    ServerOpcode43Envelope,
     ServerOpcode69Record,
     ServerOpcode93Record,
+    ServerOpcode94Record,
+    ServerOpcode147BoundsLedger,
+    ServerOpcode148Envelope,
     ServerOpcode201Record,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
     ServerOpcode244DialogueInstruction,
+    ServerOpcode272Ledger,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
+    ServerOpcode379Record,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    SkillLevelChangeRequest,
+    SkillRecordUpdate,
+    SkillRecordUpdateAcknowledgement,
     TutorialUiInstruction,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
@@ -342,6 +355,39 @@ class GameplayGameState:
         default_factory=dict, repr=False
     )
     skill_levels: dict[int, int] = field(default_factory=dict, repr=False)
+    skill_level_change_requests: int = 0
+    skill_level_change_requests_by_skill_id: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_updates: int = 0
+    skill_record_update_records: int = 0
+    skill_record_updates_by_flags: Counter[str] = field(
+        default_factory=Counter
+    )
+    skill_record_auxiliary_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_trailing_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_request_matches: int = 0
+    skill_record_request_mismatches: int = 0
+    skill_record_updates_without_request: int = 0
+    pending_skill_level_change_requests: int = 0
+    last_skill_record_response_ms: float | None = None
+    max_skill_record_response_ms: float | None = None
+    skill_record_update_acknowledgements: int = 0
+    matched_skill_record_update_acknowledgements: int = 0
+    unmatched_skill_record_update_acknowledgements: int = 0
+    pending_skill_record_update_acknowledgements: int = 0
+    skill_record_acknowledgement_control_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_acknowledgement_trailing_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    last_skill_record_acknowledgement_ms: float | None = None
+    max_skill_record_acknowledgement_ms: float | None = None
     string_property_code_units: dict[int, int] = field(
         default_factory=dict, repr=False
     )
@@ -732,6 +778,26 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_13_opaque_bytes: int = 0
+    client_opcode_43_packets: int = 0
+    client_opcode_43_sequences: Counter[int] = field(default_factory=Counter)
+    client_opcode_43_variants: Counter[str] = field(default_factory=Counter)
+    client_opcode_43_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_43_opaque_bytes: int = 0
+    server_opcode_43_packets: int = 0
+    server_opcode_43_message_types: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_43_opaque_bytes: int = 0
+    client_opcode_114_packets: int = 0
+    client_opcode_114_control_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_114_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_114_redacted_values: int = 0
     client_opcode_122_packets: int = 0
     client_opcode_122_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_122_shapes: Counter[str] = field(default_factory=Counter)
@@ -771,6 +837,24 @@ class GameplayGameState:
     server_opcode_239_trailing_values: Counter[int] = field(
         default_factory=Counter
     )
+    server_opcode_147_packets: int = 0
+    server_opcode_147_value_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_147_rectangle_shapes: Counter[str] = field(
+        default_factory=Counter
+    )
+    server_opcode_272_packets: int = 0
+    server_opcode_272_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_272_group_1_count: int = 0
+    server_opcode_272_group_2_count: int = 0
+    server_opcode_272_flag_1_true_count: int = 0
+    server_opcode_272_flag_2_true_count: int = 0
+    server_opcode_272_trailer_values: Counter[int] = field(
+        default_factory=Counter
+    )
     instructional_dialogue_requests: int = 0
     instructional_dialogue_value_1: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_2: Counter[int] = field(default_factory=Counter)
@@ -798,6 +882,18 @@ class GameplayGameState:
     server_opcode_348_control_pairs: Counter[str] = field(
         default_factory=Counter
     )
+    client_opcode_66_acknowledgements: int = 0
+    client_opcode_66_selectors: Counter[int] = field(default_factory=Counter)
+    client_opcode_66_status_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_66_shapes: Counter[str] = field(default_factory=Counter)
+    client_opcode_66_optional_values: int = 0
+    matched_client_opcode_66_acknowledgements: int = 0
+    unmatched_client_opcode_66_acknowledgements: int = 0
+    pending_server_opcode_348_requests: int = 0
+    last_opcode_348_round_trip_ms: float | None = None
+    max_opcode_348_round_trip_ms: float | None = None
     fixed_server_records: int = 0
     fixed_server_records_by_opcode: Counter[int] = field(
         default_factory=Counter
@@ -891,6 +987,7 @@ class FieldNpcSpawnReplayPlan:
 
 FixedServerRecord = (
     FixedServerEmptyRecord
+    | FixedServerI32Record
     | FixedServerOpcode11Record
     | FixedServerU16PairRecord
     | FixedServerU16Record
@@ -904,8 +1001,11 @@ FixedServerRecord = (
 NeutralServerRecord = (
     ServerOpcode69Record
     | ServerOpcode93Record
+    | ServerOpcode94Record
+    | ServerOpcode148Envelope
     | ServerOpcode201Record
     | ServerOpcode205Record
+    | ServerOpcode379Record
 )
 
 FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
@@ -913,6 +1013,7 @@ FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
     FixedServerU8Record.SUPPORTED_OPCODES,
     FixedServerU16Record.SUPPORTED_OPCODES,
     FixedServerU16PairRecord.SUPPORTED_OPCODES,
+    FixedServerI32Record.SUPPORTED_OPCODES,
     FixedServerU32Record.SUPPORTED_OPCODES,
     FixedServerU32PairRecord.SUPPORTED_OPCODES,
     FixedServerU64Record.SUPPORTED_OPCODES,
@@ -2878,6 +2979,85 @@ class GameplayAnalysis:
                     "region_bytes": self.state.progression_region_bytes,
                     "shape": self.state.progression_shape,
                     "skill_levels": self.state.skill_levels,
+                    "skill_record_updates": {
+                        "requests": self.state.skill_level_change_requests,
+                        "requests_by_skill_id": dict(
+                            self.state.skill_level_change_requests_by_skill_id
+                        ),
+                        "updates": self.state.skill_record_updates,
+                        "records": self.state.skill_record_update_records,
+                        "updates_by_flags": dict(
+                            self.state.skill_record_updates_by_flags
+                        ),
+                        "auxiliary_values": dict(
+                            self.state.skill_record_auxiliary_values
+                        ),
+                        "trailing_values": dict(
+                            self.state.skill_record_trailing_values
+                        ),
+                        "request_matches": (
+                            self.state.skill_record_request_matches
+                        ),
+                        "request_mismatches": (
+                            self.state.skill_record_request_mismatches
+                        ),
+                        "updates_without_request": (
+                            self.state.skill_record_updates_without_request
+                        ),
+                        "pending_requests": (
+                            self.state.pending_skill_level_change_requests
+                        ),
+                        "last_request_response_ms": (
+                            None
+                            if self.state.last_skill_record_response_ms is None
+                            else round(
+                                self.state.last_skill_record_response_ms, 3
+                            )
+                        ),
+                        "max_request_response_ms": (
+                            None
+                            if self.state.max_skill_record_response_ms is None
+                            else round(
+                                self.state.max_skill_record_response_ms, 3
+                            )
+                        ),
+                        "acknowledgements": (
+                            self.state.skill_record_update_acknowledgements
+                        ),
+                        "matched_acknowledgements": (
+                            self.state.matched_skill_record_update_acknowledgements
+                        ),
+                        "unmatched_acknowledgements": (
+                            self.state.unmatched_skill_record_update_acknowledgements
+                        ),
+                        "pending_acknowledgements": (
+                            self.state.pending_skill_record_update_acknowledgements
+                        ),
+                        "acknowledgement_control_values": dict(
+                            self.state.skill_record_acknowledgement_control_values
+                        ),
+                        "acknowledgement_trailing_values": dict(
+                            self.state.skill_record_acknowledgement_trailing_values
+                        ),
+                        "last_acknowledgement_ms": (
+                            None
+                            if self.state.last_skill_record_acknowledgement_ms
+                            is None
+                            else round(
+                                self.state.last_skill_record_acknowledgement_ms,
+                                3,
+                            )
+                        ),
+                        "max_acknowledgement_ms": (
+                            None
+                            if self.state.max_skill_record_acknowledgement_ms
+                            is None
+                            else round(
+                                self.state.max_skill_record_acknowledgement_ms,
+                                3,
+                            )
+                        ),
+                    },
                     "string_property_code_units": (
                         self.state.string_property_code_units
                     ),
@@ -3662,6 +3842,34 @@ class GameplayAnalysis:
                 "client_opcode_13_opaque_bytes": (
                     self.state.client_opcode_13_opaque_bytes
                 ),
+                "client_opcode_43": {
+                    "packet_count": self.state.client_opcode_43_packets,
+                    "sequences": dict(self.state.client_opcode_43_sequences),
+                    "variants": dict(self.state.client_opcode_43_variants),
+                    "text_code_units": dict(
+                        self.state.client_opcode_43_text_code_units
+                    ),
+                    "opaque_bytes": self.state.client_opcode_43_opaque_bytes,
+                },
+                "server_opcode_43": {
+                    "packet_count": self.state.server_opcode_43_packets,
+                    "message_types": dict(
+                        self.state.server_opcode_43_message_types
+                    ),
+                    "opaque_bytes": self.state.server_opcode_43_opaque_bytes,
+                },
+                "client_opcode_114": {
+                    "packet_count": self.state.client_opcode_114_packets,
+                    "control_values": dict(
+                        self.state.client_opcode_114_control_values
+                    ),
+                    "text_code_units": dict(
+                        self.state.client_opcode_114_text_code_units
+                    ),
+                    "redacted_value_count": (
+                        self.state.client_opcode_114_redacted_values
+                    ),
+                },
                 "client_opcode_122": {
                     "packet_count": self.state.client_opcode_122_packets,
                     "selectors": dict(self.state.client_opcode_122_selectors),
@@ -3737,6 +3945,36 @@ class GameplayAnalysis:
                         self.state.server_opcode_239_trailing_values
                     ),
                 },
+                "server_opcode_147": {
+                    "packet_count": self.state.server_opcode_147_packets,
+                    "value_counts": dict(
+                        self.state.server_opcode_147_value_counts
+                    ),
+                    "rectangle_shapes": dict(
+                        self.state.server_opcode_147_rectangle_shapes
+                    ),
+                },
+                "server_opcode_272": {
+                    "packet_count": self.state.server_opcode_272_packets,
+                    "entry_counts": dict(
+                        self.state.server_opcode_272_entry_counts
+                    ),
+                    "group_1_count": (
+                        self.state.server_opcode_272_group_1_count
+                    ),
+                    "group_2_count": (
+                        self.state.server_opcode_272_group_2_count
+                    ),
+                    "flag_1_true_count": (
+                        self.state.server_opcode_272_flag_1_true_count
+                    ),
+                    "flag_2_true_count": (
+                        self.state.server_opcode_272_flag_2_true_count
+                    ),
+                    "trailer_values": dict(
+                        self.state.server_opcode_272_trailer_values
+                    ),
+                },
                 "positioned_effect_records": {
                     "packet_count": self.state.positioned_effect_records,
                     "by_opcode": dict(
@@ -3765,6 +4003,42 @@ class GameplayAnalysis:
                     ),
                     "control_pairs": dict(
                         self.state.server_opcode_348_control_pairs
+                    ),
+                },
+                "client_opcode_66": {
+                    "packet_count": (
+                        self.state.client_opcode_66_acknowledgements
+                    ),
+                    "selectors": dict(
+                        self.state.client_opcode_66_selectors
+                    ),
+                    "status_values": dict(
+                        self.state.client_opcode_66_status_values
+                    ),
+                    "shapes": dict(self.state.client_opcode_66_shapes),
+                    "optional_value_count": (
+                        self.state.client_opcode_66_optional_values
+                    ),
+                    "matched_request_count": (
+                        self.state.matched_client_opcode_66_acknowledgements
+                    ),
+                    "unmatched_request_count": (
+                        self.state.unmatched_client_opcode_66_acknowledgements
+                    ),
+                    "pending_request_count": (
+                        self.state.pending_server_opcode_348_requests
+                    ),
+                    "last_round_trip_ms": (
+                        None
+                        if self.state.last_opcode_348_round_trip_ms is None
+                        else round(
+                            self.state.last_opcode_348_round_trip_ms, 3
+                        )
+                    ),
+                    "max_round_trip_ms": (
+                        None
+                        if self.state.max_opcode_348_round_trip_ms is None
+                        else round(self.state.max_opcode_348_round_trip_ms, 3)
                     ),
                 },
                 "fixed_server_records": (
@@ -3864,6 +4138,13 @@ class GameplayStateFold:
         ] = {}
         self._pending_heartbeat_probes: deque[int] = deque()
         self._pending_opcode_426_notifications: deque[int] = deque()
+        self._pending_server_opcode_348: dict[int, deque[int]] = {}
+        self._pending_skill_level_changes: deque[
+            tuple[int, int, SkillLevelChangeRequest]
+        ] = deque()
+        self._pending_skill_record_acknowledgements: deque[
+            tuple[int, int]
+        ] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._pending_client_attacks: dict[
@@ -4637,6 +4918,59 @@ class GameplayStateFold:
                     "movement control metadata after byte zero remains opaque",
                 ),
             )
+        if opcode == 293:
+            acknowledgement = SkillRecordUpdateAcknowledgement.parse(payload)
+            matched_update = bool(
+                self._pending_skill_record_acknowledgements
+            )
+            update_frame: int | None = None
+            round_trip_ms: float | None = None
+            if matched_update:
+                update_frame, update_timestamp_ns = (
+                    self._pending_skill_record_acknowledgements.popleft()
+                )
+                round_trip_ms = (
+                    frame.timestamp_ns - update_timestamp_ns
+                ) / 1e6
+                self.state.pending_skill_record_update_acknowledgements -= 1
+                self.state.matched_skill_record_update_acknowledgements += 1
+                self.state.last_skill_record_acknowledgement_ms = round_trip_ms
+                self.state.max_skill_record_acknowledgement_ms = max(
+                    self.state.max_skill_record_acknowledgement_ms or 0.0,
+                    round_trip_ms,
+                )
+            else:
+                self.state.unmatched_skill_record_update_acknowledgements += 1
+            self.state.skill_record_update_acknowledgements += 1
+            self.state.skill_record_acknowledgement_control_values[
+                acknowledgement.control_value
+            ] += 1
+            self.state.skill_record_acknowledgement_trailing_values[
+                acknowledgement.trailing_value
+            ] += 1
+            details: dict[str, object] = {
+                **acknowledgement.safe_dict(),
+                "matched_update": matched_update,
+                "update_frame": update_frame,
+                "pending_updates": (
+                    self.state.pending_skill_record_update_acknowledgements
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
+            self._event(
+                frame,
+                "skill_record_update_acknowledged",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="skill_record_update_acknowledgement",
+                coverage=ShapeCoverage.FULL,
+                parsed=acknowledgement,
+                details=details,
+            )
         if opcode == 309:
             acknowledgement = ClientOpcode309Acknowledgement.parse(payload)
             matched_notification = bool(
@@ -4724,6 +5058,50 @@ class GameplayStateFold:
         if opcode == 54:
             return self._fold_client_attack(
                 frame, ClientOpcode54AttackAction.parse(payload)
+            )
+        if opcode == 103:
+            request = SkillLevelChangeRequest.parse(payload)
+            previous_request = (
+                self._pending_skill_level_changes[-1][2]
+                if self._pending_skill_level_changes
+                else None
+            )
+            tick_delta = (
+                None
+                if previous_request is None
+                else (request.client_tick - previous_request.client_tick)
+                & 0xFFFF_FFFF
+            )
+            modeled_level = self.state.skill_levels.get(request.skill_id)
+            self._pending_skill_level_changes.append(
+                (frame.index, frame.timestamp_ns, request)
+            )
+            self.state.skill_level_change_requests += 1
+            self.state.skill_level_change_requests_by_skill_id[
+                request.skill_id
+            ] += 1
+            self.state.pending_skill_level_change_requests += 1
+            details = {
+                **request.safe_dict(),
+                "modeled_level_before": modeled_level,
+                "skill_known_before": modeled_level is not None,
+                "client_tick_delta": tick_delta,
+                "pending_requests": (
+                    self.state.pending_skill_level_change_requests
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "skill_level_change_requested",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="skill_level_change_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
             )
         if opcode == 104:
             request = ClientSkillUseRequest.parse(payload)
@@ -4874,6 +5252,124 @@ class GameplayStateFold:
                 details=details,
                 issues=("client opcode-13 payload remains opaque",),
             )
+        if opcode == 43:
+            envelope = ClientOpcode43Envelope.parse(payload)
+            self.state.client_opcode_43_packets += 1
+            self.state.client_opcode_43_sequences[envelope.sequence] += 1
+            self.state.client_opcode_43_variants[envelope.variant] += 1
+            self.state.client_opcode_43_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.client_opcode_43_opaque_bytes += (
+                envelope.opaque_byte_count
+            )
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_43_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_43_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=envelope,
+                details=details,
+                issues=(
+                    "client opcode-43 identifier, text, opaque bytes, and "
+                    "higher-level purpose remain semantically unresolved",
+                ),
+            )
+        if opcode == 66:
+            acknowledgement = ClientOpcode66Acknowledgement.parse(payload)
+            pending = self._pending_server_opcode_348.get(
+                acknowledgement.selector
+            )
+            matched_request = bool(pending)
+            round_trip_ms: float | None = None
+            if pending:
+                request_timestamp_ns = pending.popleft()
+                round_trip_ms = (
+                    frame.timestamp_ns - request_timestamp_ns
+                ) / 1e6
+                self.state.pending_server_opcode_348_requests -= 1
+                self.state.matched_client_opcode_66_acknowledgements += 1
+                self.state.last_opcode_348_round_trip_ms = round_trip_ms
+                self.state.max_opcode_348_round_trip_ms = max(
+                    self.state.max_opcode_348_round_trip_ms or 0.0,
+                    round_trip_ms,
+                )
+                if not pending:
+                    self._pending_server_opcode_348.pop(
+                        acknowledgement.selector, None
+                    )
+            else:
+                self.state.unmatched_client_opcode_66_acknowledgements += 1
+            self.state.client_opcode_66_acknowledgements += 1
+            self.state.client_opcode_66_selectors[
+                acknowledgement.selector
+            ] += 1
+            self.state.client_opcode_66_status_values[
+                acknowledgement.status_value
+            ] += 1
+            self.state.client_opcode_66_shapes[acknowledgement.shape] += 1
+            if acknowledgement.optional_value is not None:
+                self.state.client_opcode_66_optional_values += 1
+            details: dict[str, object] = {
+                **acknowledgement.safe_dict(),
+                "matched_request": matched_request,
+                "pending_requests": (
+                    self.state.pending_server_opcode_348_requests
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
+            self._event(
+                frame,
+                "server_opcode_348_acknowledged",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_66_acknowledgement",
+                coverage=ShapeCoverage.FULL,
+                parsed=acknowledgement,
+                details=details,
+            )
+        if opcode == 114:
+            envelope = ClientOpcode114TextEnvelope.parse(payload)
+            self.state.client_opcode_114_packets += 1
+            self.state.client_opcode_114_control_values[
+                envelope.control_value
+            ] += 1
+            self.state.client_opcode_114_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.client_opcode_114_redacted_values += 1
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_114_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_114_text_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=envelope,
+                details=details,
+                issues=(
+                    "client opcode-114 text, trailing value, and "
+                    "higher-level purpose remain semantically unresolved",
+                ),
+            )
         if opcode == 122 and ClientOpcode122Envelope.is_captured_shape(payload):
             envelope = ClientOpcode122Envelope.parse(payload)
             self.state.client_opcode_122_packets += 1
@@ -4941,6 +5437,35 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 43:
+            envelope = ServerOpcode43Envelope.parse(payload)
+            self.state.server_opcode_43_packets += 1
+            self.state.server_opcode_43_message_types[
+                envelope.message_type
+            ] += 1
+            self.state.server_opcode_43_opaque_bytes += len(
+                envelope.opaque_body
+            )
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_43_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_43_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=envelope,
+                details=details,
+                issues=(
+                    "server opcode-43 body and higher-level purpose remain "
+                    "semantically unresolved",
+                ),
+            )
         if opcode == 39:
             change_set = InventoryChangeSet.parse(payload)
             modification_details: list[dict[str, object]] = []
@@ -5315,6 +5840,103 @@ class GameplayStateFold:
                 )
                 if partial
                 else (),
+            )
+        if opcode == 46:
+            update = SkillRecordUpdate.parse(payload)
+            record_changes: list[dict[str, int | None]] = []
+            for record in update.records:
+                previous_level = self.state.skill_levels.get(record.skill_id)
+                self.state.skill_levels[record.skill_id] = record.level
+                record_changes.append(
+                    {
+                        "skill_id": record.skill_id,
+                        "previous_level": previous_level,
+                        "current_level": record.level,
+                        "level_delta": (
+                            None
+                            if previous_level is None
+                            else record.level - previous_level
+                        ),
+                        "auxiliary_value": record.auxiliary_value,
+                    }
+                )
+                self.state.skill_record_auxiliary_values[
+                    record.auxiliary_value
+                ] += 1
+
+            request_frame: int | None = None
+            requested_skill_id: int | None = None
+            request_matches: bool | None = None
+            request_response_ms: float | None = None
+            if update.records:
+                if self._pending_skill_level_changes:
+                    request_frame, request_timestamp_ns, request = (
+                        self._pending_skill_level_changes.popleft()
+                    )
+                    self.state.pending_skill_level_change_requests -= 1
+                    requested_skill_id = request.skill_id
+                    request_matches = any(
+                        record.skill_id == request.skill_id
+                        for record in update.records
+                    )
+                    request_response_ms = (
+                        frame.timestamp_ns - request_timestamp_ns
+                    ) / 1e6
+                    self.state.last_skill_record_response_ms = (
+                        request_response_ms
+                    )
+                    self.state.max_skill_record_response_ms = max(
+                        self.state.max_skill_record_response_ms or 0.0,
+                        request_response_ms,
+                    )
+                    if request_matches:
+                        self.state.skill_record_request_matches += 1
+                    else:
+                        self.state.skill_record_request_mismatches += 1
+                        self.warnings.append(
+                            "skill record update did not contain the skill id "
+                            "from the next pending level-change request"
+                        )
+                else:
+                    self.state.skill_record_updates_without_request += 1
+
+            self._pending_skill_record_acknowledgements.append(
+                (frame.index, frame.timestamp_ns)
+            )
+            self.state.skill_record_updates += 1
+            self.state.skill_record_update_records += len(update.records)
+            self.state.skill_record_updates_by_flags[
+                f"{int(update.flag_a)}:{int(update.flag_b)}"
+            ] += 1
+            self.state.skill_record_trailing_values[
+                update.trailing_value
+            ] += 1
+            self.state.pending_skill_record_update_acknowledgements += 1
+            details: dict[str, object] = {
+                **update.safe_dict(),
+                "record_changes": record_changes,
+                "request_frame": request_frame,
+                "requested_skill_id": requested_skill_id,
+                "request_matches": request_matches,
+                "pending_requests": (
+                    self.state.pending_skill_level_change_requests
+                ),
+                "pending_acknowledgements": (
+                    self.state.pending_skill_record_update_acknowledgements
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if request_response_ms is not None:
+                details["request_response_ms"] = round(
+                    request_response_ms, 3
+                )
+            self._event(frame, "skill_records_updated", details=details)
+            return self._observation(
+                frame,
+                kind="skill_record_update",
+                coverage=ShapeCoverage.FULL,
+                parsed=update,
+                details=details,
             )
         if opcode == 41:
             update = CharacterStatUpdate.parse(payload)
@@ -6282,6 +6904,69 @@ class GameplayStateFold:
                 parsed=instruction,
                 details=details,
             )
+        if opcode == 147:
+            ledger = ServerOpcode147BoundsLedger.parse(payload)
+            rectangle_shape = (
+                f"{ledger.rectangle_1}:{ledger.rectangle_2}"
+            )
+            self.state.server_opcode_147_packets += 1
+            self.state.server_opcode_147_value_counts[len(ledger.values)] += 1
+            self.state.server_opcode_147_rectangle_shapes[
+                rectangle_shape
+            ] += 1
+            details = {
+                **ledger.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "field_bounds_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_147_bounds_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger,
+                details=details,
+            )
+        if opcode == 272:
+            ledger_272 = ServerOpcode272Ledger.parse(payload)
+            self.state.server_opcode_272_packets += 1
+            self.state.server_opcode_272_entry_counts[
+                len(ledger_272.entries)
+            ] += 1
+            self.state.server_opcode_272_group_1_count += (
+                ledger_272.group_1_count
+            )
+            self.state.server_opcode_272_group_2_count += (
+                ledger_272.group_2_count
+            )
+            self.state.server_opcode_272_flag_1_true_count += sum(
+                entry.flag_1 for entry in ledger_272.entries
+            )
+            self.state.server_opcode_272_flag_2_true_count += sum(
+                entry.flag_2 for entry in ledger_272.entries
+            )
+            self.state.server_opcode_272_trailer_values[
+                ledger_272.trailer_value
+            ] += 1
+            details = {
+                **ledger_272.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "field_configuration_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_272_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_272,
+                details=details,
+            )
         if (
             opcode == 239
             and len(payload) >= 3
@@ -6410,6 +7095,11 @@ class GameplayStateFold:
             }
         ):
             envelope = ServerOpcode348TextEnvelope.parse(payload)
+            pending = self._pending_server_opcode_348.setdefault(
+                envelope.selector, deque()
+            )
+            pending.append(frame.timestamp_ns)
+            self.state.pending_server_opcode_348_requests += 1
             self.state.server_opcode_348_packets += 1
             self.state.server_opcode_348_categories[envelope.category] += 1
             self.state.server_opcode_348_selectors[envelope.selector] += 1
@@ -6422,6 +7112,9 @@ class GameplayStateFold:
                 self.state.server_opcode_348_control_pairs[control_pair] += 1
             details = {
                 **envelope.safe_dict(),
+                "pending_acknowledgements": (
+                    self.state.pending_server_opcode_348_requests
+                ),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -6437,17 +7130,23 @@ class GameplayStateFold:
                 parsed=envelope,
                 details=details,
             )
-        if opcode in {69, 93, 201, 205}:
+        if opcode in {69, 93, 94, 148, 201, 205, 379}:
             if opcode == 69:
                 neutral_record: NeutralServerRecord = (
                     ServerOpcode69Record.parse(payload)
                 )
             elif opcode == 93:
                 neutral_record = ServerOpcode93Record.parse(payload)
+            elif opcode == 94:
+                neutral_record = ServerOpcode94Record.parse(payload)
+            elif opcode == 148:
+                neutral_record = ServerOpcode148Envelope.parse(payload)
             elif opcode == 201:
                 neutral_record = ServerOpcode201Record.parse(payload)
-            else:
+            elif opcode == 205:
                 neutral_record = ServerOpcode205Record.parse(payload)
+            else:
+                neutral_record = ServerOpcode379Record.parse(payload)
             details: dict[str, object] = {
                 "opcode": opcode,
                 **neutral_record.safe_dict(),
@@ -6464,7 +7163,10 @@ class GameplayStateFold:
                 "neutral_server_record_received",
                 details=details,
             )
-            partial = opcode in {69, 201}
+            partial = opcode in {69, 201} or (
+                isinstance(neutral_record, ServerOpcode148Envelope)
+                and not neutral_record.fully_bounded
+            )
             return self._observation(
                 frame,
                 kind="neutral_server_record",
@@ -6498,6 +7200,12 @@ class GameplayStateFold:
                 fixed_record = FixedServerU16Record.parse(payload)
                 details = {
                     "shape": "uint16",
+                    "value": fixed_record.value,
+                }
+            elif opcode in FixedServerI32Record.SUPPORTED_OPCODES:
+                fixed_record = FixedServerI32Record.parse(payload)
+                details = {
+                    "shape": "int32",
                     "value": fixed_record.value,
                 }
             elif opcode in FixedServerU32Record.SUPPORTED_OPCODES:
@@ -7989,6 +8697,34 @@ class GameplayStateFold:
                 "opcode-426 notifications had no captured client "
                 "opcode-309 acknowledgement"
             )
+        if self.state.unmatched_client_opcode_66_acknowledgements:
+            self.warnings.append(
+                f"{self.state.unmatched_client_opcode_66_acknowledgements} "
+                "client opcode-66 acknowledgements had no pending "
+                "same-selector server opcode-348 request"
+            )
+        if self.state.pending_server_opcode_348_requests:
+            self.warnings.append(
+                f"{self.state.pending_server_opcode_348_requests} server "
+                "opcode-348 requests had no captured client opcode-66 "
+                "acknowledgement"
+            )
+        if self.state.pending_skill_level_change_requests:
+            self.warnings.append(
+                f"{self.state.pending_skill_level_change_requests} skill "
+                "level-change requests had no captured record update"
+            )
+        if self.state.unmatched_skill_record_update_acknowledgements:
+            self.warnings.append(
+                f"{self.state.unmatched_skill_record_update_acknowledgements} "
+                "skill-record acknowledgements had no pending server update"
+            )
+        if self.state.pending_skill_record_update_acknowledgements:
+            self.warnings.append(
+                f"{self.state.pending_skill_record_update_acknowledgements} "
+                "server skill-record updates had no captured client "
+                "acknowledgement"
+            )
         if self.state.pending_item_uses:
             self.warnings.append(
                 f"{self.state.pending_item_uses} item-use requests had no "
@@ -8015,6 +8751,12 @@ class GameplayStateFold:
                     ),
                     "pending_opcode_426_notifications": (
                         self.state.pending_opcode_426_notifications
+                    ),
+                    "pending_skill_level_change_requests": (
+                        self.state.pending_skill_level_change_requests
+                    ),
+                    "pending_skill_record_update_acknowledgements": (
+                        self.state.pending_skill_record_update_acknowledgements
                     ),
                     "pending_item_uses": self.state.pending_item_uses,
                     "pending_item_pickups": self.state.pending_item_pickups,
@@ -9598,6 +10340,7 @@ def plan_fixed_server_record_replay(
         raise ValueError("world transcript failed packet/state validation")
     record_types = (
         FixedServerEmptyRecord,
+        FixedServerI32Record,
         FixedServerOpcode11Record,
         FixedServerU16PairRecord,
         FixedServerU16Record,
@@ -9960,6 +10703,24 @@ def render_gameplay_analysis(
             f"variant:{state.progression_variant}"
         ),
         (
+            "skill_records="
+            f"requests:{state.skill_level_change_requests} "
+            f"updates:{state.skill_record_updates} "
+            f"records:{state.skill_record_update_records} "
+            f"request_matches:{state.skill_record_request_matches} "
+            f"request_mismatches:{state.skill_record_request_mismatches} "
+            f"updates_without_request:{state.skill_record_updates_without_request} "
+            f"pending_requests:{state.pending_skill_level_change_requests} "
+            "acknowledgements:"
+            f"{state.skill_record_update_acknowledgements} "
+            "matched_acknowledgements:"
+            f"{state.matched_skill_record_update_acknowledgements} "
+            "unmatched_acknowledgements:"
+            f"{state.unmatched_skill_record_update_acknowledgements} "
+            "pending_acknowledgements:"
+            f"{state.pending_skill_record_update_acknowledgements}"
+        ),
+        (
             f"fixed_server_records=count:{state.fixed_server_records} "
             f"by_opcode:{dict(state.fixed_server_records_by_opcode)} "
             f"character_contexts:{state.initial_character_contexts}"
@@ -10299,6 +11060,26 @@ def render_gameplay_analysis(
             f"extended:{state.tutorial_ui_extended_instructions}"
         ),
         (
+            "server_opcode_147="
+            f"packets:{state.server_opcode_147_packets} "
+            "value_counts:"
+            f"{dict(sorted(state.server_opcode_147_value_counts.items()))} "
+            "rectangle_shapes:"
+            f"{dict(sorted(state.server_opcode_147_rectangle_shapes.items()))}"
+        ),
+        (
+            "server_opcode_272="
+            f"packets:{state.server_opcode_272_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_272_entry_counts.items()))} "
+            f"group_1:{state.server_opcode_272_group_1_count} "
+            f"group_2:{state.server_opcode_272_group_2_count} "
+            f"flag_1_true:{state.server_opcode_272_flag_1_true_count} "
+            f"flag_2_true:{state.server_opcode_272_flag_2_true_count} "
+            "trailer_values:"
+            f"{dict(sorted(state.server_opcode_272_trailer_values.items()))}"
+        ),
+        (
             "server_opcode_239="
             f"packets:{state.server_opcode_239_packets} "
             "selectors:"
@@ -10338,6 +11119,44 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
             "control_pairs:"
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
+        ),
+        (
+            "client_opcode_66="
+            f"packets:{state.client_opcode_66_acknowledgements} "
+            f"selectors:{dict(sorted(state.client_opcode_66_selectors.items()))} "
+            "status_values:"
+            f"{dict(sorted(state.client_opcode_66_status_values.items()))} "
+            f"shapes:{dict(sorted(state.client_opcode_66_shapes.items()))} "
+            f"optional_values:{state.client_opcode_66_optional_values} "
+            "matched:"
+            f"{state.matched_client_opcode_66_acknowledgements} "
+            "unmatched:"
+            f"{state.unmatched_client_opcode_66_acknowledgements} "
+            f"pending:{state.pending_server_opcode_348_requests} "
+            f"last_rtt_ms:{state.last_opcode_348_round_trip_ms} "
+            f"max_rtt_ms:{state.max_opcode_348_round_trip_ms}"
+        ),
+        (
+            f"client_opcode_43=packets:{state.client_opcode_43_packets} "
+            f"sequences:{dict(sorted(state.client_opcode_43_sequences.items()))} "
+            f"variants:{dict(sorted(state.client_opcode_43_variants.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.client_opcode_43_text_code_units.items()))} "
+            f"opaque_bytes:{state.client_opcode_43_opaque_bytes}"
+        ),
+        (
+            f"server_opcode_43=packets:{state.server_opcode_43_packets} "
+            "message_types:"
+            f"{dict(sorted(state.server_opcode_43_message_types.items()))} "
+            f"opaque_bytes:{state.server_opcode_43_opaque_bytes}"
+        ),
+        (
+            f"client_opcode_114=packets:{state.client_opcode_114_packets} "
+            "control_values:"
+            f"{dict(sorted(state.client_opcode_114_control_values.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.client_opcode_114_text_code_units.items()))} "
+            f"redacted_values:{state.client_opcode_114_redacted_values}"
         ),
         (
             f"client_opcode_122=packets:{state.client_opcode_122_packets} "

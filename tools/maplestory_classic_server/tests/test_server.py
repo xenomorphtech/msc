@@ -552,6 +552,28 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(arguments.verify_timeout_seconds, 3)
         self.assertTrue(arguments.json)
 
+    def test_parser_accepts_live_skill_record_injection_validation(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "inject-skill-record",
+                "--transcript",
+                "live-world.jsonl",
+                "--skill-id",
+                "2001005",
+                "--level",
+                "6",
+                "--verify-timeout-seconds",
+                "3",
+                "--json",
+            ]
+        )
+
+        self.assertEqual(arguments.transcript, Path("live-world.jsonl"))
+        self.assertEqual(arguments.skill_id, 2_001_005)
+        self.assertEqual(arguments.level, 6)
+        self.assertEqual(arguments.verify_timeout_seconds, 3)
+        self.assertTrue(arguments.json)
+
     def test_replay_parser_accepts_typed_inventory_quantity_update(self) -> None:
         arguments = build_parser().parse_args(
             [

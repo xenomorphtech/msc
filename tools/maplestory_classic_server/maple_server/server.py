@@ -61,7 +61,11 @@ from .http_api import (
 from .live_replay import (
     DEFAULT_PACKET_API_URL,
     inject_current_hp_live,
+    inject_mob_temporary_stat_live,
+    inject_skill_record_live,
     render_current_hp_live_replay,
+    render_mob_temporary_stat_live_replay,
+    render_skill_record_live_replay,
 )
 from .packets import (
     ChannelTransitionResponse,
@@ -3476,6 +3480,87 @@ def build_parser() -> argparse.ArgumentParser:
     )
     live_hp_parser.add_argument("--json", action="store_true")
 
+    live_skill_record_parser = subparsers.add_parser(
+        "inject-skill-record",
+        help=(
+            "compose one captured-form skill-record update, inject it through "
+            "a live replay API, and verify the client acknowledgement and fold"
+        ),
+    )
+    live_skill_record_parser.add_argument(
+        "--transcript", required=True, type=Path
+    )
+    skill_record_mode = live_skill_record_parser.add_mutually_exclusive_group(
+        required=True
+    )
+    skill_record_mode.add_argument(
+        "--empty",
+        action="store_true",
+        help="send the captured zero-record form without changing progression",
+    )
+    skill_record_mode.add_argument(
+        "--skill-id",
+        type=int,
+        help="update an existing skill id from the live progression state",
+    )
+    live_skill_record_parser.add_argument(
+        "--level",
+        type=int,
+        help="emitted level; defaults to the existing level for a no-op control",
+    )
+    live_skill_record_parser.add_argument(
+        "--http-api-url",
+        default=DEFAULT_PACKET_API_URL,
+        help="loopback POST /api/v1/server-packets endpoint",
+    )
+    live_skill_record_parser.add_argument(
+        "--api-timeout-seconds", type=float, default=5.0
+    )
+    live_skill_record_parser.add_argument(
+        "--verify-timeout-seconds", type=float, default=5.0
+    )
+    live_skill_record_parser.add_argument("--json", action="store_true")
+
+    live_mob_stat_parser = subparsers.add_parser(
+        "inject-mob-temporary-stat",
+        help=(
+            "compose one mob spawn/set/reset/leave lifecycle from generated "
+            "IL2CPP packet evidence, inject it, and verify the gameplay fold"
+        ),
+    )
+    live_mob_stat_parser.add_argument("--transcript", required=True, type=Path)
+    live_mob_stat_parser.add_argument(
+        "--il2cpp-shape-dump", required=True, type=Path
+    )
+    live_mob_stat_parser.add_argument(
+        "--evidence-jsonl", required=True, type=Path
+    )
+    live_mob_stat_parser.add_argument(
+        "--evidence-tcp-stream", type=int, default=92
+    )
+    live_mob_stat_parser.add_argument("--x-offset", type=int, default=120)
+    live_mob_stat_parser.add_argument(
+        "--spawn-hold-seconds", type=float, default=0.0
+    )
+    live_mob_stat_parser.add_argument(
+        "--set-hold-seconds", type=float, default=1.0
+    )
+    live_mob_stat_parser.add_argument(
+        "--reset-hold-seconds", type=float, default=0.0
+    )
+    live_mob_stat_parser.add_argument(
+        "--http-api-url",
+        default=DEFAULT_PACKET_API_URL,
+        help="loopback POST /api/v1/server-packets endpoint",
+    )
+    live_mob_stat_parser.add_argument(
+        "--api-timeout-seconds", type=float, default=5.0
+    )
+    live_mob_stat_parser.add_argument(
+        "--verify-timeout-seconds", type=float, default=5.0
+    )
+    live_mob_stat_parser.add_argument("--json", action="store_true")
+
     analyze_parser = subparsers.add_parser(
         "analyze-login",
         help=(
@@ -4750,6 +4835,53 @@ def main() -> None:
             )
         else:
             print(render_current_hp_live_replay(result))
+        return
+    if arguments.command == "inject-skill-record":
+        result = inject_skill_record_live(
+            arguments.transcript,
+            skill_id=arguments.skill_id,
+            level=arguments.level,
+            api_url=arguments.http_api_url,
+            api_timeout_seconds=arguments.api_timeout_seconds,
+            verify_timeout_seconds=arguments.verify_timeout_seconds,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    result.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_skill_record_live_replay(result))
+        return
+    if arguments.command == "inject-mob-temporary-stat":
+        result = inject_mob_temporary_stat_live(
+            arguments.transcript,
+            arguments.il2cpp_shape_dump,
+            arguments.evidence_jsonl,
+            evidence_tcp_stream=arguments.evidence_tcp_stream,
+            x_offset=arguments.x_offset,
+            spawn_hold_seconds=arguments.spawn_hold_seconds,
+            set_hold_seconds=arguments.set_hold_seconds,
+            reset_hold_seconds=arguments.reset_hold_seconds,
+            api_url=arguments.http_api_url,
+            api_timeout_seconds=arguments.api_timeout_seconds,
+            verify_timeout_seconds=arguments.verify_timeout_seconds,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    result.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_mob_temporary_stat_live_replay(result))
         return
     if arguments.command in {"analyze-login", "analyze-gameplay"}:
         if arguments.pcap is not None:

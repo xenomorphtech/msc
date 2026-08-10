@@ -13,12 +13,12 @@ fn manifest() -> LoadedManifest {
 }
 
 #[test]
-fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
+fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 65);
-    assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 97);
-    assert_eq!(shapes.len(), 162);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 76);
+    assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
+    assert_eq!(shapes.len(), 170);
 
     let shape = shapes
         .iter()
@@ -26,6 +26,96 @@ fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
         .unwrap();
     assert_eq!(shape.length, Some(326));
     assert_eq!(shape.operations.len(), 2);
+
+    let skill_update = shapes
+        .iter()
+        .find(|shape| shape.name == "skill_record_update")
+        .unwrap();
+    assert_eq!(skill_update.opcode, 46);
+    assert_eq!(skill_update.length, None);
+    assert_eq!(skill_update.operations.len(), 6);
+
+    let signed_i32 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_60_i32")
+        .unwrap();
+    assert_eq!(signed_i32.opcode, 60);
+    assert_eq!(signed_i32.length, Some(6));
+    assert_eq!(signed_i32.operations.len(), 2);
+
+    let flag_and_pair = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_94_record")
+        .unwrap();
+    assert_eq!(flag_and_pair.opcode, 94);
+    assert_eq!(flag_and_pair.length, Some(11));
+    assert_eq!(flag_and_pair.operations.len(), 4);
+
+    let opcode_148 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_148_envelope")
+        .unwrap();
+    assert_eq!(opcode_148.opcode, 148);
+    assert_eq!(opcode_148.length, None);
+    assert_eq!(opcode_148.operations.len(), 3);
+
+    let legacy_opcode_148 = shapes
+        .iter()
+        .find(|shape| shape.name == "observed_server_to_client_opcode_148_length_1639")
+        .unwrap();
+    assert_eq!(legacy_opcode_148.length, Some(1_639));
+
+    let opcode_43_identified = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_43_identified_text")
+        .unwrap();
+    assert_eq!(opcode_43_identified.opcode, 43);
+    assert_eq!(opcode_43_identified.length, None);
+    assert_eq!(opcode_43_identified.operations.len(), 5);
+
+    let opcode_43_compact = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_43_compact")
+        .unwrap();
+    assert_eq!(opcode_43_compact.opcode, 43);
+    assert_eq!(opcode_43_compact.length, Some(12));
+    assert_eq!(opcode_43_compact.operations.len(), 3);
+
+    let opcode_114 = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_114_text_envelope")
+        .unwrap();
+    assert_eq!(opcode_114.opcode, 114);
+    assert_eq!(opcode_114.length, None);
+    assert_eq!(opcode_114.operations.len(), 4);
+
+    let opcode_66 = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_66_server_348_acknowledgement")
+        .unwrap();
+    assert_eq!(opcode_66.opcode, 66);
+    assert_eq!(opcode_66.length, None);
+    assert_eq!(opcode_66.operations.len(), 3);
+
+    let opcode_147 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_147_bounds_ledger")
+        .unwrap();
+    assert_eq!(opcode_147.opcode, 147);
+    assert_eq!(opcode_147.length, Some(94));
+    assert_eq!(opcode_147.operations.len(), 11);
+
+    let opcode_272 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_272_field_ledger")
+        .unwrap();
+    assert_eq!(opcode_272.opcode, 272);
+    assert_eq!(opcode_272.length, Some(1_056));
+    assert_eq!(opcode_272.operations.len(), 12);
+    assert!(!shapes.iter().any(|shape| {
+        shape.name == "observed_server_to_client_opcode_147_length_94"
+            || shape.name == "observed_server_to_client_opcode_272_length_1056"
+    }));
 }
 
 #[test]
@@ -39,7 +129,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 162);
+    assert_eq!(dump.packet_shapes.len(), 170);
     assert_eq!(
         dump.handlers
             .iter()
@@ -92,6 +182,29 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
         .unwrap();
     assert_eq!(transition.rva, Some(0x00c1_1620));
     assert_eq!(transition.direct_reads[0].kind, "i16");
+
+    for (opcode, expected_reads) in [
+        (60, vec!["i32"]),
+        (94, vec!["bool", "i32", "i32"]),
+        (
+            379,
+            vec!["u8", "datetime", "datetime", "datetime", "datetime"],
+        ),
+    ] {
+        let handler = dump
+            .handlers
+            .iter()
+            .find(|handler| handler.opcode == opcode)
+            .unwrap();
+        assert_eq!(
+            handler
+                .direct_reads
+                .iter()
+                .map(|read| read.kind.as_str())
+                .collect::<Vec<_>>(),
+            expected_reads
+        );
+    }
 
     assert_eq!(
         deterministic_json(&dump).unwrap(),
