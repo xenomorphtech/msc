@@ -17,7 +17,9 @@ from maple_server.gameplay import GameplayPhase  # noqa: E402
 from maple_server.live_replay import (  # noqa: E402
     DEFAULT_PACKET_API_URL,
     inject_current_hp_live,
+    inject_skill_record_live,
     plan_mob_temporary_stat_live_replay,
+    plan_skill_record_update_live,
     validate_packet_api_url,
 )
 from maple_server.packets import (  # noqa: E402
@@ -25,10 +27,20 @@ from maple_server.packets import (  # noqa: E402
     MobSpawnData,
     MobTemporaryStatReset,
     MobTemporaryStatSet,
+    SkillRecordUpdate,
 )
 
 
-def state(*, current_hp: int, player_stat_updates: int) -> SimpleNamespace:
+def state(
+    *,
+    current_hp: int,
+    player_stat_updates: int,
+    skill_record_updates: int = 0,
+    skill_record_update_records: int = 0,
+    skill_record_update_acknowledgements: int = 0,
+    matched_skill_record_update_acknowledgements: int = 0,
+    skill_record_updates_without_request: int = 0,
+) -> SimpleNamespace:
     return SimpleNamespace(
         current_hp=current_hp,
         max_hp=222,
@@ -57,6 +69,19 @@ def state(*, current_hp: int, player_stat_updates: int) -> SimpleNamespace:
         fame=0,
         mesos=4567,
         player_stat_updates=player_stat_updates,
+        skill_level_change_requests=0,
+        pending_skill_level_change_requests=0,
+        skill_record_updates=skill_record_updates,
+        skill_record_update_records=skill_record_update_records,
+        skill_record_update_acknowledgements=(
+            skill_record_update_acknowledgements
+        ),
+        matched_skill_record_update_acknowledgements=(
+            matched_skill_record_update_acknowledgements
+        ),
+        unmatched_skill_record_update_acknowledgements=0,
+        pending_skill_record_update_acknowledgements=0,
+        skill_record_updates_without_request=skill_record_updates_without_request,
     )
 
 
@@ -168,6 +193,125 @@ class LiveReplayTest(unittest.TestCase):
             inject_current_hp_live(Path("live.jsonl"), 50)
 
         post.assert_not_called()
+
+    def test_skill_record_plan_builds_both_captured_forms(self) -> None:
+        analysis = SimpleNamespace(
+            valid=True,
+            state=state(current_hp=50, player_stat_updates=1),
+        )
+
+        empty = plan_skill_record_update_live(analysis)
+        existing = plan_skill_record_update_live(
+            analysis,
+            skill_id=2_001_002,
+        )
+
+        self.assertEqual(empty.update.to_bytes(), bytes.fromhex("2e000000000002"))
+        self.assertEqual(
+            existing.update.to_bytes(),
+            bytes.fromhex("2e00010001006a881e00010000000000000002"),
+        )
+        self.assertEqual(existing.safe_dict()["mode"], "existing_skill")
+        with self.assertRaisesRegex(ValueError, "requires a skill id"):
+            plan_skill_record_update_live(analysis, level=2)
+        with self.assertRaisesRegex(ValueError, "not present"):
+            plan_skill_record_update_live(analysis, skill_id=9_999_999)
+
+    def test_live_skill_record_injection_requires_update_and_ack_fold(self) -> None:
+        baseline = SimpleNamespace(
+            valid=True,
+            state=state(current_hp=50, player_stat_updates=1),
+            observations=(),
+        )
+        update_observation = SimpleNamespace(
+            direction="server_to_client",
+            opcode=46,
+            details={
+                "flag_a": True,
+                "flag_b": False,
+                "record_count": 1,
+                "records": [
+                    {
+                        "skill_id": 2_001_002,
+                        "level": 1,
+                        "auxiliary_value": 0,
+                    }
+                ],
+                "trailing_value": 2,
+                "record_changes": [
+                    {
+                        "skill_id": 2_001_002,
+                        "previous_level": 1,
+                        "current_level": 1,
+                        "level_delta": 0,
+                        "auxiliary_value": 0,
+                    }
+                ],
+            },
+            frame_index=81,
+            kind="skill_record_update",
+            coverage=ShapeCoverage.FULL,
+        )
+        acknowledgement_observation = SimpleNamespace(
+            direction="client_to_server",
+            opcode=293,
+            details={
+                "control_value": 346,
+                "client_tick": 400_000,
+                "trailing_value": 0,
+                "matched_update": True,
+                "update_frame": 81,
+                "round_trip_ms": 11.25,
+            },
+            frame_index=82,
+            kind="skill_record_update_acknowledgement",
+            coverage=ShapeCoverage.FULL,
+        )
+        observed = SimpleNamespace(
+            valid=True,
+            state=state(
+                current_hp=50,
+                player_stat_updates=1,
+                skill_record_updates=1,
+                skill_record_update_records=1,
+                skill_record_update_acknowledgements=1,
+                matched_skill_record_update_acknowledgements=1,
+                skill_record_updates_without_request=1,
+            ),
+            observations=(update_observation, acknowledgement_observation),
+        )
+        api_response = {
+            "accepted": True,
+            "opcode": 46,
+            "plaintext_length": 19,
+        }
+
+        with (
+            patch("maple_server.live_replay.Transcript.load", return_value=object()),
+            patch(
+                "maple_server.live_replay.analyze_gameplay_transcript",
+                side_effect=(baseline, observed),
+            ),
+            patch(
+                "maple_server.live_replay._post_plaintext_packet",
+                return_value=api_response,
+            ) as post,
+        ):
+            result = inject_skill_record_live(
+                Path("live.jsonl"),
+                skill_id=2_001_002,
+            )
+
+        payload = post.call_args.args[1]
+        self.assertEqual(SkillRecordUpdate.parse(payload).records[0].level, 1)
+        report = result.safe_dict()
+        self.assertTrue(report["verification"]["matched"])
+        self.assertEqual(
+            report["verification"]["observed_acknowledgement"][
+                "control_value"
+            ],
+            346,
+        )
 
     def test_mob_stat_plan_uses_generated_shapes_and_capture_pair(self) -> None:
         object_id = 1234

@@ -625,6 +625,33 @@ inventory, and progression. API acceptance alone remains insufficient; the
 command succeeds only when the observed fold matches every check. The JSON
 report is identifier-free and does not expose plaintext bytes.
 
+Use the typed skill-record companion for the captured server opcode-`46` forms:
+
+```sh
+# Captured seven-byte zero-record control.
+python -m maple_server inject-skill-record \
+  --transcript /path/to/live-world.jsonl \
+  --empty \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+
+# Reassert an existing live skill at its current level.
+python -m maple_server inject-skill-record \
+  --transcript /path/to/live-world.jsonl \
+  --skill-id 2001005 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+Exactly one of `--empty` and `--skill-id` is required. Existing-skill mode
+defaults to the folded current level; `--level` can instead name an explicit
+non-negative int32 level. The command refuses unknown skills or a baseline with
+pending skill transactions, round-trips the typed packet before sending, and
+then requires the exact opcode-`46` observation followed by its matched client
+opcode-`293` acknowledgement. It verifies counter deltas, resulting skill
+levels, player state, phase, field epoch, map, inventory, and all other
+progression before reporting success.
+
 For mob opcode-`285`/`286` experiments, use the generated-evidence validator
 instead of copying packet hex. First run the pinned IL2CPP dumper's `verify`,
 `dump`, `export-pcap`, and `validate --require-all-supported` commands from its
@@ -665,6 +692,16 @@ heartbeats and reactive responses, so encryption and socket-write order cannot
 advance the Maple cipher IV out of sequence. Successful sends are also written
 to the replay transcript as packet and `http_server_packet_injected` runtime
 records and pass through the existing modeled-response policies.
+
+A browser-free stream-`114` live run validated both skill-record modes. Two
+manual controls and the two typed command invocations produced four opcode-`46`
+updates and four matched opcode-`293` acknowledgements, control value `346`,
+zero unmatched or pending transactions, and acknowledgement times from
+`11.297` through `864.607` ms. The final transcript
+`downloads/maple_custom_server_observed/skill_records_live_20260810/world/1786360603786044891_replay_12857.jsonl`
+folds validly and warning-free to active map `101000000`, HP `50`, unchanged
+player/inventory/progression, skill `2001005` still at level `6`, and 61/61
+matched generated heartbeats. The client remained responsive in the field.
 
 The browser-free live proof injected exact captured opcode-`385` and `156`
 expanded packets after the client was active. The client stayed on map

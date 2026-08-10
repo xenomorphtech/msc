@@ -23,6 +23,8 @@ from .packets import (
     MobLeaveField,
     MobTemporaryStatReset,
     MobTemporaryStatSet,
+    SkillRecordEntry,
+    SkillRecordUpdate,
 )
 from .transcript import Transcript
 
@@ -63,6 +65,81 @@ class CurrentHpLiveReplayResult:
                     "inventory_unchanged": True,
                     "progression_unchanged": True,
                     "player_stat_updates_delta_matches": True,
+                },
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SkillRecordLiveReplayPlan:
+    update: SkillRecordUpdate = field(repr=False)
+    original_skill_level: int | None
+    emitted_skill_level: int | None
+
+    def safe_dict(self) -> dict[str, object]:
+        records = self.update.records
+        return {
+            "opcode": self.update.opcode,
+            "length": len(self.update.to_bytes()),
+            "mode": "empty" if not records else "existing_skill",
+            "flag_a": self.update.flag_a,
+            "flag_b": self.update.flag_b,
+            "record_count": len(records),
+            "skill_id": None if not records else records[0].skill_id,
+            "original_skill_level": self.original_skill_level,
+            "emitted_skill_level": self.emitted_skill_level,
+            "auxiliary_value": None if not records else records[0].auxiliary_value,
+            "trailing_value": self.update.trailing_value,
+            "prediction": {
+                "skill_record_updates_delta": 1,
+                "skill_record_update_records_delta": len(records),
+                "matched_acknowledgements_delta": 1,
+                "updates_without_request_delta": int(bool(records)),
+                "skill_level": (
+                    "unchanged" if not records else self.emitted_skill_level
+                ),
+                "phase": "unchanged",
+                "field_epoch": "unchanged",
+                "map_id": "unchanged",
+                "player_state": "unchanged",
+                "inventory": "unchanged",
+                "other_progression": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SkillRecordLiveReplayResult:
+    plan: SkillRecordLiveReplayPlan = field(repr=False)
+    api_response: dict[str, object]
+    observed_update: dict[str, object]
+    observed_acknowledgement: dict[str, object]
+    polls: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "accepted": True,
+            "operation": "skill_record_update",
+            "plan": self.plan.safe_dict(),
+            "api": self.api_response,
+            "verification": {
+                "matched": True,
+                "polls": self.polls,
+                "observed_update": self.observed_update,
+                "observed_acknowledgement": self.observed_acknowledgement,
+                "checks": {
+                    "typed_packet_round_trip": True,
+                    "typed_update_observed": True,
+                    "client_acknowledgement_observed": True,
+                    "acknowledgement_matched_update": True,
+                    "counter_deltas_match": True,
+                    "skill_levels_match": True,
+                    "phase_unchanged": True,
+                    "field_epoch_unchanged": True,
+                    "map_id_unchanged": True,
+                    "player_state_unchanged": True,
+                    "inventory_unchanged": True,
+                    "other_progression_unchanged": True,
                 },
             },
         }
@@ -283,6 +360,12 @@ def _progression_snapshot(analysis: GameplayAnalysis) -> tuple[object, ...]:
         state.fame,
         state.mesos,
     )
+
+
+def _progression_snapshot_without_skill_levels(
+    analysis: GameplayAnalysis,
+) -> tuple[object, ...]:
+    return _progression_snapshot(analysis)[1:]
 
 
 def _load_json_object(path: Path, *, description: str) -> dict[str, object]:
@@ -904,6 +987,259 @@ def inject_mob_temporary_stat_live(
     )
 
 
+def plan_skill_record_update_live(
+    analysis: GameplayAnalysis,
+    *,
+    skill_id: int | None = None,
+    level: int | None = None,
+) -> SkillRecordLiveReplayPlan:
+    """Build one captured-form empty or existing-skill record update."""
+    if not analysis.valid:
+        raise ValueError("live world transcript failed packet/state validation")
+    if skill_id is None:
+        if level is not None:
+            raise ValueError("skill level requires a skill id")
+        update = SkillRecordUpdate(
+            flag_a=False,
+            flag_b=False,
+            records=(),
+            trailing_value=2,
+        )
+        original_level = None
+        emitted_level = None
+    else:
+        if skill_id not in analysis.state.skill_levels:
+            raise ValueError("skill id is not present in the live progression state")
+        original_level = analysis.state.skill_levels[skill_id]
+        emitted_level = original_level if level is None else level
+        if not 0 <= emitted_level <= 0x7FFF_FFFF:
+            raise ValueError("skill level must fit a non-negative int32")
+        update = SkillRecordUpdate(
+            flag_a=True,
+            flag_b=False,
+            records=(
+                SkillRecordEntry(
+                    skill_id=skill_id,
+                    level=emitted_level,
+                    auxiliary_value=0,
+                ),
+            ),
+            trailing_value=2,
+        )
+    payload = update.to_bytes()
+    if SkillRecordUpdate.parse(payload) != update:
+        raise RuntimeError("skill-record update failed typed packet round trip")
+    return SkillRecordLiveReplayPlan(
+        update=update,
+        original_skill_level=original_level,
+        emitted_skill_level=emitted_level,
+    )
+
+
+def _matching_skill_record_transaction(
+    analysis: GameplayAnalysis,
+    *,
+    first_observation: int,
+    update: SkillRecordUpdate,
+) -> tuple[dict[str, object], dict[str, object]] | None:
+    expected_shape = update.safe_dict()
+    update_observation = None
+    for observation in analysis.observations[first_observation:]:
+        if update_observation is None:
+            if (
+                observation.direction != "server_to_client"
+                or observation.opcode != 46
+                or observation.kind != "skill_record_update"
+            ):
+                continue
+            observed_shape = {
+                name: observation.details.get(name)
+                for name in (
+                    "flag_a",
+                    "flag_b",
+                    "record_count",
+                    "records",
+                    "trailing_value",
+                )
+            }
+            if observed_shape != expected_shape:
+                continue
+            update_observation = observation
+            continue
+        if (
+            observation.direction != "client_to_server"
+            or observation.opcode != 293
+            or observation.kind != "skill_record_update_acknowledgement"
+            or observation.details.get("matched_update") is not True
+            or observation.details.get("update_frame")
+            != update_observation.frame_index
+        ):
+            continue
+        return (
+            {
+                "frame_index": update_observation.frame_index,
+                "opcode": update_observation.opcode,
+                "kind": update_observation.kind,
+                "coverage": update_observation.coverage.value,
+                **expected_shape,
+                "record_changes": update_observation.details.get(
+                    "record_changes"
+                ),
+            },
+            {
+                "frame_index": observation.frame_index,
+                "opcode": observation.opcode,
+                "kind": observation.kind,
+                "coverage": observation.coverage.value,
+                "control_value": observation.details.get("control_value"),
+                "client_tick": observation.details.get("client_tick"),
+                "trailing_value": observation.details.get("trailing_value"),
+                "matched_update": True,
+                "update_frame": observation.details.get("update_frame"),
+                "round_trip_ms": observation.details.get("round_trip_ms"),
+            },
+        )
+    return None
+
+
+def inject_skill_record_live(
+    transcript_path: Path,
+    *,
+    skill_id: int | None = None,
+    level: int | None = None,
+    api_url: str = DEFAULT_PACKET_API_URL,
+    api_timeout_seconds: float = 5.0,
+    verify_timeout_seconds: float = 5.0,
+) -> SkillRecordLiveReplayResult:
+    """Plan, inject, and verify one typed skill-record transaction."""
+    if not math.isfinite(api_timeout_seconds) or api_timeout_seconds <= 0:
+        raise ValueError("API timeout must be positive")
+    if not math.isfinite(verify_timeout_seconds) or verify_timeout_seconds <= 0:
+        raise ValueError("verification timeout must be positive")
+    validate_packet_api_url(api_url)
+    baseline = analyze_gameplay_transcript(Transcript.load(transcript_path))
+    if not baseline.valid:
+        raise ValueError("live world transcript failed packet/state validation")
+    if baseline.state.pending_skill_level_change_requests:
+        raise ValueError("live state has pending skill-level change requests")
+    if baseline.state.pending_skill_record_update_acknowledgements:
+        raise ValueError("live state has pending skill-record acknowledgements")
+    plan = plan_skill_record_update_live(
+        baseline,
+        skill_id=skill_id,
+        level=level,
+    )
+    baseline_observations = len(baseline.observations)
+    baseline_inventory = baseline.state.inventory_items
+    baseline_player = _player_state_snapshot(baseline)
+    baseline_other_progression = _progression_snapshot_without_skill_levels(
+        baseline
+    )
+    expected_skill_levels = dict(baseline.state.skill_levels)
+    if plan.update.records:
+        record = plan.update.records[0]
+        expected_skill_levels[record.skill_id] = record.level
+    api_response = _post_plaintext_packet(
+        api_url,
+        plan.update.to_bytes(),
+        timeout_seconds=api_timeout_seconds,
+    )
+
+    deadline = time.monotonic() + verify_timeout_seconds
+    polls = 0
+    last_analysis = baseline
+    while time.monotonic() < deadline:
+        polls += 1
+        time.sleep(0.05)
+        last_analysis = analyze_gameplay_transcript(
+            Transcript.load(transcript_path)
+        )
+        if not last_analysis.valid:
+            raise RuntimeError("injected transcript failed packet/state validation")
+        transaction = _matching_skill_record_transaction(
+            last_analysis,
+            first_observation=baseline_observations,
+            update=plan.update,
+        )
+        if transaction is None:
+            continue
+        state = last_analysis.state
+        expected_records = len(plan.update.records)
+        counter_checks = {
+            "skill_record_updates": (
+                state.skill_record_updates
+                == baseline.state.skill_record_updates + 1
+            ),
+            "skill_record_update_records": (
+                state.skill_record_update_records
+                == baseline.state.skill_record_update_records + expected_records
+            ),
+            "acknowledgements": (
+                state.skill_record_update_acknowledgements
+                == baseline.state.skill_record_update_acknowledgements + 1
+            ),
+            "matched_acknowledgements": (
+                state.matched_skill_record_update_acknowledgements
+                == baseline.state.matched_skill_record_update_acknowledgements + 1
+            ),
+            "unmatched_acknowledgements": (
+                state.unmatched_skill_record_update_acknowledgements
+                == baseline.state.unmatched_skill_record_update_acknowledgements
+            ),
+            "pending_acknowledgements": (
+                state.pending_skill_record_update_acknowledgements == 0
+            ),
+            "updates_without_request": (
+                state.skill_record_updates_without_request
+                == baseline.state.skill_record_updates_without_request
+                + int(bool(expected_records))
+            ),
+            "requests": (
+                state.skill_level_change_requests
+                == baseline.state.skill_level_change_requests
+            ),
+            "pending_requests": state.pending_skill_level_change_requests == 0,
+        }
+        invariant_checks = {
+            "skill_levels": state.skill_levels == expected_skill_levels,
+            "phase": state.phase == baseline.state.phase,
+            "field_epoch": state.field_epoch == baseline.state.field_epoch,
+            "map_id": state.map_id == baseline.state.map_id,
+            "player": _player_state_snapshot(last_analysis) == baseline_player,
+            "inventory": state.inventory_items == baseline_inventory,
+            "other_progression": (
+                _progression_snapshot_without_skill_levels(last_analysis)
+                == baseline_other_progression
+            ),
+        }
+        failed = [
+            name
+            for name, matched in {**counter_checks, **invariant_checks}.items()
+            if not matched
+        ]
+        if failed:
+            raise RuntimeError(
+                "typed skill-record replay violated predicted checks: "
+                + ", ".join(failed)
+            )
+        observed_update, observed_acknowledgement = transaction
+        return SkillRecordLiveReplayResult(
+            plan=plan,
+            api_response=api_response,
+            observed_update=observed_update,
+            observed_acknowledgement=observed_acknowledgement,
+            polls=polls,
+        )
+    raise TimeoutError(
+        "packet API accepted the skill-record update, but the live transcript "
+        "did not observe its matched client acknowledgement within "
+        f"{verify_timeout_seconds:g} seconds; last counters were "
+        f"updates={last_analysis.state.skill_record_updates}, "
+        "acknowledgements="
+        f"{last_analysis.state.skill_record_update_acknowledgements}"
+    )
+
+
 def _matching_current_hp_packet(
     analysis: GameplayAnalysis,
     *,
@@ -1010,6 +1346,36 @@ def inject_current_hp_live(
         "packet API accepted the current-HP update, but the live transcript did "
         f"not observe it within {verify_timeout_seconds:g} seconds; last state "
         f"was current_hp={last_analysis.state.current_hp!r}"
+    )
+
+
+def render_skill_record_live_replay(
+    result: SkillRecordLiveReplayResult,
+) -> str:
+    plan = result.plan.safe_dict()
+    acknowledgement = result.observed_acknowledgement
+    if plan["record_count"]:
+        prediction = (
+            f"skill {plan['skill_id']} "
+            f"{plan['original_skill_level']} -> {plan['emitted_skill_level']}"
+        )
+    else:
+        prediction = "zero records; progression unchanged"
+    return "\n".join(
+        (
+            "live skill-record replay: matched",
+            f"  predicted: {prediction}",
+            (
+                "  observed: opcode 46 frame "
+                f"{result.observed_update['frame_index']} -> opcode 293 frame "
+                f"{acknowledgement['frame_index']} in "
+                f"{acknowledgement['round_trip_ms']} ms"
+            ),
+            (
+                "  unchanged: phase, field epoch, map, player, inventory, "
+                "other progression"
+            ),
+        )
     )
 
 

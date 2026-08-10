@@ -367,6 +367,14 @@
   events, tracks request/ack timing, and finishes with no pending transaction.
   The automatic IL2CPP manifest carries these shapes and exactly consumes all
   26 family packets exported from stream `126`.
+- `inject-skill-record` now plans either the captured zero-record opcode-`46`
+  form or a one-record update for an existing folded skill, submits it only
+  through the opt-in loopback packet API, and requires the real client's
+  matched opcode-`293` acknowledgement before comparing all predicted state
+  invariants. A browser-free live stream-`114` run delivered two of each form:
+  all four acknowledgements matched with control `346`, no transaction remained
+  pending, the client stayed responsive, and player/map/inventory/progression
+  plus skill `2001005 = 6` remained unchanged with 61/61 heartbeats paired.
 - `--generate-initial-field-snapshot` now reconstructs the complete nested
   opcode-`157` state before replay, verifies same-length byte equality for the
   unmodified baseline, reparses both envelope and nested forms, and exposes

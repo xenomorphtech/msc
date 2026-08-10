@@ -1036,6 +1036,17 @@ The fold gives all three packets full structural coverage, emits
 timing. The opcode-`46` trailing byte is deliberately not interpreted as skill
 points: surrounding opcode-`41` stat updates independently change that stat.
 
+A browser-free real-client stream-`114` replay then tested the server packet in
+both captured forms. Two zero-record packets and two one-record packets that
+reasserted existing skill `2001005` at level `6` all produced client opcode
+`293` with control `346` and trailing value `0`. The four acknowledgements took
+`11.297` to `864.607` ms; none remained pending or unmatched. The immutable
+fold stayed valid and warning-free on map `101000000`, with HP `50`, skill
+levels, player state, inventory, and all other progression unchanged, while
+61/61 generated heartbeats were paired. `inject-skill-record` now automates
+typed construction, API submission, acknowledgement correlation, and these
+invariant checks for either the empty form or one existing skill.
+
 ## Client skill-use request (`104`)
 
 The key-`71` live control produced a complete fixed-width client request:
