@@ -993,6 +993,49 @@ binding sequence `2001005 -> 2001004 -> 2001005`, and matches 91/91 heartbeats
 with no pending or unmatched response. This proves the key/value relationship
 without assigning meanings to the other selector families.
 
+## Skill-record change transaction (`client 103`, `server 46`, `client 293`)
+
+The level-1-through-10 capture contains a complete request/update/acknowledgement
+transaction distinct from skill use:
+
+```text
+client opcode 103 (10 bytes):
+  uint16 opcode = 103
+  uint32 client_tick
+  uint32 skill_id
+
+server opcode 46:
+  uint16 opcode = 46
+  uint8  flag_a                 # boolean; semantic role remains neutral
+  uint8  flag_b                 # boolean; semantic role remains neutral
+  int16  record_count           # non-negative
+  repeat record_count:
+    int32 skill_id
+    int32 level
+    int32 auxiliary_value       # semantic role remains neutral
+  uint8  trailing_value         # semantic role remains neutral
+
+client opcode 293 (12 bytes):
+  uint16 opcode = 293
+  uint32 control_value          # 346 in all captured acknowledgements
+  uint32 client_tick
+  uint16 trailing_value         # zero in all captured acknowledgements
+```
+
+Stream `126` contains eight opcode-`103` requests, eight matching one-record
+opcode-`46` updates, one additional zero-record update, and nine opcode-`293`
+acknowledgements. Every request is followed by an update for the same skill id;
+every update is acknowledged. The maximum observed request-to-update interval
+is `691.152` ms and the maximum update-to-acknowledgement interval is `16.933`
+ms. Folding the records yields skill levels `{12:0, 1000:1, 2001004:1,
+2001005:6}` with no pending requests or acknowledgements.
+
+The fold gives all three packets full structural coverage, emits
+`skill_level_change_requested`, `skill_records_updated`, and
+`skill_record_update_acknowledged`, and reports request/ack correlations and
+timing. The opcode-`46` trailing byte is deliberately not interpreted as skill
+points: surrounding opcode-`41` stat updates independently change that stat.
+
 ## Client skill-use request (`104`)
 
 The key-`71` live control produced a complete fixed-width client request:
@@ -2522,7 +2565,8 @@ transcript metadata. The resulting session contains 71,100 decrypted frames
 (31,345 client and 39,755 server), one marker-`26` initial snapshot, 35 later
 field snapshots, 841 stat updates, 256 inventory change sets, 78 direct NPC
 spawns, 36 NPC lifecycle spawns,
-436 drop-spawn packets, and 197 pickup requests.
+436 drop-spawn packets, 197 pickup requests, eight skill-level requests, nine
+skill-record updates, and nine skill-record acknowledgements.
 
 All 197 pickup requests resolve to a known active drop, match their field
 epoch after the marker-`26` initial snapshot is folded, and target a final
@@ -2530,8 +2574,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,565
-full, 44,295 partial, 240 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,591
+full, 44,295 partial, 214 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,400 full, 21,740 partial,
 67 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

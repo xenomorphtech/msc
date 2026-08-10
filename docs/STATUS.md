@@ -359,6 +359,14 @@
   round-trips this packet and both `111.pcapng` marker-`23` variants exactly;
   the fold emits `progression_shape` and includes compact skills, maps, and
   clock state.
+- The long capture's skill-record transaction is now fully typed. Eight client
+  opcode-`103` level-change requests correlate by skill id with eight
+  one-record server opcode-`46` updates; a ninth zero-record update exercises
+  the empty branch, and all nine updates receive client opcode-`293`
+  acknowledgements. The fold updates skill levels, emits all three lifecycle
+  events, tracks request/ack timing, and finishes with no pending transaction.
+  The automatic IL2CPP manifest carries these shapes and exactly consumes all
+  26 family packets exported from stream `126`.
 - `--generate-initial-field-snapshot` now reconstructs the complete nested
   opcode-`157` state before replay, verifies same-length byte equality for the
   unmodified baseline, reparses both envelope and nested forms, and exposes

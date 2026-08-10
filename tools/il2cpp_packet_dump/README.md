@@ -14,8 +14,8 @@ Classic's IL2CPP packet surface. It has three deliberately separate layers:
 
 The current manifest pins protocol 300, the 2026-08-08 client binaries, the
 obfuscated enum/attribute identities, reader method RVAs, and the SHA-256 of
-capture `111.pcapng`. A mismatched binary, metadata file, enum file, or capture
-is rejected.
+both reference captures, `111.pcapng` and `1-10FS.pcapng`. A mismatched binary,
+metadata file, enum file, or capture is rejected.
 
 ## Build and dump
 
@@ -38,7 +38,10 @@ handlers, files, and reads have deterministic ordering.
 The exporter asks `tshark` only for TCP segments. Rust performs endpoint
 identification, overlap-checked TCP reassembly, handshake parsing, Maple
 AES-OFB decryption, IV advancement, frame-header validation, and JSONL
-serialization itself.
+serialization itself. It also locates a valid Maple greeting within the first
+4,096 reassembled bytes and removes the corresponding per-direction transport
+preludes. This is required for `1-10FS.pcapng` stream `126`, whose measured
+preludes are 28 client bytes and 14 server bytes.
 
 ```sh
 cargo run --release -- export-pcap \
@@ -53,6 +56,13 @@ cargo run --release -- validate \
   --input tests/private/111.streams-83-92-114.jsonl \
   --output target/111.shape-report.json \
   --require-all-supported
+
+cargo run --release -- export-pcap \
+  --manifest versions/maple-classic-300-2026-08-08.json \
+  --pcap ../../1-10FS.pcapng \
+  --stream 126 \
+  --output target/private/1-10FS.stream-126.jsonl \
+  --summary target/1-10FS.stream-126.summary.json
 ```
 
 Each JSONL row includes plaintext hex and therefore can contain private
@@ -75,5 +85,9 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently contains 65 semantic/manual shapes and 97 explicitly
-observed-opaque exact-width variants.
+manifest currently contains 68 semantic/manual shapes and 97 explicitly
+observed-opaque exact-width variants, 165 total. The added gameplay transaction
+shapes cover client opcode `103`, server opcode `46`, and client opcode `293`.
+All 26 occurrences of that family in `1-10FS.pcapng` stream `126` are exactly
+consumed. The complete 71,100-frame stream intentionally remains a broader
+modeling corpus rather than an all-opcode manifest regression.

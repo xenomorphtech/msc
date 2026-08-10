@@ -16,9 +16,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 65);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 68);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 97);
-    assert_eq!(shapes.len(), 162);
+    assert_eq!(shapes.len(), 165);
 
     let shape = shapes
         .iter()
@@ -26,6 +26,14 @@ fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
         .unwrap();
     assert_eq!(shape.length, Some(326));
     assert_eq!(shape.operations.len(), 2);
+
+    let skill_update = shapes
+        .iter()
+        .find(|shape| shape.name == "skill_record_update")
+        .unwrap();
+    assert_eq!(skill_update.opcode, 46);
+    assert_eq!(skill_update.length, None);
+    assert_eq!(skill_update.operations.len(), 6);
 }
 
 #[test]
@@ -39,7 +47,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 162);
+    assert_eq!(dump.packet_shapes.len(), 165);
     assert_eq!(
         dump.handlers
             .iter()

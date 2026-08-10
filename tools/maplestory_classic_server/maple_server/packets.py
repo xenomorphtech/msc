@@ -2736,6 +2736,124 @@ class MobHealthPercentageUpdate:
 
 
 @dataclass(frozen=True)
+class SkillRecordEntry:
+    skill_id: int
+    level: int
+    auxiliary_value: int
+
+    def _validate(self) -> None:
+        if not 0 <= self.skill_id <= 0x7FFF_FFFF:
+            raise PacketShapeError("skill record id must fit a non-negative int32")
+        for name, value in (
+            ("level", self.level),
+            ("auxiliary_value", self.auxiliary_value),
+        ):
+            if not -0x8000_0000 <= value <= 0x7FFF_FFFF:
+                raise PacketShapeError(f"skill record {name} must fit int32")
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack(
+            "<iii", self.skill_id, self.level, self.auxiliary_value
+        )
+
+
+@dataclass(frozen=True)
+class SkillRecordUpdate:
+    flag_a: bool
+    flag_b: bool
+    records: tuple[SkillRecordEntry, ...]
+    trailing_value: int
+    opcode: int = 46
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SkillRecordUpdate":
+        reader = PacketReader(payload, packet_name="skill_record_update")
+        _expect_opcode(reader, 46)
+        flag_a_raw = reader.u8("flag_a")
+        flag_b_raw = reader.u8("flag_b")
+        for name, value in (("flag_a", flag_a_raw), ("flag_b", flag_b_raw)):
+            if value not in {0, 1}:
+                raise PacketShapeError(
+                    f"skill_record_update.{name} is {value}, expected boolean 0 or 1"
+                )
+        record_count = reader.i16("record_count")
+        if record_count < 0:
+            raise PacketShapeError(
+                "skill_record_update.record_count must be non-negative"
+            )
+        records = tuple(
+            SkillRecordEntry(
+                skill_id=reader.i32(f"records[{index}].skill_id"),
+                level=reader.i32(f"records[{index}].level"),
+                auxiliary_value=reader.i32(
+                    f"records[{index}].auxiliary_value"
+                ),
+            )
+            for index in range(record_count)
+        )
+        trailing_value = reader.u8("trailing_value")
+        reader.finish()
+        update = cls(
+            flag_a=bool(flag_a_raw),
+            flag_b=bool(flag_b_raw),
+            records=records,
+            trailing_value=trailing_value,
+        )
+        update._validate()
+        return update
+
+    def _validate(self) -> None:
+        if len(self.records) > 0x7FFF:
+            raise PacketShapeError(
+                "skill record update has more than 32767 records"
+            )
+        if not 0 <= self.trailing_value <= 0xFF:
+            raise PacketShapeError(
+                "skill record update trailing value must fit uint8"
+            )
+        for record in self.records:
+            record._validate()
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "flag_a": self.flag_a,
+            "flag_b": self.flag_b,
+            "record_count": len(self.records),
+            "records": [
+                {
+                    "skill_id": record.skill_id,
+                    "level": record.level,
+                    "auxiliary_value": record.auxiliary_value,
+                }
+                for record in self.records
+            ],
+            "trailing_value": self.trailing_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return b"".join(
+                (
+                    struct.pack(
+                        "<HBBh",
+                        self.opcode,
+                        int(self.flag_a),
+                        int(self.flag_b),
+                        len(self.records),
+                    ),
+                    *(record.to_bytes() for record in self.records),
+                    struct.pack("<B", self.trailing_value),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"skill record update field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class CharacterStatUpdate:
     request_flag: int
     stat_mask: int
@@ -4961,6 +5079,38 @@ class ServerAttackRelay:
             struct.pack("<HIB", self.opcode, self.object_id, self.packed_counts)
             + self.opaque_body
         )
+
+
+@dataclass(frozen=True)
+class SkillLevelChangeRequest:
+    client_tick: int
+    skill_id: int
+    opcode: int = 103
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SkillLevelChangeRequest":
+        reader = PacketReader(payload, packet_name="skill_level_change_request")
+        _expect_opcode(reader, 103)
+        request = cls(
+            client_tick=reader.u32("client_tick"),
+            skill_id=reader.u32("skill_id"),
+        )
+        reader.finish()
+        return request
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "client_tick": self.client_tick,
+            "skill_id": self.skill_id,
+        }
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack("<HII", self.opcode, self.client_tick, self.skill_id)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"skill level change request field is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)
@@ -7797,6 +7947,50 @@ class ClientOpcode309Acknowledgement:
 
     def to_bytes(self) -> bytes:
         return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
+class SkillRecordUpdateAcknowledgement:
+    control_value: int
+    client_tick: int
+    trailing_value: int
+    opcode: int = 293
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "SkillRecordUpdateAcknowledgement":
+        reader = PacketReader(
+            payload, packet_name="skill_record_update_acknowledgement"
+        )
+        _expect_opcode(reader, 293)
+        acknowledgement = cls(
+            control_value=reader.u32("control_value"),
+            client_tick=reader.u32("client_tick"),
+            trailing_value=reader.u16("trailing_value"),
+        )
+        reader.finish()
+        return acknowledgement
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "control_value": self.control_value,
+            "client_tick": self.client_tick,
+            "trailing_value": self.trailing_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack(
+                "<HIIH",
+                self.opcode,
+                self.control_value,
+                self.client_tick,
+                self.trailing_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                "skill record update acknowledgement field is out of range: "
+                f"{error}"
+            ) from error
 
 
 @dataclass(frozen=True)

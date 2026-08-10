@@ -53,8 +53,14 @@
     },
     {
       "name": "capture_111",
-      "path": "/home/sdancer/Downloads/111.pcapng",
+      "path": "111.pcapng",
       "sha256": "6f98e4aa1e1f432740d14b5f6df86761bf00bd7d544f759436a68c67a63a17ef",
+      "required": false
+    },
+    {
+      "name": "capture_1_10FS",
+      "path": "1-10FS.pcapng",
+      "sha256": "51f0d75c898c46740f742f8faf3f13fdb3d277e3eea10b424d0f14c0bc339cf4",
       "required": false
     }
   ],
@@ -451,6 +457,41 @@
         {"op":"if_mask","field":"stat_mask","mask":65536,"operations":[{"op":"read","name":"experience","kind":"u32"}]},
         {"op":"if_mask","field":"stat_mask","mask":262144,"operations":[{"op":"read","name":"mesos","kind":"u64"}]},
         {"op":"read","name":"tail","kind":"u8","equals":0}
+      ]
+    },
+    {
+      "name":"skill_level_change_request","direction":"client_to_server","opcode":103,"length":10,
+      "source":"packets.py:SkillLevelChangeRequest; all eight 1-10FS stream-126 requests precede a matching opcode-46 skill id",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":103},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"skill_id","kind":"u32"}
+      ]
+    },
+    {
+      "name":"skill_record_update","direction":"server_to_client","opcode":46,
+      "source":"IL2CPP opcode-46 handler c18f6ae2... direct bool/bool/i16/i32/i32/i32/u8 reads; 1-10FS stream-126 validates one zero-record and eight one-record packets",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":46},
+        {"op":"read","name":"flag_a","kind":"u8"},
+        {"op":"read","name":"flag_b","kind":"u8"},
+        {"op":"read","name":"record_count","kind":"i16"},
+        {"op":"repeat","count_from":"record_count","operations":[
+          {"op":"read","name":"skill_id","kind":"i32"},
+          {"op":"read","name":"level","kind":"i32"},
+          {"op":"read","name":"auxiliary_value","kind":"i32"}
+        ]},
+        {"op":"read","name":"trailing_value","kind":"u8"}
+      ]
+    },
+    {
+      "name":"skill_record_update_acknowledgement","direction":"client_to_server","opcode":293,"length":12,
+      "source":"packets.py:SkillRecordUpdateAcknowledgement; all nine 1-10FS stream-126 packets immediately acknowledge opcode 46",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":293},
+        {"op":"read","name":"control_value","kind":"u32"},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"trailing_value","kind":"u16"}
       ]
     },
     {

@@ -89,6 +89,9 @@ from .packets import (
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    SkillLevelChangeRequest,
+    SkillRecordUpdate,
+    SkillRecordUpdateAcknowledgement,
     TutorialUiInstruction,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
@@ -342,6 +345,39 @@ class GameplayGameState:
         default_factory=dict, repr=False
     )
     skill_levels: dict[int, int] = field(default_factory=dict, repr=False)
+    skill_level_change_requests: int = 0
+    skill_level_change_requests_by_skill_id: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_updates: int = 0
+    skill_record_update_records: int = 0
+    skill_record_updates_by_flags: Counter[str] = field(
+        default_factory=Counter
+    )
+    skill_record_auxiliary_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_trailing_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_request_matches: int = 0
+    skill_record_request_mismatches: int = 0
+    skill_record_updates_without_request: int = 0
+    pending_skill_level_change_requests: int = 0
+    last_skill_record_response_ms: float | None = None
+    max_skill_record_response_ms: float | None = None
+    skill_record_update_acknowledgements: int = 0
+    matched_skill_record_update_acknowledgements: int = 0
+    unmatched_skill_record_update_acknowledgements: int = 0
+    pending_skill_record_update_acknowledgements: int = 0
+    skill_record_acknowledgement_control_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    skill_record_acknowledgement_trailing_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    last_skill_record_acknowledgement_ms: float | None = None
+    max_skill_record_acknowledgement_ms: float | None = None
     string_property_code_units: dict[int, int] = field(
         default_factory=dict, repr=False
     )
@@ -2878,6 +2914,85 @@ class GameplayAnalysis:
                     "region_bytes": self.state.progression_region_bytes,
                     "shape": self.state.progression_shape,
                     "skill_levels": self.state.skill_levels,
+                    "skill_record_updates": {
+                        "requests": self.state.skill_level_change_requests,
+                        "requests_by_skill_id": dict(
+                            self.state.skill_level_change_requests_by_skill_id
+                        ),
+                        "updates": self.state.skill_record_updates,
+                        "records": self.state.skill_record_update_records,
+                        "updates_by_flags": dict(
+                            self.state.skill_record_updates_by_flags
+                        ),
+                        "auxiliary_values": dict(
+                            self.state.skill_record_auxiliary_values
+                        ),
+                        "trailing_values": dict(
+                            self.state.skill_record_trailing_values
+                        ),
+                        "request_matches": (
+                            self.state.skill_record_request_matches
+                        ),
+                        "request_mismatches": (
+                            self.state.skill_record_request_mismatches
+                        ),
+                        "updates_without_request": (
+                            self.state.skill_record_updates_without_request
+                        ),
+                        "pending_requests": (
+                            self.state.pending_skill_level_change_requests
+                        ),
+                        "last_request_response_ms": (
+                            None
+                            if self.state.last_skill_record_response_ms is None
+                            else round(
+                                self.state.last_skill_record_response_ms, 3
+                            )
+                        ),
+                        "max_request_response_ms": (
+                            None
+                            if self.state.max_skill_record_response_ms is None
+                            else round(
+                                self.state.max_skill_record_response_ms, 3
+                            )
+                        ),
+                        "acknowledgements": (
+                            self.state.skill_record_update_acknowledgements
+                        ),
+                        "matched_acknowledgements": (
+                            self.state.matched_skill_record_update_acknowledgements
+                        ),
+                        "unmatched_acknowledgements": (
+                            self.state.unmatched_skill_record_update_acknowledgements
+                        ),
+                        "pending_acknowledgements": (
+                            self.state.pending_skill_record_update_acknowledgements
+                        ),
+                        "acknowledgement_control_values": dict(
+                            self.state.skill_record_acknowledgement_control_values
+                        ),
+                        "acknowledgement_trailing_values": dict(
+                            self.state.skill_record_acknowledgement_trailing_values
+                        ),
+                        "last_acknowledgement_ms": (
+                            None
+                            if self.state.last_skill_record_acknowledgement_ms
+                            is None
+                            else round(
+                                self.state.last_skill_record_acknowledgement_ms,
+                                3,
+                            )
+                        ),
+                        "max_acknowledgement_ms": (
+                            None
+                            if self.state.max_skill_record_acknowledgement_ms
+                            is None
+                            else round(
+                                self.state.max_skill_record_acknowledgement_ms,
+                                3,
+                            )
+                        ),
+                    },
                     "string_property_code_units": (
                         self.state.string_property_code_units
                     ),
@@ -3864,6 +3979,12 @@ class GameplayStateFold:
         ] = {}
         self._pending_heartbeat_probes: deque[int] = deque()
         self._pending_opcode_426_notifications: deque[int] = deque()
+        self._pending_skill_level_changes: deque[
+            tuple[int, int, SkillLevelChangeRequest]
+        ] = deque()
+        self._pending_skill_record_acknowledgements: deque[
+            tuple[int, int]
+        ] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._pending_client_attacks: dict[
@@ -4637,6 +4758,59 @@ class GameplayStateFold:
                     "movement control metadata after byte zero remains opaque",
                 ),
             )
+        if opcode == 293:
+            acknowledgement = SkillRecordUpdateAcknowledgement.parse(payload)
+            matched_update = bool(
+                self._pending_skill_record_acknowledgements
+            )
+            update_frame: int | None = None
+            round_trip_ms: float | None = None
+            if matched_update:
+                update_frame, update_timestamp_ns = (
+                    self._pending_skill_record_acknowledgements.popleft()
+                )
+                round_trip_ms = (
+                    frame.timestamp_ns - update_timestamp_ns
+                ) / 1e6
+                self.state.pending_skill_record_update_acknowledgements -= 1
+                self.state.matched_skill_record_update_acknowledgements += 1
+                self.state.last_skill_record_acknowledgement_ms = round_trip_ms
+                self.state.max_skill_record_acknowledgement_ms = max(
+                    self.state.max_skill_record_acknowledgement_ms or 0.0,
+                    round_trip_ms,
+                )
+            else:
+                self.state.unmatched_skill_record_update_acknowledgements += 1
+            self.state.skill_record_update_acknowledgements += 1
+            self.state.skill_record_acknowledgement_control_values[
+                acknowledgement.control_value
+            ] += 1
+            self.state.skill_record_acknowledgement_trailing_values[
+                acknowledgement.trailing_value
+            ] += 1
+            details: dict[str, object] = {
+                **acknowledgement.safe_dict(),
+                "matched_update": matched_update,
+                "update_frame": update_frame,
+                "pending_updates": (
+                    self.state.pending_skill_record_update_acknowledgements
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
+            self._event(
+                frame,
+                "skill_record_update_acknowledged",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="skill_record_update_acknowledgement",
+                coverage=ShapeCoverage.FULL,
+                parsed=acknowledgement,
+                details=details,
+            )
         if opcode == 309:
             acknowledgement = ClientOpcode309Acknowledgement.parse(payload)
             matched_notification = bool(
@@ -4724,6 +4898,50 @@ class GameplayStateFold:
         if opcode == 54:
             return self._fold_client_attack(
                 frame, ClientOpcode54AttackAction.parse(payload)
+            )
+        if opcode == 103:
+            request = SkillLevelChangeRequest.parse(payload)
+            previous_request = (
+                self._pending_skill_level_changes[-1][2]
+                if self._pending_skill_level_changes
+                else None
+            )
+            tick_delta = (
+                None
+                if previous_request is None
+                else (request.client_tick - previous_request.client_tick)
+                & 0xFFFF_FFFF
+            )
+            modeled_level = self.state.skill_levels.get(request.skill_id)
+            self._pending_skill_level_changes.append(
+                (frame.index, frame.timestamp_ns, request)
+            )
+            self.state.skill_level_change_requests += 1
+            self.state.skill_level_change_requests_by_skill_id[
+                request.skill_id
+            ] += 1
+            self.state.pending_skill_level_change_requests += 1
+            details = {
+                **request.safe_dict(),
+                "modeled_level_before": modeled_level,
+                "skill_known_before": modeled_level is not None,
+                "client_tick_delta": tick_delta,
+                "pending_requests": (
+                    self.state.pending_skill_level_change_requests
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "skill_level_change_requested",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="skill_level_change_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
             )
         if opcode == 104:
             request = ClientSkillUseRequest.parse(payload)
@@ -5315,6 +5533,103 @@ class GameplayStateFold:
                 )
                 if partial
                 else (),
+            )
+        if opcode == 46:
+            update = SkillRecordUpdate.parse(payload)
+            record_changes: list[dict[str, int | None]] = []
+            for record in update.records:
+                previous_level = self.state.skill_levels.get(record.skill_id)
+                self.state.skill_levels[record.skill_id] = record.level
+                record_changes.append(
+                    {
+                        "skill_id": record.skill_id,
+                        "previous_level": previous_level,
+                        "current_level": record.level,
+                        "level_delta": (
+                            None
+                            if previous_level is None
+                            else record.level - previous_level
+                        ),
+                        "auxiliary_value": record.auxiliary_value,
+                    }
+                )
+                self.state.skill_record_auxiliary_values[
+                    record.auxiliary_value
+                ] += 1
+
+            request_frame: int | None = None
+            requested_skill_id: int | None = None
+            request_matches: bool | None = None
+            request_response_ms: float | None = None
+            if update.records:
+                if self._pending_skill_level_changes:
+                    request_frame, request_timestamp_ns, request = (
+                        self._pending_skill_level_changes.popleft()
+                    )
+                    self.state.pending_skill_level_change_requests -= 1
+                    requested_skill_id = request.skill_id
+                    request_matches = any(
+                        record.skill_id == request.skill_id
+                        for record in update.records
+                    )
+                    request_response_ms = (
+                        frame.timestamp_ns - request_timestamp_ns
+                    ) / 1e6
+                    self.state.last_skill_record_response_ms = (
+                        request_response_ms
+                    )
+                    self.state.max_skill_record_response_ms = max(
+                        self.state.max_skill_record_response_ms or 0.0,
+                        request_response_ms,
+                    )
+                    if request_matches:
+                        self.state.skill_record_request_matches += 1
+                    else:
+                        self.state.skill_record_request_mismatches += 1
+                        self.warnings.append(
+                            "skill record update did not contain the skill id "
+                            "from the next pending level-change request"
+                        )
+                else:
+                    self.state.skill_record_updates_without_request += 1
+
+            self._pending_skill_record_acknowledgements.append(
+                (frame.index, frame.timestamp_ns)
+            )
+            self.state.skill_record_updates += 1
+            self.state.skill_record_update_records += len(update.records)
+            self.state.skill_record_updates_by_flags[
+                f"{int(update.flag_a)}:{int(update.flag_b)}"
+            ] += 1
+            self.state.skill_record_trailing_values[
+                update.trailing_value
+            ] += 1
+            self.state.pending_skill_record_update_acknowledgements += 1
+            details: dict[str, object] = {
+                **update.safe_dict(),
+                "record_changes": record_changes,
+                "request_frame": request_frame,
+                "requested_skill_id": requested_skill_id,
+                "request_matches": request_matches,
+                "pending_requests": (
+                    self.state.pending_skill_level_change_requests
+                ),
+                "pending_acknowledgements": (
+                    self.state.pending_skill_record_update_acknowledgements
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if request_response_ms is not None:
+                details["request_response_ms"] = round(
+                    request_response_ms, 3
+                )
+            self._event(frame, "skill_records_updated", details=details)
+            return self._observation(
+                frame,
+                kind="skill_record_update",
+                coverage=ShapeCoverage.FULL,
+                parsed=update,
+                details=details,
             )
         if opcode == 41:
             update = CharacterStatUpdate.parse(payload)
@@ -7989,6 +8304,22 @@ class GameplayStateFold:
                 "opcode-426 notifications had no captured client "
                 "opcode-309 acknowledgement"
             )
+        if self.state.pending_skill_level_change_requests:
+            self.warnings.append(
+                f"{self.state.pending_skill_level_change_requests} skill "
+                "level-change requests had no captured record update"
+            )
+        if self.state.unmatched_skill_record_update_acknowledgements:
+            self.warnings.append(
+                f"{self.state.unmatched_skill_record_update_acknowledgements} "
+                "skill-record acknowledgements had no pending server update"
+            )
+        if self.state.pending_skill_record_update_acknowledgements:
+            self.warnings.append(
+                f"{self.state.pending_skill_record_update_acknowledgements} "
+                "server skill-record updates had no captured client "
+                "acknowledgement"
+            )
         if self.state.pending_item_uses:
             self.warnings.append(
                 f"{self.state.pending_item_uses} item-use requests had no "
@@ -8015,6 +8346,12 @@ class GameplayStateFold:
                     ),
                     "pending_opcode_426_notifications": (
                         self.state.pending_opcode_426_notifications
+                    ),
+                    "pending_skill_level_change_requests": (
+                        self.state.pending_skill_level_change_requests
+                    ),
+                    "pending_skill_record_update_acknowledgements": (
+                        self.state.pending_skill_record_update_acknowledgements
                     ),
                     "pending_item_uses": self.state.pending_item_uses,
                     "pending_item_pickups": self.state.pending_item_pickups,
@@ -9958,6 +10295,24 @@ def render_gameplay_analysis(
             f"timestamp_properties:{len(state.timestamp_property_keys)} "
             f"extended_properties:{len(state.extended_property_code_units)} "
             f"variant:{state.progression_variant}"
+        ),
+        (
+            "skill_records="
+            f"requests:{state.skill_level_change_requests} "
+            f"updates:{state.skill_record_updates} "
+            f"records:{state.skill_record_update_records} "
+            f"request_matches:{state.skill_record_request_matches} "
+            f"request_mismatches:{state.skill_record_request_mismatches} "
+            f"updates_without_request:{state.skill_record_updates_without_request} "
+            f"pending_requests:{state.pending_skill_level_change_requests} "
+            "acknowledgements:"
+            f"{state.skill_record_update_acknowledgements} "
+            "matched_acknowledgements:"
+            f"{state.matched_skill_record_update_acknowledgements} "
+            "unmatched_acknowledgements:"
+            f"{state.unmatched_skill_record_update_acknowledgements} "
+            "pending_acknowledgements:"
+            f"{state.pending_skill_record_update_acknowledgements}"
         ),
         (
             f"fixed_server_records=count:{state.fixed_server_records} "

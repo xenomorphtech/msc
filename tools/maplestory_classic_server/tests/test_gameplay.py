@@ -127,6 +127,10 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    SkillLevelChangeRequest,
+    SkillRecordEntry,
+    SkillRecordUpdate,
+    SkillRecordUpdateAcknowledgement,
     TutorialUiInstruction,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
@@ -649,6 +653,7 @@ def fixture_gameplay_transcript(
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
     opcode_426_acknowledgement: bool = False,
+    skill_record_lifecycle: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
     item_use: bool = False,
@@ -1271,6 +1276,54 @@ def fixture_gameplay_transcript(
             "client_to_server",
             ClientOpcode309Acknowledgement().to_bytes(),
         )
+    if skill_record_lifecycle:
+        append(
+            "client_to_server",
+            SkillLevelChangeRequest(
+                client_tick=200_000,
+                skill_id=2_001_005,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            SkillRecordUpdate(
+                flag_a=True,
+                flag_b=False,
+                records=(
+                    SkillRecordEntry(
+                        skill_id=2_001_005,
+                        level=7,
+                        auxiliary_value=0,
+                    ),
+                ),
+                trailing_value=2,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            SkillRecordUpdateAcknowledgement(
+                control_value=346,
+                client_tick=200_450,
+                trailing_value=0,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            SkillRecordUpdate(
+                flag_a=False,
+                flag_b=False,
+                records=(),
+                trailing_value=4,
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            SkillRecordUpdateAcknowledgement(
+                control_value=346,
+                client_tick=200_451,
+                trailing_value=0,
+            ).to_bytes(),
+        )
     append("server_to_client", HeartbeatProbe().to_bytes())
     append(
         "client_to_server",
@@ -1305,6 +1358,63 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_skill_record_change_lifecycle_round_trip(self) -> None:
+        request_bytes = bytes.fromhex("6700affa0200e8030000")
+        update_bytes = bytes.fromhex(
+            "2e0001000100e8030000010000000000000002"
+        )
+        empty_update_bytes = bytes.fromhex("2e000000000002")
+        acknowledgement_bytes = bytes.fromhex(
+            "25015a01000071fc02000000"
+        )
+        request = SkillLevelChangeRequest(
+            client_tick=195_247,
+            skill_id=1_000,
+        )
+        update = SkillRecordUpdate(
+            flag_a=True,
+            flag_b=False,
+            records=(
+                SkillRecordEntry(
+                    skill_id=1_000,
+                    level=1,
+                    auxiliary_value=0,
+                ),
+            ),
+            trailing_value=2,
+        )
+        empty_update = SkillRecordUpdate(
+            flag_a=False,
+            flag_b=False,
+            records=(),
+            trailing_value=2,
+        )
+        acknowledgement = SkillRecordUpdateAcknowledgement(
+            control_value=346,
+            client_tick=195_697,
+            trailing_value=0,
+        )
+
+        self.assertEqual(request.to_bytes(), request_bytes)
+        self.assertEqual(SkillLevelChangeRequest.parse(request_bytes), request)
+        self.assertEqual(update.to_bytes(), update_bytes)
+        self.assertEqual(SkillRecordUpdate.parse(update_bytes), update)
+        self.assertEqual(empty_update.to_bytes(), empty_update_bytes)
+        self.assertEqual(
+            SkillRecordUpdate.parse(empty_update_bytes), empty_update
+        )
+        self.assertEqual(
+            acknowledgement.to_bytes(), acknowledgement_bytes
+        )
+        self.assertEqual(
+            SkillRecordUpdateAcknowledgement.parse(acknowledgement_bytes),
+            acknowledgement,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "boolean"):
+            SkillRecordUpdate.parse(bytes.fromhex("2e000200000002"))
+        with self.assertRaisesRegex(PacketShapeError, "non-negative"):
+            SkillRecordUpdate.parse(bytes.fromhex("2e000000ffff02"))
+
     def test_client_skill_use_request_round_trip(self) -> None:
         observed = bytes.fromhex("6800a40106006a881e00010000")
         restored = bytes.fromhex("68002c8409006a881e00010000")
@@ -4762,6 +4872,71 @@ class GameplayStateFoldTest(unittest.TestCase):
             observation.details["compact_variant_header_hex"], "00" * 7
         )
         self.assertIn("partially opaque", observation.issues[0])
+
+    def test_folds_skill_record_request_update_acknowledgement_lifecycle(
+        self,
+    ) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                skill_record_lifecycle=True,
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.skill_levels[2_001_005], 7)
+        self.assertEqual(analysis.state.skill_level_change_requests, 1)
+        self.assertEqual(analysis.state.skill_record_updates, 2)
+        self.assertEqual(analysis.state.skill_record_update_records, 1)
+        self.assertEqual(analysis.state.skill_record_request_matches, 1)
+        self.assertEqual(analysis.state.skill_record_request_mismatches, 0)
+        self.assertEqual(analysis.state.skill_record_updates_without_request, 0)
+        self.assertEqual(analysis.state.pending_skill_level_change_requests, 0)
+        self.assertEqual(
+            analysis.state.skill_record_update_acknowledgements, 2
+        )
+        self.assertEqual(
+            analysis.state.matched_skill_record_update_acknowledgements, 2
+        )
+        self.assertEqual(
+            analysis.state.unmatched_skill_record_update_acknowledgements, 0
+        )
+        self.assertEqual(
+            analysis.state.pending_skill_record_update_acknowledgements, 0
+        )
+        self.assertEqual(
+            analysis.state.skill_record_updates_by_flags,
+            {"1:0": 1, "0:0": 1},
+        )
+        self.assertEqual(
+            analysis.state.skill_record_acknowledgement_control_values,
+            {346: 2},
+        )
+        kinds = [event.kind for event in analysis.events]
+        self.assertEqual(kinds.count("skill_level_change_requested"), 1)
+        self.assertEqual(kinds.count("skill_records_updated"), 2)
+        self.assertEqual(kinds.count("skill_record_update_acknowledged"), 2)
+        progression = analysis.safe_dict()["state"]["progression"]
+        self.assertEqual(
+            progression["skill_record_updates"]["request_matches"], 1
+        )
+        observations = {
+            item.kind: item
+            for item in analysis.observations
+            if item.kind
+            in {
+                "skill_level_change_request",
+                "skill_record_update",
+                "skill_record_update_acknowledgement",
+            }
+        }
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations.values()
+            )
+        )
 
     def test_folds_remote_player_entry_refresh_and_leave_lifecycle(
         self,
