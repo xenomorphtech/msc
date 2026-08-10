@@ -5877,7 +5877,7 @@ class MobMovementAcknowledgement:
 class FixedServerEmptyRecord:
     opcode: int
 
-    SUPPORTED_OPCODES = {24, 178}
+    SUPPORTED_OPCODES = {24, 45, 178}
 
     @classmethod
     def parse(cls, payload: bytes) -> "FixedServerEmptyRecord":
@@ -5903,7 +5903,7 @@ class FixedServerU8Record:
     opcode: int
     value: int
 
-    SUPPORTED_OPCODES = {58, 105}
+    SUPPORTED_OPCODES = {58, 71, 89, 105, 121}
 
     @classmethod
     def parse(cls, payload: bytes) -> "FixedServerU8Record":
@@ -5931,17 +5931,22 @@ class FixedServerU16Record:
     value: int
     opcode: int = 56
 
+    SUPPORTED_OPCODES = {56, 72, 74}
+
     @classmethod
     def parse(cls, payload: bytes) -> "FixedServerU16Record":
         reader = PacketReader(payload, packet_name="fixed_server_u16_record")
-        _expect_opcode(reader, 56)
-        record = cls(value=reader.u16("value"))
+        opcode = reader.u16("opcode")
+        record = cls(value=reader.u16("value"), opcode=opcode)
         reader.finish()
+        record._validate()
         return record
 
     def _validate(self) -> None:
-        if self.opcode != 56:
-            raise PacketShapeError("fixed-server uint16 opcode must be 56")
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported uint16 fixed-server opcode {self.opcode}"
+            )
 
     def to_bytes(self) -> bytes:
         self._validate()
@@ -5958,7 +5963,7 @@ class FixedServerU32Record:
     opcode: int
     value: int
 
-    SUPPORTED_OPCODES = {386, 388, 389}
+    SUPPORTED_OPCODES = {112, 131, 190, 301, 386, 388, 389}
 
     @classmethod
     def parse(cls, payload: bytes) -> "FixedServerU32Record":
@@ -5990,6 +5995,8 @@ class FixedServerU16PairRecord:
     value_2: int
     opcode: int = 96
 
+    SUPPORTED_OPCODES = {96}
+
     @classmethod
     def parse(cls, payload: bytes) -> "FixedServerU16PairRecord":
         reader = PacketReader(
@@ -6004,8 +6011,10 @@ class FixedServerU16PairRecord:
         return record
 
     def _validate(self) -> None:
-        if self.opcode != 96:
-            raise PacketShapeError("fixed-server uint16-pair opcode must be 96")
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported uint16-pair fixed-server opcode {self.opcode}"
+            )
 
     def to_bytes(self) -> bytes:
         self._validate()
@@ -6014,6 +6023,76 @@ class FixedServerU16PairRecord:
         except struct.error as error:
             raise PacketShapeError(
                 f"fixed-server uint16 pair is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class FixedServerU32PairRecord:
+    value_1: int
+    value_2: int
+    opcode: int = 76
+
+    SUPPORTED_OPCODES = {76}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerU32PairRecord":
+        reader = PacketReader(
+            payload, packet_name="fixed_server_u32_pair_record"
+        )
+        opcode = reader.u16("opcode")
+        record = cls(
+            value_1=reader.u32("value_1"),
+            value_2=reader.u32("value_2"),
+            opcode=opcode,
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported uint32-pair fixed-server opcode {self.opcode}"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<HII", self.opcode, self.value_1, self.value_2)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"fixed-server uint32 pair is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class FixedServerU64Record:
+    opcode: int
+    value: int
+
+    SUPPORTED_OPCODES = {398}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "FixedServerU64Record":
+        reader = PacketReader(payload, packet_name="fixed_server_u64_record")
+        record = cls(opcode=reader.u16("opcode"), value=reader.u64("value"))
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode not in self.SUPPORTED_OPCODES:
+            raise PacketShapeError(
+                f"unsupported uint64 fixed-server opcode {self.opcode}"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<HQ", self.opcode, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"fixed-server uint64 value is out of range: {error}"
             ) from error
 
 

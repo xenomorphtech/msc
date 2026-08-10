@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,072 observations are full, 44,177 partial, 851
+`--fail-on-invalid`: 26,158 observations are full, 44,177 partial, 765
 unknown-but-lossless, and none invalid. The original 12 warnings are state
 correlations, not shape failures. The combat model adds one aggregate warning
 for six delayed predictions that differ by one HP, so the current total is 13.
@@ -120,8 +120,8 @@ opaque. The fold emits `server_opcode_77_received` and exposes only variant,
 text-code-unit, control/value, and opaque-byte distributions. Neither packet
 records, events, text reports, JSON, nor HTTP status return captured text.
 
-Together, these latest modeled families leave the long-corpus totals at 26,072
-full, 44,177 partial, 851 unknown-but-lossless, and zero invalid.
+Together, these latest modeled families leave the long-corpus totals at 26,158
+full, 44,177 partial, 765 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a
@@ -381,29 +381,32 @@ controlled HP mutation below.
 
 Add `--generate-fixed-server-records` to regenerate all fully modeled
 fixed-width server records at their captured frame indices. The supported
-opcodes are `11`, `24`, `56`, `58`, `59`, `96`, `105`, `178`, `386`, `388`,
-and `389`. The planner requires a valid gameplay fold, round-trips every typed
+opcodes are `11`, `24`, `45`, `56`, `58`, `59`, `71`, `72`, `74`, `76`, `89`,
+`96`, `105`, `112`, `121`, `131`, `178`, `190`, `301`, `386`, `388`, `389`,
+and `398`. The planner requires a valid gameplay fold, round-trips every typed
 record, preserves its packet length, rejects duplicate indices and explicit
 patch conflicts, and does not assume the records occur only during bootstrap.
-Both sustained reference streams contain a second opcode-`96` during later
-gameplay.
+Both sustained reference streams contain a second opcode-`96`, repeated empty
+opcode `45`, and repeated u32 opcodes `190`/`301` during later gameplay.
 
-For stream `114`, the flag replaces 11 server frames at indices
-`2,4,5,6,7,8,10,12,13,14,15`. It composes with
+For stream `114`, the current flag replaces 21 typed server frames. It composes with
 `--generate-initial-field-snapshot` and `--generate-field-npc-spawns`.
 `protocol.fixed_server_record_emitter` exposes the frame/opcode sequence,
 neutral typed values, field epochs, patch count, and the predicted unchanged
 player/phase state. The opcode-`59` character id is excluded; status reports
 only its flag, zero-reserved invariant, and match against world entry.
 
-The 2026-08-09 browser-free live composition used all three emitters. The
-client entered map `101000000` and rendered level `12`, HP `50/222`, MP
+The 2026-08-09 browser-free live composition used all three emitters with the
+then-modeled 11-record subset; the additional ten records were still sent as
+their unchanged capture bytes in that same accepted session. The client
+entered map `101000000` and rendered level `12`, HP `50/222`, MP
 `97/342`, the expected NPCs, and the active field. The observed transcript at
 `downloads/maple_custom_server_observed/fixed_server_emitter_live_20260809/world/1786313433938476085_replay_12857.jsonl`
-folds validly to `active`, all 11 records at full coverage, one matching
+folds validly to `active`, all 21 records at full coverage, one matching
 character context, nine active/spawned NPCs, and continuously paired
-heartbeats. This validates typed fixed-record serialization through the real
-encrypted client rather than only offline re-encoding.
+heartbeats. This validates the original typed subset through the real client;
+the expanded planner emits the identical bytes already accepted for the other
+ten records and has exhaustive PCAP round-trip coverage.
 
 ## Typed variable server-record generation
 

@@ -29,7 +29,9 @@ from .packets import (
     FixedServerOpcode11Record,
     FixedServerU16PairRecord,
     FixedServerU16Record,
+    FixedServerU32PairRecord,
     FixedServerU32Record,
+    FixedServerU64Record,
     FixedServerU8Record,
     FieldLoadStage,
     FieldSnapshotEnvelope,
@@ -758,9 +760,21 @@ FixedServerRecord = (
     | FixedServerOpcode11Record
     | FixedServerU16PairRecord
     | FixedServerU16Record
+    | FixedServerU32PairRecord
     | FixedServerU32Record
+    | FixedServerU64Record
     | FixedServerU8Record
     | InitialCharacterContextRecord
+)
+
+FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
+    FixedServerEmptyRecord.SUPPORTED_OPCODES,
+    FixedServerU8Record.SUPPORTED_OPCODES,
+    FixedServerU16Record.SUPPORTED_OPCODES,
+    FixedServerU16PairRecord.SUPPORTED_OPCODES,
+    FixedServerU32Record.SUPPORTED_OPCODES,
+    FixedServerU32PairRecord.SUPPORTED_OPCODES,
+    FixedServerU64Record.SUPPORTED_OPCODES,
 )
 
 
@@ -5850,7 +5864,7 @@ class GameplayStateFold:
                 parsed=variable_record,
                 details=details,
             )
-        if opcode in {11, 24, 56, 58, 59, 96, 105, 178, 386, 388, 389}:
+        if opcode in FIXED_SERVER_OPCODES:
             if opcode in FixedServerEmptyRecord.SUPPORTED_OPCODES:
                 fixed_record: FixedServerRecord = (
                     FixedServerEmptyRecord.parse(payload)
@@ -5862,7 +5876,7 @@ class GameplayStateFold:
                     "shape": "uint8",
                     "value": fixed_record.value,
                 }
-            elif opcode == 56:
+            elif opcode in FixedServerU16Record.SUPPORTED_OPCODES:
                 fixed_record = FixedServerU16Record.parse(payload)
                 details = {
                     "shape": "uint16",
@@ -5874,7 +5888,7 @@ class GameplayStateFold:
                     "shape": "uint32",
                     "value": fixed_record.value,
                 }
-            elif opcode == 96:
+            elif opcode in FixedServerU16PairRecord.SUPPORTED_OPCODES:
                 fixed_record = FixedServerU16PairRecord.parse(payload)
                 details = {
                     "shape": "uint16_pair",
@@ -5882,6 +5896,21 @@ class GameplayStateFold:
                         fixed_record.value_1,
                         fixed_record.value_2,
                     ],
+                }
+            elif opcode in FixedServerU32PairRecord.SUPPORTED_OPCODES:
+                fixed_record = FixedServerU32PairRecord.parse(payload)
+                details = {
+                    "shape": "uint32_pair",
+                    "values": [
+                        fixed_record.value_1,
+                        fixed_record.value_2,
+                    ],
+                }
+            elif opcode in FixedServerU64Record.SUPPORTED_OPCODES:
+                fixed_record = FixedServerU64Record.parse(payload)
+                details = {
+                    "shape": "uint64",
+                    "value": fixed_record.value,
                 }
             elif opcode == 11:
                 fixed_record = FixedServerOpcode11Record.parse(payload)
@@ -8592,7 +8621,9 @@ def plan_fixed_server_record_replay(
         FixedServerOpcode11Record,
         FixedServerU16PairRecord,
         FixedServerU16Record,
+        FixedServerU32PairRecord,
         FixedServerU32Record,
+        FixedServerU64Record,
         FixedServerU8Record,
         InitialCharacterContextRecord,
     )

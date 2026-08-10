@@ -558,15 +558,22 @@ Three independent gameplay streams share a small fixed-width server-record
 family. Their complete grammars, including the two-byte opcode, are:
 
 ```text
-opcode 24, 178:          uint16 opcode
-opcode 58, 105:          uint16 opcode; uint8 value
-opcode 56:               uint16 opcode; uint16 value
-opcode 386, 388, 389:    uint16 opcode; uint32 value
-opcode 96:               uint16 opcode; uint16 value_1; uint16 value_2
-opcode 11:               uint16 opcode; uint32 reserved=0; uint8 reserved=0
-opcode 59:               uint16 opcode; uint32 character_id; uint8 flag=1;
-                         uint32 reserved_1=0; uint32 reserved_2=0;
-                         uint32 reserved_3=0
+opcode 24, 45, 178:                 uint16 opcode
+opcode 58, 71, 89, 105, 121:        uint16 opcode; uint8 value
+opcode 56, 72, 74:                  uint16 opcode; uint16 value
+opcode 112, 131, 190, 301,
+       386, 388, 389:               uint16 opcode; uint32 value
+opcode 96:                          uint16 opcode; uint16 value_1;
+                                    uint16 value_2
+opcode 76:                          uint16 opcode; uint32 value_1;
+                                    uint32 value_2
+opcode 398:                         uint16 opcode; uint64 value
+opcode 11:                          uint16 opcode; uint32 reserved=0;
+                                    uint8 reserved=0
+opcode 59:                          uint16 opcode; uint32 character_id;
+                                    uint8 flag=1; uint32 reserved_1=0;
+                                    uint32 reserved_2=0;
+                                    uint32 reserved_3=0
 ```
 
 Opcode `59` is the only member with an established state relationship: its
@@ -577,10 +584,12 @@ values stay semantically neutral. In particular, stream `126` proves opcode
 opcodes `156` and `385` are bounded separately below and are not included in
 this family.
 
-The initial sequence contains one of each shape: 11 records total in short
-stream `114`. Streams `92` and `126` each contain a second opcode-`96` later in
-gameplay, so the fold and emitter are deliberately position-neutral. All 11
-stream-`114` records and all 12 records in each sustained stream parse at full
+Short stream `114` contains 21 records: one of every supported opcode except
+the repeated sustained-session opcodes `190` and `301`. Streams `92` and `126`
+contain 98 records each, including a second opcode-`96`, repeated empty opcode
+`45`, and repeated u32 opcodes `190`/`301` later in gameplay. The two sustained
+streams deliberately have different value and frequency distributions while
+retaining identical widths. All 217 capture observations parse at full
 coverage, round-trip exactly, update opcode counters, and emit
 `fixed_server_record_received` or `initial_character_context_received` events
 with the current field epoch.
@@ -591,10 +600,14 @@ duplicates or explicit-patch conflicts. `GET /api/v1/status` exposes the safe
 plan under `protocol.fixed_server_record_emitter`; it includes neutral values,
 frame indices, field epochs, patch count, and an unchanged player/phase
 prediction, but no character id. A browser-free live stream-`114` run composed
-all 11 generated records with the typed initial snapshot and nine generated
-NPC spawns. The client reached and rendered map `101000000`; its independent
-transcript folds validly to `active` with matching player state, all 11 record
-shapes, nine NPCs, and paired heartbeat traffic.
+the original 11 generated records with the typed initial snapshot and nine
+generated NPC spawns; the other ten now-typed records traveled as unchanged
+capture bytes in that same connection. The client reached and rendered map
+`101000000`; its independent transcript folds validly to `active` with matching
+player state, all 21 current record observations, nine NPCs, and paired
+heartbeat traffic. The expanded emitter has exhaustive byte-for-byte PCAP
+round-trip coverage; a separate live run of the 21-patch plan is not yet
+claimed.
 
 ## Variable server records (`156`, `385`)
 
@@ -2047,10 +2060,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,072
-full, 44,177 partial, 851 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,272 full, 21,654 partial,
-281 unknown, and zero invalid; stream `114` reaches 31/14/31/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,158
+full, 44,177 partial, 765 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,358 full, 21,654 partial,
+195 unknown, and zero invalid; stream `114` reaches 41/14/21/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its 13 remaining warnings are cross-packet state correlations:
 12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed

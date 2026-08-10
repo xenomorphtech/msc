@@ -58,7 +58,9 @@ from maple_server.packets import (  # noqa: E402
     FixedServerOpcode11Record,
     FixedServerU16PairRecord,
     FixedServerU16Record,
+    FixedServerU32PairRecord,
     FixedServerU32Record,
+    FixedServerU64Record,
     FixedServerU8Record,
     FieldLoadStage,
     FieldSnapshotEnvelope,
@@ -199,6 +201,24 @@ def fixture_fixed_server_records() -> tuple[object, ...]:
         FixedServerU32Record(opcode=388, value=0xFDE04000),
         FixedServerU16Record(value=0x1800),
         FixedServerU8Record(opcode=58, value=1),
+        FixedServerEmptyRecord(opcode=45),
+        FixedServerU8Record(opcode=71, value=53),
+        FixedServerU8Record(opcode=89, value=0),
+        FixedServerU8Record(opcode=121, value=0),
+        FixedServerU16Record(opcode=72, value=7),
+        FixedServerU16Record(opcode=74, value=26),
+        FixedServerU32Record(opcode=112, value=0),
+        FixedServerU32Record(opcode=131, value=0),
+        FixedServerU32Record(opcode=190, value=137_474),
+        FixedServerU32Record(opcode=301, value=3_290),
+        FixedServerU32PairRecord(
+            value_1=999_999_999,
+            value_2=999_999_999,
+        ),
+        FixedServerU64Record(
+            opcode=398,
+            value=134_305_036_800_000_000,
+        ),
     )
 
 
@@ -1830,8 +1850,27 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "context flag"):
             replace(records[5], context_flag=0).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "opcode must be 56"):
+        with self.assertRaisesRegex(PacketShapeError, "unsupported uint16"):
             replace(records[9], opcode=57).to_bytes()
+
+        captured = {
+            45: "2d00",
+            71: "470035",
+            72: "48000700",
+            74: "4a001a00",
+            76: "4c00ffc99a3bffc99a3b",
+            89: "590000",
+            112: "700000000000",
+            121: "790000",
+            131: "830000000000",
+            190: "be0002190200",
+            301: "2d01da0c0000",
+            398: "8e010080022ab825dd01",
+        }
+        by_opcode = {record.opcode: record for record in records}
+        for opcode, expected_hex in captured.items():
+            with self.subTest(opcode=opcode):
+                self.assertEqual(by_opcode[opcode].to_bytes().hex(), expected_hex)
 
     def test_variable_server_records_round_trip(self) -> None:
         records = fixture_variable_server_records()
@@ -3136,13 +3175,13 @@ class GameplayStateFoldTest(unittest.TestCase):
         plan = plan_fixed_server_record_replay(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.fixed_server_records, 11)
+        self.assertEqual(analysis.state.fixed_server_records, len(records))
         self.assertEqual(analysis.state.initial_character_contexts, 1)
         self.assertEqual(
             analysis.state.fixed_server_records_by_opcode,
             {record.opcode: 1 for record in records},
         )
-        self.assertEqual(len(plan.frames), 11)
+        self.assertEqual(len(plan.frames), len(records))
         self.assertEqual(
             [frame.record.opcode for frame in plan.frames],
             [record.opcode for record in records],
