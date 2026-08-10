@@ -2704,6 +2704,249 @@ class LocalTemporaryStatSetHeader:
 
 
 @dataclass(frozen=True)
+class ServerOpcode77Envelope:
+    """Redacted structural envelope for server opcode 77.
+
+    The three text fields are retained for exact round trips but deliberately
+    omitted from ``safe_dict`` because capture samples contain player-visible
+    and user-derived strings.  Variant 8 and unknown variants retain their
+    post-text/body bytes as opaque.
+    """
+
+    variant: int
+    primary_text: str | None = field(default=None, repr=False)
+    secondary_text: str | None = field(default=None, repr=False)
+    tertiary_text: str | None = field(default=None, repr=False)
+    control_bytes: tuple[int, ...] = ()
+    terminal_u32: int | None = None
+    opaque_tail: bytes = field(default=b"", repr=False)
+    opcode: int = 77
+
+    FULLY_BOUNDED_VARIANTS = frozenset({3, 4, 5})
+    VARIANT_5_CONTROLS = (3, 10, 10, 2)
+
+    @property
+    def text_code_unit_counts(self) -> tuple[int, ...]:
+        return tuple(
+            len(text.encode("utf-16-le")) // 2
+            for text in (
+                self.primary_text,
+                self.secondary_text,
+                self.tertiary_text,
+            )
+            if text is not None
+        )
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode77Envelope":
+        reader = PacketReader(payload, packet_name="server_opcode_77_envelope")
+        _expect_opcode(reader, 77)
+        variant = reader.u8("variant")
+        primary_text = None
+        secondary_text = None
+        tertiary_text = None
+        control_bytes: tuple[int, ...] = ()
+        terminal_u32 = None
+        opaque_tail = b""
+        if variant == 3:
+            primary_text = reader.utf16_string(
+                "primary_text", trailing_byte=False
+            )
+            control_bytes = tuple(reader.bytes(3, "control_bytes"))
+        elif variant == 4:
+            enabled = reader.u8("text_present")
+            if enabled not in {0, 1}:
+                raise PacketShapeError(
+                    "server_opcode_77_envelope.text_present is "
+                    f"{enabled}, expected boolean 0 or 1"
+                )
+            control_bytes = (enabled,)
+            if enabled:
+                primary_text = reader.utf16_string(
+                    "primary_text", trailing_byte=True
+                )
+        elif variant == 5:
+            primary_text = reader.utf16_string(
+                "primary_text", trailing_byte=False
+            )
+            prefix_a = reader.u8("prefix_a")
+            prefix_b = reader.u8("prefix_b")
+            secondary_text = reader.utf16_string(
+                "secondary_text", trailing_byte=True
+            )
+            separator = reader.u8("separator")
+            tertiary_text = reader.utf16_string(
+                "tertiary_text", trailing_byte=True
+            )
+            terminal_tag = reader.u8("terminal_tag")
+            control_bytes = (prefix_a, prefix_b, separator, terminal_tag)
+            if control_bytes != cls.VARIANT_5_CONTROLS:
+                raise PacketShapeError(
+                    "server_opcode_77_envelope variant 5 control bytes are "
+                    f"{control_bytes}, expected {cls.VARIANT_5_CONTROLS}"
+                )
+            terminal_u32 = reader.u32("terminal_u32")
+        elif variant == 8:
+            primary_text = reader.utf16_string(
+                "primary_text", trailing_byte=False
+            )
+            opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
+        else:
+            opaque_tail = reader.bytes(reader.remaining, "opaque_body")
+        reader.finish()
+        return cls(
+            variant=variant,
+            primary_text=primary_text,
+            secondary_text=secondary_text,
+            tertiary_text=tertiary_text,
+            control_bytes=control_bytes,
+            terminal_u32=terminal_u32,
+            opaque_tail=opaque_tail,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "variant": self.variant,
+            "text_field_count": len(self.text_code_unit_counts),
+            "text_code_unit_counts": list(self.text_code_unit_counts),
+            "control_bytes": list(self.control_bytes),
+            "terminal_u32": self.terminal_u32,
+            "opaque_tail_length": len(self.opaque_tail),
+            "text_redacted": bool(self.text_code_unit_counts),
+        }
+
+    def to_bytes(self) -> bytes:
+        try:
+            header = struct.pack("<HB", self.opcode, self.variant)
+            encoded_controls = bytes(self.control_bytes)
+        except (struct.error, TypeError, ValueError) as error:
+            raise PacketShapeError(
+                "server opcode-77 opcode, variant, and controls must fit "
+                "their unsigned integer widths"
+            ) from error
+        texts = (self.primary_text, self.secondary_text, self.tertiary_text)
+        if self.variant == 3:
+            if self.primary_text is None or any(
+                text is not None for text in texts[1:]
+            ):
+                raise PacketShapeError(
+                    "server opcode-77 variant 3 requires only primary_text"
+                )
+            if len(self.control_bytes) != 3:
+                raise PacketShapeError(
+                    "server opcode-77 variant 3 needs three control bytes"
+                )
+            if self.terminal_u32 is not None or self.opaque_tail:
+                raise PacketShapeError(
+                    "server opcode-77 variant 3 has no terminal value or "
+                    "opaque tail"
+                )
+            return (
+                header
+                + encode_utf16_string(self.primary_text, trailing_byte=False)
+                + encoded_controls
+            )
+        if self.variant == 4:
+            if (
+                len(self.control_bytes) != 1
+                or self.control_bytes[0] not in {0, 1}
+            ):
+                raise PacketShapeError(
+                    "server opcode-77 variant 4 needs one boolean control byte"
+                )
+            enabled = self.control_bytes[0]
+            if bool(self.primary_text is not None) != bool(enabled):
+                raise PacketShapeError(
+                    "server opcode-77 variant 4 text must match its presence flag"
+                )
+            if any(text is not None for text in texts[1:]):
+                raise PacketShapeError(
+                    "server opcode-77 variant 4 allows only primary_text"
+                )
+            if self.terminal_u32 is not None or self.opaque_tail:
+                raise PacketShapeError(
+                    "server opcode-77 variant 4 has no terminal value or "
+                    "opaque tail"
+                )
+            body = bytes((enabled,))
+            if self.primary_text is not None:
+                body += encode_utf16_string(
+                    self.primary_text, trailing_byte=True
+                )
+            return header + body
+        if self.variant == 5:
+            if any(text is None for text in texts):
+                raise PacketShapeError(
+                    "server opcode-77 variant 5 requires three text fields"
+                )
+            if self.control_bytes != self.VARIANT_5_CONTROLS:
+                raise PacketShapeError(
+                    "server opcode-77 variant 5 needs control bytes "
+                    f"{self.VARIANT_5_CONTROLS}"
+                )
+            if self.terminal_u32 is None:
+                raise PacketShapeError(
+                    "server opcode-77 variant 5 requires terminal_u32"
+                )
+            if self.opaque_tail:
+                raise PacketShapeError(
+                    "server opcode-77 variant 5 has no opaque tail"
+                )
+            primary_text = self.primary_text
+            secondary_text = self.secondary_text
+            tertiary_text = self.tertiary_text
+            if (
+                primary_text is None
+                or secondary_text is None
+                or tertiary_text is None
+            ):
+                raise AssertionError("validated opcode-77 texts are incomplete")
+            try:
+                terminal = struct.pack("<I", self.terminal_u32)
+            except struct.error as error:
+                raise PacketShapeError(
+                    "server opcode-77 terminal_u32 must fit uint32"
+                ) from error
+            return b"".join(
+                (
+                    header,
+                    encode_utf16_string(primary_text, trailing_byte=False),
+                    encoded_controls[:2],
+                    encode_utf16_string(secondary_text, trailing_byte=True),
+                    encoded_controls[2:3],
+                    encode_utf16_string(tertiary_text, trailing_byte=True),
+                    encoded_controls[3:4],
+                    terminal,
+                )
+            )
+        if self.variant == 8:
+            if self.primary_text is None or any(
+                text is not None for text in texts[1:]
+            ):
+                raise PacketShapeError(
+                    "server opcode-77 variant 8 requires only primary_text"
+                )
+            if self.control_bytes or self.terminal_u32 is not None:
+                raise PacketShapeError(
+                    "server opcode-77 variant 8 retains only an opaque tail"
+                )
+            return (
+                header
+                + encode_utf16_string(self.primary_text, trailing_byte=False)
+                + self.opaque_tail
+            )
+        if any(text is not None for text in texts):
+            raise PacketShapeError(
+                "unknown server opcode-77 variants cannot contain typed text"
+            )
+        if self.control_bytes or self.terminal_u32 is not None:
+            raise PacketShapeError(
+                "unknown server opcode-77 variants retain only an opaque body"
+            )
+        return header + self.opaque_tail
+
+
+@dataclass(frozen=True)
 class InventoryModification:
     operation: int
     inventory_type: int

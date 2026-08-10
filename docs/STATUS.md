@@ -1,4 +1,4 @@
-# Status as of 2026-08-09
+# Status as of 2026-08-10
 
 ## Working
 
@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 152 tests.
+- The custom-server suite currently passes all 184 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  25,611 full, 43,954 partial, 1,535 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 12,990 full, 21,604 partial,
-  613 unknown, and zero invalid; stream `114` reports 29/14/33/0. Thirteen
+  25,937 full, 43,961 partial, 1,202 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,164 full, 21,610 partial,
+  433 unknown, and zero invalid; stream `114` reports 31/14/31/0. Thirteen
   long-corpus state-correlation warnings remain: the prior 12 plus one
   aggregate warning for six one-HP combat prediction differences.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
@@ -162,6 +162,15 @@
   stream `92` has 446 type-`1`, 104 length-prefixed type-`6`, and five
   length-prefixed type-`13` envelopes. Every packet round-trips, while the fold
   exposes only message-type/body-size counts and keeps all bodies opaque.
+- Server opcode `77` now has a redacted structural envelope across all 515
+  sustained-corpus samples. Variants `3`, `4`, and `5` fully bound their
+  counted UTF-16 fields, optional terminator, fixed controls, and neutral
+  terminal value; variant `8` preserves 278 final bytes across 13 packets as
+  opaque. Streams `92`, `114`, and `126` contribute 180, 2, and 333 exact
+  round-trips respectively, promoting 502 observations to full and 13 to
+  partial coverage. State/events expose only variant, text-length,
+  control/value, and opaque-byte distributions; captured text is omitted from
+  safe reports and HTTP status.
 - Client opcode `217`, separate from the same-numbered server life-movement
   broadcast, now has exact compact and counted record-set boundaries. Stream
   `126` contains 345 eight-byte compact packets and 592 record sets: format `0`

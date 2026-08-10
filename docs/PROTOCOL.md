@@ -747,6 +747,59 @@ normal client progression from the unsafe opcode-`42` experiment. Do not replay
 opcode `42` as a response until a capture-backed nonzero record grammar and a
 fresh-client minimal-packet acceptance test exist.
 
+## Redacted server opcode-`77` envelope
+
+All 515 opcode-`77` samples in the sustained gameplay references share a
+one-byte variant discriminator. The text-bearing branches use the standard
+`uint16` UTF-16LE code-unit count, but reports never expose the decoded text:
+
+```text
+uint16 opcode = 77
+uint8 variant
+
+variant 3:
+    utf16 primary_text
+    uint8 control[3]
+
+variant 4:
+    bool text_present
+    if text_present:
+        utf16 primary_text
+        uint8 zero_terminator
+
+variant 5:
+    utf16 primary_text
+    uint8 prefix_a = 3
+    uint8 prefix_b = 10
+    utf16 secondary_text
+    uint8 zero_terminator
+    uint8 separator = 10
+    utf16 tertiary_text
+    uint8 zero_terminator
+    uint8 terminal_tag = 2
+    uint32 terminal_value              # role remains neutral
+
+variant 8:
+    utf16 primary_text
+    bytes opaque_tail                  # observed lengths 4 or 117
+```
+
+Variant `3` always has its exact three-byte suffix. Variant `4` has 41 short
+false forms and ten true forms with a terminated string. All 22 variant-`5`
+packets use control pattern `03 0a 0a 02` and consume exactly. Variant `8`
+retains 278 opaque bytes across 13 packets and therefore remains partial;
+variants `3`, `4`, and `5` have full structural coverage.
+
+Stream `92` contributes variants `3/4/5/8 = 152/13/9/6`, stream `114`
+contributes `1/1/0/0`, and level-1-through-10 stream `126` contributes
+`276/37/13/7`. Every packet reparses and round-trips exactly: 502 observations
+move from unknown to full and 13 move to partial. The fold emits
+`server_opcode_77_received`, tracks variant/control/value and text-length
+distributions plus opaque-byte totals, and never copies any of the three text
+fields into safe JSON, text reports, events, or HTTP status. The family keeps a
+neutral name because the four variants span multiple visible-message forms;
+frequency and readable strings alone do not establish one gameplay role.
+
 ## Inventory change sets (`server 39`)
 
 The capture-validated packet grammar is:
@@ -1941,10 +1994,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 25,611
-full, 43,954 partial, 1,535 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 12,990 full, 21,604 partial,
-613 unknown, and zero invalid; stream `114` reaches 29/14/33/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 25,937
+full, 43,961 partial, 1,202 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,164 full, 21,610 partial,
+433 unknown, and zero invalid; stream `114` reaches 31/14/31/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its 13 remaining warnings are cross-packet state correlations:
 12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed

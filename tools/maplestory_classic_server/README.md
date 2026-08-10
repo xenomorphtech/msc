@@ -387,13 +387,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 25,597 full,
-43,954 partial, 1,549 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 25,937 full,
+43,961 partial, 1,202 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 12,976 full, 21,604 partial,
-627 unknown, and zero invalid observations; short stream `114` remains 16 full,
-14 partial, 46 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,164 full, 21,610 partial,
+433 unknown, and zero invalid observations; short stream `114` remains 31 full,
+14 partial, 31 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -422,6 +422,11 @@ The gameplay fold currently models these capture-backed boundaries:
   active lifecycle,
 - server opcode `49`: the three pickup-result variants for item quantity, mesos
   amount, and a still-neutral special value,
+- server opcode `77`: redacted variants `3`/`4`/`5` fully bound one to three
+  counted UTF-16 fields plus their fixed neutral controls/value, while variant
+  `8` preserves only its 4- or 117-byte tail as opaque; safe state, events,
+  JSON, text output, and HTTP status expose lengths/distributions but never
+  captured text,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
   to local pickup requests by the exact aliased drop id,
 - server opcode `41`: masked player-stat deltas for level, job, STR, DEX, INT,

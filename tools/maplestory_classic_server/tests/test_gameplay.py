@@ -104,6 +104,7 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementSubmission,
     PickupGainNotice,
     ServerAttackRelay,
+    ServerOpcode77Envelope,
     ServerOpcode426Notification,
     WorldBootstrapAcknowledgement,
     WorldEntryRequest,
@@ -1317,6 +1318,61 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(header.enabled_bit_indices, (0,))
         with self.assertRaisesRegex(PacketShapeError, "remain opaque"):
             replace(header, zero_mask_flag_a=0).to_bytes()
+
+    def test_server_opcode_77_variants_round_trip_with_redacted_text(
+        self,
+    ) -> None:
+        envelopes = (
+            ServerOpcode77Envelope(
+                variant=3,
+                primary_text="private message",
+                control_bytes=(0, 4, 1),
+            ),
+            ServerOpcode77Envelope(variant=4, control_bytes=(0,)),
+            ServerOpcode77Envelope(
+                variant=4,
+                primary_text="private notice",
+                control_bytes=(1,),
+            ),
+            ServerOpcode77Envelope(
+                variant=5,
+                primary_text="SID_WORLDNOTICE_WEDDING_CATHEDRAL",
+                secondary_text="private sender",
+                tertiary_text="private recipient",
+                control_bytes=ServerOpcode77Envelope.VARIANT_5_CONTROLS,
+                terminal_u32=28,
+            ),
+            ServerOpcode77Envelope(
+                variant=8,
+                primary_text="private child text",
+                opaque_tail=b"\x00\x07\x00\x00",
+            ),
+        )
+
+        for envelope in envelopes:
+            with self.subTest(variant=envelope.variant):
+                encoded = envelope.to_bytes()
+                self.assertEqual(
+                    ServerOpcode77Envelope.parse(encoded), envelope
+                )
+                safe = str(envelope.safe_dict())
+                self.assertNotIn("private", safe)
+
+        captured_variant_5 = bytes.fromhex(
+            "4d000521005300490044005f0057004f0052004c0044004e004f005400490043"
+            "0045005f00570045004400440049004e0047005f004300410054004800450044"
+            "00520041004c00030a0500ab706f67b0518e7f0f5f000a03009b730956c87000"
+            "021c000000"
+        )
+        parsed = ServerOpcode77Envelope.parse(captured_variant_5)
+        self.assertEqual(parsed.to_bytes(), captured_variant_5)
+        self.assertEqual(parsed.variant, 5)
+        self.assertEqual(parsed.text_code_unit_counts, (33, 5, 3))
+        self.assertEqual(parsed.control_bytes, (3, 10, 10, 2))
+        self.assertEqual(parsed.terminal_u32, 28)
+
+        with self.assertRaisesRegex(PacketShapeError, "control bytes"):
+            replace(envelopes[3], control_bytes=(3, 10, 9, 2)).to_bytes()
 
     def test_item_use_request_round_trip(self) -> None:
         request = ItemUseRequest(
@@ -3251,6 +3307,76 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(safe["zero_mask_flag_a_values"], {0: 1})
         self.assertIn(
             "local_temporary_stat_sets=packets:1 zero_masks:1",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_server_opcode_77_without_exposing_text(self) -> None:
+        envelopes = (
+            ServerOpcode77Envelope(
+                variant=3,
+                primary_text="sensitive chat text",
+                control_bytes=(0, 4, 1),
+            ),
+            ServerOpcode77Envelope(variant=4, control_bytes=(0,)),
+            ServerOpcode77Envelope(
+                variant=5,
+                primary_text="SID_WORLDNOTICE_WEDDING_CATHEDRAL",
+                secondary_text="sensitive sender",
+                tertiary_text="sensitive recipient",
+                control_bytes=ServerOpcode77Envelope.VARIANT_5_CONTROLS,
+                terminal_u32=28,
+            ),
+            ServerOpcode77Envelope(
+                variant=8,
+                primary_text="sensitive child text",
+                opaque_tail=b"\x00\x07\x00\x00",
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                envelope.to_bytes() for envelope in envelopes
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.current_hp, 70)
+        self.assertEqual(analysis.state.current_mp, 136)
+        self.assertEqual(analysis.state.server_opcode_77_packets, 4)
+        self.assertEqual(
+            analysis.state.server_opcode_77_by_variant,
+            {3: 1, 4: 1, 5: 1, 8: 1},
+        )
+        self.assertEqual(analysis.state.server_opcode_77_text_fields, 5)
+        expected_code_units = sum(
+            sum(envelope.text_code_unit_counts) for envelope in envelopes
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_77_text_code_units,
+            expected_code_units,
+        )
+        self.assertEqual(analysis.state.server_opcode_77_opaque_bytes, 4)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_77_envelope"
+        ]
+        self.assertEqual(
+            [observation.coverage.value for observation in observations],
+            ["full", "full", "full", "partial"],
+        )
+        events = [
+            event
+            for event in analysis.events
+            if event.kind == "server_opcode_77_received"
+        ]
+        self.assertEqual(len(events), 4)
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("sensitive", safe)
+        self.assertIn(
+            "server_opcode_77=packets:4 variants:",
             render_gameplay_analysis(analysis),
         )
 
