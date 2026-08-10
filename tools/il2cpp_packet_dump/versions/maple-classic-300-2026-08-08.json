@@ -775,9 +775,24 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":301},{"op":"read","name":"value","kind":"u32"}]
     },
     {
-      "name":"client_opcode_45","direction":"client_to_server","opcode":45,"length":6,
-      "source":"capture-111 request branch",
+      "name":"client_world_exit_status_45","direction":"client_to_server","opcode":45,"length":6,
+      "source":"capture-111 stream-114 terminal sequence: one redacted u32 status 66.699 ms after empty client opcode 241 and 100.305 ms before terminal server opcode 9",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":45},{"op":"read","name":"value","kind":"u32"}]
+    },
+    {
+      "name":"client_world_exit_status_46","direction":"client_to_server","opcode":46,"length":6,
+      "source":"capture-111 stream-92 terminal sequence: one redacted u32 status 64.396 ms after empty client opcode 241 and 100.677 ms before terminal server opcode 9",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":46},{"op":"read","name":"value","kind":"u32"}]
+    },
+    {
+      "name":"client_opcode_75_empty_bootstrap_marker","direction":"client_to_server","opcode":75,"length":2,
+      "source":"capture-111 stream 92 and 1-10FS stream 126: opcode-only client packet once during initial field bootstrap in each independent sustained session",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":75}]
+    },
+    {
+      "name":"client_world_exit_request","direction":"client_to_server","opcode":241,"length":2,
+      "source":"capture-111 streams 92 and 114: opcode-only client packet 165.073 and 167.004 ms before each final server opcode-9 termination",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":241}]
     },
     {
       "name":"server_opcode_45","direction":"server_to_client","opcode":45,"length":2,

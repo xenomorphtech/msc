@@ -365,6 +365,23 @@ gamestate model calls these correlated envelopes rather than a proven
 request/response, and opcode `394` remains unnecessary for the working login
 and gameplay path.
 
+Two client-side boundaries now close the short stream's remaining unknowns.
+Opcode `75` is an exact empty marker observed once during initial field loading
+in both sustained captures; the current local-Wine transcript independently
+emitted it at field epoch `1` while phase was `field_loading`. Opcode `241`
+begins the captured world-exit transaction in both `111` gameplay streams. It
+is followed 64.396/66.699 ms later by a redacted `u32` status on client opcode
+`46`/`45`, then by final server opcode `9` at 165.073/167.004 ms. The fold adds
+an `exit_requested` phase, correlates the terminal packet FIFO, and publishes
+only opcodes, counts, phases, and timing. Stream `92` reaches
+`13,417/21,782/8/0`, stream `114` reaches `54/22/0/0`, and stream `126` reaches
+`26,661/44,381/58/0`.
+
+A direct-Wayland game-menu attempt did not emit opcode `241` from the current
+client, so no terminal packet was injected and no live exit-effect claim is
+made. The client remained active in map `101000000`; the two independent
+captured terminal sequences remain the evidence for the transaction model.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -448,9 +465,9 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid. Stream
-`92` now reaches 13,414 full, 21,782 partial, 11 unknown, and zero invalid;
-stream `114` reaches 52/22/2/0.
+26,661 full, 44,381 partial, 58 unknown-but-lossless, and zero invalid. Stream
+`92` now reaches 13,417 full, 21,782 partial, 8 unknown, and zero invalid;
+stream `114` reaches 54/22/0/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
 client has a sequence byte followed by either an opaque identifier, counted

@@ -18,6 +18,7 @@ from .packets import (
     ClientAttackAction,
     ClientOpcode43Envelope,
     ClientOpcode66Acknowledgement,
+    ClientOpcode75EmptyRecord,
     ClientOpcode101Record,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
@@ -26,6 +27,8 @@ from .packets import (
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
+    ClientWorldExitRequest,
+    ClientWorldExitStatus,
     CompactFieldTransition,
     CompactInitialProgressionSnapshot,
     FieldDropRemoval,
@@ -180,6 +183,7 @@ class GameplayPhase(str, Enum):
     ENTRY_REQUESTED = "entry_requested"
     FIELD_LOADING = "field_loading"
     ACTIVE = "active"
+    EXIT_REQUESTED = "exit_requested"
     TERMINATED = "terminated"
 
 
@@ -1041,6 +1045,17 @@ class GameplayGameState:
     left_ctrl_skill_id: int | None = None
     left_ctrl_skill_known: bool = False
     pending_movements: int = 0
+    client_opcode_75_empty_records: int = 0
+    world_exit_requests: int = 0
+    world_exit_requests_from_active_phase: int = 0
+    world_exit_status_packets: int = 0
+    world_exit_status_packets_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    matched_world_exit_terminations: int = 0
+    pending_world_exit_requests: int = 0
+    last_world_exit_round_trip_ms: float | None = None
+    max_world_exit_round_trip_ms: float | None = None
     termination_received: bool = False
 
 
@@ -4373,6 +4388,40 @@ class GameplayAnalysis:
                         self.state.left_ctrl_skill_known
                     ),
                 },
+                "world_exit": {
+                    "bootstrap_marker_count": (
+                        self.state.client_opcode_75_empty_records
+                    ),
+                    "request_count": self.state.world_exit_requests,
+                    "requests_from_active_phase": (
+                        self.state.world_exit_requests_from_active_phase
+                    ),
+                    "status_packet_count": (
+                        self.state.world_exit_status_packets
+                    ),
+                    "status_packets_by_opcode": dict(
+                        self.state.world_exit_status_packets_by_opcode
+                    ),
+                    "status_values_redacted": (
+                        self.state.world_exit_status_packets
+                    ),
+                    "matched_termination_count": (
+                        self.state.matched_world_exit_terminations
+                    ),
+                    "pending_request_count": (
+                        self.state.pending_world_exit_requests
+                    ),
+                    "last_round_trip_ms": (
+                        None
+                        if self.state.last_world_exit_round_trip_ms is None
+                        else round(self.state.last_world_exit_round_trip_ms, 3)
+                    ),
+                    "max_round_trip_ms": (
+                        None
+                        if self.state.max_world_exit_round_trip_ms is None
+                        else round(self.state.max_world_exit_round_trip_ms, 3)
+                    ),
+                },
                 "termination_received": self.state.termination_received,
                 "transport_closed": self.transport_closed,
             },
@@ -4427,6 +4476,7 @@ class GameplayStateFold:
         self._pending_opcode_426_notifications: deque[int] = deque()
         self._pending_server_opcode_348: dict[int, deque[int]] = {}
         self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
+        self._pending_world_exit_requests: deque[int] = deque()
         self._pending_skill_level_changes: deque[
             tuple[int, int, SkillLevelChangeRequest]
         ] = deque()
@@ -4843,6 +4893,71 @@ class GameplayStateFold:
                 parsed=request,
                 details=entry_details,
                 issues=("world entry value and ticket tail remain opaque",),
+            )
+        if opcode == 75:
+            marker = ClientOpcode75EmptyRecord.parse(payload)
+            self.state.client_opcode_75_empty_records += 1
+            details = {
+                "field_epoch": self.state.field_epoch,
+                "phase": self.state.phase.value,
+            }
+            self._event(
+                frame,
+                "client_opcode_75_empty_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_75_empty_record",
+                coverage=ShapeCoverage.FULL,
+                parsed=marker,
+                details=details,
+            )
+        if opcode == 241:
+            request = ClientWorldExitRequest.parse(payload)
+            phase_before = self.state.phase
+            self._pending_world_exit_requests.append(frame.timestamp_ns)
+            self.state.world_exit_requests += 1
+            self.state.pending_world_exit_requests += 1
+            if phase_before == GameplayPhase.ACTIVE:
+                self.state.world_exit_requests_from_active_phase += 1
+            self.state.phase = GameplayPhase.EXIT_REQUESTED
+            details = {
+                "field_epoch": self.state.field_epoch,
+                "phase_before": phase_before.value,
+                "pending_requests": self.state.pending_world_exit_requests,
+            }
+            self._event(frame, "world_exit_requested", details=details)
+            return self._observation(
+                frame,
+                kind="client_world_exit_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode in {45, 46}:
+            status = ClientWorldExitStatus.parse(payload)
+            self.state.world_exit_status_packets += 1
+            self.state.world_exit_status_packets_by_opcode[opcode] += 1
+            details = {
+                **status.safe_dict(),
+                "correlated_exit_request": bool(
+                    self._pending_world_exit_requests
+                ),
+                "pending_requests": self.state.pending_world_exit_requests,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "world_exit_status_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_world_exit_status",
+                coverage=ShapeCoverage.FULL,
+                parsed=status,
+                details=details,
             )
         if opcode == 301:
             acknowledgement = WorldBootstrapAcknowledgement.parse(payload)
@@ -6790,19 +6905,40 @@ class GameplayStateFold:
             )
         if opcode == 9:
             termination = WorldSessionTermination.parse(payload)
+            correlated_exit_request = bool(self._pending_world_exit_requests)
+            round_trip_ms: float | None = None
+            if correlated_exit_request:
+                request_timestamp_ns = self._pending_world_exit_requests.popleft()
+                self.state.pending_world_exit_requests -= 1
+                self.state.matched_world_exit_terminations += 1
+                round_trip_ms = (
+                    frame.timestamp_ns - request_timestamp_ns
+                ) / 1e6
+                self.state.last_world_exit_round_trip_ms = round_trip_ms
+                self.state.max_world_exit_round_trip_ms = max(
+                    self.state.max_world_exit_round_trip_ms or 0.0,
+                    round_trip_ms,
+                )
             self.state.termination_received = True
             self.state.phase = GameplayPhase.TERMINATED
+            details: dict[str, object] = {
+                "opaque_reason_bytes": 7,
+                "correlated_exit_request": correlated_exit_request,
+                "pending_exit_requests": self.state.pending_world_exit_requests,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
             self._event(
                 frame,
                 "world_session_termination_received",
-                details={"opaque_reason_bytes": 7},
+                details=details,
             )
             return self._observation(
                 frame,
                 kind="world_session_termination",
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=termination,
-                details={"opaque_reason_bytes": 7},
+                details=details,
                 issues=("world-session termination reason remains opaque",),
             )
         if opcode == 157:
@@ -9403,6 +9539,11 @@ class GameplayStateFold:
                 "opcode-394/279 text pairs did not match the captured five-code-"
                 "unit transformation"
             )
+        if self.state.pending_world_exit_requests:
+            self.warnings.append(
+                f"{self.state.pending_world_exit_requests} client world-exit "
+                "requests had no captured terminal server opcode-9 packet"
+            )
         if self.state.pending_skill_level_change_requests:
             self.warnings.append(
                 f"{self.state.pending_skill_level_change_requests} skill "
@@ -9448,6 +9589,9 @@ class GameplayStateFold:
                     ),
                     "pending_server_opcode_394_envelopes": (
                         self.state.pending_server_opcode_394_envelopes
+                    ),
+                    "pending_world_exit_requests": (
+                        self.state.pending_world_exit_requests
                     ),
                     "pending_skill_level_change_requests": (
                         self.state.pending_skill_level_change_requests
@@ -11906,6 +12050,20 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
             "control_pairs:"
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
+        ),
+        (
+            "world_exit="
+            f"bootstrap_markers:{state.client_opcode_75_empty_records} "
+            f"requests:{state.world_exit_requests} "
+            "active_requests:"
+            f"{state.world_exit_requests_from_active_phase} "
+            f"statuses:{state.world_exit_status_packets} "
+            "status_opcodes:"
+            f"{dict(sorted(state.world_exit_status_packets_by_opcode.items()))} "
+            f"matched:{state.matched_world_exit_terminations} "
+            f"pending:{state.pending_world_exit_requests} "
+            f"last_rtt_ms:{state.last_world_exit_round_trip_ms} "
+            f"max_rtt_ms:{state.max_world_exit_round_trip_ms}"
         ),
         (
             "opcode_394_279="

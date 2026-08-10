@@ -9967,6 +9967,82 @@ class SkillRecordUpdateAcknowledgement:
 
 
 @dataclass(frozen=True)
+class ClientOpcode75EmptyRecord:
+    """Exact empty client marker observed during field bootstrap."""
+
+    opcode: int = 75
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode75EmptyRecord":
+        reader = PacketReader(payload, packet_name="client_opcode_75_empty")
+        _expect_opcode(reader, 75)
+        reader.finish()
+        return cls()
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 75:
+            raise PacketShapeError("client empty-record opcode must be 75")
+        return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
+class ClientWorldExitRequest:
+    """Exact empty client marker correlated with terminal server opcode 9."""
+
+    opcode: int = 241
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientWorldExitRequest":
+        reader = PacketReader(payload, packet_name="client_world_exit_request")
+        _expect_opcode(reader, 241)
+        reader.finish()
+        return cls()
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 241:
+            raise PacketShapeError("world-exit request opcode must be 241")
+        return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
+class ClientWorldExitStatus:
+    """Redacted four-byte status sent between exit request and termination."""
+
+    value: int = field(repr=False)
+    opcode: int
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientWorldExitStatus":
+        reader = PacketReader(payload, packet_name="client_world_exit_status")
+        opcode = reader.u16("opcode")
+        if opcode not in {45, 46}:
+            raise PacketShapeError(
+                f"world-exit status opcode must be 45 or 46, got {opcode}"
+            )
+        value = reader.u32("value")
+        reader.finish()
+        return cls(value=value, opcode=opcode)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "status_opcode": self.opcode,
+            "value_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode not in {45, 46}:
+            raise PacketShapeError(
+                f"world-exit status opcode must be 45 or 46, got {self.opcode}"
+            )
+        try:
+            return struct.pack("<HI", self.opcode, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"world-exit status value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode394TextEnvelope:
     """One redacted counted-text envelope correlated with client opcode 279."""
 

@@ -1288,6 +1288,45 @@ gameplay. The two full observations move stream `92` to
 `13,414/21,782/11/0`; stream `114` remains `52/22/2/0` and stream `126` remains
 `26,660/44,381/59/0`.
 
+## Client field bootstrap and world exit
+
+Client opcode `75` is an exact opcode-only marker:
+
+```text
+uint16 opcode = 75
+```
+
+It occurs once during the initial `field_loading` phase in `111.pcapng` stream
+`92` and `1-10FS.pcapng` stream `126`. The browser-free local-Wine transcript
+independently emits the same marker at field epoch `1`. No stronger semantic
+role is assigned.
+
+Both terminating `111.pcapng` world sessions share this client/server sequence:
+
+```text
+uint16 opcode = 241                    # empty world-exit request
+
+uint16 opcode = 45 or 46               # stream 114 or 92
+uint32 value                            # redacted status value
+
+uint16 opcode = 9
+byte[7] opaque_reason                   # existing terminal server packet
+```
+
+The request is emitted from `active`. Status opcode `46` follows by 64.396 ms
+in stream `92`; status opcode `45` follows by 66.699 ms in stream `114`. The
+final server packet follows the request by 165.073 and 167.004 ms respectively.
+The fold enters `exit_requested`, reports the status value only as redacted,
+then enters `terminated` and records FIFO correlation plus round-trip timing on
+opcode `9`. Exact packet observations promote all three client boundaries to
+full coverage. Stream `92` reaches `13,417/21,782/8/0`, stream `114` reaches
+`54/22/0/0`, and stream `126` reaches `26,661/44,381/58/0`.
+
+The current local client's game-menu confirmation did not emit opcode `241`,
+so a terminal injection was intentionally not attempted. This leaves the
+captured transaction exact and independently repeated, but its live UI trigger
+unproven in the current replay state.
+
 ## Field-bootstrap ledgers (`147`, `272`)
 
 Each opcode occurs once and byte-identically across gameplay streams `92`,
@@ -3159,10 +3198,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,660
-full, 44,381 partial, 59 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,414 full, 21,782 partial,
-11 unknown, and zero invalid; stream `114` reaches 52/22/2/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,661
+full, 44,381 partial, 58 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,417 full, 21,782 partial,
+8 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

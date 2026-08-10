@@ -16,7 +16,7 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 97);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 100);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
     assert_eq!(shapes.len(), 176);
 
@@ -127,11 +127,15 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         ("server_opcode_28_text_ledger_large", 28, 260, 3),
         ("server_opcode_28_text_ledger_compact", 28, 164, 3),
         ("server_opcode_29_text_ledger", 29, 327, 3),
+        ("client_world_exit_status_45", 45, 6, 2),
+        ("client_world_exit_status_46", 46, 6, 2),
+        ("client_opcode_75_empty_bootstrap_marker", 75, 2, 1),
         ("server_opcode_135_bootstrap_ledger", 135, 3_725, 10),
         ("server_opcode_142_text_ledger_large", 142, 254, 5),
         ("server_opcode_142_text_ledger_compact", 142, 190, 5),
         ("server_opcode_394_text_envelope", 394, 119, 2),
         ("client_opcode_279_text_envelope", 279, 120, 3),
+        ("client_world_exit_request", 241, 2, 1),
         ("server_opcode_425_value_ledger", 425, 68, 7),
     ] {
         let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
@@ -184,7 +188,10 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
             || shape.name == "observed_server_to_client_opcode_235_length_12"
             || shape.name == "observed_server_to_client_opcode_272_length_1056"
             || shape.name == "observed_server_to_client_opcode_276_length_3"
+            || shape.name == "observed_client_to_server_opcode_46_length_6"
+            || shape.name == "observed_client_to_server_opcode_75_length_2"
             || shape.name == "observed_client_to_server_opcode_279_length_120"
+            || shape.name == "observed_client_to_server_opcode_241_length_2"
             || shape.name == "observed_server_to_client_opcode_394_length_119"
             || shape.name == "observed_server_to_client_opcode_425_length_68"
     }));

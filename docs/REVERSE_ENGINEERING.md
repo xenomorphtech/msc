@@ -399,6 +399,19 @@ an exact injection into the live local-Wine field session produced no opcode
 records redacted envelopes, correlation, and gap timing without calling the
 pair security state or treating opcode `279` as a guaranteed response.
 
+The remaining short-stream client exit cluster is capture-driven because the
+automatic dump describes incoming server handlers, not these outgoing client
+writes. Two independent world sessions provide the same ordering: empty opcode
+`241`, a six-byte client status packet after roughly 65 ms, and terminal server
+opcode `9` after roughly 166 ms. The status opcode differs (`46` in stream `92`,
+`45` in stream `114`), but both bodies are exactly one redacted `u32`. That
+repetition supports an `exit_requested` gamestate transition and temporal
+pairing while leaving the value and reason semantics unnamed. Empty opcode `75`
+is separately repeated at the same initial field-loading boundary in streams
+`92` and `126`, and the local-Wine replay independently emitted it. A local UI
+exit attempt did not emit opcode `241`; no server terminal packet was forced,
+so the live effect remains explicitly unproven.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte

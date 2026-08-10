@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,414 full, 21,782 partial,
-  11 unknown, and zero invalid; stream `114` reports 52/22/2/0. Seven
+  26,661 full, 44,381 partial, 58 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,417 full, 21,782 partial,
+  8 unknown, and zero invalid; stream `114` reports 54/22/0/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -185,6 +185,16 @@
   world connection produced no opcode `279` within seven seconds, while the
   client remained responsive in map `101000000`; opcode `394` is not required
   by the current login/gameplay path.
+- Client opcode `75` is now a full opcode-only field-bootstrap marker, observed
+  once in both sustained captures and independently in the running local-Wine
+  transcript at field epoch `1`. The two `111` world sessions also prove a
+  repeated exit transaction: empty client opcode `241`, redacted-u32 client
+  status opcode `46`/`45` after 64.396/66.699 ms, and final server opcode `9`
+  after 165.073/167.004 ms. The gamestate now enters `exit_requested`, tracks
+  the redacted status, and correlates the terminal transition. Coverage becomes
+  `13,417/21,782/8/0`, `54/22/0/0`, and `26,661/44,381/58/0` for streams
+  `92`, `114`, and `126`. The current game-menu attempt emitted no opcode `241`,
+  so live terminal replay remains unclaimed.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

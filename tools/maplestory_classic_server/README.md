@@ -436,13 +436,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,660 full,
-44,381 partial, 59 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
+44,381 partial, 58 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,414 full, 21,782 partial,
-11 unknown, and zero invalid observations; short stream `114` reaches 52 full,
-22 partial, 2 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,417 full, 21,782 partial,
+8 unknown, and zero invalid observations; short stream `114` reaches 54 full,
+22 partial, zero unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -584,6 +584,11 @@ The gameplay fold currently models these capture-backed boundaries:
   neutral byte and changes only code-unit span `10..14`. The fold reports FIFO
   correlation and observed gap, not a guaranteed response: exact local-Wine
   injection produced no opcode `279` while the field client stayed responsive,
+- client opcode `75`: an exact empty field-bootstrap marker repeated in streams
+  `92`/`126` and independently emitted by the current local-Wine client,
+- client opcode `241`, client status opcode `45`/`46`, and terminal server
+  opcode `9`: a repeated world-exit transaction that enters `exit_requested`,
+  redacts the one-u32 status, and reaches `terminated` after 165–167 ms,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
   records with two raw-byte-preserving IL2CPP booleans and two signed values per
   entry; zero is false and every nonzero byte is true, and the three-byte
@@ -1723,3 +1728,7 @@ preserve distinct Unity scan codes in this setup.
     inventing security semantics, validate both codecs and manifest shapes,
     and record the local-Wine negative replay result that kept gameplay healthy
     but emitted no opcode `279`.
+64. Promote the repeated client opcode-`75` field-bootstrap marker and both
+    opcode-`241`/status/terminal world-exit sequences into exact redacted
+    gamestate events, close every unknown packet in short stream `114`, and
+    confirm opcode `75` independently in the running local-Wine transcript.

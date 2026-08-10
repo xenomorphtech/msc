@@ -47,6 +47,7 @@ from maple_server.packets import (  # noqa: E402
     ClientAttackAction,
     ClientOpcode43Envelope,
     ClientOpcode66Acknowledgement,
+    ClientOpcode75EmptyRecord,
     ClientOpcode101Record,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
@@ -55,6 +56,8 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
+    ClientWorldExitRequest,
+    ClientWorldExitStatus,
     CompactFieldTransition,
     CompactInitialProgressionSnapshot,
     FieldDropRemoval,
@@ -2880,6 +2883,30 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertNotIn("sensitive", str(client.safe_dict()))
         with self.assertRaisesRegex(PacketShapeError, "trailing byte"):
             ServerOpcode394TextEnvelope.parse(server.to_bytes()[:-1] + b"\x01")
+
+    def test_client_bootstrap_and_world_exit_records_round_trip(self) -> None:
+        bootstrap = ClientOpcode75EmptyRecord()
+        request = ClientWorldExitRequest()
+
+        self.assertEqual(bootstrap.to_bytes(), b"K\x00")
+        self.assertEqual(
+            ClientOpcode75EmptyRecord.parse(bootstrap.to_bytes()),
+            bootstrap,
+        )
+        self.assertEqual(request.to_bytes(), b"\xf1\x00")
+        self.assertEqual(ClientWorldExitRequest.parse(request.to_bytes()), request)
+        for opcode, value in ((45, 0x1234), (46, 0x5678)):
+            with self.subTest(opcode=opcode):
+                status = ClientWorldExitStatus(value=value, opcode=opcode)
+                self.assertEqual(len(status.to_bytes()), 6)
+                self.assertEqual(
+                    ClientWorldExitStatus.parse(status.to_bytes()),
+                    status,
+                )
+                self.assertTrue(status.safe_dict()["value_redacted"])
+                self.assertNotIn(str(value), str(status.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "45 or 46"):
+            ClientWorldExitStatus(value=0, opcode=47).to_bytes()
 
     def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
         self,
@@ -5842,6 +5869,78 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.warnings,
         )
         self.assertNotIn("sensitive", str(analysis.safe_dict()))
+
+    def test_folds_client_world_exit_transaction(self) -> None:
+        status_value = 0x12345678
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_client_plaintexts=(
+                ClientOpcode75EmptyRecord().to_bytes(),
+                ClientWorldExitRequest().to_bytes(),
+                ClientWorldExitStatus(
+                    value=status_value,
+                    opcode=46,
+                ).to_bytes(),
+            ),
+            terminate=True,
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.phase, GameplayPhase.TERMINATED)
+        self.assertEqual(analysis.state.client_opcode_75_empty_records, 1)
+        self.assertEqual(analysis.state.world_exit_requests, 1)
+        self.assertEqual(analysis.state.world_exit_requests_from_active_phase, 1)
+        self.assertEqual(analysis.state.world_exit_status_packets, 1)
+        self.assertEqual(
+            analysis.state.world_exit_status_packets_by_opcode,
+            {46: 1},
+        )
+        self.assertEqual(analysis.state.matched_world_exit_terminations, 1)
+        self.assertEqual(analysis.state.pending_world_exit_requests, 0)
+        self.assertEqual(
+            [
+                event.kind
+                for event in analysis.events
+                if event.kind
+                in {
+                    "client_opcode_75_empty_received",
+                    "world_exit_requested",
+                    "world_exit_status_submitted",
+                    "world_session_termination_received",
+                }
+            ],
+            [
+                "client_opcode_75_empty_received",
+                "world_exit_requested",
+                "world_exit_status_submitted",
+                "world_session_termination_received",
+            ],
+        )
+        self.assertNotIn(str(status_value), str(analysis.safe_dict()))
+        self.assertIn(
+            "world_exit=bootstrap_markers:1 requests:1 active_requests:1",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_world_exit_request_without_termination_stays_pending(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_client_plaintexts=(ClientWorldExitRequest().to_bytes(),),
+            close=False,
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.phase, GameplayPhase.EXIT_REQUESTED)
+        self.assertEqual(analysis.state.pending_world_exit_requests, 1)
+        self.assertIn(
+            "1 client world-exit requests had no captured terminal server "
+            "opcode-9 packet",
+            analysis.warnings,
+        )
 
     def test_folds_positioned_effect_records(self) -> None:
         records = (
