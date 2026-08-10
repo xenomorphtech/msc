@@ -489,6 +489,23 @@ two injection events, final Left Ctrl skill `2001005`, active map `101000000`,
 HP `50`, and 91/91 matched heartbeats. This is a causal key-binding result;
 the other selector families remain unnamed.
 
+A second browser-free A/B/A exercised physical evdev key code `71`. Under the
+captured `71 -> 2001002` binding, the client emitted the exact 13-byte skill-use
+request `opcode 104, tick, skill 2001002, level 1, trailing 0`. Injecting only
+`?keyboard-skill=71:2001004` changed the same key to the modeled opcode-`52`
+variant-`17` attack; restoring the unmodified opcode-`385` frame restored the
+opcode-`104` request. The two opcode-`104` ticks differ by `230024` ms while
+their transcript timestamps differ by `230039.792` ms. The frozen transcript
+is
+`downloads/maple_custom_server_observed/key_binding_71_live_20260809/world/1786320080162364482_replay_12857.jsonl`.
+It folds validly to active map `101000000`, HP `50`, final bindings
+`29 -> 2001005` and `71 -> 2001002`, two full opcode-`104` observations, two
+level/binding correlations, and no issues. It has 38 matched and zero unmatched
+heartbeat responses; its sole warning is one final probe whose response fell
+outside the capture during controlled shutdown. This validates the request
+model and binding-dependent dispatch, not the server-side effect or response
+semantics of skill `2001002`.
+
 ## Typed NPC-spawn generation
 
 Add `--generate-field-npc-spawns` to the world replay command to regenerate

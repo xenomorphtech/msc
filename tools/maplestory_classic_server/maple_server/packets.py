@@ -4075,6 +4075,57 @@ class ServerAttackRelay:
 
 
 @dataclass(frozen=True)
+class ClientSkillUseRequest:
+    client_tick: int
+    skill_id: int
+    skill_level: int
+    trailing_value: int
+    opcode: int = 104
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientSkillUseRequest":
+        reader = PacketReader(payload, packet_name="client_skill_use_request")
+        _expect_opcode(reader, 104)
+        request = cls(
+            client_tick=reader.u32("client_tick"),
+            skill_id=reader.u32("skill_id"),
+            skill_level=reader.u8("skill_level"),
+            trailing_value=reader.u16("trailing_value"),
+        )
+        reader.finish()
+        return request
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "client_tick": self.client_tick,
+            "skill_id": self.skill_id,
+            "skill_level": self.skill_level,
+            "trailing_value": self.trailing_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        for name, value, maximum in (
+            ("client_tick", self.client_tick, 0xFFFF_FFFF),
+            ("skill_id", self.skill_id, 0xFFFF_FFFF),
+            ("skill_level", self.skill_level, 0xFF),
+            ("trailing_value", self.trailing_value, 0xFFFF),
+        ):
+            if not 0 <= value <= maximum:
+                raise PacketShapeError(
+                    f"client skill-use {name} must fit in "
+                    f"u{maximum.bit_length()}"
+                )
+        return struct.pack(
+            "<HIIBH",
+            self.opcode,
+            self.client_tick,
+            self.skill_id,
+            self.skill_level,
+            self.trailing_value,
+        )
+
+
+@dataclass(frozen=True)
 class ClientOpcode101Record:
     header_value: int
     primary_value: int

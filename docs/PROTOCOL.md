@@ -670,6 +670,40 @@ binding sequence `2001005 -> 2001004 -> 2001005`, and matches 91/91 heartbeats
 with no pending or unmatched response. This proves the key/value relationship
 without assigning meanings to the other selector families.
 
+## Client skill-use request (`104`)
+
+The key-`71` live control produced a complete fixed-width client request:
+
+```text
+uint16 opcode = 104
+uint32 client_tick
+uint32 skill_id
+uint8  skill_level
+uint16 trailing_value    # observed 0; role remains neutral
+```
+
+The captured and restored `71 -> 2001002` binding each emitted an exact
+13-byte opcode-`104` packet. Both requests carried skill id `2001002`, level
+`1`, and trailing value `0`; the level agrees with the initial progression
+snapshot. Their client ticks were `393636` and `623660`, a delta of `230024`
+ms. The corresponding transcript timestamps differ by `230039.792` ms, only
+`15.792` ms more, which supports interpreting the uint32 as a client
+millisecond tick.
+
+This result is causal rather than a shape-only label. With the captured
+binding, physical evdev key code `71` emitted opcode `104`. Changing only the
+opcode-`385` entry value to learned skill `2001004` made the same key emit the
+already-modeled opcode-`52` variant-`17` attack instead. Restoring the exact
+captured binding restored opcode `104` with skill id `2001002`. The two
+opcode-`104` samples are from the controlled live transcript; streams `92`,
+`114`, and `126` in the two reference PCAPs contain none.
+
+The gameplay fold gives this packet full structural coverage, correlates the
+skill id with both current keyboard bindings and learned skill levels, checks
+the submitted level, tracks tick deltas/decreases and neutral trailing values,
+and emits `client_skill_use_submitted`. It does not yet infer a required server
+response or assign a meaning to `trailing_value` beyond the observed zero.
+
 ## Inventory change sets (`server 39`)
 
 The capture-validated packet grammar is:

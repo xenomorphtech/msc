@@ -20,6 +20,7 @@ from .packets import (
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
+    ClientSkillUseRequest,
     CompactFieldTransition,
     CompactInitialProgressionSnapshot,
     FieldDropRemoval,
@@ -590,6 +591,24 @@ class GameplayGameState:
     client_opcode_101_tail_values: Counter[int] = field(
         default_factory=Counter
     )
+    client_skill_use_requests: int = 0
+    client_skill_use_requests_by_skill_id: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_skill_use_level_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_skill_use_trailing_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_skill_use_known_skills: int = 0
+    client_skill_use_unknown_skills: int = 0
+    client_skill_use_level_matches: int = 0
+    client_skill_use_level_mismatches: int = 0
+    client_skill_use_binding_matches: int = 0
+    client_skill_use_binding_mismatches: int = 0
+    last_client_skill_tick: int | None = None
+    client_skill_tick_decreases: int = 0
     client_opcode_13_messages: int = 0
     client_opcode_13_messages_by_type: Counter[int] = field(
         default_factory=Counter
@@ -3231,6 +3250,36 @@ class GameplayAnalysis:
                 "client_opcode_101_tail_values": dict(
                     self.state.client_opcode_101_tail_values
                 ),
+                "client_skill_uses": {
+                    "request_count": self.state.client_skill_use_requests,
+                    "requests_by_skill_id": dict(
+                        self.state.client_skill_use_requests_by_skill_id
+                    ),
+                    "skill_level_values": dict(
+                        self.state.client_skill_use_level_values
+                    ),
+                    "trailing_values": dict(
+                        self.state.client_skill_use_trailing_values
+                    ),
+                    "known_skills": self.state.client_skill_use_known_skills,
+                    "unknown_skills": (
+                        self.state.client_skill_use_unknown_skills
+                    ),
+                    "level_matches": (
+                        self.state.client_skill_use_level_matches
+                    ),
+                    "level_mismatches": (
+                        self.state.client_skill_use_level_mismatches
+                    ),
+                    "binding_matches": (
+                        self.state.client_skill_use_binding_matches
+                    ),
+                    "binding_mismatches": (
+                        self.state.client_skill_use_binding_mismatches
+                    ),
+                    "last_client_tick": self.state.last_client_skill_tick,
+                    "tick_decreases": self.state.client_skill_tick_decreases,
+                },
                 "client_opcode_13_messages": (
                     self.state.client_opcode_13_messages
                 ),
@@ -4211,6 +4260,81 @@ class GameplayStateFold:
         if opcode == 54:
             return self._fold_client_attack(
                 frame, ClientOpcode54AttackAction.parse(payload)
+            )
+        if opcode == 104:
+            request = ClientSkillUseRequest.parse(payload)
+            modeled_skill_level = self.state.skill_levels.get(
+                request.skill_id
+            )
+            bound_key_codes = sorted(
+                key_code
+                for key_code, skill_id in (
+                    self.state.keyboard_skill_bindings.items()
+                )
+                if skill_id == request.skill_id
+            )
+            previous_tick = self.state.last_client_skill_tick
+            tick_delta = (
+                None
+                if previous_tick is None
+                else (request.client_tick - previous_tick) & 0xFFFF_FFFF
+            )
+            skill_known = modeled_skill_level is not None
+            level_matches = (
+                None
+                if modeled_skill_level is None
+                else request.skill_level == modeled_skill_level
+            )
+            binding_matches = bool(bound_key_codes)
+            self.state.client_skill_use_requests += 1
+            self.state.client_skill_use_requests_by_skill_id[
+                request.skill_id
+            ] += 1
+            self.state.client_skill_use_level_values[
+                request.skill_level
+            ] += 1
+            self.state.client_skill_use_trailing_values[
+                request.trailing_value
+            ] += 1
+            if skill_known:
+                self.state.client_skill_use_known_skills += 1
+                if level_matches:
+                    self.state.client_skill_use_level_matches += 1
+                else:
+                    self.state.client_skill_use_level_mismatches += 1
+            else:
+                self.state.client_skill_use_unknown_skills += 1
+            if binding_matches:
+                self.state.client_skill_use_binding_matches += 1
+            else:
+                self.state.client_skill_use_binding_mismatches += 1
+            if (
+                previous_tick is not None
+                and request.client_tick < previous_tick
+            ):
+                self.state.client_skill_tick_decreases += 1
+            self.state.last_client_skill_tick = request.client_tick
+            details = {
+                **request.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+                "modeled_skill_level": modeled_skill_level,
+                "skill_known": skill_known,
+                "skill_level_matches_model": level_matches,
+                "bound_key_codes": bound_key_codes,
+                "binding_matches_model": binding_matches,
+                "client_tick_delta": tick_delta,
+            }
+            self._event(
+                frame,
+                "client_skill_use_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_skill_use_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
             )
         if opcode == 101:
             record = ClientOpcode101Record.parse(payload)
@@ -8353,6 +8477,15 @@ def render_gameplay_analysis(
     client_opcode_101_tail_values = json.dumps(
         dict(sorted(state.client_opcode_101_tail_values.items()))
     )
+    client_skill_use_requests_by_skill_id = json.dumps(
+        dict(sorted(state.client_skill_use_requests_by_skill_id.items()))
+    )
+    client_skill_use_level_values = json.dumps(
+        dict(sorted(state.client_skill_use_level_values.items()))
+    )
+    client_skill_use_trailing_values = json.dumps(
+        dict(sorted(state.client_skill_use_trailing_values.items()))
+    )
     client_opcode_217_record_formats = json.dumps(
         dict(sorted(state.client_opcode_217_records_by_format.items()))
     )
@@ -8700,6 +8833,20 @@ def render_gameplay_analysis(
             f"flag_values:{client_opcode_101_flag_values} "
             f"secondary_values:{client_opcode_101_secondary_values} "
             f"tail_values:{client_opcode_101_tail_values}"
+        ),
+        (
+            f"client_skill_uses=requests:{state.client_skill_use_requests} "
+            f"by_skill:{client_skill_use_requests_by_skill_id} "
+            f"levels:{client_skill_use_level_values} "
+            f"trailing_values:{client_skill_use_trailing_values} "
+            f"known:{state.client_skill_use_known_skills} "
+            f"unknown:{state.client_skill_use_unknown_skills} "
+            f"level_matches:{state.client_skill_use_level_matches} "
+            f"level_mismatches:{state.client_skill_use_level_mismatches} "
+            f"binding_matches:{state.client_skill_use_binding_matches} "
+            f"binding_mismatches:{state.client_skill_use_binding_mismatches} "
+            f"last_tick:{state.last_client_skill_tick} "
+            f"tick_decreases:{state.client_skill_tick_decreases}"
         ),
         (
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "

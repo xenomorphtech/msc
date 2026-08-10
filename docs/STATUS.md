@@ -109,6 +109,16 @@
   `[29,25]`. The warning-free fold records keyboard snapshots
   `2001005 -> 2001004 -> 2001005`, remains active on map `101000000` at HP
   `50`, and matches 91/91 heartbeats.
+- A second direct-evdev A/B/A validates key code `71` and client opcode `104`.
+  Captured/restored `71 -> 2001002` emitted the exact fixed-width request
+  `uint32 tick, uint32 skill id, uint8 level, uint16 trailing`; mutating only
+  the binding value to `2001004` switched the same key to opcode-`52` variant
+  `17`, and restoring it restored opcode `104`. The two requests carry learned
+  level `1` and tick delta `230024` ms, within `15.792` ms of transcript elapsed
+  time. The fold now gives opcode `104` full coverage, correlates it with
+  learned skills and current bindings, and emits `client_skill_use_submitted`.
+  The frozen run remains active and valid with 38 matched heartbeats; its only
+  warning is the final shutdown-raced pending probe.
 - `--generate-field-npc-spawns` now reconstructs every fully typed opcode-`300`
   frame from the folded aliased entity model. It validates exact 22-byte
   re-encoding, reparsing, frame uniqueness, and patch conflicts; runtime status
@@ -615,9 +625,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 1. Use the owner/proximity negative controls to isolate the remaining
    client-side drop eligibility condition; serve a reactive pickup only after
    observing an authentic opcode-`185` request.
-2. Test the second captured selector-`1` binding at key code `71` with direct
-   evdev input, then use one-field controls to determine whether selector `0`
-   is an empty binding without assigning meanings to selectors `2/4/5/6`.
+2. Determine whether client opcode `104` requires a modeled server response,
+   then use one-field controls to test whether opcode-`385` selector `0` is an
+   empty binding without assigning meanings to selectors `2/4/5/6`.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Add a bounded per-trigger event budget so repeated valid gameplay events

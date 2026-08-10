@@ -49,6 +49,7 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode217RecordSet,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
+    ClientSkillUseRequest,
     CompactFieldTransition,
     CompactInitialProgressionSnapshot,
     FieldDropRemoval,
@@ -614,6 +615,7 @@ def fixture_gameplay_transcript(
     active_item_drop: bool = False,
     active_item_drop_owner: int | None = None,
     extra_server_plaintexts: tuple[bytes, ...] = (),
+    extra_client_plaintexts: tuple[bytes, ...] = (),
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -1249,6 +1251,8 @@ def fixture_gameplay_transcript(
         )
     for plaintext in extra_server_plaintexts:
         append("server_to_client", plaintext)
+    for plaintext in extra_client_plaintexts:
+        append("client_to_server", plaintext)
     if terminate:
         append(
             "server_to_client",
@@ -1260,6 +1264,25 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_client_skill_use_request_round_trip(self) -> None:
+        observed = bytes.fromhex("6800a40106006a881e00010000")
+        restored = bytes.fromhex("68002c8409006a881e00010000")
+        request = ClientSkillUseRequest(
+            client_tick=393_636,
+            skill_id=2_001_002,
+            skill_level=1,
+            trailing_value=0,
+        )
+
+        self.assertEqual(request.to_bytes(), observed)
+        self.assertEqual(ClientSkillUseRequest.parse(observed), request)
+        self.assertEqual(
+            ClientSkillUseRequest.parse(restored),
+            replace(request, client_tick=623_660),
+        )
+        with self.assertRaisesRegex(PacketShapeError, "skill_level"):
+            replace(request, skill_level=256).to_bytes()
+
     def test_item_use_request_round_trip(self) -> None:
         request = ItemUseRequest(
             client_tick=102_034,
@@ -3068,6 +3091,84 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertNotIn("11111111", repr(safe))
         self.assertNotIn("22222222", repr(safe))
+
+    def test_folds_client_skill_use_against_progression_and_bindings(
+        self,
+    ) -> None:
+        keyboard = fixture_variable_server_records()[2]
+        requests = (
+            ClientSkillUseRequest(
+                client_tick=393_636,
+                skill_id=2_001_002,
+                skill_level=1,
+                trailing_value=0,
+            ),
+            ClientSkillUseRequest(
+                client_tick=623_660,
+                skill_id=2_001_002,
+                skill_level=1,
+                trailing_value=0,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(keyboard.to_bytes(),),
+            extra_client_plaintexts=tuple(
+                request.to_bytes() for request in requests
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_skill_use_requests, 2)
+        self.assertEqual(
+            analysis.state.client_skill_use_requests_by_skill_id,
+            {2_001_002: 2},
+        )
+        self.assertEqual(
+            analysis.state.client_skill_use_level_values, {1: 2}
+        )
+        self.assertEqual(
+            analysis.state.client_skill_use_trailing_values, {0: 2}
+        )
+        self.assertEqual(analysis.state.client_skill_use_known_skills, 2)
+        self.assertEqual(analysis.state.client_skill_use_unknown_skills, 0)
+        self.assertEqual(analysis.state.client_skill_use_level_matches, 2)
+        self.assertEqual(analysis.state.client_skill_use_level_mismatches, 0)
+        self.assertEqual(analysis.state.client_skill_use_binding_matches, 2)
+        self.assertEqual(analysis.state.client_skill_use_binding_mismatches, 0)
+        self.assertEqual(analysis.state.last_client_skill_tick, 623_660)
+        self.assertEqual(analysis.state.client_skill_tick_decreases, 0)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_skill_use_request"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(observations[0].details["bound_key_codes"], [71])
+        self.assertTrue(observations[0].details["skill_level_matches_model"])
+        self.assertEqual(observations[1].details["client_tick_delta"], 230_024)
+        self.assertEqual(
+            sum(
+                event.kind == "client_skill_use_submitted"
+                for event in analysis.events
+            ),
+            2,
+        )
+        safe = analysis.safe_dict()["state"]["client_skill_uses"]
+        self.assertEqual(safe["requests_by_skill_id"], {2_001_002: 2})
+        self.assertEqual(safe["level_matches"], 2)
+        self.assertIn(
+            "client_skill_uses=requests:2",
+            render_gameplay_analysis(analysis),
+        )
 
     def test_folds_keyboard_skill_binding_reload_sequence(self) -> None:
         original = fixture_variable_server_records()[2]

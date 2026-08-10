@@ -179,6 +179,18 @@ skill `2001005`'s two-hit opcode-`52` variant `18`, to skill `2001004`'s one-hit
 variant `17`, and back to variant `18`; the client stayed active and matched
 91/91 heartbeats.
 
+The second captured selector-`1` binding is also causal. Physical evdev key
+code `71` under `71 -> 2001002` emitted client opcode `104` as the exact
+13-byte shape `uint32 client_tick, uint32 skill_id, uint8 skill_level, uint16
+trailing_value`. Both captured/restored samples carried skill `2001002`, learned
+level `1`, and trailing zero. Rebinding only key `71` to `2001004` switched the
+same input to opcode-`52` variant `17`; restoring the original binding restored
+opcode `104`. The gameplay fold reports these as full
+`client_skill_use_request` observations and `client_skill_use_submitted` events,
+including progression/binding correlations and tick deltas. No opcode-`104`
+sample occurs in reference streams `92`, `114`, or `126`, and no required
+server response is inferred yet.
+
 For controlled live experiments, replay mode also accepts
 `--enable-http-packet-injection` together with `--http-api-port`. It enables
 loopback-only `POST /api/v1/server-packets` with exact JSON
