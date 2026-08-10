@@ -6492,6 +6492,109 @@ class ServerOpcode323PositionedEffectRecord:
 
 
 @dataclass(frozen=True)
+class ServerOpcode348TextEnvelope:
+    """Capture-bounded, identifier-safe text branches of server opcode 348."""
+
+    category: int
+    primary_value: int = field(repr=False)
+    selector: int
+    value: int
+    text: str = field(repr=False)
+    control_1: int | None = None
+    control_2: int | None = None
+    opcode: int = 348
+
+    EXTENDED_SELECTOR = 0
+    SIMPLE_SELECTORS = frozenset({3, 6, 17})
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode348TextEnvelope":
+        reader = PacketReader(payload, packet_name="server_opcode_348_text")
+        _expect_opcode(reader, 348)
+        category = reader.u8("category")
+        primary_value = reader.i32("primary_value")
+        selector = reader.u8("selector")
+        value = reader.i32("value")
+        text = reader.utf16_string("text", trailing_byte=True)
+        if selector == cls.EXTENDED_SELECTOR:
+            record = cls(
+                category=category,
+                primary_value=primary_value,
+                selector=selector,
+                value=value,
+                text=text,
+                control_1=reader.u8("control_1"),
+                control_2=reader.u8("control_2"),
+            )
+        elif selector in cls.SIMPLE_SELECTORS:
+            record = cls(
+                category=category,
+                primary_value=primary_value,
+                selector=selector,
+                value=value,
+                text=text,
+            )
+        else:
+            raise PacketShapeError(
+                "server opcode-348 selector must be captured value "
+                f"0, 3, 6, or 17, got {selector}"
+            )
+        reader.finish()
+        return record
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.text.encode("utf-16-le")) // 2
+
+    def safe_dict(self) -> dict[str, int | bool | None]:
+        return {
+            "category": self.category,
+            "primary_value_redacted": True,
+            "selector": self.selector,
+            "value": self.value,
+            "text_present": True,
+            "text_code_units": self.text_code_units,
+            "control_1": self.control_1,
+            "control_2": self.control_2,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 348:
+            raise PacketShapeError("server opcode-348 envelope opcode must be 348")
+        try:
+            encoded = struct.pack(
+                "<HBiBi",
+                self.opcode,
+                self.category,
+                self.primary_value,
+                self.selector,
+                self.value,
+            ) + encode_utf16_string(self.text, trailing_byte=True)
+            if self.selector == self.EXTENDED_SELECTOR:
+                if self.control_1 is None or self.control_2 is None:
+                    raise PacketShapeError(
+                        "server opcode-348 selector 0 requires two controls"
+                    )
+                return encoded + struct.pack(
+                    "<BB", self.control_1, self.control_2
+                )
+            if self.selector in self.SIMPLE_SELECTORS:
+                if self.control_1 is not None or self.control_2 is not None:
+                    raise PacketShapeError(
+                        "server opcode-348 simple selector cannot include controls"
+                    )
+                return encoded
+            raise PacketShapeError(
+                "server opcode-348 selector must be captured value 0, 3, 6, "
+                f"or 17, got {self.selector}"
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-348 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode69Record:
     """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
 

@@ -81,6 +81,7 @@ from .packets import (
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
+    ServerOpcode348TextEnvelope,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -736,6 +737,16 @@ class GameplayGameState:
     positioned_effect_updates: int = 0
     positioned_effect_unknown_updates: int = 0
     positioned_effect_control_values: Counter[str] = field(
+        default_factory=Counter
+    )
+    server_opcode_348_packets: int = 0
+    server_opcode_348_categories: Counter[int] = field(default_factory=Counter)
+    server_opcode_348_selectors: Counter[int] = field(default_factory=Counter)
+    server_opcode_348_values: Counter[int] = field(default_factory=Counter)
+    server_opcode_348_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_348_control_pairs: Counter[str] = field(
         default_factory=Counter
     )
     fixed_server_records: int = 0
@@ -3606,6 +3617,20 @@ class GameplayAnalysis:
                         self.state.positioned_effect_control_values
                     ),
                 },
+                "server_opcode_348": {
+                    "packet_count": self.state.server_opcode_348_packets,
+                    "categories": dict(
+                        self.state.server_opcode_348_categories
+                    ),
+                    "selectors": dict(self.state.server_opcode_348_selectors),
+                    "values": dict(self.state.server_opcode_348_values),
+                    "text_code_units": dict(
+                        self.state.server_opcode_348_text_code_units
+                    ),
+                    "control_pairs": dict(
+                        self.state.server_opcode_348_control_pairs
+                    ),
+                },
                 "fixed_server_records": (
                     self.state.fixed_server_records
                 ),
@@ -6200,6 +6225,43 @@ class GameplayStateFold:
                 kind="positioned_effect_record",
                 coverage=ShapeCoverage.FULL,
                 parsed=effect_record,
+                details=details,
+            )
+        if (
+            opcode == 348
+            and len(payload) >= 8
+            and payload[7]
+            in {
+                ServerOpcode348TextEnvelope.EXTENDED_SELECTOR,
+                *ServerOpcode348TextEnvelope.SIMPLE_SELECTORS,
+            }
+        ):
+            envelope = ServerOpcode348TextEnvelope.parse(payload)
+            self.state.server_opcode_348_packets += 1
+            self.state.server_opcode_348_categories[envelope.category] += 1
+            self.state.server_opcode_348_selectors[envelope.selector] += 1
+            self.state.server_opcode_348_values[envelope.value] += 1
+            self.state.server_opcode_348_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            if envelope.control_1 is not None:
+                control_pair = f"{envelope.control_1}:{envelope.control_2}"
+                self.state.server_opcode_348_control_pairs[control_pair] += 1
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_348_received",
+                details=details,
+                identifiers={"primary_value": envelope.primary_value},
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_348_text_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=envelope,
                 details=details,
             )
         if opcode in {69, 93, 201, 205}:
@@ -9841,6 +9903,17 @@ def render_gameplay_analysis(
             f"updates:{state.positioned_effect_updates} "
             f"unknown_updates:{state.positioned_effect_unknown_updates} "
             f"controls:{dict(sorted(state.positioned_effect_control_values.items()))}"
+        ),
+        (
+            "server_opcode_348="
+            f"packets:{state.server_opcode_348_packets} "
+            f"categories:{dict(sorted(state.server_opcode_348_categories.items()))} "
+            f"selectors:{dict(sorted(state.server_opcode_348_selectors.items()))} "
+            f"values:{dict(sorted(state.server_opcode_348_values.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
+            "control_pairs:"
+            f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
         ),
         (
             f"client_opcode_217=packets:{state.client_opcode_217_packets} "

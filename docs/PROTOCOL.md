@@ -753,6 +753,38 @@ ending at `(633,-2677)` with zero unknown updates and 131/131 matched heartbeat
 pairs. This validates the coordinate/effect interpretation, but not the
 meaning of the displayed number or any neutral numeric/control field.
 
+## Redacted text envelope (`348`)
+
+The pinned version-300 opcode-`348` handler performs four common primitive
+reads before selector dispatch. The observed branches have this exact grammar:
+
+```text
+uint16 opcode = 348
+uint8  category
+int32  primary_value                 # retained for re-emission; redacted
+uint8  selector
+int32  value
+uint16 text_code_units
+utf16le[text_code_units] text        # retained for re-emission; redacted
+uint8  text_terminator = 0
+if selector == 0:
+    uint8 control_1
+    uint8 control_2
+```
+
+Only stream `126` contains opcode `348`: 31 packets, 30 distinct payloads, and
+six distinct primary values. Category is `4` and value is zero in every packet.
+Selectors occur as `0:20, 3:2, 6:7, 17:2`. Selector `0` control pairs are
+`0:0` once, `0:1` nine times, and `1:1` ten times; selectors `3`, `6`, and `17`
+end immediately after the string terminator. Packet lengths range from 59 to
+391 bytes. Every packet consumes and re-encodes exactly at full coverage.
+
+The fold emits `server_opcode_348_received` and exposes category, selector,
+value, text-code-unit, and control-pair distributions. Safe state, events,
+reports, JSON, and HTTP-derived analysis omit the primary value and text.
+Their higher-level roles remain neutral, and handler selectors absent from the
+captures stay unknown. No live client effect has been established.
+
 ## Fixed-width neutral server records
 
 Three independent gameplay streams share a small fixed-width server-record
@@ -2361,8 +2393,8 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,452
-full, 44,295 partial, 353 unknown-but-lossless, and zero invalid packet
+coverage. Strict validation succeeds across all 71,100 frames with 26,483
+full, 44,295 partial, 322 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,376 full, 21,740 partial,
 91 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

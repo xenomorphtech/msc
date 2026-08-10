@@ -387,8 +387,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,452 full,
-44,295 partial, 353 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,483 full,
+44,295 partial, 322 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,376 full, 21,740 partial,
@@ -472,6 +472,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcodes `320`/`322`/`323`: exact positioned-effect records with an
   aliased primary key, signed coordinates, neutral controls, and current-field
   update correlation,
+- server opcode `348`: capture-bounded redacted text envelopes with a common
+  u8/i32/selector/i32 prefix, terminated counted UTF-16 text, and two trailing
+  controls only on observed selector `0`; selectors `3`/`6`/`17` end after the
+  text terminator and all other selectors remain unknown,
 - server opcodes `69`/`93`/`201`/`205`: capture-bounded neutral record
   families; numeric fields are typed, potentially identifying primary values
   are omitted from safe output, and fixed unknown regions remain explicit,
@@ -1528,3 +1532,6 @@ preserve distinct Unity scan codes in this setup.
 49. Bound observed opcode-`239` selectors `3`/`9`/`13`/`21`, round-trip all 60
     reference packets, fold their structural distributions, and redact every
     record key and UTF-16 string while leaving unobserved selectors unknown.
+50. Bound observed opcode-`348` selectors `0`/`3`/`6`/`17`, round-trip all 31
+    level-1-to-10 packets, emit identifier-safe structural events, and keep
+    the primary values and UTF-16 strings out of reports and HTTP state.

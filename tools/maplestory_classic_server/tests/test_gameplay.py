@@ -119,6 +119,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
+    ServerOpcode348TextEnvelope,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -1980,6 +1981,51 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(empty_9, records=record_set.records).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "requires text"):
             ServerOpcode239Envelope(selector=21).to_bytes()
+
+    def test_server_opcode_348_text_envelope_variants_round_trip(self) -> None:
+        extended = ServerOpcode348TextEnvelope(
+            category=4,
+            primary_value=0x01020304,
+            selector=0,
+            value=0,
+            text="A$",
+            control_1=0,
+            control_2=1,
+        )
+        simple = tuple(
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=0x0A0B0C0D + selector,
+                selector=selector,
+                value=0,
+                text=f"text-{selector}",
+            )
+            for selector in (3, 6, 17)
+        )
+        signed = replace(simple[0], primary_value=-2, value=-1)
+
+        self.assertEqual(
+            extended.to_bytes().hex(),
+            "5c0104040302010000000000020041002400000001",
+        )
+        for envelope in (extended, *simple, signed):
+            self.assertEqual(
+                ServerOpcode348TextEnvelope.parse(envelope.to_bytes()),
+                envelope,
+            )
+        safe = str(extended.safe_dict())
+        self.assertNotIn("16909060", safe)
+        self.assertNotIn("A$", safe)
+        self.assertEqual(extended.text_code_units, 2)
+
+        with self.assertRaisesRegex(PacketShapeError, "selector must"):
+            replace(simple[0], selector=1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires two controls"):
+            replace(extended, control_2=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "cannot include controls"):
+            replace(simple[0], control_1=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
+            ServerOpcode348TextEnvelope.parse(simple[0].to_bytes() + b"\x00")
 
     def test_positioned_effect_records_round_trip_and_redact_primary(self) -> None:
         records = (
@@ -4122,6 +4168,97 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("2345678", safe)
         self.assertIn(
             "server_opcode_239=packets:4 selectors:{3: 1, 9: 1, 13: 1, 21: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_server_opcode_348_text_envelope_variants(self) -> None:
+        envelopes = (
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_456_789,
+                selector=0,
+                value=0,
+                text="redacted-extended",
+                control_1=0,
+                control_2=1,
+            ),
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_456_790,
+                selector=0,
+                value=0,
+                text="redacted-second",
+                control_1=0,
+                control_2=0,
+            ),
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_456_791,
+                selector=3,
+                value=0,
+                text="simple-3",
+            ),
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_456_792,
+                selector=6,
+                value=0,
+                text="simple-6",
+            ),
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_456_793,
+                selector=17,
+                value=0,
+                text="simple-17",
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(
+                envelope.to_bytes() for envelope in envelopes
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_348_packets, 5)
+        self.assertEqual(analysis.state.server_opcode_348_categories, {4: 5})
+        self.assertEqual(
+            analysis.state.server_opcode_348_selectors,
+            {0: 2, 3: 1, 6: 1, 17: 1},
+        )
+        self.assertEqual(analysis.state.server_opcode_348_values, {0: 5})
+        self.assertEqual(
+            analysis.state.server_opcode_348_control_pairs,
+            {"0:1": 1, "0:0": 1},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_348_text_envelope"
+        ]
+        self.assertEqual(len(observations), 5)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "server_opcode_348_received"
+                for event in analysis.events
+            ),
+            5,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("redacted-extended", safe)
+        self.assertNotIn("3456789", safe)
+        self.assertIn(
+            "server_opcode_348=packets:5 categories:{4: 5} "
+            "selectors:{0: 2, 3: 1, 6: 1, 17: 1}",
             render_gameplay_analysis(analysis),
         )
 

@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 201 tests.
+The last run passed all 203 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,452 observations are full, 44,295 partial, 353
+`--fail-on-invalid`: 26,483 observations are full, 44,295 partial, 322
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -206,8 +206,19 @@ HTTP-derived state expose numeric distributions and text length but never the
 record keys or text. Unobserved selectors remain unknown, and no higher-level
 gameplay/UI role or live-rendering effect is claimed.
 
-Together, these latest modeled families leave the long-corpus totals at 26,452
-full, 44,295 partial, 353 unknown-but-lossless, and zero invalid.
+Server opcode `348` is a separate redacted text envelope. The pinned handler
+confirms a common u8/i32/u8-selector/i32 prefix before dispatch. All 31
+stream-`126` packets use category `4`, value `0`, and selectors `0`, `3`, `6`,
+or `17`, followed by one terminated counted UTF-16 string. Selector `0` adds
+two control bytes; the other three captured selectors end at the terminator.
+All 31 consume and re-encode exactly at full coverage. Safe reports/events/
+JSON/HTTP expose only structural distributions and omit the six distinct
+primary values plus all string contents. No `111.pcapng` gameplay stream
+contains this opcode, unobserved handler selectors remain unknown, and no live
+effect is claimed because the fresh muted client reached only world selection.
+
+Together, these latest modeled families leave the long-corpus totals at 26,483
+full, 44,295 partial, 322 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

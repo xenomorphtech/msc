@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 201 tests.
+- The custom-server suite currently passes all 203 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,452 full, 44,295 partial, 353 unknown-but-lossless, and zero invalid
+  26,483 full, 44,295 partial, 322 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,376 full, 21,740 partial,
   91 unknown, and zero invalid; stream `114` reports 43/20/13/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
@@ -110,6 +110,14 @@
   fold exactly. Record keys and text are retained only for re-emission and are
   redacted from safe state/events/reports/HTTP; the handler-backed selector
   dispatch does not justify a higher-level semantic or live-effect claim.
+- Server opcode `348` now has full, redacted structural coverage for all 31
+  stream-`126` packets. The pinned handler and capture agree on a common
+  u8/i32/selector/i32 prefix plus terminated counted UTF-16 text; selector `0`
+  has two trailing control bytes, while selectors `3`/`6`/`17` do not. Every
+  packet round-trips exactly. State/events/reports/HTTP omit the primary values
+  and text, future selectors stay unknown, and no live effect is claimed: the
+  newly launched browser-free, programmatically muted client validly reached
+  world selection but not a held-open world connection for injection.
 - The level-1-to-10 corpus expands opcode-`41` to all observed level, job,
   primary-stat, current/max HP/MP, AP/SP, EXP, and mesos masks. All 841 stat
   packets round-trip and the fold ends at level `10`, job `200`, HP `114/194`,
