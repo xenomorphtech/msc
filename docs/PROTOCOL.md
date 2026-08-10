@@ -599,15 +599,60 @@ reparses it, preserves its original length and server-frame index, and rejects
 duplicates or explicit-patch conflicts. `GET /api/v1/status` exposes the safe
 plan under `protocol.fixed_server_record_emitter`; it includes neutral values,
 frame indices, field epochs, patch count, and an unchanged player/phase
-prediction, but no character id. A browser-free live stream-`114` run composed
-the original 11 generated records with the typed initial snapshot and nine
-generated NPC spawns; the other ten now-typed records traveled as unchanged
-capture bytes in that same connection. The client reached and rendered map
-`101000000`; its independent transcript folds validly to `active` with matching
-player state, all 21 current record observations, nine NPCs, and paired
-heartbeat traffic. The expanded emitter has exhaustive byte-for-byte PCAP
-round-trip coverage; a separate live run of the 21-patch plan is not yet
-claimed.
+prediction, but no character id. A browser-free live stream-`114` run first
+composed the original 11 generated records with the typed initial snapshot and
+nine generated NPC spawns; the other ten now-typed records traveled as
+unchanged capture bytes in that connection. A fresh run of the expanded
+emitter then patched all 21 fixed records. The client reached and rendered map
+`101000000` with one active connection, no failures, and 13/13 paired heartbeat
+probes. The status API reported `frames_patched:21` and the exact 21-opcode
+plan. The expanded emitter also has exhaustive byte-for-byte PCAP round-trip
+coverage.
+
+## Neutral server records (`69`, `93`, `201`, `205`)
+
+These four opcodes recur with identical boundaries in all three gameplay
+streams. Their semantic roles remain neutral, and fields that may carry a
+character/session value are redacted from safe output:
+
+```text
+opcode 69:
+    uint16 opcode
+    uint32 header_value
+    byte[263] opaque_table
+
+opcode 93:
+    uint16 opcode
+    uint8 value_count
+    repeat value_count: uint32 value
+
+opcode 201:
+    uint16 opcode
+    uint32 primary_value             # redacted
+    uint32 secondary_value           # redacted
+    uint8 flag_a
+    uint8 flag_b
+    byte[22] opaque_tail
+
+opcode 205:
+    uint16 opcode
+    uint32 primary_value             # redacted
+    uint32 secondary_value
+    uint64 numeric_value
+    uint8 trailing_value
+```
+
+Streams `92/114/126` contribute `45/4/96` records respectively. By opcode,
+the combined counts are `69:50`, `93:7`, `201:46`, and `205:42`. Every
+opcode-`69` header is `7` and all 263 retained bytes are zero in these
+captures. Every opcode-`93` packet counts four u32 values. Opcode `205` is
+fully bounded, as is the counted opcode-`93` vector, so those 49 observations
+are full coverage. Opcodes `69` and `201` retain 14,162 bytes across their 96
+packets and remain partial rather than receiving invented suffix semantics.
+
+The gamestate fold emits `neutral_server_record_received`, tracks packets by
+opcode, typed-value counts, and opaque-byte totals, and exposes only redacted
+safe details. All 145 packets reparse and round-trip byte-for-byte.
 
 ## Variable server records (`156`, `385`)
 
@@ -2060,10 +2105,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,158
-full, 44,177 partial, 765 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,358 full, 21,654 partial,
-195 unknown, and zero invalid; stream `114` reaches 41/14/21/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,188
+full, 44,243 partial, 669 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,375 full, 21,682 partial,
+150 unknown, and zero invalid; stream `114` reaches 43/16/17/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its 13 remaining warnings are cross-packet state correlations:
 12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed

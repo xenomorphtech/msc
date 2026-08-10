@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 186 tests.
+The last run passed all 188 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,158 observations are full, 44,177 partial, 765
+`--fail-on-invalid`: 26,188 observations are full, 44,243 partial, 669
 unknown-but-lossless, and none invalid. The original 12 warnings are state
 correlations, not shape failures. The combat model adds one aggregate warning
 for six delayed predictions that differ by one HP, so the current total is 13.
@@ -120,8 +120,24 @@ opaque. The fold emits `server_opcode_77_received` and exposes only variant,
 text-code-unit, control/value, and opaque-byte distributions. Neither packet
 records, events, text reports, JSON, nor HTTP status return captured text.
 
-Together, these latest modeled families leave the long-corpus totals at 26,158
-full, 44,177 partial, 765 unknown-but-lossless, and zero invalid.
+The neutral server-record fold now also separates opcodes `69`, `93`, `201`,
+and `205`. Across all three reference streams, 145/145 packets consume and
+round-trip exactly. The counted-u32 opcode `93` and numeric opcode `205` add 49
+full observations. Opcode `69` retains its fixed 263-byte table and opcode
+`201` retains its fixed 22-byte suffix, adding 96 partial observations and
+14,162 explicitly counted opaque bytes. Potentially character-like primary
+values are retained for exact re-emission but omitted from safe state, events,
+and reports.
+
+The current tree was also exercised through a fresh browser-free launch on the
+nested Wayland space, using direct seat input without moving the desktop
+cursor. The muted client passed world and character selection and rendered map
+`101000000`. At that point `GET /api/v1/status` reported one active connection,
+zero failures, all 21 fixed-record frames patched, and 13/13 paired heartbeat
+probes.
+
+Together, these latest modeled families leave the long-corpus totals at 26,188
+full, 44,243 partial, 669 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

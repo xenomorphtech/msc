@@ -69,6 +69,10 @@ from .packets import (
     PlayerMovementSubmission,
     PickupGainNotice,
     ServerAttackRelay,
+    ServerOpcode69Record,
+    ServerOpcode93Record,
+    ServerOpcode201Record,
+    ServerOpcode205Record,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -664,6 +668,12 @@ class GameplayGameState:
         default_factory=Counter
     )
     bootstrap_acknowledgements: int = 0
+    neutral_server_records: int = 0
+    neutral_server_records_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    neutral_server_typed_values: int = 0
+    neutral_server_opaque_bytes: int = 0
     fixed_server_records: int = 0
     fixed_server_records_by_opcode: Counter[int] = field(
         default_factory=Counter
@@ -765,6 +775,13 @@ FixedServerRecord = (
     | FixedServerU64Record
     | FixedServerU8Record
     | InitialCharacterContextRecord
+)
+
+NeutralServerRecord = (
+    ServerOpcode69Record
+    | ServerOpcode93Record
+    | ServerOpcode201Record
+    | ServerOpcode205Record
 )
 
 FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
@@ -3423,6 +3440,16 @@ class GameplayAnalysis:
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
                 ),
+                "neutral_server_records": {
+                    "packet_count": self.state.neutral_server_records,
+                    "packets_by_opcode": dict(
+                        self.state.neutral_server_records_by_opcode
+                    ),
+                    "typed_value_count": (
+                        self.state.neutral_server_typed_values
+                    ),
+                    "opaque_bytes": self.state.neutral_server_opaque_bytes,
+                },
                 "fixed_server_records": (
                     self.state.fixed_server_records
                 ),
@@ -5863,6 +5890,51 @@ class GameplayStateFold:
                 ),
                 parsed=variable_record,
                 details=details,
+            )
+        if opcode in {69, 93, 201, 205}:
+            if opcode == 69:
+                neutral_record: NeutralServerRecord = (
+                    ServerOpcode69Record.parse(payload)
+                )
+            elif opcode == 93:
+                neutral_record = ServerOpcode93Record.parse(payload)
+            elif opcode == 201:
+                neutral_record = ServerOpcode201Record.parse(payload)
+            else:
+                neutral_record = ServerOpcode205Record.parse(payload)
+            details: dict[str, object] = {
+                "opcode": opcode,
+                **neutral_record.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            typed_value_count = int(details["typed_value_count"])
+            opaque_tail_length = int(details["opaque_tail_length"])
+            self.state.neutral_server_records += 1
+            self.state.neutral_server_records_by_opcode[opcode] += 1
+            self.state.neutral_server_typed_values += typed_value_count
+            self.state.neutral_server_opaque_bytes += opaque_tail_length
+            self._event(
+                frame,
+                "neutral_server_record_received",
+                details=details,
+            )
+            partial = opcode in {69, 201}
+            return self._observation(
+                frame,
+                kind="neutral_server_record",
+                coverage=(
+                    ShapeCoverage.PARTIAL if partial else ShapeCoverage.FULL
+                ),
+                parsed=neutral_record,
+                details=details,
+                issues=(
+                    (
+                        f"opcode {opcode} retains {opaque_tail_length} "
+                        "capture-bounded opaque bytes"
+                    ),
+                )
+                if partial
+                else (),
             )
         if opcode in FIXED_SERVER_OPCODES:
             if opcode in FixedServerEmptyRecord.SUPPORTED_OPCODES:
@@ -8831,6 +8903,9 @@ def render_gameplay_analysis(
     client_opcode_217_record_counts = json.dumps(
         dict(sorted(state.client_opcode_217_record_counts.items()))
     )
+    neutral_server_record_opcodes = json.dumps(
+        dict(sorted(state.neutral_server_records_by_opcode.items()))
+    )
     player_stat_masks = json.dumps(
         {
             f"0x{mask:08x}": count
@@ -9218,6 +9293,13 @@ def render_gameplay_analysis(
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "
             f"message_types:{client_opcode_13_message_types} "
             f"opaque_bytes:{state.client_opcode_13_opaque_bytes}"
+        ),
+        (
+            "neutral_server_records="
+            f"packets:{state.neutral_server_records} "
+            f"opcodes:{neutral_server_record_opcodes} "
+            f"typed_values:{state.neutral_server_typed_values} "
+            f"opaque_bytes:{state.neutral_server_opaque_bytes}"
         ),
         (
             f"client_opcode_217=packets:{state.client_opcode_217_packets} "

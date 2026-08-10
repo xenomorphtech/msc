@@ -106,6 +106,10 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementSubmission,
     PickupGainNotice,
     ServerAttackRelay,
+    ServerOpcode69Record,
+    ServerOpcode93Record,
+    ServerOpcode201Record,
+    ServerOpcode205Record,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
@@ -1872,6 +1876,52 @@ class GameplayPacketShapeTest(unittest.TestCase):
             with self.subTest(opcode=opcode):
                 self.assertEqual(by_opcode[opcode].to_bytes().hex(), expected_hex)
 
+    def test_neutral_server_records_round_trip_and_redact_primary_values(
+        self,
+    ) -> None:
+        records = (
+            ServerOpcode69Record(
+                header_value=7,
+                opaque_tail=b"\x00" * ServerOpcode69Record.OPAQUE_TAIL_LENGTH,
+            ),
+            ServerOpcode93Record(
+                values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
+            ),
+            ServerOpcode201Record(
+                primary_value=302_104,
+                secondary_value=0,
+                flag_a=1,
+                flag_b=1,
+                opaque_tail=bytes.fromhex(
+                    "6e4b4c000000009028150000000000480220f5004d02"
+                ),
+            ),
+            ServerOpcode205Record(
+                primary_value=302_104,
+                secondary_value=0,
+                numeric_value=1_386_640,
+                trailing_value=0,
+            ),
+        )
+        expected_hex = (
+            "450007000000" + "00" * 263,
+            "5d000451548900b9241f0095980f0055548900",
+            "c900189c04000000000001016e4b4c000000009028150000000000480220f5004d02",
+            "cd00189c040000000000902815000000000000",
+        )
+
+        for record, expected in zip(records, expected_hex, strict=True):
+            with self.subTest(opcode=record.opcode):
+                encoded = record.to_bytes()
+                self.assertEqual(encoded.hex(), expected)
+                self.assertEqual(type(record).parse(encoded), record)
+                self.assertNotIn("302104", str(record.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "exactly 263"):
+            replace(records[0], opaque_tail=b"\x00" * 262).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "exactly 22"):
+            replace(records[2], opaque_tail=b"\x00" * 21).to_bytes()
+
     def test_variable_server_records_round_trip(self) -> None:
         records = fixture_variable_server_records()
 
@@ -3570,6 +3620,71 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("sensitive", safe)
         self.assertIn(
             "server_opcode_49=packets:7 variants:",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_neutral_server_records_with_bounded_opaque_tails(
+        self,
+    ) -> None:
+        records = (
+            ServerOpcode69Record(
+                header_value=7,
+                opaque_tail=b"\x00" * ServerOpcode69Record.OPAQUE_TAIL_LENGTH,
+            ),
+            ServerOpcode93Record(
+                values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
+            ),
+            ServerOpcode201Record(
+                primary_value=302_104,
+                secondary_value=0,
+                flag_a=1,
+                flag_b=1,
+                opaque_tail=b"\x00" * ServerOpcode201Record.OPAQUE_TAIL_LENGTH,
+            ),
+            ServerOpcode205Record(
+                primary_value=302_104,
+                secondary_value=0,
+                numeric_value=1_386_640,
+                trailing_value=0,
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=tuple(record.to_bytes() for record in records),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.neutral_server_records, 4)
+        self.assertEqual(
+            analysis.state.neutral_server_records_by_opcode,
+            {69: 1, 93: 1, 201: 1, 205: 1},
+        )
+        self.assertEqual(analysis.state.neutral_server_typed_values, 13)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 285)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "neutral_server_record"
+        ]
+        self.assertEqual(
+            [observation.coverage.value for observation in observations],
+            ["partial", "full", "partial", "full"],
+        )
+        self.assertEqual(
+            len(
+                [
+                    event
+                    for event in analysis.events
+                    if event.kind == "neutral_server_record_received"
+                ]
+            ),
+            4,
+        )
+        self.assertNotIn("302104", str(analysis.safe_dict()))
+        self.assertIn(
+            "neutral_server_records=packets:4 opcodes:",
             render_gameplay_analysis(analysis),
         )
 

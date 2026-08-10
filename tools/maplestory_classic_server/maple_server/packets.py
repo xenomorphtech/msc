@@ -5874,6 +5874,220 @@ class MobMovementAcknowledgement:
 
 
 @dataclass(frozen=True)
+class ServerOpcode69Record:
+    """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
+
+    header_value: int
+    opaque_tail: bytes = field(repr=False)
+    opcode: int = 69
+
+    OPAQUE_TAIL_LENGTH = 263
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode69Record":
+        reader = PacketReader(payload, packet_name="server_opcode_69_record")
+        _expect_opcode(reader, 69)
+        record = cls(
+            header_value=reader.u32("header_value"),
+            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 69:
+            raise PacketShapeError("server opcode-69 record opcode must be 69")
+        if len(self.opaque_tail) != self.OPAQUE_TAIL_LENGTH:
+            raise PacketShapeError(
+                "server opcode-69 opaque tail must be exactly "
+                f"{self.OPAQUE_TAIL_LENGTH} bytes"
+            )
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "header_value": self.header_value,
+            "typed_value_count": 1,
+            "opaque_tail_length": len(self.opaque_tail),
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<HI", self.opcode, self.header_value) + bytes(
+                self.opaque_tail
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-69 header value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode93Record:
+    """Opcode-93 counted uint32 vector with neutral element semantics."""
+
+    values: tuple[int, ...]
+    opcode: int = 93
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode93Record":
+        reader = PacketReader(payload, packet_name="server_opcode_93_record")
+        _expect_opcode(reader, 93)
+        value_count = reader.u8("value_count")
+        record = cls(
+            values=tuple(
+                reader.u32(f"values[{index}]")
+                for index in range(value_count)
+            )
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "value_count": len(self.values),
+            "unique_value_count": len(set(self.values)),
+            "typed_value_count": len(self.values),
+            "opaque_tail_length": 0,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 93:
+            raise PacketShapeError("server opcode-93 record opcode must be 93")
+        if len(self.values) > 0xFF:
+            raise PacketShapeError(
+                "server opcode-93 record cannot contain more than 255 values"
+            )
+        try:
+            return struct.pack(
+                f"<HB{len(self.values)}I",
+                self.opcode,
+                len(self.values),
+                *self.values,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-93 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode201Record:
+    """Opcode-201 typed prefix with a capture-fixed opaque suffix."""
+
+    primary_value: int = field(repr=False)
+    secondary_value: int = field(repr=False)
+    flag_a: int
+    flag_b: int
+    opaque_tail: bytes = field(repr=False)
+    opcode: int = 201
+
+    OPAQUE_TAIL_LENGTH = 22
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode201Record":
+        reader = PacketReader(payload, packet_name="server_opcode_201_record")
+        _expect_opcode(reader, 201)
+        record = cls(
+            primary_value=reader.u32("primary_value"),
+            secondary_value=reader.u32("secondary_value"),
+            flag_a=reader.u8("flag_a"),
+            flag_b=reader.u8("flag_b"),
+            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 201:
+            raise PacketShapeError("server opcode-201 record opcode must be 201")
+        if len(self.opaque_tail) != self.OPAQUE_TAIL_LENGTH:
+            raise PacketShapeError(
+                "server opcode-201 opaque tail must be exactly "
+                f"{self.OPAQUE_TAIL_LENGTH} bytes"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "primary_value_redacted": True,
+            "secondary_value_redacted": True,
+            "flag_a": self.flag_a,
+            "flag_b": self.flag_b,
+            "typed_value_count": 4,
+            "opaque_tail_length": len(self.opaque_tail),
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<HIIBB",
+                self.opcode,
+                self.primary_value,
+                self.secondary_value,
+                self.flag_a,
+                self.flag_b,
+            ) + bytes(self.opaque_tail)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-201 prefix is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode205Record:
+    """Fully bounded opcode-205 numeric record with a redacted primary value."""
+
+    primary_value: int = field(repr=False)
+    secondary_value: int
+    numeric_value: int
+    trailing_value: int
+    opcode: int = 205
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode205Record":
+        reader = PacketReader(payload, packet_name="server_opcode_205_record")
+        _expect_opcode(reader, 205)
+        record = cls(
+            primary_value=reader.u32("primary_value"),
+            secondary_value=reader.u32("secondary_value"),
+            numeric_value=reader.u64("numeric_value"),
+            trailing_value=reader.u8("trailing_value"),
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "primary_value_redacted": True,
+            "secondary_value": self.secondary_value,
+            "numeric_value": self.numeric_value,
+            "trailing_value": self.trailing_value,
+            "typed_value_count": 4,
+            "opaque_tail_length": 0,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 205:
+            raise PacketShapeError("server opcode-205 record opcode must be 205")
+        try:
+            return struct.pack(
+                "<HIIQB",
+                self.opcode,
+                self.primary_value,
+                self.secondary_value,
+                self.numeric_value,
+                self.trailing_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-205 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class FixedServerEmptyRecord:
     opcode: int
 
