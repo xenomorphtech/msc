@@ -290,6 +290,17 @@ claiming a false decode. All other 22 cross-corpus packets use the semantic
 switch shape. A live replay of variant `10` matched the predicted neutral fold,
 left core state unchanged, and kept the client and heartbeats active.
 
+Cross-corpus validation also corrected the automatic manifest's manual client
+opcode-`43` layer. Stream `92` alone made values `4`, `8`, and `12` look like
+compact discriminators, but stream `126` uses those same leading bytes in the
+counted UTF-16 form and continues through `35`. The byte is therefore retained
+as a neutral sequence. Two candidate shapes now share the opcode: a variable
+`u8, u32, counted UTF-16, zero, byte[6]` form and a fixed
+`u8, byte[9]` form. Total packet length distinguishes them without ambiguity.
+Native validation consumes all 45 client packets, and the existing fixed
+server shape consumes its three `u8, byte[16]` responses. The model does not
+name the redacted identifier, string, or opaque bytes as security state.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte

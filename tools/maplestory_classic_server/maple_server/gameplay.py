@@ -16,6 +16,7 @@ from .gamestate import (
 from .packets import (
     CharacterStatUpdate,
     ClientAttackAction,
+    ClientOpcode43Envelope,
     ClientOpcode101Record,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
@@ -77,6 +78,7 @@ from .packets import (
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
     ServerAttackRelay,
+    ServerOpcode43Envelope,
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
@@ -772,6 +774,18 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_13_opaque_bytes: int = 0
+    client_opcode_43_packets: int = 0
+    client_opcode_43_sequences: Counter[int] = field(default_factory=Counter)
+    client_opcode_43_variants: Counter[str] = field(default_factory=Counter)
+    client_opcode_43_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_43_opaque_bytes: int = 0
+    server_opcode_43_packets: int = 0
+    server_opcode_43_message_types: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_43_opaque_bytes: int = 0
     client_opcode_122_packets: int = 0
     client_opcode_122_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_122_shapes: Counter[str] = field(default_factory=Counter)
@@ -3786,6 +3800,22 @@ class GameplayAnalysis:
                 "client_opcode_13_opaque_bytes": (
                     self.state.client_opcode_13_opaque_bytes
                 ),
+                "client_opcode_43": {
+                    "packet_count": self.state.client_opcode_43_packets,
+                    "sequences": dict(self.state.client_opcode_43_sequences),
+                    "variants": dict(self.state.client_opcode_43_variants),
+                    "text_code_units": dict(
+                        self.state.client_opcode_43_text_code_units
+                    ),
+                    "opaque_bytes": self.state.client_opcode_43_opaque_bytes,
+                },
+                "server_opcode_43": {
+                    "packet_count": self.state.server_opcode_43_packets,
+                    "message_types": dict(
+                        self.state.server_opcode_43_message_types
+                    ),
+                    "opaque_bytes": self.state.server_opcode_43_opaque_bytes,
+                },
                 "client_opcode_122": {
                     "packet_count": self.state.client_opcode_122_packets,
                     "selectors": dict(self.state.client_opcode_122_selectors),
@@ -5101,6 +5131,37 @@ class GameplayStateFold:
                 details=details,
                 issues=("client opcode-13 payload remains opaque",),
             )
+        if opcode == 43:
+            envelope = ClientOpcode43Envelope.parse(payload)
+            self.state.client_opcode_43_packets += 1
+            self.state.client_opcode_43_sequences[envelope.sequence] += 1
+            self.state.client_opcode_43_variants[envelope.variant] += 1
+            self.state.client_opcode_43_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.client_opcode_43_opaque_bytes += (
+                envelope.opaque_byte_count
+            )
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_43_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_43_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=envelope,
+                details=details,
+                issues=(
+                    "client opcode-43 identifier, text, opaque bytes, and "
+                    "higher-level purpose remain semantically unresolved",
+                ),
+            )
         if opcode == 122 and ClientOpcode122Envelope.is_captured_shape(payload):
             envelope = ClientOpcode122Envelope.parse(payload)
             self.state.client_opcode_122_packets += 1
@@ -5168,6 +5229,35 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 43:
+            envelope = ServerOpcode43Envelope.parse(payload)
+            self.state.server_opcode_43_packets += 1
+            self.state.server_opcode_43_message_types[
+                envelope.message_type
+            ] += 1
+            self.state.server_opcode_43_opaque_bytes += len(
+                envelope.opaque_body
+            )
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_43_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_43_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=envelope,
+                details=details,
+                issues=(
+                    "server opcode-43 body and higher-level purpose remain "
+                    "semantically unresolved",
+                ),
+            )
         if opcode == 39:
             change_set = InventoryChangeSet.parse(payload)
             modification_details: list[dict[str, object]] = []
@@ -10718,6 +10808,20 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
             "control_pairs:"
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
+        ),
+        (
+            f"client_opcode_43=packets:{state.client_opcode_43_packets} "
+            f"sequences:{dict(sorted(state.client_opcode_43_sequences.items()))} "
+            f"variants:{dict(sorted(state.client_opcode_43_variants.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.client_opcode_43_text_code_units.items()))} "
+            f"opaque_bytes:{state.client_opcode_43_opaque_bytes}"
+        ),
+        (
+            f"server_opcode_43=packets:{state.server_opcode_43_packets} "
+            "message_types:"
+            f"{dict(sorted(state.server_opcode_43_message_types.items()))} "
+            f"opaque_bytes:{state.server_opcode_43_opaque_bytes}"
         ),
         (
             f"client_opcode_122=packets:{state.client_opcode_122_packets} "

@@ -5165,6 +5165,147 @@ class ClientSkillUseRequest:
 
 
 @dataclass(frozen=True)
+class ClientOpcode43Envelope:
+    """Capture-bounded neutral envelopes for client opcode 43."""
+
+    sequence: int
+    opaque_identifier: int | None = field(default=None, repr=False)
+    opaque_text: str | None = field(default=None, repr=False)
+    opaque_tail: bytes = field(default=b"", repr=False)
+    opaque_compact_body: bytes = field(default=b"", repr=False)
+    opcode: int = 43
+
+    @property
+    def variant(self) -> str:
+        return "compact" if self.opaque_identifier is None else "identified_text"
+
+    @property
+    def text_code_units(self) -> int:
+        if self.opaque_text is None:
+            return 0
+        return len(self.opaque_text.encode("utf-16-le")) // 2
+
+    @property
+    def opaque_byte_count(self) -> int:
+        return len(self.opaque_compact_body) + len(self.opaque_tail)
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode43Envelope":
+        reader = PacketReader(payload, packet_name="client_opcode_43")
+        _expect_opcode(reader, 43)
+        sequence = reader.u8("sequence")
+        if reader.remaining == 9:
+            opaque_compact_body = reader.bytes(9, "opaque_compact_body")
+            reader.finish()
+            return cls(
+                sequence=sequence,
+                opaque_compact_body=opaque_compact_body,
+            )
+
+        opaque_identifier = reader.u32("opaque_identifier")
+        opaque_text = reader.utf16_string("opaque_text", trailing_byte=True)
+        opaque_tail = reader.bytes(6, "opaque_tail")
+        reader.finish()
+        return cls(
+            sequence=sequence,
+            opaque_identifier=opaque_identifier,
+            opaque_text=opaque_text,
+            opaque_tail=opaque_tail,
+        )
+
+    def safe_dict(self) -> dict[str, int | bool | str]:
+        return {
+            "sequence": self.sequence,
+            "variant": self.variant,
+            "identifier_present": self.opaque_identifier is not None,
+            "text_code_units": self.text_code_units,
+            "text_redacted": self.opaque_text is not None,
+            "opaque_bytes": self.opaque_byte_count,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 43:
+            raise PacketShapeError("client opcode-43 envelope opcode must be 43")
+        if not 0 <= self.sequence <= 0xFF:
+            raise PacketShapeError("client opcode-43 sequence must fit in u8")
+
+        prefix = struct.pack("<HB", self.opcode, self.sequence)
+        if self.opaque_identifier is None:
+            if self.opaque_text is not None or self.opaque_tail:
+                raise PacketShapeError(
+                    "client opcode-43 compact envelope cannot contain text "
+                    "or a tail"
+                )
+            if len(self.opaque_compact_body) != 9:
+                raise PacketShapeError(
+                    "client opcode-43 compact envelope needs 9 opaque bytes"
+                )
+            return prefix + self.opaque_compact_body
+
+        if not 0 <= self.opaque_identifier <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-43 identifier must fit in u32"
+            )
+        if self.opaque_text is None:
+            raise PacketShapeError(
+                "client opcode-43 identified-text envelope needs text"
+            )
+        if len(self.opaque_tail) != 6:
+            raise PacketShapeError(
+                "client opcode-43 identified-text envelope needs a "
+                "6-byte tail"
+            )
+        if self.opaque_compact_body:
+            raise PacketShapeError(
+                "client opcode-43 identified-text envelope cannot contain "
+                "a compact body"
+            )
+        return (
+            prefix
+            + struct.pack("<I", self.opaque_identifier)
+            + encode_utf16_string(self.opaque_text, trailing_byte=True)
+            + self.opaque_tail
+        )
+
+
+@dataclass(frozen=True)
+class ServerOpcode43Envelope:
+    """Capture-bounded neutral fixed server response for opcode 43."""
+
+    message_type: int
+    opaque_body: bytes = field(repr=False)
+    opcode: int = 43
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode43Envelope":
+        reader = PacketReader(payload, packet_name="server_opcode_43")
+        _expect_opcode(reader, 43)
+        envelope = cls(
+            message_type=reader.u8("message_type"),
+            opaque_body=reader.bytes(16, "opaque_body"),
+        )
+        reader.finish()
+        return envelope
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "message_type": self.message_type,
+            "opaque_bytes": len(self.opaque_body),
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 43:
+            raise PacketShapeError("server opcode-43 envelope opcode must be 43")
+        if not 0 <= self.message_type <= 0xFF:
+            raise PacketShapeError("server opcode-43 message type must fit in u8")
+        if len(self.opaque_body) != 16:
+            raise PacketShapeError(
+                "server opcode-43 envelope needs a 16-byte opaque body"
+            )
+        return struct.pack("<HB", self.opcode, self.message_type) + self.opaque_body
+
+
+@dataclass(frozen=True)
 class ClientOpcode101Record:
     header_value: int
     primary_value: int

@@ -16,9 +16,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 71);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 72);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
-    assert_eq!(shapes.len(), 167);
+    assert_eq!(shapes.len(), 168);
 
     let shape = shapes
         .iter()
@@ -64,6 +64,22 @@ fn manifest_expands_observed_opaque_shapes_with_exact_widths() {
         .find(|shape| shape.name == "observed_server_to_client_opcode_148_length_1639")
         .unwrap();
     assert_eq!(legacy_opcode_148.length, Some(1_639));
+
+    let opcode_43_identified = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_43_identified_text")
+        .unwrap();
+    assert_eq!(opcode_43_identified.opcode, 43);
+    assert_eq!(opcode_43_identified.length, None);
+    assert_eq!(opcode_43_identified.operations.len(), 5);
+
+    let opcode_43_compact = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_43_compact")
+        .unwrap();
+    assert_eq!(opcode_43_compact.opcode, 43);
+    assert_eq!(opcode_43_compact.length, Some(12));
+    assert_eq!(opcode_43_compact.operations.len(), 3);
 }
 
 #[test]
@@ -77,7 +93,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 167);
+    assert_eq!(dump.packet_shapes.len(), 168);
     assert_eq!(
         dump.handlers
             .iter()

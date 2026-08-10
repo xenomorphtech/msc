@@ -128,6 +128,58 @@ type-`1` envelopes. Every packet consumes exactly and round-trips byte-for-byte;
 the fold emits type and opaque-byte counts without exposing any body. The
 payload meanings remain partial rather than being labeled as security traffic.
 
+## World opcode `43` neutral envelopes
+
+Client and server opcode `43` use separate capture-bounded envelopes. The
+leading client byte is named only as a sequence: values `1..12` occur once in
+stream `92`, while stream `126` contains `1..29` and `32..35`. Identical values
+do not select a stable layout across the captures, so the decoder branches on
+the complete packet shape rather than inventing discriminator semantics:
+
+```text
+client identified-text envelope:
+  uint16 opcode = 43
+  uint8 sequence
+  uint32 opaque_identifier          # redacted
+  uint16 text_code_units
+  utf16le[text_code_units] opaque_text
+  uint8 zero_terminator = 0
+  byte[6] opaque_tail
+
+client compact envelope:
+  uint16 opcode = 43
+  uint8 sequence
+  byte[9] opaque_body
+
+server envelope:
+  uint16 opcode = 43
+  uint8 message_type
+  byte[16] opaque_body
+```
+
+Stream `92` contributes nine identified-text clients, three compact clients,
+and three server packets; all server message types are zero. Stream `126`
+contributes 33 identified-text clients. Text lengths are `0:3`, `4:5`, `5:9`,
+`6:27`, and `8:1` code units across client packets; zero represents the compact
+form, not captured text. All 48 packets round-trip exactly as partial semantic
+observations. Safe state/events expose only sequence, variant, text length,
+message type, and opaque-byte counts; the identifier, text, and byte bodies are
+never emitted.
+
+The automatic shape manifest now uses two competing client candidates rather
+than the earlier stream-`92` switch, which incorrectly treated sequence values
+`4`, `8`, and `12` as compact-only. Exact packet length makes the candidates
+unambiguous, and native validation consumes all 45 client packets without a
+short read, trailing byte, unsupported variant, or ambiguity.
+
+An exact captured 19-byte server envelope was injected into an already active
+browser-free custom-server session. The fold added one partial opcode-`43`
+event, core phase/map/player/inventory/progression state stayed unchanged,
+matched heartbeats advanced from 173 to 176, and the connection remained
+active with zero failures. No client opcode-`43` response appeared, so this
+proves bounded non-stalling acceptance only—not security, status, or
+request/response semantics.
+
 The captured server frame at index `3` is a second opcode-`0` message with
 plaintext result byte `2`. It is the direct source of the replayed
 account-policy dialog: replacing only this frame with heartbeat `0a00` removes
@@ -2637,9 +2689,9 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,622
-full, 44,296 partial, 182 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,404 full, 21,740 partial,
-63 unknown, and zero invalid; stream `114` reaches 44/20/12/0. The long fold
+full, 44,329 partial, 149 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,404 full, 21,755 partial,
+48 unknown, and zero invalid; stream `114` reaches 44/20/12/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

@@ -785,24 +785,23 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":45}]
     },
     {
-      "name":"client_opcode_43","direction":"client_to_server","opcode":43,
-      "source":"capture-111 u8-discriminated client status branches; opcode-43 handler d43559a5... begins with the same u8 discriminator",
+      "name":"client_opcode_43_identified_text","direction":"client_to_server","opcode":43,
+      "source":"capture-111 and 1-10FS shared u8/u32/counted-UTF16/trailing-zero/six-byte-tail envelope; opcode-43 handler d43559a5... begins with the same u8 direct read",
       "operations":[
-        {"op":"read","name":"opcode","kind":"u16","equals":43},{"op":"read","name":"message_type","kind":"u8"},
-        {"op":"switch","field":"message_type","cases":[
-          {"equals":1,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":2,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":3,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":4,"operations":[{"op":"bytes","name":"status","length":9}]},
-          {"equals":5,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":6,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":7,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":8,"operations":[{"op":"bytes","name":"status","length":9}]},
-          {"equals":9,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":10,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":11,"operations":[{"op":"read","name":"actor_id","kind":"u32"},{"op":"utf16","name":"name","trailing_zero":true},{"op":"bytes","name":"tail","length":6}]},
-          {"equals":12,"operations":[{"op":"bytes","name":"status","length":9}]}
-        ]}
+        {"op":"read","name":"opcode","kind":"u16","equals":43},
+        {"op":"read","name":"sequence","kind":"u8"},
+        {"op":"read","name":"opaque_identifier","kind":"u32"},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"bytes","name":"opaque_tail","length":6}
+      ]
+    },
+    {
+      "name":"client_opcode_43_compact","direction":"client_to_server","opcode":43,"length":12,
+      "source":"capture-111 compact u8 plus nine-byte body; kept separate because the same u8 values use the identified-text envelope in 1-10FS",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":43},
+        {"op":"read","name":"sequence","kind":"u8"},
+        {"op":"bytes","name":"opaque_body","length":9}
       ]
     },
     {

@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,622 observations are full, 44,296 partial, 182
+`--fail-on-invalid`: 26,622 observations are full, 44,329 partial, 149
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -253,9 +253,29 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, these latest modeled families leave the long-corpus totals at 26,622
-full, 44,296 partial, 182 unknown-but-lossless, and zero invalid. Stream `92`
-now reaches 13,404 full, 21,740 partial, 63 unknown, and zero invalid; stream
+full, 44,329 partial, 149 unknown-but-lossless, and zero invalid. Stream `92`
+now reaches 13,404 full, 21,755 partial, 48 unknown, and zero invalid; stream
 `114` reaches 44/20/12/0.
+
+Client/server opcode `43` is now folded as a neutral redacted family. The
+client has a sequence byte followed by either an opaque identifier, counted
+UTF-16 value, zero terminator, and six-byte tail, or a compact nine-byte body.
+The server has a message byte plus a fixed 16-byte body. The automatic packet
+manifest now represents the client forms as two length-disambiguated shapes;
+this replaces the earlier stream-`92` switch that failed when the same sequence
+values used the identified-text form in stream `126`. Across both sustained
+captures, all 45 client and three server packets consume and re-emit exactly.
+Safe analysis publishes only sequence/variant, text-length, message-type, and
+opaque-byte distributions.
+
+The already active browser-free stream-`114` client then received one exact
+19-byte server envelope through loopback-only `POST /api/v1/server-packets`.
+The independent transcript fold added one partial `server_opcode_43_received`
+event, left phase, field epoch, map, player, inventory, and progression
+unchanged, and advanced matched heartbeat probes from 173 to 176. Runtime
+status retained one active connection with zero connection or injection
+failures. No client opcode-`43` response appeared, so no security or
+request/response behavior is assigned.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a

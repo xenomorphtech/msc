@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,622 full, 44,296 partial, 182 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,404 full, 21,740 partial,
-  63 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
+  26,622 full, 44,329 partial, 149 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,404 full, 21,755 partial,
+  48 unknown, and zero invalid; stream `114` reports 44/20/12/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, and `379` are
@@ -74,6 +74,14 @@
   A fresh direct-Wayland replay of empty opcode-`148` variant `10` likewise
   produced one full neutral event, left core state unchanged, advanced matched
   heartbeats from 11 to 18, and retained one active connection with no failures.
+- Client/server opcode `43` now uses two redacted client envelopes and one
+  fixed server envelope instead of a sequence-keyed stream-specific switch.
+  All 45 client and three server packets across streams `92` and `126`
+  round-trip exactly as partial observations; sequence, variant, text length,
+  message type, and opaque-byte counts are safe, while identifiers, text, and
+  bodies remain omitted. An exact server packet live replay left core state
+  unchanged, advanced matched heartbeats `173 -> 176`, retained one active
+  connection with zero failures, and produced no client opcode-`43` response.
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly, every leave matches the
   current field epoch, and all opcode-`202`/`217` movement broadcasts now
