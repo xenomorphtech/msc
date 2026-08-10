@@ -86,17 +86,25 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 95 semantic/manual shapes and 96 explicitly
+manifest currently declares 97 semantic/manual shapes and 96 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
 fourteenth overlaps; opcode `135` adds the fifteenth. Opcode `169` adds a
-non-overlapping shape found only in `1-10FS`, leaving 176 active shapes and 81
-active opaque pins.
+non-overlapping shape found only in `1-10FS`; server opcode `394` and client
+opcode `279` add the sixteenth and seventeenth overlaps. This leaves 176 active
+shapes and 79 active opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
 re-emits the sole 3,725-byte stream-`114` packet exactly; the checked-in shape
 contains no captured numeric values.
+The opcode-`394`/`279` shapes are explicitly capture/correlation-backed. The
+automatic dump proves that server enum member `394` exists but attributes no
+managed handler. Exact framing supplies the server's trailing-zero UTF-16
+envelope and the client's neutral-byte-plus-UTF-16 envelope; both contain 57
+code units and suppress their matching opaque pins. A live local-Wine injection
+did not elicit opcode `279`, so the manifest source and higher-level model do
+not claim causal response or security semantics.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short

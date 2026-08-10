@@ -1251,6 +1251,43 @@ peer. The client processed the ledger and retained its field connection and
 heartbeat exchange. This proves packet shape and non-blocking handling, not the
 meaning or cross-session safety of the redacted values.
 
+## Correlated opcode `394` / client opcode `279` text envelopes
+
+The automatic packet dump contains the server opcode-`394` enum member but no
+attributed managed handler, so the shape below comes from exact capture
+consumption rather than a flattened read list:
+
+```text
+uint16 opcode = 394
+uint16 text_code_units = 57
+utf16  text[text_code_units]          # redacted
+uint8  trailing_zero = 0
+```
+
+The sole server packet is 119 bytes. The next client packet, 57.92 ms later,
+has this exact 120-byte boundary:
+
+```text
+uint16 opcode = 279
+uint8  control_value                  # observed 1; neutral role
+uint16 text_code_units = 57
+utf16  text[text_code_units]          # redacted
+uint8  trailing_zero = 0
+```
+
+The two strings have equal lengths and 52 of 57 code units are identical; the
+only changed span is indices `10..14`. Both codecs preserve the text privately
+for exact re-emission while safe state, events, and packet observations expose
+only lengths, the control byte, changed count/span, temporal correlation, and
+the observed gap. FIFO pairing is an analysis correlation, not a causal claim:
+injecting the exact server packet through the local replay's loopback HTTP API
+did not produce client opcode `279` within seven seconds, and the local Wine
+client remained connected and responsive in-field. The model therefore uses
+neutral envelope/event names and does not require opcode `394` for login or
+gameplay. The two full observations move stream `92` to
+`13,414/21,782/11/0`; stream `114` remains `52/22/2/0` and stream `126` remains
+`26,660/44,381/59/0`.
+
 ## Field-bootstrap ledgers (`147`, `272`)
 
 Each opcode occurs once and byte-identically across gameplay streams `92`,
@@ -3124,8 +3161,8 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,660
 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,412 full, 21,782 partial,
-13 unknown, and zero invalid; stream `114` reaches 52/22/2/0. The long fold
+observations. Stream `92` independently reaches 13,414 full, 21,782 partial,
+11 unknown, and zero invalid; stream `114` reaches 52/22/2/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

@@ -1195,6 +1195,23 @@
       ]
     },
     {
+      "name":"server_opcode_394_text_envelope","direction":"server_to_client","opcode":394,"length":119,
+      "source":"the automatic dump confirms enum opcode 394 but finds no attributed managed handler; the sole capture-111 packet exactly decodes as one 57-code-unit trailing-zero UTF-16 value and is followed 58 ms later by the correlated client opcode-279 text envelope; local-Wine injection did not cause an opcode-279 packet, so causality remains unproven",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":394},
+        {"op":"utf16","name":"text","trailing_zero":true}
+      ]
+    },
+    {
+      "name":"client_opcode_279_text_envelope","direction":"client_to_server","opcode":279,"length":120,
+      "source":"the sole capture-111 packet follows server opcode 394 by 58 ms and contains one neutral u8 plus the same 57-code-unit trailing-zero UTF-16 envelope; code units 10 through 14 change and the other 52 are identical",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":279},
+        {"op":"read","name":"control_value","kind":"u8"},
+        {"op":"utf16","name":"text","trailing_zero":true}
+      ]
+    },
+    {
       "name":"server_opcode_96","direction":"server_to_client","opcode":96,"length":6,
       "source":"IL2CPP opcode-96 handler f55baf92... direct i16/i16 reads; three capture frames",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":96},{"op":"read","name":"value_1","kind":"i16"},{"op":"read","name":"value_2","kind":"i16"}]

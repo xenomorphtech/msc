@@ -53,8 +53,8 @@
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,412 full, 21,782 partial,
-  13 unknown, and zero invalid; stream `114` reports 52/22/2/0. Seven
+  packet observations. Stream `92` now reports 13,414 full, 21,782 partial,
+  11 unknown, and zero invalid; stream `114` reports 52/22/2/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -174,6 +174,17 @@
   distributions and a redaction flag. The 20 stream-`92` and two stream-`114`
   packets move from unknown to partial, producing `13,412/21,782/13/0` and
   `52/22/2/0`. Opaque bodies are not replayed.
+- Server opcode `394` and client opcode `279` now use exact redacted text
+  envelopes instead of opaque width pins. The automatic dump confirms the
+  server enum member but attributes no managed handler; the sole capture pair
+  supplies the exact `u16-counted UTF-16 + zero` boundaries. Both texts contain
+  57 code units, only indices `10..14` differ, and the client envelope follows
+  by 57.92 ms. The fold reports this as neutral temporal correlation, not a
+  proven request/response, and moves stream `92` to
+  `13,414/21,782/11/0`. An exact loopback injection into the sole local-Wine
+  world connection produced no opcode `279` within seven seconds, while the
+  client remained responsive in map `101000000`; opcode `394` is not required
+  by the current login/gameplay path.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

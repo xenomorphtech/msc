@@ -51,6 +51,7 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
+    ClientOpcode279TextEnvelope,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
@@ -149,6 +150,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
+    ServerOpcode394TextEnvelope,
     ServerOpcode379Record,
     ServerOpcode425ValueLedger,
     ServerOpcode49Envelope,
@@ -2848,6 +2850,36 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertNotIn("private-map-resource", str(instruction.safe_dict()))
         with self.assertRaisesRegex(PacketShapeError, "selector must be 3"):
             replace(instruction, selector=2).to_bytes()
+
+    def test_opcode_394_279_text_envelopes_round_trip_and_redact(self) -> None:
+        server_text = "sensitive-" + "A" * 47
+        client_text = server_text[:10] + "reply" + server_text[15:]
+        server = ServerOpcode394TextEnvelope(text=server_text)
+        client = ClientOpcode279TextEnvelope(
+            control_value=1,
+            text=client_text,
+        )
+
+        self.assertEqual(len(server.to_bytes()), 119)
+        self.assertEqual(len(client.to_bytes()), 120)
+        self.assertEqual(
+            ServerOpcode394TextEnvelope.parse(server.to_bytes()),
+            server,
+        )
+        self.assertEqual(
+            ClientOpcode279TextEnvelope.parse(client.to_bytes()),
+            client,
+        )
+        self.assertEqual(
+            client.changed_code_unit_indices(server.text),
+            (10, 11, 12, 13, 14),
+        )
+        self.assertTrue(server.safe_dict()["text_redacted"])
+        self.assertTrue(client.safe_dict()["text_redacted"])
+        self.assertNotIn("sensitive", str(server.safe_dict()))
+        self.assertNotIn("sensitive", str(client.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "trailing byte"):
+            ServerOpcode394TextEnvelope.parse(server.to_bytes()[:-1] + b"\x01")
 
     def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
         self,
@@ -5723,6 +5755,93 @@ class GameplayStateFoldTest(unittest.TestCase):
             "selectors:{0: 2, 3: 1, 6: 1, 17: 1}",
             render_gameplay_analysis(analysis),
         )
+
+    def test_correlates_server_opcode_394_with_client_opcode_279(self) -> None:
+        server_text = "sensitive-" + "A" * 47
+        client_text = server_text[:10] + "reply" + server_text[15:]
+        server = ServerOpcode394TextEnvelope(text=server_text)
+        client = ClientOpcode279TextEnvelope(
+            control_value=1,
+            text=client_text,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(server.to_bytes(),),
+            extra_client_plaintexts=(client.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_394_packets, 1)
+        self.assertEqual(analysis.state.server_opcode_394_text_code_units, {57: 1})
+        self.assertEqual(analysis.state.client_opcode_279_text_packets, 1)
+        self.assertEqual(analysis.state.client_opcode_279_control_values, {1: 1})
+        self.assertEqual(
+            analysis.state.client_opcode_279_changed_code_unit_counts,
+            {5: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_279_changed_span_shapes,
+            {"10:14": 1},
+        )
+        self.assertEqual(analysis.state.correlated_client_opcode_279_packets, 1)
+        self.assertEqual(analysis.state.uncorrelated_client_opcode_279_packets, 0)
+        self.assertEqual(analysis.state.client_opcode_279_transform_matches, 1)
+        self.assertEqual(analysis.state.client_opcode_279_transform_mismatches, 0)
+        self.assertEqual(analysis.state.pending_server_opcode_394_envelopes, 0)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {
+                "server_opcode_394_text_envelope",
+                "client_opcode_279_text_envelope",
+            }
+        ]
+        self.assertEqual(
+            [observation.kind for observation in observations],
+            [
+                "server_opcode_394_text_envelope",
+                "client_opcode_279_text_envelope",
+            ],
+        )
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        event_kinds = {event.kind for event in analysis.events}
+        self.assertIn("server_opcode_394_text_received", event_kinds)
+        self.assertIn("client_opcode_279_text_submitted", event_kinds)
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("sensitive", safe)
+        self.assertIn(
+            "opcode_394_279=server:1 server_text_code_units:{57: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_server_opcode_394_does_not_assume_client_response(self) -> None:
+        server = ServerOpcode394TextEnvelope(text="sensitive-" + "A" * 47)
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(server.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_394_packets, 1)
+        self.assertEqual(analysis.state.client_opcode_279_text_packets, 0)
+        self.assertEqual(analysis.state.correlated_client_opcode_279_packets, 0)
+        self.assertEqual(analysis.state.pending_server_opcode_394_envelopes, 1)
+        self.assertIn(
+            "1 server opcode-394 text envelopes had no later captured client "
+            "opcode-279 envelope",
+            analysis.warnings,
+        )
+        self.assertNotIn("sensitive", str(analysis.safe_dict()))
 
     def test_folds_positioned_effect_records(self) -> None:
         records = (

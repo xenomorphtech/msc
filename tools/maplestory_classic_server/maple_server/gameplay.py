@@ -22,6 +22,7 @@ from .packets import (
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
+    ClientOpcode279TextEnvelope,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
@@ -103,6 +104,7 @@ from .packets import (
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
+    ServerOpcode394TextEnvelope,
     ServerOpcode379Record,
     ServerOpcode425ValueLedger,
     ServerOpcode49Envelope,
@@ -979,6 +981,30 @@ class GameplayGameState:
     server_opcode_348_control_pairs: Counter[str] = field(
         default_factory=Counter
     )
+    server_opcode_394_packets: int = 0
+    server_opcode_394_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_text_packets: int = 0
+    client_opcode_279_control_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_changed_code_unit_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_changed_span_shapes: Counter[str] = field(
+        default_factory=Counter
+    )
+    correlated_client_opcode_279_packets: int = 0
+    uncorrelated_client_opcode_279_packets: int = 0
+    client_opcode_279_transform_matches: int = 0
+    client_opcode_279_transform_mismatches: int = 0
+    pending_server_opcode_394_envelopes: int = 0
+    last_opcode_394_279_gap_ms: float | None = None
+    max_opcode_394_279_gap_ms: float | None = None
     client_opcode_66_acknowledgements: int = 0
     client_opcode_66_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_66_status_values: Counter[int] = field(
@@ -4219,6 +4245,53 @@ class GameplayAnalysis:
                         self.state.server_opcode_348_control_pairs
                     ),
                 },
+                "opcode_394_279": {
+                    "server_packet_count": self.state.server_opcode_394_packets,
+                    "server_text_code_units": dict(
+                        self.state.server_opcode_394_text_code_units
+                    ),
+                    "client_packet_count": (
+                        self.state.client_opcode_279_text_packets
+                    ),
+                    "client_control_values": dict(
+                        self.state.client_opcode_279_control_values
+                    ),
+                    "client_text_code_units": dict(
+                        self.state.client_opcode_279_text_code_units
+                    ),
+                    "changed_code_unit_counts": dict(
+                        self.state.client_opcode_279_changed_code_unit_counts
+                    ),
+                    "changed_span_shapes": dict(
+                        self.state.client_opcode_279_changed_span_shapes
+                    ),
+                    "correlated_pair_count": (
+                        self.state.correlated_client_opcode_279_packets
+                    ),
+                    "uncorrelated_client_packet_count": (
+                        self.state.uncorrelated_client_opcode_279_packets
+                    ),
+                    "captured_transform_matches": (
+                        self.state.client_opcode_279_transform_matches
+                    ),
+                    "captured_transform_mismatches": (
+                        self.state.client_opcode_279_transform_mismatches
+                    ),
+                    "pending_server_envelope_count": (
+                        self.state.pending_server_opcode_394_envelopes
+                    ),
+                    "last_observed_gap_ms": (
+                        None
+                        if self.state.last_opcode_394_279_gap_ms is None
+                        else round(self.state.last_opcode_394_279_gap_ms, 3)
+                    ),
+                    "max_observed_gap_ms": (
+                        None
+                        if self.state.max_opcode_394_279_gap_ms is None
+                        else round(self.state.max_opcode_394_279_gap_ms, 3)
+                    ),
+                    "text_redacted": True,
+                },
                 "client_opcode_66": {
                     "packet_count": (
                         self.state.client_opcode_66_acknowledgements
@@ -4353,6 +4426,7 @@ class GameplayStateFold:
         self._pending_heartbeat_probes: deque[int] = deque()
         self._pending_opcode_426_notifications: deque[int] = deque()
         self._pending_server_opcode_348: dict[int, deque[int]] = {}
+        self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
         self._pending_skill_level_changes: deque[
             tuple[int, int, SkillLevelChangeRequest]
         ] = deque()
@@ -5183,6 +5257,91 @@ class GameplayStateFold:
                 kind="skill_record_update_acknowledgement",
                 coverage=ShapeCoverage.FULL,
                 parsed=acknowledgement,
+                details=details,
+            )
+        if opcode == 279:
+            envelope = ClientOpcode279TextEnvelope.parse(payload)
+            correlated_server_envelope = bool(self._pending_server_opcode_394)
+            observed_gap_ms: float | None = None
+            changed_indices: tuple[int, ...] = ()
+            same_text_length: bool | None = None
+            captured_transform_match: bool | None = None
+            changed_span = "uncorrelated"
+            if correlated_server_envelope:
+                server_timestamp_ns, server_text = (
+                    self._pending_server_opcode_394.popleft()
+                )
+                self.state.pending_server_opcode_394_envelopes -= 1
+                self.state.correlated_client_opcode_279_packets += 1
+                observed_gap_ms = (
+                    frame.timestamp_ns - server_timestamp_ns
+                ) / 1e6
+                self.state.last_opcode_394_279_gap_ms = observed_gap_ms
+                self.state.max_opcode_394_279_gap_ms = max(
+                    self.state.max_opcode_394_279_gap_ms or 0.0,
+                    observed_gap_ms,
+                )
+                server_code_units = len(server_text.encode("utf-16le")) // 2
+                same_text_length = (
+                    server_code_units == envelope.text_code_units
+                )
+                changed_indices = envelope.changed_code_unit_indices(
+                    server_text
+                )
+                contiguous = bool(changed_indices) and changed_indices == tuple(
+                    range(changed_indices[0], changed_indices[-1] + 1)
+                )
+                if contiguous:
+                    changed_span = f"{changed_indices[0]}:{changed_indices[-1]}"
+                elif not changed_indices:
+                    changed_span = "none"
+                else:
+                    changed_span = "noncontiguous"
+                captured_transform_match = (
+                    same_text_length
+                    and changed_indices == (10, 11, 12, 13, 14)
+                )
+                if captured_transform_match:
+                    self.state.client_opcode_279_transform_matches += 1
+                else:
+                    self.state.client_opcode_279_transform_mismatches += 1
+            else:
+                self.state.uncorrelated_client_opcode_279_packets += 1
+            self.state.client_opcode_279_text_packets += 1
+            self.state.client_opcode_279_control_values[
+                envelope.control_value
+            ] += 1
+            self.state.client_opcode_279_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.client_opcode_279_changed_code_unit_counts[
+                len(changed_indices)
+            ] += 1
+            self.state.client_opcode_279_changed_span_shapes[changed_span] += 1
+            details: dict[str, object] = {
+                **envelope.safe_dict(),
+                "correlated_server_envelope": correlated_server_envelope,
+                "same_text_length": same_text_length,
+                "changed_code_unit_count": len(changed_indices),
+                "changed_span": changed_span,
+                "captured_transform_match": captured_transform_match,
+                "pending_server_envelopes": (
+                    self.state.pending_server_opcode_394_envelopes
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if observed_gap_ms is not None:
+                details["observed_gap_ms"] = round(observed_gap_ms, 3)
+            self._event(
+                frame,
+                "client_opcode_279_text_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_279_text_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=envelope,
                 details=details,
             )
         if opcode == 309:
@@ -7589,6 +7748,35 @@ class GameplayStateFold:
                 parsed=envelope,
                 details=details,
             )
+        if opcode == 394:
+            envelope = ServerOpcode394TextEnvelope.parse(payload)
+            self._pending_server_opcode_394.append(
+                (frame.timestamp_ns, envelope.text)
+            )
+            self.state.server_opcode_394_packets += 1
+            self.state.server_opcode_394_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.pending_server_opcode_394_envelopes += 1
+            details = {
+                **envelope.safe_dict(),
+                "pending_client_envelopes": (
+                    self.state.pending_server_opcode_394_envelopes
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_394_text_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_394_text_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=envelope,
+                details=details,
+            )
         if opcode in {
             69,
             93,
@@ -9197,6 +9385,24 @@ class GameplayStateFold:
                 "opcode-348 requests had no captured client opcode-66 "
                 "acknowledgement"
             )
+        if self.state.uncorrelated_client_opcode_279_packets:
+            self.warnings.append(
+                f"{self.state.uncorrelated_client_opcode_279_packets} client "
+                "opcode-279 text envelopes had no preceding unmatched server "
+                "opcode-394 envelope"
+            )
+        if self.state.pending_server_opcode_394_envelopes:
+            self.warnings.append(
+                f"{self.state.pending_server_opcode_394_envelopes} server "
+                "opcode-394 text envelopes had no later captured client "
+                "opcode-279 envelope"
+            )
+        if self.state.client_opcode_279_transform_mismatches:
+            self.warnings.append(
+                f"{self.state.client_opcode_279_transform_mismatches} correlated "
+                "opcode-394/279 text pairs did not match the captured five-code-"
+                "unit transformation"
+            )
         if self.state.pending_skill_level_change_requests:
             self.warnings.append(
                 f"{self.state.pending_skill_level_change_requests} skill "
@@ -9239,6 +9445,9 @@ class GameplayStateFold:
                     ),
                     "pending_opcode_426_notifications": (
                         self.state.pending_opcode_426_notifications
+                    ),
+                    "pending_server_opcode_394_envelopes": (
+                        self.state.pending_server_opcode_394_envelopes
                     ),
                     "pending_skill_level_change_requests": (
                         self.state.pending_skill_level_change_requests
@@ -11697,6 +11906,29 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
             "control_pairs:"
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
+        ),
+        (
+            "opcode_394_279="
+            f"server:{state.server_opcode_394_packets} "
+            "server_text_code_units:"
+            f"{dict(sorted(state.server_opcode_394_text_code_units.items()))} "
+            f"client:{state.client_opcode_279_text_packets} "
+            "controls:"
+            f"{dict(sorted(state.client_opcode_279_control_values.items()))} "
+            "client_text_code_units:"
+            f"{dict(sorted(state.client_opcode_279_text_code_units.items()))} "
+            "changed_counts:"
+            f"{dict(sorted(state.client_opcode_279_changed_code_unit_counts.items()))} "
+            "changed_spans:"
+            f"{dict(sorted(state.client_opcode_279_changed_span_shapes.items()))} "
+            f"correlated:{state.correlated_client_opcode_279_packets} "
+            f"uncorrelated:{state.uncorrelated_client_opcode_279_packets} "
+            f"transform_matches:{state.client_opcode_279_transform_matches} "
+            "transform_mismatches:"
+            f"{state.client_opcode_279_transform_mismatches} "
+            f"pending:{state.pending_server_opcode_394_envelopes} "
+            f"last_gap_ms:{state.last_opcode_394_279_gap_ms} "
+            f"max_gap_ms:{state.max_opcode_394_279_gap_ms}"
         ),
         (
             "client_opcode_66="

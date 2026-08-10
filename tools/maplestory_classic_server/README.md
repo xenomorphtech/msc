@@ -440,8 +440,8 @@ gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,660 full,
 44,381 partial, 59 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,412 full, 21,782 partial,
-13 unknown, and zero invalid observations; short stream `114` reaches 52 full,
+metadata. Stream `92` independently passes with 13,414 full, 21,782 partial,
+11 unknown, and zero invalid observations; short stream `114` reaches 52 full,
 22 partial, 2 unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
@@ -579,6 +579,11 @@ The gameplay fold currently models these capture-backed boundaries:
   handler dump plus an executed local-Wine reader trace; nested `u8`, `i16`, and
   `i32` counts bound integer vectors, integer pairs, and two integer/byte groups,
   while safe output exposes only structural totals and boolean counts,
+- server opcode `394` and client opcode `279`: exact 57-code-unit redacted
+  UTF-16 envelopes separated by 57.92 ms in stream `92`; the client adds one
+  neutral byte and changes only code-unit span `10..14`. The fold reports FIFO
+  correlation and observed gap, not a guaranteed response: exact local-Wine
+  injection produced no opcode `279` while the field client stayed responsive,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
   records with two raw-byte-preserving IL2CPP booleans and two signed values per
   entry; zero is false and every nonzero byte is true, and the three-byte
@@ -1713,3 +1718,8 @@ preserve distinct Unity scan codes in this setup.
     exact Python/Rust consumption, fold only redacted structural totals, and
     replay the captured plaintext through the sole local-Wine connection with
     the world socket and generated heartbeats still active.
+63. Replace the opcode-`394` and client-opcode-`279` opaque pins with exact
+    redacted UTF-16 envelopes, correlate the sole captured pair without
+    inventing security semantics, validate both codecs and manifest shapes,
+    and record the local-Wine negative replay result that kept gameplay healthy
+    but emitted no opcode `279`.

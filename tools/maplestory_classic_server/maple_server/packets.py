@@ -9967,6 +9967,101 @@ class SkillRecordUpdateAcknowledgement:
 
 
 @dataclass(frozen=True)
+class ServerOpcode394TextEnvelope:
+    """One redacted counted-text envelope correlated with client opcode 279."""
+
+    text: str = field(repr=False)
+    opcode: int = 394
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode394TextEnvelope":
+        reader = PacketReader(payload, packet_name="server_opcode_394_text")
+        _expect_opcode(reader, 394)
+        text = reader.utf16_string("text", trailing_byte=True)
+        reader.finish()
+        return cls(text=text)
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.text.encode("utf-16le")) // 2
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 394:
+            raise PacketShapeError("server text envelope opcode must be 394")
+        return struct.pack("<H", self.opcode) + encode_utf16_string(
+            self.text,
+            trailing_byte=True,
+        )
+
+
+@dataclass(frozen=True)
+class ClientOpcode279TextEnvelope:
+    """Redacted counted-text envelope correlated with server opcode 394."""
+
+    control_value: int
+    text: str = field(repr=False)
+    opcode: int = 279
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode279TextEnvelope":
+        reader = PacketReader(payload, packet_name="client_opcode_279_text")
+        _expect_opcode(reader, 279)
+        control_value = reader.u8("control_value")
+        text = reader.utf16_string("text", trailing_byte=True)
+        reader.finish()
+        return cls(control_value=control_value, text=text)
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.text.encode("utf-16le")) // 2
+
+    def changed_code_unit_indices(self, source_text: str) -> tuple[int, ...]:
+        source = source_text.encode("utf-16le")
+        response = self.text.encode("utf-16le")
+        source_units = tuple(
+            source[offset : offset + 2] for offset in range(0, len(source), 2)
+        )
+        response_units = tuple(
+            response[offset : offset + 2]
+            for offset in range(0, len(response), 2)
+        )
+        shared_count = min(len(source_units), len(response_units))
+        changed = [
+            index
+            for index in range(shared_count)
+            if source_units[index] != response_units[index]
+        ]
+        changed.extend(
+            range(shared_count, max(len(source_units), len(response_units)))
+        )
+        return tuple(changed)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "control_value": self.control_value,
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 279:
+            raise PacketShapeError("client text response opcode must be 279")
+        try:
+            prefix = struct.pack("<HB", self.opcode, self.control_value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-279 control is out of range: {error}"
+            ) from error
+        return prefix + encode_utf16_string(self.text, trailing_byte=True)
+
+
+@dataclass(frozen=True)
 class ServerOpcode426Notification:
     """Exact empty notification acknowledged by client opcode 309."""
 

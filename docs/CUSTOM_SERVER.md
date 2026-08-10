@@ -344,6 +344,27 @@ type/body-length distributions and redaction flags. Stream `92` moves to
 No replay is enabled because the bodies remain opaque and may contain
 session-local transport state.
 
+The remaining stream-`92` opcode-`394`/client-opcode-`279` pair is now bounded
+without assigning it a security role. The automatic
+`tools/il2cpp_packet_dump` output confirms enum opcode `394` but has no
+attributed managed handler. Capture comparison closes the sole 119-byte server
+packet as one 57-code-unit trailing-zero UTF-16 envelope. The next 120-byte
+client opcode `279`, 57.92 ms later, is one neutral byte plus a same-length
+UTF-16 envelope: only code-unit indices `10..14` differ. Both payloads now
+round-trip exactly, fold as full redacted observations, and expose only text
+length, control, changed-span, temporal-correlation, and gap distributions.
+This moves stream `92` to `13,414/21,782/11/0`; streams `114` and `126` remain
+`52/22/2/0` and `26,660/44,381/59/0`.
+
+The causal interpretation was tested, not assumed. With the browser-free local
+Wine client as the sole world peer, loopback-only
+`POST /api/v1/server-packets` accepted the exact opcode-`394` plaintext. The
+client stayed rendered in map `101000000`, retained the world connection, and
+emitted no opcode `279` over the following seven seconds. Accordingly the
+gamestate model calls these correlated envelopes rather than a proven
+request/response, and opcode `394` remains unnecessary for the working login
+and gameplay path.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -428,7 +449,7 @@ unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
 26,660 full, 44,381 partial, 59 unknown-but-lossless, and zero invalid. Stream
-`92` now reaches 13,412 full, 21,782 partial, 13 unknown, and zero invalid;
+`92` now reaches 13,414 full, 21,782 partial, 11 unknown, and zero invalid;
 stream `114` reaches 52/22/2/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
@@ -2040,10 +2061,9 @@ Replace the remaining opaque replay portions with stateful handling:
 1. Isolate the additional client-side drop eligibility condition using the
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
-2. Continue the finite automatic-dump pass with the remaining server opcode
-   `394`; separate direct primitive reads
-   from delegated bodies and preserve neutral roles until capture comparison or
-   a controlled effect supports semantic names.
+2. Deepen the remaining capture-bounded gameplay bodies only where generated
+   handlers, independent captures, or controlled effects support exact fields;
+   retain neutral roles for the opcode-`394`/`279` correlation.
 3. Reuse the proven typed final-field mob injection to validate the existing
    movement-acknowledgement policy through the real client.
 4. Capture a ranked or multi-character account to validate the conditional

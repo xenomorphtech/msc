@@ -386,6 +386,19 @@ with 719/719 matched heartbeats. This negative cross-state result prevents the
 offline adjacency from being generalized into a state-independent injection
 recipe.
 
+The final stream-`92` opaque pair demonstrates the same evidence discipline.
+The automatic `tools/il2cpp_packet_dump` artifact contains the opcode-`394`
+enum member but no attributed managed handler, so it cannot supply a reader
+grammar. Exact capture accounting instead closes the 119-byte server payload
+as a 57-code-unit trailing-zero UTF-16 envelope and the client opcode-`279`
+payload 57.92 ms later as one neutral byte plus the same envelope width. A
+private code-unit comparison finds one changed span, indices `10..14`, with all
+52 other units equal. That is strong temporal and structural correlation, but
+an exact injection into the live local-Wine field session produced no opcode
+`279` while leaving the client responsive. The checked-in model therefore
+records redacted envelopes, correlation, and gap timing without calling the
+pair security state or treating opcode `279` as a guaranteed response.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte
