@@ -68,6 +68,8 @@ from .packets import (
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    RemotePlayerEnterField,
+    RemotePlayerLeaveField,
     ServerAttackRelay,
     ServerOpcode69Record,
     ServerOpcode93Record,
@@ -177,8 +179,10 @@ class MobEntity:
 @dataclass
 class ObservedPlayerEntity:
     alias: str
-    x: int
-    y: int
+    x: int | None
+    y: int | None
+    level: int | None = None
+    name_code_units: int | None = None
 
 
 @dataclass
@@ -364,6 +368,13 @@ class GameplayGameState:
     remote_player_movement_commands_by_type: Counter[int] = field(
         default_factory=Counter
     )
+    remote_player_movement_broadcasts_for_known_players: int = 0
+    remote_player_movement_broadcasts_for_unknown_players: int = 0
+    remote_player_entries: int = 0
+    remote_player_refreshes: int = 0
+    remote_player_entry_opaque_bytes: int = 0
+    remote_player_leaves: int = 0
+    remote_player_unknown_leaves: int = 0
     life_movement_submissions: int = 0
     life_movement_submission_commands: int = 0
     life_movement_submission_commands_by_type: Counter[int] = field(
@@ -2643,6 +2654,8 @@ class GameplayAnalysis:
                 "entity": entity.alias,
                 "x": entity.x,
                 "y": entity.y,
+                "level": entity.level,
+                "name_code_units": entity.name_code_units,
             }
             if show_identifiers:
                 record["object_id"] = object_id
@@ -2811,6 +2824,21 @@ class GameplayAnalysis:
                 ),
                 "remote_player_movement_commands_by_type": dict(
                     self.state.remote_player_movement_commands_by_type
+                ),
+                "remote_player_movement_broadcasts_for_known_players": (
+                    self.state.remote_player_movement_broadcasts_for_known_players
+                ),
+                "remote_player_movement_broadcasts_for_unknown_players": (
+                    self.state.remote_player_movement_broadcasts_for_unknown_players
+                ),
+                "remote_player_entries": self.state.remote_player_entries,
+                "remote_player_refreshes": self.state.remote_player_refreshes,
+                "remote_player_entry_opaque_bytes": (
+                    self.state.remote_player_entry_opaque_bytes
+                ),
+                "remote_player_leaves": self.state.remote_player_leaves,
+                "remote_player_unknown_leaves": (
+                    self.state.remote_player_unknown_leaves
                 ),
                 "life_movement_submissions": (
                     self.state.life_movement_submissions
@@ -5484,6 +5512,7 @@ class GameplayStateFold:
             )
             cleared_npcs = len(self.state.npcs)
             cleared_mobs = len(self.state.mobs)
+            cleared_players = len(self.state.observed_players)
             cleared_drops = len(self.state.field_drops)
             if self.state.entry_character_id is None:
                 self.warnings.append(
@@ -5520,6 +5549,7 @@ class GameplayStateFold:
                 "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
                 "cleared_npcs": cleared_npcs,
                 "cleared_mobs": cleared_mobs,
+                "cleared_players": cleared_players,
                 "cleared_drops": cleared_drops,
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
@@ -6121,6 +6151,83 @@ class GameplayStateFold:
                     else ()
                 ),
             )
+        if opcode == 189:
+            entered = RemotePlayerEnterField.parse(payload)
+            alias = self._alias(
+                self._player_aliases, entered.object_id, "player"
+            )
+            existing = self.state.observed_players.get(entered.object_id)
+            self.state.observed_players[entered.object_id] = (
+                ObservedPlayerEntity(
+                    alias=alias,
+                    x=existing.x if existing is not None else None,
+                    y=existing.y if existing is not None else None,
+                    level=entered.level,
+                    name_code_units=entered.name_code_units,
+                )
+            )
+            self.state.remote_player_entries += 1
+            self.state.remote_player_entry_opaque_bytes += len(
+                entered.opaque_body
+            )
+            if existing is not None:
+                self.state.remote_player_refreshes += 1
+            details = {
+                "entity": alias,
+                "level": entered.level,
+                "name_code_units": entered.name_code_units,
+                "opaque_body_bytes": len(entered.opaque_body),
+                "previously_observed": existing is not None,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "remote_player_entered_field",
+                details=details,
+                identifiers={"object_id": entered.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="remote_player_enter_field",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=entered,
+                details=details,
+                issues=(
+                    "remote-player entry body remains version-specific and "
+                    "opaque",
+                ),
+            )
+        if opcode == 190:
+            left = RemotePlayerLeaveField.parse(payload)
+            existing = self.state.observed_players.pop(left.object_id, None)
+            alias = (
+                existing.alias
+                if existing is not None
+                else self._alias(
+                    self._player_aliases, left.object_id, "player"
+                )
+            )
+            self.state.remote_player_leaves += 1
+            if existing is None:
+                self.state.remote_player_unknown_leaves += 1
+            details = {
+                "entity": alias,
+                "known_player": existing is not None,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "remote_player_left_field",
+                details=details,
+                identifiers={"object_id": left.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="remote_player_leave_field",
+                coverage=ShapeCoverage.FULL,
+                parsed=left,
+                details=details,
+            )
         if opcode == 217:
             broadcast = LifeMovementBroadcast.parse(payload)
             path = broadcast.movement
@@ -6172,9 +6279,19 @@ class GameplayStateFold:
                     alias=alias,
                     x=final_position[0],
                     y=final_position[1],
+                    level=existing.level if existing is not None else None,
+                    name_code_units=(
+                        existing.name_code_units
+                        if existing is not None
+                        else None
+                    ),
                 )
             )
             self.state.remote_player_movement_broadcasts += 1
+            if existing is None:
+                self.state.remote_player_movement_broadcasts_for_unknown_players += 1
+            else:
+                self.state.remote_player_movement_broadcasts_for_known_players += 1
             self.state.remote_player_movement_commands += len(path.commands)
             self.state.remote_player_movement_commands_by_type.update(
                 command.command_type for command in path.commands
@@ -6610,7 +6727,11 @@ class GameplayStateFold:
                 self.state.server_ranged_attack_projectile_ids[
                     ranged_metadata.projectile_id
                 ] += 1
-                if actor_entity is not None:
+                if (
+                    actor_entity is not None
+                    and actor_entity.x is not None
+                    and actor_entity.y is not None
+                ):
                     delta_x = ranged_metadata.position_x - actor_entity.x
                     delta_y = ranged_metadata.position_y - actor_entity.y
                     self.state.server_ranged_attack_positions_for_known_players += 1
@@ -9084,8 +9205,18 @@ def render_gameplay_analysis(
             f"command_types:{player_movement_command_types} "
             "remote_observed:"
             f"{len(state.observed_players)} "
+            f"remote_entries:{state.remote_player_entries} "
+            f"remote_refreshes:{state.remote_player_refreshes} "
+            f"remote_leaves:{state.remote_player_leaves} "
+            f"remote_unknown_leaves:{state.remote_player_unknown_leaves} "
+            "remote_entry_opaque_bytes:"
+            f"{state.remote_player_entry_opaque_bytes} "
             "remote_broadcasts:"
             f"{state.remote_player_movement_broadcasts} "
+            "remote_known_broadcasts:"
+            f"{state.remote_player_movement_broadcasts_for_known_players} "
+            "remote_unknown_broadcasts:"
+            f"{state.remote_player_movement_broadcasts_for_unknown_players} "
             "remote_commands:"
             f"{state.remote_player_movement_commands} "
             "remote_command_types:"

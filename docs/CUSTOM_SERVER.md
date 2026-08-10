@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 188 tests.
+The last run passed all 191 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,188 observations are full, 44,243 partial, 669
+`--fail-on-invalid`: 26,188 observations are full, 44,295 partial, 617
 unknown-but-lossless, and none invalid. The original 12 warnings are state
 correlations, not shape failures. The combat model adds one aggregate warning
 for six delayed predictions that differ by one HP, so the current total is 13.
@@ -91,6 +91,15 @@ broadcasts. The short stream prints one local path ending at `(633,-2677)` and
 two remote-player broadcasts under session-local aliases. The long stream
 validates and round-trips 531 submissions, 113 broadcasts, and all 4,281
 commands, with fixed tags `0/1/3/5` and payload sizes `13/7/5/13` bytes.
+
+Remote-player presence now begins with server opcode `189`, whose IL2CPP-backed
+prefix carries object id, level, and a counted UTF-16 name before a retained
+version-specific body. Opcode `190` is its exact u32-id removal, not a neutral
+fixed record. Across streams `92/114/126`, all 114 entries and 39 leaves
+round-trip exactly, all leaves match current-epoch entries, and every one of
+563 opcode-`202` and 652 server opcode-`217` broadcasts now references a known
+player. Safe events/state expose aliases, level, name length, and optional
+position, but never the captured id or name.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
@@ -137,7 +146,7 @@ zero failures, all 21 fixed-record frames patched, and 13/13 paired heartbeat
 probes.
 
 Together, these latest modeled families leave the long-corpus totals at 26,188
-full, 44,243 partial, 669 unknown-but-lossless, and zero invalid.
+full, 44,295 partial, 617 unknown-but-lossless, and zero invalid.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
 compact packets are exactly eight bytes. The other 592 packets contain a
@@ -398,12 +407,13 @@ controlled HP mutation below.
 Add `--generate-fixed-server-records` to regenerate all fully modeled
 fixed-width server records at their captured frame indices. The supported
 opcodes are `11`, `24`, `45`, `56`, `58`, `59`, `71`, `72`, `74`, `76`, `89`,
-`96`, `105`, `112`, `121`, `131`, `178`, `190`, `301`, `386`, `388`, `389`,
+`96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
 and `398`. The planner requires a valid gameplay fold, round-trips every typed
 record, preserves its packet length, rejects duplicate indices and explicit
 patch conflicts, and does not assume the records occur only during bootstrap.
 Both sustained reference streams contain a second opcode-`96`, repeated empty
-opcode `45`, and repeated u32 opcodes `190`/`301` during later gameplay.
+opcode `45`, and repeated opcode-`301` values during later gameplay. Opcode
+`190` is folded separately as a remote-player removal.
 
 For stream `114`, the current flag replaces 21 typed server frames. It composes with
 `--generate-initial-field-snapshot` and `--generate-field-npc-spawns`.
@@ -517,6 +527,18 @@ were answered. Transcript
 folds validly to four variable records, 178 typed selector/value entries, six
 typed int32 values, zero opaque bytes, and two injection events, matching the
 predicted unchanged player/phase state.
+
+The current remote-player A/B/A used the same endpoint without browser or host
+cursor input. A typed opcode-`202`, composed from a captured remote-player
+control/id and the local player's validated path, moved a white-haired remote
+sprite to predicted position `(629,-2691)`. Injecting its six-byte opcode-`190`
+made the sprite disappear and changed folded active-player state `4 -> 3`.
+Replaying its exact opcode-`189` entry and the same movement made it visible
+again and restored `3 -> 4`. The live transcript at
+`downloads/maple_custom_server_observed/neutral_records_live_20260810/world/1786331780729639306_replay_12857.jsonl`
+folds validly with zero unknown leaves. After restoration the client remained
+active on map `101000000`, the server had no connection failures, and 209/209
+heartbeat probes were paired.
 
 The follow-up keyboard experiment used one typed mob and physical evdev input.
 With the captured Left Ctrl binding `29 -> 2001005`, Ctrl emitted opcode-`52`

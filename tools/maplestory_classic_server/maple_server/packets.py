@@ -5874,6 +5874,98 @@ class MobMovementAcknowledgement:
 
 
 @dataclass(frozen=True)
+class RemotePlayerEnterField:
+    """Opcode-189 remote-player prefix plus its version-specific body."""
+
+    object_id: int = field(repr=False)
+    level: int
+    name: str = field(repr=False)
+    opaque_body: bytes = field(repr=False)
+    opcode: int = 189
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "RemotePlayerEnterField":
+        reader = PacketReader(payload, packet_name="remote_player_enter_field")
+        _expect_opcode(reader, 189)
+        record = cls(
+            object_id=reader.u32("object_id"),
+            level=reader.u8("level"),
+            name=reader.utf16_string("name", trailing_byte=False),
+            opaque_body=reader.bytes(reader.remaining, "opaque_body"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    @property
+    def name_code_units(self) -> int:
+        return len(self.name.encode("utf-16-le")) // 2
+
+    def _validate(self) -> None:
+        if self.opcode != 189:
+            raise PacketShapeError(
+                "remote-player enter-field opcode must be 189"
+            )
+        if not self.opaque_body:
+            raise PacketShapeError(
+                "remote-player enter-field body cannot be empty"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "object_id_redacted": True,
+            "level": self.level,
+            "name_code_units": self.name_code_units,
+            "opaque_body_length": len(self.opaque_body),
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            prefix = struct.pack("<HIB", self.opcode, self.object_id, self.level)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player enter-field prefix is out of range: {error}"
+            ) from error
+        return (
+            prefix
+            + encode_utf16_string(self.name, trailing_byte=False)
+            + bytes(self.opaque_body)
+        )
+
+
+@dataclass(frozen=True)
+class RemotePlayerLeaveField:
+    """Fully bounded opcode-190 remote-player removal."""
+
+    object_id: int = field(repr=False)
+    opcode: int = 190
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "RemotePlayerLeaveField":
+        reader = PacketReader(payload, packet_name="remote_player_leave_field")
+        _expect_opcode(reader, 190)
+        record = cls(object_id=reader.u32("object_id"))
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, bool]:
+        return {"object_id_redacted": True}
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 190:
+            raise PacketShapeError(
+                "remote-player leave-field opcode must be 190"
+            )
+        try:
+            return struct.pack("<HI", self.opcode, self.object_id)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player leave-field object id is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode69Record:
     """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
 
@@ -6177,7 +6269,7 @@ class FixedServerU32Record:
     opcode: int
     value: int
 
-    SUPPORTED_OPCODES = {112, 131, 190, 301, 386, 388, 389}
+    SUPPORTED_OPCODES = {112, 131, 301, 386, 388, 389}
 
     @classmethod
     def parse(cls, payload: bytes) -> "FixedServerU32Record":

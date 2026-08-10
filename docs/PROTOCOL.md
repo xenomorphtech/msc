@@ -552,6 +552,51 @@ The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
 fully decoded and updates transition sequence, map, portal, HP, and server
 clock without replacing the initial player-stat model.
 
+## Remote-player field lifecycle (`189`, `190`)
+
+The pinned version-300 IL2CPP opcode-`189` handler reads a u32 object id, a u8
+level, and a counted UTF-16 name before delegating the remaining player body.
+The adjacent opcode-`190` handler reads exactly one u32 object id and removes
+that player:
+
+```text
+opcode 189:
+    uint16 opcode
+    uint32 object_id                 # redacted
+    uint8 level
+    uint16 name_code_units
+    utf16le[name_code_units] name    # retained only for re-emission
+    byte[] opaque_player_body
+
+opcode 190:
+    uint16 opcode
+    uint32 object_id                 # redacted
+```
+
+Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
+packets round-trip exactly. The entry prefixes are structurally bounded and
+their 36,450 remaining body bytes stay explicit, so the 114 entries are
+partial; the 39 exact removals are full. Every removal references a player
+introduced in the same field epoch. More importantly, all 563 opcode-`202`
+player-movement broadcasts and all 652 server opcode-`217` life-movement
+broadcasts now correlate with a prior entry instead of creating players from
+movement alone.
+
+The fold emits `remote_player_entered_field` and
+`remote_player_left_field`, clears active players at field transitions, and
+preserves entry metadata when later movement supplies a position. Safe state
+exposes only an alias, level, name-code-unit count, position when known, and
+opaque-byte count. It never emits the captured object id or name.
+
+A browser-free live A/B/A then composed the restored player's captured
+entry/control values with the local player's validated movement path. Opcode
+`202` moved the white-haired remote sprite to the predicted `(629,-2691)`.
+Injecting its typed six-byte opcode-`190` removed the sprite and changed folded
+active-player state `4 -> 3`; replaying the exact opcode-`189` plus the composed
+movement made it visible again and restored `3 -> 4`. The final transcript is
+valid with zero unknown leaves. The client remained active on map `101000000`
+with no connection failures and 209/209 paired heartbeat probes.
+
 ## Fixed-width neutral server records
 
 Three independent gameplay streams share a small fixed-width server-record
@@ -561,7 +606,7 @@ family. Their complete grammars, including the two-byte opcode, are:
 opcode 24, 45, 178:                 uint16 opcode
 opcode 58, 71, 89, 105, 121:        uint16 opcode; uint8 value
 opcode 56, 72, 74:                  uint16 opcode; uint16 value
-opcode 112, 131, 190, 301,
+opcode 112, 131, 301,
        386, 388, 389:               uint16 opcode; uint32 value
 opcode 96:                          uint16 opcode; uint16 value_1;
                                     uint16 value_2
@@ -585,11 +630,11 @@ opcodes `156` and `385` are bounded separately below and are not included in
 this family.
 
 Short stream `114` contains 21 records: one of every supported opcode except
-the repeated sustained-session opcodes `190` and `301`. Streams `92` and `126`
-contain 98 records each, including a second opcode-`96`, repeated empty opcode
-`45`, and repeated u32 opcodes `190`/`301` later in gameplay. The two sustained
-streams deliberately have different value and frequency distributions while
-retaining identical widths. All 217 capture observations parse at full
+the sustained-session opcode `301`. Streams `92` and `126` contain 69 and 88
+records respectively, including a second opcode-`96`, repeated empty opcode
+`45`, and repeated opcode-`301` values later in gameplay. Opcode `190` is now
+the remote-player removal described above rather than a neutral numeric
+record. All 178 remaining fixed-record observations parse at full
 coverage, round-trip exactly, update opcode counters, and emit
 `fixed_server_record_received` or `initial_character_context_received` events
 with the current field epoch.
@@ -2106,9 +2151,9 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,188
-full, 44,243 partial, 669 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,375 full, 21,682 partial,
-150 unknown, and zero invalid; stream `114` reaches 43/16/17/0. The long fold
+full, 44,295 partial, 617 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,375 full, 21,740 partial,
+92 unknown, and zero invalid; stream `114` reaches 43/20/13/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its 13 remaining warnings are cross-packet state correlations:
 12 pre-existing NPC/pickup warnings plus one aggregate warning for six delayed

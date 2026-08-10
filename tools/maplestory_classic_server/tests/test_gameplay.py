@@ -105,6 +105,8 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    RemotePlayerEnterField,
+    RemotePlayerLeaveField,
     ServerAttackRelay,
     ServerOpcode69Record,
     ServerOpcode93Record,
@@ -213,7 +215,6 @@ def fixture_fixed_server_records() -> tuple[object, ...]:
         FixedServerU16Record(opcode=74, value=26),
         FixedServerU32Record(opcode=112, value=0),
         FixedServerU32Record(opcode=131, value=0),
-        FixedServerU32Record(opcode=190, value=137_474),
         FixedServerU32Record(opcode=301, value=3_290),
         FixedServerU32PairRecord(
             value_1=999_999_999,
@@ -1867,7 +1868,6 @@ class GameplayPacketShapeTest(unittest.TestCase):
             112: "700000000000",
             121: "790000",
             131: "830000000000",
-            190: "be0002190200",
             301: "2d01da0c0000",
             398: "8e010080022ab825dd01",
         }
@@ -1875,6 +1875,35 @@ class GameplayPacketShapeTest(unittest.TestCase):
         for opcode, expected_hex in captured.items():
             with self.subTest(opcode=opcode):
                 self.assertEqual(by_opcode[opcode].to_bytes().hex(), expected_hex)
+
+    def test_remote_player_lifecycle_round_trip_and_redacts_identity(
+        self,
+    ) -> None:
+        entered = RemotePlayerEnterField(
+            object_id=302_104,
+            level=12,
+            name="小慧22",
+            opaque_body=b"\x00" * 309,
+        )
+        left = RemotePlayerLeaveField(object_id=302_104)
+
+        encoded_entry = entered.to_bytes()
+        self.assertEqual(len(encoded_entry), 326)
+        self.assertTrue(
+            encoded_entry.hex().startswith(
+                "bd00189c04000c04000f5c676132003200"
+            )
+        )
+        self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
+        self.assertEqual(left.to_bytes().hex(), "be00189c0400")
+        self.assertEqual(RemotePlayerLeaveField.parse(left.to_bytes()), left)
+        self.assertNotIn("302104", str(entered.safe_dict()))
+        self.assertNotIn("小慧22", str(entered.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "cannot be empty"):
+            replace(entered, opaque_body=b"").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 8 bytes"):
+            RemotePlayerEnterField.parse(bytes.fromhex("bd00010000000c0400"))
 
     def test_neutral_server_records_round_trip_and_redact_primary_values(
         self,
@@ -3836,6 +3865,118 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn("partially opaque", observation.issues[0])
 
+    def test_folds_remote_player_entry_refresh_and_leave_lifecycle(
+        self,
+    ) -> None:
+        player_a = RemotePlayerEnterField(
+            object_id=987_654_321,
+            level=12,
+            name="CaptureName",
+            opaque_body=b"\xaa\xbb",
+        )
+        player_b = RemotePlayerEnterField(
+            object_id=123_456_789,
+            level=9,
+            name="Other",
+            opaque_body=b"\xcc",
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                player_a.to_bytes(),
+                replace(player_a, level=13, opaque_body=b"\xdd").to_bytes(),
+                player_b.to_bytes(),
+                RemotePlayerLeaveField(
+                    object_id=player_a.object_id
+                ).to_bytes(),
+                RemotePlayerLeaveField(object_id=777_777_777).to_bytes(),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.remote_player_entries, 3)
+        self.assertEqual(analysis.state.remote_player_refreshes, 1)
+        self.assertEqual(analysis.state.remote_player_entry_opaque_bytes, 4)
+        self.assertEqual(analysis.state.remote_player_leaves, 2)
+        self.assertEqual(analysis.state.remote_player_unknown_leaves, 1)
+        self.assertEqual(list(analysis.state.observed_players), [player_b.object_id])
+        remaining = analysis.state.observed_players[player_b.object_id]
+        self.assertEqual(remaining.level, 9)
+        self.assertEqual(remaining.name_code_units, 5)
+        self.assertIsNone(remaining.x)
+        self.assertIsNone(remaining.y)
+        lifecycle = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"remote_player_enter_field", "remote_player_leave_field"}
+        ]
+        self.assertEqual(
+            [observation.coverage.value for observation in lifecycle],
+            ["partial", "partial", "partial", "full", "full"],
+        )
+        safe = analysis.safe_dict()
+        self.assertNotIn("987654321", str(safe))
+        self.assertNotIn("CaptureName", str(safe))
+        self.assertEqual(safe["state"]["observed_remote_player_count"], 1)
+        event_kinds = [event.kind for event in analysis.events]
+        self.assertEqual(event_kinds.count("remote_player_entered_field"), 3)
+        self.assertEqual(event_kinds.count("remote_player_left_field"), 2)
+
+    def test_remote_player_attack_before_first_movement_has_no_position(
+        self,
+    ) -> None:
+        entered_payload = RemotePlayerEnterField(
+            object_id=PLAYER_OBJECT_ID,
+            level=12,
+            name="Player",
+            opaque_body=b"\x00",
+        ).to_bytes()
+        relay_payload = ServerAttackRelay(
+            opcode=219,
+            object_id=PLAYER_OBJECT_ID,
+            packed_counts=0x12,
+            opaque_body=fixture_attack_relay_body(
+                prefix_length=15,
+                target_count=1,
+                hit_count=2,
+                tail_length=4,
+            ),
+        ).to_bytes()
+        fold = GameplayStateFold()
+        frames = (
+            PlainFrame(
+                index=0,
+                direction_index=0,
+                timestamp_ns=1_000_000_000,
+                direction="server_to_client",
+                wire_offset=0,
+                wire_length=len(entered_payload),
+                plaintext=entered_payload,
+            ),
+            PlainFrame(
+                index=1,
+                direction_index=1,
+                timestamp_ns=1_010_000_000,
+                direction="server_to_client",
+                wire_offset=len(entered_payload),
+                wire_length=len(relay_payload),
+                plaintext=relay_payload,
+            ),
+        )
+
+        observations = tuple(fold.consume(frame) for frame in frames)
+
+        self.assertEqual(fold.state.server_attack_relays_for_known_players, 1)
+        self.assertEqual(
+            fold.state.server_ranged_attack_positions_for_known_players,
+            0,
+        )
+        self.assertIsNone(fold.state.observed_players[PLAYER_OBJECT_ID].x)
+        self.assertNotIn("actor_position_x", observations[-1].details)
+
     def test_folds_player_movement_into_local_and_remote_state(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(player_movement=True)
@@ -3851,6 +3992,14 @@ class GameplayStateFoldTest(unittest.TestCase):
             {0: 2, 1: 1, 3: 1, 5: 1},
         )
         self.assertEqual(analysis.state.remote_player_movement_broadcasts, 1)
+        self.assertEqual(
+            analysis.state.remote_player_movement_broadcasts_for_known_players,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.remote_player_movement_broadcasts_for_unknown_players,
+            1,
+        )
         self.assertEqual(analysis.state.remote_player_movement_commands, 5)
         self.assertEqual(
             analysis.state.remote_player_movement_commands_by_type,
