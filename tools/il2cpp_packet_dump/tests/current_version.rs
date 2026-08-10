@@ -16,7 +16,7 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 91);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 92);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
     assert_eq!(shapes.len(), 175);
 
@@ -50,6 +50,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(flag_and_pair.opcode, 94);
     assert_eq!(flag_and_pair.length, Some(11));
     assert_eq!(flag_and_pair.operations.len(), 4);
+
+    let opcode_137 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_137_primitive_prefix")
+        .unwrap();
+    assert_eq!(opcode_137.opcode, 137);
+    assert_eq!(opcode_137.length, Some(84));
+    assert_eq!(opcode_137.operations.len(), 5);
 
     let opcode_148 = shapes
         .iter()
@@ -152,6 +160,7 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert!(!shapes.iter().any(|shape| {
         shape.name == "observed_server_to_client_opcode_27_length_1056"
             || shape.name == "observed_server_to_client_opcode_28_length_260"
+            || shape.name == "observed_server_to_client_opcode_137_length_84"
             || shape.name == "observed_server_to_client_opcode_142_length_254"
             || shape.name == "observed_server_to_client_opcode_147_length_94"
             || shape.name == "observed_server_to_client_opcode_228_length_10"

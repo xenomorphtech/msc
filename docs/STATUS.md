@@ -52,17 +52,17 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,659 full, 44,380 partial, 61 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,411 full, 21,760 partial,
-  36 unknown, and zero invalid; stream `114` reports 50/20/6/0. Seven
+  26,659 full, 44,381 partial, 60 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,411 full, 21,762 partial,
+  34 unknown, and zero invalid; stream `114` reports 50/20/6/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
-- Server opcodes `69`, `93`, `94`, `148`, `201`, `205`, `276`, and `379` are
-  separated into neutral, capture-bounded records. All 178 reference packets
-  consume and round-trip exactly; typed branches add 81 full observations,
-  while the 97 records with fixed unknown regions remain partial and redact
-  potentially identifying primary values from safe state, events, reports, and
-  HTTP-derived analysis.
+- Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
+  `379` are separated into neutral, capture-bounded records. All 181 reference
+  packets consume and round-trip exactly; typed branches add 81 full
+  observations, while the 100 records with fixed unknown regions remain
+  partial and redact potentially identifying primary values from safe state,
+  events, reports, and HTTP-derived analysis.
   The automatic IL2CPP dump proves opcode `94` reads `bool + i32 + i32` and
   opcode `379` reads a discriminator plus four datetimes on variant `36`; its
   delegated opcode-`148` handler supplies variants `9`/`10`/`12`/`13`. One
@@ -123,6 +123,13 @@
   unchanged, and was followed by matched heartbeats with no pending probe or
   injection failure. The nested-Sway client stayed focused and its mute service
   remained active.
+- Server opcode `137` now uses the automatic handler's direct `i16/i32/i32`
+  prefix followed by the capture-bounded 72-byte tail shared by all three
+  84-byte packets. The codec redacts both prefix and tail, round-trips all three
+  packets, and folds them as partial neutral events. This moves stream `92` to
+  `13,411/21,762/34/0` and stream `126` to `26,659/44,381/60/0`; live replay is
+  deferred because neither the values nor delegated tail have safe
+  cross-session semantics.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

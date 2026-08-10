@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,659 observations are full, 44,380 partial, 61
+`--fail-on-invalid`: 26,659 observations are full, 44,381 partial, 60
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -160,17 +160,18 @@ opaque. The fold emits `server_opcode_77_received` and exposes only variant,
 text-code-unit, control/value, and opaque-byte distributions. Neither packet
 records, events, text reports, JSON, nor HTTP status return captured text.
 
-The neutral server-record fold now separates opcodes `69`, `93`, `94`, `148`,
-`201`, `205`, `276`, and `379`. Streams `92/114/126` contribute `50/6/122`
-records, for 178/178 exact packet round trips. Combined opcode counts are
-`69:50`, `93:7`, `94:3`, `148:23`, `201:46`, `205:42`, `276:2`, and `379:5`.
-The generated IL2CPP dump supplies exact direct reads for opcodes `94`, `276`,
-and `379` plus the delegated opcode-`148` variant switch. That switch bounds
+The neutral server-record fold now separates opcodes `69`, `93`, `94`, `137`,
+`148`, `201`, `205`, `276`, and `379`. Streams `92/114/126` contribute
+`52/6/123` records, for 181/181 exact packet round trips. Combined opcode
+counts are `69:50`, `93:7`, `94:3`, `137:3`, `148:23`, `201:46`, `205:42`,
+`276:2`, and `379:5`. The generated IL2CPP dump supplies exact direct reads for
+opcodes `94`, `137`, `276`, and `379` plus the delegated opcode-`148` variant
+switch. That switch bounds
 empty variant `10`,
 count-zero variant `9`, and two-i32 variants `12`/`13`; the one legacy nonempty
 variant-`9` body remains explicit opaque data because it does not consume under
 the current build's record mask `0x9`. The family therefore provides 81 full
-and 97 partial observations, 507 typed values, and 15,794 opaque bytes.
+and 100 partial observations, 516 typed values, and 16,010 opaque bytes.
 Potentially identifying values are retained for exact re-emission but omitted
 from safe state, events, and reports.
 
@@ -271,6 +272,16 @@ runtime status retained one active connection, zero injection failures, and a
 ready packet route. The browser-free client remained focused on the nested
 Sway space and the audio-mute service stayed active.
 
+Opcode `137` supplies the next generated prefix without overstating its body.
+Its handler directly reads `i16/i32/i32`; all three packets are 84 bytes and
+retain a 72-byte capture-bounded tail. A redacted typed envelope consumes and
+re-emits the two stream-`92` packets and one stream-`126` packet exactly, folds
+them as partial neutral events, and publishes only typed-value/tail-length
+counts. Coverage moves to `13,411/21,762/34/0` and
+`26,659/44,381/60/0`, while stream `114` remains `50/20/6/0`. No live packet
+was sent because the three values and delegated tail may depend on session or
+field state.
+
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
 object id followed by the exact 16-byte opcode-`300` spawn body, and fold as
@@ -354,8 +365,8 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,659 full, 44,380 partial, 61 unknown-but-lossless, and zero invalid. Stream
-`92` now reaches 13,411 full, 21,760 partial, 36 unknown, and zero invalid;
+26,659 full, 44,381 partial, 60 unknown-but-lossless, and zero invalid. Stream
+`92` now reaches 13,411 full, 21,762 partial, 34 unknown, and zero invalid;
 stream `114` reaches 50/20/6/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The
@@ -1968,7 +1979,7 @@ Replace the remaining opaque replay portions with stateful handling:
    now-falsified owner/proximity baseline, then run the reactive pickup effect
    only after the real client emits opcode `185`.
 2. Continue the finite automatic-dump pass with the remaining server opcodes
-   `13`, `29`, `135`, `137`, `169`, and `394`; separate direct primitive reads
+   `13`, `29`, `135`, `169`, and `394`; separate direct primitive reads
    from delegated bodies and preserve neutral roles until capture comparison or
    a controlled effect supports semantic names.
 3. Reuse the proven typed final-field mob injection to validate the existing

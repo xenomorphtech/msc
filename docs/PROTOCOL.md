@@ -990,9 +990,9 @@ probes. The status API reported `frames_patched:21` and the exact 21-opcode
 plan. The expanded emitter also has exhaustive byte-for-byte PCAP round-trip
 coverage.
 
-## Neutral server records (`69`, `93`, `94`, `148`, `201`, `205`, `276`, `379`)
+## Neutral server records (`69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, `379`)
 
-These eight opcodes recur with capture-bounded layouts in the gameplay
+These nine opcodes recur with capture-bounded layouts in the gameplay
 streams. Their semantic roles remain neutral, and fields that may carry a
 character/session value are redacted from safe output:
 
@@ -1012,6 +1012,13 @@ opcode 94:
     bool flag
     int32 primary_value
     int32 secondary_value
+
+opcode 137:
+    uint16 opcode
+    int16 first_value               # redacted
+    int32 second_value              # redacted
+    int32 third_value               # redacted
+    byte[72] opaque_tail
 
 opcode 148:
     uint16 opcode
@@ -1052,26 +1059,29 @@ opcode 379, variant 36:
     int64 time_4
 ```
 
-Streams `92/114/126` contribute `50/6/122` records respectively. By opcode,
-the combined counts are `69:50`, `93:7`, `94:3`, `148:23`, `201:46`, `205:42`,
-`276:2`, and `379:5`. Every
+Streams `92/114/126` contribute `52/6/123` records respectively. By opcode,
+the combined counts are `69:50`, `93:7`, `94:3`, `137:3`, `148:23`, `201:46`,
+`205:42`, `276:2`, and `379:5`. Every
 opcode-`69` header is `7` and all 263 retained bytes are zero in these
 captures. Every opcode-`93` packet counts four u32 values. Opcode `205` is
 fully bounded, as is the counted opcode-`93` vector. The generated handler dump
-independently supplies the exact direct-read sequences for opcodes `94`, `276`,
-and `379`; both opcode-`276` packets are the three-byte `0x05` true form, both
-opcode-`379` short packets use variant `35`, and its three
+independently supplies the exact direct-read sequences for opcodes `94`, `137`,
+`276`, and `379`. Opcode `137` directly reads `i16/i32/i32`; the two stream-`92`
+packets and one stream-`126` packet are all 84 bytes, leaving the same 72-byte
+capture-bounded tail after that prefix. Both opcode-`276` packets are the
+three-byte `0x05` true form, both opcode-`379` short packets use variant `35`,
+and its three
 four-datetime packets use variant `36`. Opcode `148` contributes one empty
 variant-`9`, nine empty variant-`10`, nine variant-`12`, three variant-`13`, and
 one nonempty variant-`9` packet. The current delegated IL2CPP record mask is
 `0x9`; the legacy nonempty body does not consume under that current parser and
 therefore retains 1,632 record bytes as one explicit partial observation.
-Together the family provides 81 full and 97 partial observations with 15,794
+Together the family provides 81 full and 100 partial observations with 16,010
 opaque bytes rather than inventing suffix or record semantics.
 
 The gamestate fold emits `neutral_server_record_received`, tracks packets by
 opcode, typed-value counts, and opaque-byte totals, and exposes only redacted
-safe details. All 178 packets reparse and round-trip byte-for-byte.
+safe details. All 181 packets reparse and round-trip byte-for-byte.
 
 A typed live replay of captured opcode-`94` values (`flag=true`, primary
 `2380000`, secondary `2`) added exactly one neutral event while phase, field
@@ -1096,6 +1106,13 @@ byte for exact re-emission. A loopback replay of exact packet `140105` added a
 second full opcode-`276` event. The core-state digest was unchanged, phase/map
 remained `active`/`101000000`, the next three heartbeats matched with no pending
 probe, and packet injection retained zero failures.
+
+Opcode `137` remains deliberately partial. Its three generated prefix values
+and 72-byte tail are retained for exact re-emission but redacted from safe
+analysis; only typed-value and tail-length counts are published. All three
+packets validate natively and in the state fold. Live replay is deferred because
+the generated handler does not name the values or consume the delegated tail,
+so cross-session injection would not be a bounded semantic test.
 
 ## Field-bootstrap ledgers (`147`, `272`)
 
@@ -2969,9 +2986,9 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,659
-full, 44,380 partial, 61 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,411 full, 21,760 partial,
-36 unknown, and zero invalid; stream `114` reaches 50/20/6/0. The long fold
+full, 44,381 partial, 60 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,411 full, 21,762 partial,
+34 unknown, and zero invalid; stream `114` reaches 50/20/6/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six

@@ -43,6 +43,9 @@ zero is false and every nonzero byte is true. The validator normalizes that
 truth value for branch/constant checks while typed Python codecs retain a
 noncanonical raw byte for lossless re-emission. Captured opcode `276` provides
 the concrete cross-corpus case: wire byte `0x05` is accepted as true.
+Opcode `137` is the complementary partial case: the dump proves direct
+`i16/i32/i32` reads, while capture comparison leaves the following 72 bytes
+opaque until delegated-reader evidence is available.
 
 Exported plaintext JSONL under `target/private/` is evidence, not source: it
 contains private captured bytes, remains ignored, and must not be committed or

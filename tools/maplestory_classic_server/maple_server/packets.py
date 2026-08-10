@@ -8224,6 +8224,67 @@ class ServerU32OpaqueTailEnvelope:
 
 
 @dataclass(frozen=True)
+class ServerOpcode137OpaqueTailEnvelope:
+    """Generated i16/i32/i32 prefix plus a capture-bounded ignored tail."""
+
+    first_value: int = field(repr=False)
+    second_value: int = field(repr=False)
+    third_value: int = field(repr=False)
+    opaque_tail: bytes = field(repr=False)
+    opcode: int = 137
+
+    OPAQUE_TAIL_LENGTH = 72
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode137OpaqueTailEnvelope":
+        reader = PacketReader(payload, packet_name="server_opcode_137_envelope")
+        _expect_opcode(reader, 137)
+        envelope = cls(
+            first_value=reader.i16("first_value"),
+            second_value=reader.i32("second_value"),
+            third_value=reader.i32("third_value"),
+            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+        )
+        reader.finish()
+        envelope._validate()
+        return envelope
+
+    def _validate(self) -> None:
+        if self.opcode != 137:
+            raise PacketShapeError(
+                "server opcode-137 envelope opcode must be 137"
+            )
+        if len(self.opaque_tail) != self.OPAQUE_TAIL_LENGTH:
+            raise PacketShapeError(
+                "server opcode-137 opaque tail must be exactly "
+                f"{self.OPAQUE_TAIL_LENGTH} bytes"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "typed_values_redacted": True,
+            "typed_value_count": 3,
+            "opaque_tail_length": len(self.opaque_tail),
+            "opaque_tail_redacted": bool(self.opaque_tail),
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<Hhii",
+                self.opcode,
+                self.first_value,
+                self.second_value,
+                self.third_value,
+            ) + bytes(self.opaque_tail)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-137 prefix value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode69Record:
     """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
 

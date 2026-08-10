@@ -44,7 +44,7 @@ fn capture_111_jsonl_has_zero_unsupported_or_consumption_failures() {
     assert_eq!(counts[&(114, Direction::ServerToClient)], 65);
 
     let shapes = manifest.packet_shapes().unwrap();
-    assert_eq!(manifest.manifest.manual_shapes.len(), 91);
+    assert_eq!(manifest.manifest.manual_shapes.len(), 92);
     assert_eq!(manifest.manifest.observed_opaque_shapes.len(), 96);
     assert_eq!(shapes.len(), 175);
     let report = validate_packets(&packets, &shapes).unwrap();

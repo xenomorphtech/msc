@@ -84,6 +84,7 @@ from .packets import (
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
+    ServerOpcode137OpaqueTailEnvelope,
     ServerOpcode27IntegerLedger,
     ServerOpcode28TextLedger,
     ServerOpcode142TextLedger,
@@ -1045,6 +1046,7 @@ NeutralServerRecord = (
     ServerOpcode69Record
     | ServerOpcode93Record
     | ServerOpcode94Record
+    | ServerOpcode137OpaqueTailEnvelope
     | ServerOpcode148Envelope
     | ServerOpcode201Record
     | ServerOpcode205Record
@@ -7344,6 +7346,7 @@ class GameplayStateFold:
             69,
             93,
             94,
+            137,
             148,
             201,
             205,
@@ -7366,6 +7369,10 @@ class GameplayStateFold:
                 neutral_record = ServerOpcode93Record.parse(payload)
             elif opcode == 94:
                 neutral_record = ServerOpcode94Record.parse(payload)
+            elif opcode == 137:
+                neutral_record = ServerOpcode137OpaqueTailEnvelope.parse(
+                    payload
+                )
             elif opcode == 148:
                 neutral_record = ServerOpcode148Envelope.parse(payload)
             elif opcode == 201:
@@ -7394,6 +7401,7 @@ class GameplayStateFold:
             )
             partial = opcode in {
                 69,
+                137,
                 201,
                 *ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS,
             } or (

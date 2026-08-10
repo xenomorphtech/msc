@@ -121,6 +121,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
+    ServerOpcode137OpaqueTailEnvelope,
     ServerOpcode27IntegerLedger,
     ServerOpcode27IntegerLedgerEntry,
     ServerOpcode28TextLedger,
@@ -2722,6 +2723,27 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(envelopes[0], opaque_tail=b"short").to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "opcode must be one of"):
             replace(envelopes[0], opcode=229).to_bytes()
+
+    def test_server_opcode_137_primitive_prefix_round_trip(self) -> None:
+        envelope = ServerOpcode137OpaqueTailEnvelope(
+            first_value=10,
+            second_value=120_000_001,
+            third_value=5_050_003,
+            opaque_tail=b"\xa5" * 72,
+        )
+
+        encoded = envelope.to_bytes()
+
+        self.assertEqual(len(encoded), 84)
+        self.assertEqual(
+            ServerOpcode137OpaqueTailEnvelope.parse(encoded), envelope
+        )
+        self.assertNotIn("120000001", str(envelope.safe_dict()))
+        self.assertNotIn(envelope.opaque_tail.hex(), str(envelope.safe_dict()))
+        self.assertEqual(envelope.safe_dict()["typed_value_count"], 3)
+        self.assertEqual(envelope.safe_dict()["opaque_tail_length"], 72)
+        with self.assertRaisesRegex(PacketShapeError, "exactly 72"):
+            replace(envelope, opaque_tail=b"short").to_bytes()
 
     def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
         self,
@@ -5537,6 +5559,12 @@ class GameplayStateFoldTest(unittest.TestCase):
                 primary_value=2_380_000,
                 secondary_value=2,
             ),
+            ServerOpcode137OpaqueTailEnvelope(
+                first_value=10,
+                second_value=120_000_001,
+                third_value=5_050_003,
+                opaque_tail=b"\xa5" * 72,
+            ),
             ServerOpcode201Record(
                 primary_value=302_104,
                 secondary_value=0,
@@ -5590,13 +5618,14 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 20)
+        self.assertEqual(analysis.state.neutral_server_records, 21)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
             {
                 69: 1,
                 93: 1,
                 94: 1,
+                137: 1,
                 148: 5,
                 201: 1,
                 205: 1,
@@ -5610,8 +5639,8 @@ class GameplayStateFoldTest(unittest.TestCase):
                 379: 2,
             },
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 41)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_974)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 44)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 2_046)
         observations = [
             observation
             for observation in analysis.observations
@@ -5623,6 +5652,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "partial",
                 "full",
                 "full",
+                "partial",
                 "partial",
                 "full",
                 "full",
@@ -5650,11 +5680,11 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            20,
+            21,
         )
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:20 opcodes:",
+            "neutral_server_records=packets:21 opcodes:",
             render_gameplay_analysis(analysis),
         )
 
