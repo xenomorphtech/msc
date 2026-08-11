@@ -1128,6 +1128,14 @@ code-unit totals, and set-match status. Both reference packets exact-consume
 natively. Stream `83` now has only client opcode `274` unknown, while live has
 only its shortened server opcode `0` account record unknown.
 
+The remaining stream-`83` client opcode `274` is now a single capture-bounded
+opaque-text record: trailing-zero UTF-16 fields of 768 and 74 code units around
+the captured constants `uint32 2` and two `uint8 1` flags. The full 1,698-byte
+packet round-trips without publishing either text value, and isolated native
+validation consumes it exactly. Successful reference stream `83` therefore
+has zero unknown login packets; the live login's shortened server opcode `0`
+account record is the only remaining unknown in the active transcript.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.

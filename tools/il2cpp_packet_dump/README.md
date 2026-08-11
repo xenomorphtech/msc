@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 117 semantic/manual shapes and 89 explicitly
+manifest currently declares 118 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -97,7 +97,7 @@ opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 The live-only, non-overlapping
 opcode-`310` width and capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add nine active shapes.
-This leaves 185 active shapes and 68 active
+This leaves 185 active shapes and 67 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -183,6 +183,11 @@ the opaque blob, and a three-byte zero suffix. Their distinct total lengths
 `183/275/201` and text code-unit patterns `10/0/38`, `7/51/36`, and `1/51/5`
 exact-consume under the same grammar without assigning semantics or publishing
 the retained contents.
+Login client opcode `274` replaces its 1,698-byte observed-opaque pin with the
+sole captured fixed variant: redacted 768/74-code-unit text regions around
+captured constants `u32 2, u8 1, u8 1`, with both counted-text trailing bytes
+fixed to zero. The isolated stream-`83` record exact-consumes natively; its text
+contents and higher-level role remain neutral.
 Login server opcodes `20`, `21`, `23`, and `161` replace four observed-opaque
 pins with exact fixed-record shapes. Both reference login streams contain all
 four: opcode `20` carries one neutral `uint32`, opcodes `21` and `161` carry a

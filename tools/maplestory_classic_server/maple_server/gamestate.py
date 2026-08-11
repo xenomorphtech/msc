@@ -11,6 +11,7 @@ from .packets import (
     ChannelSelection,
     CharacterListEnvelope,
     CharacterSelection,
+    ClientOpcode274OpaqueTextRecord,
     ClientOpcode6RecordSet,
     ClientOpcode31Record,
     ClientStatusMessage,
@@ -134,8 +135,8 @@ class LoginGameState:
     )
     server_opcode_22_text_code_units: int = 0
     server_opcode_22_pending_client_record_sets: int = 0
-    client_opcode_6_matching_server_opcode_22_index_sets: int = 0
-    client_opcode_6_mismatched_server_opcode_22_index_sets: int = 0
+    client_opcode_6_server_index_set_matches: int = 0
+    client_opcode_6_server_index_set_mismatches: int = 0
     server_opcode_27_ledgers: int = 0
     server_opcode_27_entry_count_patterns: dict[str, int] = field(
         default_factory=dict
@@ -157,6 +158,10 @@ class LoginGameState:
         default_factory=dict
     )
     client_opcode_31_opaque_blob_bytes: int = 0
+    client_opcode_274_records: int = 0
+    client_opcode_274_text_code_unit_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -314,11 +319,11 @@ class LoginAnalysis:
                 "server_opcode_22_pending_client_record_sets": (
                     self.state.server_opcode_22_pending_client_record_sets
                 ),
-                "client_opcode_6_matching_server_opcode_22_index_sets": (
-                    self.state.client_opcode_6_matching_server_opcode_22_index_sets
+                "client_opcode_6_server_index_set_matches": (
+                    self.state.client_opcode_6_server_index_set_matches
                 ),
-                "client_opcode_6_mismatched_server_opcode_22_index_sets": (
-                    self.state.client_opcode_6_mismatched_server_opcode_22_index_sets
+                "client_opcode_6_server_index_set_mismatches": (
+                    self.state.client_opcode_6_server_index_set_mismatches
                 ),
                 "server_opcode_27_ledgers": (
                     self.state.server_opcode_27_ledgers
@@ -358,6 +363,10 @@ class LoginAnalysis:
                 ),
                 "client_opcode_31_opaque_blob_bytes": (
                     self.state.client_opcode_31_opaque_blob_bytes
+                ),
+                "client_opcode_274_records": self.state.client_opcode_274_records,
+                "client_opcode_274_text_code_unit_patterns": (
+                    self.state.client_opcode_274_text_code_unit_patterns
                 ),
             },
             "packets": [
@@ -952,6 +961,31 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 274:
+            record = ClientOpcode274OpaqueTextRecord.parse(payload)
+            text_pattern = "/".join(
+                str(length) for length in record.text_code_units
+            )
+            self.state.client_opcode_274_records += 1
+            self.state.client_opcode_274_text_code_unit_patterns[
+                text_pattern
+            ] = (
+                self.state.client_opcode_274_text_code_unit_patterns.get(
+                    text_pattern, 0
+                )
+                + 1
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_274_opaque_text_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-274 text contents and higher-level role remain "
+                    "neutral",
+                ),
+            )
         if opcode == 6:
             record_set = ClientOpcode6RecordSet.parse(payload)
             entry_count = str(len(record_set.opaque_entries))
@@ -977,11 +1011,9 @@ class LoginStateFold:
                 index_set_match = client_indices == server_indices
                 details["server_opcode_22_index_set_match"] = index_set_match
                 if index_set_match:
-                    self.state.client_opcode_6_matching_server_opcode_22_index_sets += 1
+                    self.state.client_opcode_6_server_index_set_matches += 1
                 else:
-                    self.state.client_opcode_6_mismatched_server_opcode_22_index_sets += (
-                        1
-                    )
+                    self.state.client_opcode_6_server_index_set_mismatches += 1
                     self.warnings.append(
                         "client opcode-6 index set does not match the preceding "
                         "server opcode-22 ledger"
@@ -1242,9 +1274,9 @@ def render_login_analysis(
         (
             "opcode_22_to_client_opcode_6="
             f"matched:"
-            f"{state['client_opcode_6_matching_server_opcode_22_index_sets']} "
+            f"{state['client_opcode_6_server_index_set_matches']} "
             f"mismatched:"
-            f"{state['client_opcode_6_mismatched_server_opcode_22_index_sets']}"
+            f"{state['client_opcode_6_server_index_set_mismatches']}"
         ),
         (
             "server_opcode_27="
@@ -1274,6 +1306,12 @@ def render_login_analysis(
             "text_patterns:"
             f"{state['client_opcode_31_text_code_unit_patterns']} "
             f"opaque_blob_bytes:{state['client_opcode_31_opaque_blob_bytes']}"
+        ),
+        (
+            "client_opcode_274="
+            f"records:{state['client_opcode_274_records']} "
+            f"text_code_units:"
+            f"{state['client_opcode_274_text_code_unit_patterns']}"
         ),
         f"packet_shapes={json.dumps(packet_counts, sort_keys=True)}",
     ]

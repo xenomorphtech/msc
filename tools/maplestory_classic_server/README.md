@@ -589,6 +589,14 @@ different orderings. Both reference records exact-consume natively, while safe
 state publishes only counts, text-length totals, and set-match status. Stream
 `83` now has only client opcode `274` unknown and live only server opcode `0`.
 
+Client opcode `274` closes the successful stream-`83` unknown inventory with a
+single capture-bounded 1,698-byte record. It contains trailing-zero UTF-16
+fields of 768 and 74 code units around a `uint32` value `2` and two `uint8`
+flags `1/1`. The Python codec and native manifest enforce those exact widths,
+constants, and boundaries; safe analysis redacts both text values and keeps the
+higher-level role neutral. Live still has one unknown: its shortened server
+opcode-`0` account record.
+
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
 prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
@@ -2057,3 +2065,6 @@ preserve distinct Unity scan codes in this setup.
     indexed-text ledger, validate the 299-entry and 152-entry reference bodies
     plus the byte-identical live body, and correlate each complete index set
     with the later client opcode-`6` record without publishing text.
+83. Replace the final stream-`83` login unknown, client opcode `274`, with its
+    exact single captured 1,698-byte redacted text variant and leave only the
+    live transcript's shortened server opcode-`0` account record unknown.

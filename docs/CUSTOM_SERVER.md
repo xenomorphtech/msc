@@ -2390,6 +2390,11 @@ project's own `README.md` for all options.
   set. Text stays redacted; safe state exposes only entry/code-unit totals and
   match status. This leaves only client opcode `274` unknown in stream `83`
   and the shortened account opcode `0` unknown live.
+- Client opcode `274`, the final stream-`83` login unknown, now uses its sole
+  capture-bounded 1,698-byte variant: redacted 768/74-code-unit UTF-16 fields
+  around constants `2/1/1`. Python and the native manifest exact-consume it,
+  while safe state reports only widths/constants. Successful stream `83` now
+  has zero unknown packets; live retains only its shortened account opcode `0`.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

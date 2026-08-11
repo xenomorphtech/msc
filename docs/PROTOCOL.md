@@ -67,6 +67,7 @@ the main blocker is obsolete.
 server 0   bootstrap/login prelude
 server 10  empty heartbeat probe
 client 6   redacted indexed record set
+client 274 fixed 768/74-code-unit redacted text record
 client 23  8-byte opaque-token heartbeat response
 client 31  three redacted UTF-16 fields and a 48-byte opaque blob
 client 13  typed opcode-13 envelope or status message
@@ -122,6 +123,14 @@ their wire order is not sequential. Safe output exposes only the fixed header
 width, common zero-field indices, record count, complete-index check, and
 aggregate counts. Header and record values—and the higher-level role of the
 set—remain neutral.
+
+The sole captured client opcode-`274` packet is a fixed 1,698-byte redacted
+variant at the start of stream `83`: a 768-code-unit trailing-zero UTF-16
+field, `uint32 2`, two `uint8 1` flags, and a 74-code-unit trailing-zero UTF-16
+field. Both fields contain hex-like text, but the codec deliberately exposes
+only their widths and the intervening constants. The contents and higher-level
+role remain neutral. Python round-trips the full packet and the native manifest
+exact-consumes the isolated record.
 
 Login also reuses the exact server opcode-`27` and opcode-`28` ledger codecs
 already validated in gameplay. Opcode `27` is an `i32` count followed by three

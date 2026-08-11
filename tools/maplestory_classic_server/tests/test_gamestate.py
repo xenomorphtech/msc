@@ -25,6 +25,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterListRecord,
     CharacterLookEntry,
     CharacterSelection,
+    ClientOpcode274OpaqueTextRecord,
     ClientOpcode6RecordSet,
     ClientOpcode31Record,
     ClientStatusMessage,
@@ -171,6 +172,7 @@ def fixture_login_transcript(
     opcode_28_ledger: ServerOpcode28TextLedger | None = None,
     opcode_22_ledger: ServerOpcode22IndexedTextLedger | None = None,
     login_server_fixed_records: tuple[LoginServerFixedRecord, ...] = (),
+    opcode_274_record: ClientOpcode274OpaqueTextRecord | None = None,
     opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
 ) -> Transcript:
@@ -218,6 +220,8 @@ def fixture_login_transcript(
         )
     if pending_heartbeat_probe:
         append("server_to_client", HeartbeatProbe().to_bytes())
+    if opcode_274_record is not None:
+        append("client_to_server", opcode_274_record.to_bytes())
     if opcode_27_ledger is not None:
         append("server_to_client", opcode_27_ledger.to_bytes())
     if opcode_28_ledger is not None:
@@ -278,6 +282,39 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_client_opcode_274_opaque_text_record_round_trip_and_redact(
+        self,
+    ) -> None:
+        record = ClientOpcode274OpaqueTextRecord(
+            opaque_text_1="A" * 768,
+            middle_value=2,
+            flags=(1, 1),
+            opaque_text_2="b" * 74,
+        )
+
+        parsed = ClientOpcode274OpaqueTextRecord.parse(record.to_bytes())
+
+        self.assertEqual(parsed, record)
+        self.assertEqual(len(parsed.to_bytes()), 1_698)
+        self.assertEqual(parsed.safe_dict()["text_code_units"], [768, 74])
+        self.assertNotIn("A" * 32, str(parsed.safe_dict()))
+        self.assertNotIn("b" * 32, str(parsed.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "768/74-code-unit"):
+            ClientOpcode274OpaqueTextRecord(
+                opaque_text_1="A" * 767,
+                middle_value=2,
+                flags=(1, 1),
+                opaque_text_2="b" * 74,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "middle value must be 2"):
+            ClientOpcode274OpaqueTextRecord(
+                opaque_text_1="A" * 768,
+                middle_value=3,
+                flags=(1, 1),
+                opaque_text_2="b" * 74,
+            ).to_bytes()
+
     def test_server_opcode_22_indexed_text_ledger_round_trip_and_redact(
         self,
     ) -> None:
@@ -580,6 +617,39 @@ class GameStateFoldTest(unittest.TestCase):
             render_login_analysis(analysis),
         )
 
+    def test_folds_client_opcode_274_without_text_contents(self) -> None:
+        record = ClientOpcode274OpaqueTextRecord(
+            opaque_text_1="A" * 768,
+            middle_value=2,
+            flags=(1, 1),
+            opaque_text_2="b" * 74,
+        )
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(opcode_274_record=record)
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_opcode_274_records, 1)
+        self.assertEqual(
+            analysis.state.client_opcode_274_text_code_unit_patterns,
+            {"768/74": 1},
+        )
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_274_opaque_text_record"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(observation.details["middle_value"], 2)
+        self.assertEqual(observation.details["flags"], [1, 1])
+        self.assertNotIn("A" * 32, str(analysis.safe_dict()))
+        self.assertNotIn("b" * 32, str(analysis.safe_dict()))
+        self.assertIn(
+            "client_opcode_274=records:1 "
+            "text_code_units:{'768/74': 1}",
+            render_login_analysis(analysis),
+        )
+
     def test_folds_client_opcode_6_record_set_without_values(self) -> None:
         server_ledger = ServerOpcode22IndexedTextLedger(
             opaque_entries=(
@@ -616,11 +686,11 @@ class GameStateFoldTest(unittest.TestCase):
             analysis.state.server_opcode_22_pending_client_record_sets, 0
         )
         self.assertEqual(
-            analysis.state.client_opcode_6_matching_server_opcode_22_index_sets,
+            analysis.state.client_opcode_6_server_index_set_matches,
             1,
         )
         self.assertEqual(
-            analysis.state.client_opcode_6_mismatched_server_opcode_22_index_sets,
+            analysis.state.client_opcode_6_server_index_set_mismatches,
             0,
         )
         self.assertEqual(analysis.state.client_opcode_6_record_sets, 1)

@@ -933,6 +933,83 @@ class ClientOpcode31Record:
 
 
 @dataclass(frozen=True)
+class ClientOpcode274OpaqueTextRecord:
+    """Single capture-bounded, text-redacted client opcode-274 variant."""
+
+    opaque_text_1: str = field(repr=False)
+    middle_value: int
+    flags: tuple[int, int]
+    opaque_text_2: str = field(repr=False)
+    opcode: int = 274
+
+    EXPECTED_TEXT_CODE_UNITS = (768, 74)
+
+    @property
+    def text_code_units(self) -> tuple[int, int]:
+        return (
+            len(self.opaque_text_1.encode("utf-16-le")) // 2,
+            len(self.opaque_text_2.encode("utf-16-le")) // 2,
+        )
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode274OpaqueTextRecord":
+        reader = PacketReader(
+            payload, packet_name="client_opcode_274_opaque_text_record"
+        )
+        _expect_opcode(reader, 274)
+        record = cls(
+            opaque_text_1=reader.utf16_string(
+                "opaque_text_1", trailing_byte=True
+            ),
+            middle_value=reader.u32("middle_value"),
+            flags=(reader.u8("flag_1"), reader.u8("flag_2")),
+            opaque_text_2=reader.utf16_string(
+                "opaque_text_2", trailing_byte=True
+            ),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 274:
+            raise PacketShapeError(
+                "client opcode-274 opaque-text record opcode must be 274"
+            )
+        if self.text_code_units != self.EXPECTED_TEXT_CODE_UNITS:
+            raise PacketShapeError(
+                "client opcode-274 text widths must match the captured "
+                "768/74-code-unit variant"
+            )
+        if self.middle_value != 2:
+            raise PacketShapeError(
+                "client opcode-274 captured middle value must be 2"
+            )
+        if self.flags != (1, 1):
+            raise PacketShapeError(
+                "client opcode-274 captured flags must both be 1"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "text_code_units": list(self.text_code_units),
+            "text_fields_redacted": True,
+            "middle_value": self.middle_value,
+            "flags": list(self.flags),
+            "higher_level_role": "neutral",
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return (
+            struct.pack("<H", self.opcode)
+            + encode_utf16_string(self.opaque_text_1, trailing_byte=True)
+            + struct.pack("<IBB", self.middle_value, *self.flags)
+            + encode_utf16_string(self.opaque_text_2, trailing_byte=True)
+        )
+
+
+@dataclass(frozen=True)
 class ChannelSelection:
     world_id: int
     channel_id: int
