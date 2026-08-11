@@ -23,7 +23,7 @@ from .packets import (
     ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
-    ClientOpcode64PositionAction,
+    ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
     ClientOpcode101Record,
@@ -1114,16 +1114,18 @@ class GameplayGameState:
     server_opcode_348_control_pairs: Counter[str] = field(
         default_factory=Counter
     )
-    client_opcode_64_packets: int = 0
-    client_opcode_64_neutral_values: Counter[int] = field(
+    npc_interaction_requests: int = 0
+    npc_interaction_requests_for_active_npcs: int = 0
+    npc_interaction_requests_for_unknown_npcs: int = 0
+    npc_interaction_target_templates: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_64_position_matches: int = 0
-    client_opcode_64_position_mismatches: int = 0
-    client_opcode_64_server_348_matches: int = 0
-    pending_client_opcode_64_actions: int = 0
-    last_opcode_64_server_348_ms: float | None = None
-    max_opcode_64_server_348_ms: float | None = None
+    npc_interaction_position_matches: int = 0
+    npc_interaction_position_mismatches: int = 0
+    npc_interaction_server_348_matches: int = 0
+    pending_npc_interaction_requests: int = 0
+    last_npc_interaction_response_ms: float | None = None
+    max_npc_interaction_response_ms: float | None = None
     client_opcode_111_packets: int = 0
     client_opcode_111_neutral_values: Counter[int] = field(
         default_factory=Counter
@@ -4631,28 +4633,34 @@ class GameplayAnalysis:
                         self.state.server_opcode_348_control_pairs
                     ),
                 },
-                "client_opcode_64": {
-                    "packet_count": self.state.client_opcode_64_packets,
-                    "neutral_values": dict(
-                        self.state.client_opcode_64_neutral_values
+                "npc_interactions": {
+                    "request_count": self.state.npc_interaction_requests,
+                    "active_npc_matches": (
+                        self.state.npc_interaction_requests_for_active_npcs
+                    ),
+                    "unknown_npc_targets": (
+                        self.state.npc_interaction_requests_for_unknown_npcs
+                    ),
+                    "target_templates": dict(
+                        self.state.npc_interaction_target_templates
                     ),
                     "life_movement_position_matches": (
-                        self.state.client_opcode_64_position_matches
+                        self.state.npc_interaction_position_matches
                     ),
                     "life_movement_position_mismatches": (
-                        self.state.client_opcode_64_position_mismatches
+                        self.state.npc_interaction_position_mismatches
                     ),
                     "server_opcode_348_matches": (
-                        self.state.client_opcode_64_server_348_matches
+                        self.state.npc_interaction_server_348_matches
                     ),
-                    "pending_actions": (
-                        self.state.pending_client_opcode_64_actions
+                    "pending_requests": (
+                        self.state.pending_npc_interaction_requests
                     ),
-                    "last_server_opcode_348_ms": (
-                        self.state.last_opcode_64_server_348_ms
+                    "last_response_ms": (
+                        self.state.last_npc_interaction_response_ms
                     ),
-                    "max_server_opcode_348_ms": (
-                        self.state.max_opcode_64_server_348_ms
+                    "max_response_ms": (
+                        self.state.max_npc_interaction_response_ms
                     ),
                 },
                 "client_opcode_111": {
@@ -4800,6 +4808,11 @@ class GameplayAnalysis:
                     "validated_key_codes": {
                         "left_ctrl": VariableServerRecord.LEFT_CTRL_KEY_CODE,
                         "z": VariableServerRecord.Z_KEY_CODE,
+                        "left_alt": VariableServerRecord.LEFT_ALT_KEY_CODE,
+                        "space": VariableServerRecord.SPACE_KEY_CODE,
+                        "keypad_zero": (
+                            VariableServerRecord.KEYPAD_ZERO_KEY_CODE
+                        ),
                     },
                     "selector_counts": dict(
                         self.state.keyboard_binding_selector_counts
@@ -4820,6 +4833,25 @@ class GameplayAnalysis:
                         VariableServerRecord.PICKUP_ACTION_ID
                     ),
                     "pickup_key_codes": self.state.pickup_key_codes,
+                    "jump_action_id": VariableServerRecord.JUMP_ACTION_ID,
+                    "jump_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id == VariableServerRecord.JUMP_ACTION_ID
+                    ),
+                    "npc_interaction_action_id": (
+                        VariableServerRecord.NPC_INTERACTION_ACTION_ID
+                    ),
+                    "npc_interaction_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id
+                        == VariableServerRecord.NPC_INTERACTION_ACTION_ID
+                    ),
                     "known_skill_binding_count": (
                         self.state.keyboard_known_skill_bindings
                     ),
@@ -4960,8 +4992,8 @@ class GameplayStateFold:
         self._last_client_life_movement_position: (
             tuple[int, int, int] | None
         ) = None
-        self._pending_client_opcode_64: deque[
-            tuple[int, int, int, ClientOpcode64PositionAction]
+        self._pending_npc_interactions: deque[
+            tuple[int, int, int, ClientNpcInteractionRequest]
         ] = deque()
         self._pending_client_opcode_111: deque[
             tuple[int, int, int, ClientOpcode111CashSlotAction]
@@ -6732,7 +6764,7 @@ class GameplayStateFold:
                 ),
             )
         if opcode == 64:
-            action = ClientOpcode64PositionAction.parse(payload)
+            request = ClientNpcInteractionRequest.parse(payload)
             life_position = self._last_client_life_movement_position
             position_known = (
                 life_position is not None
@@ -6741,42 +6773,67 @@ class GameplayStateFold:
             position_matches = (
                 position_known
                 and life_position is not None
-                and action.position_x == life_position[1]
-                and action.position_y == life_position[2]
+                and request.position_x == life_position[1]
+                and request.position_y == life_position[2]
             )
-            self.state.client_opcode_64_packets += 1
-            self.state.client_opcode_64_neutral_values[
-                action.neutral_value
-            ] += 1
-            if position_matches:
-                self.state.client_opcode_64_position_matches += 1
+            npc = self.state.npcs.get(request.npc_object_id)
+            npc_alias = self._alias(
+                self._npc_aliases, request.npc_object_id, "npc"
+            )
+            self.state.npc_interaction_requests += 1
+            if npc is None:
+                self.state.npc_interaction_requests_for_unknown_npcs += 1
             else:
-                self.state.client_opcode_64_position_mismatches += 1
-            self._pending_client_opcode_64.append(
-                (frame.index, frame.timestamp_ns, self.state.field_epoch, action)
+                self.state.npc_interaction_requests_for_active_npcs += 1
+                self.state.npc_interaction_target_templates[
+                    npc.spawn.template_id
+                ] += 1
+            if position_matches:
+                self.state.npc_interaction_position_matches += 1
+            else:
+                self.state.npc_interaction_position_mismatches += 1
+            self._pending_npc_interactions.append(
+                (
+                    frame.index,
+                    frame.timestamp_ns,
+                    self.state.field_epoch,
+                    request,
+                )
             )
-            self.state.pending_client_opcode_64_actions += 1
+            self.state.pending_npc_interaction_requests += 1
             details = {
-                **action.safe_dict(),
+                "npc": npc_alias,
+                "active_npc": npc is not None,
+                "npc_template_id": (
+                    npc.spawn.template_id if npc is not None else None
+                ),
+                "position_x": request.position_x,
+                "position_y": request.position_y,
                 "life_movement_position_known": position_known,
                 "position_matches_last_life_movement": position_matches,
                 "field_epoch": self.state.field_epoch,
             }
+            if npc is not None:
+                details.update(
+                    {
+                        "npc_x": npc.spawn.x,
+                        "npc_y": npc.spawn.cy,
+                        "npc_delta_x": request.position_x - npc.spawn.x,
+                        "npc_delta_y": request.position_y - npc.spawn.cy,
+                    }
+                )
             self._event(
                 frame,
-                "client_opcode_64_position_submitted",
+                "npc_interaction_requested",
                 details=details,
+                identifiers={"npc_object_id": request.npc_object_id},
             )
             return self._observation(
                 frame,
-                kind="client_opcode_64_position_action",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=action,
+                kind="npc_interaction_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
-                issues=(
-                    "client opcode-64 neutral value and higher-level action "
-                    "purpose remain unresolved",
-                ),
             )
         if opcode == 111:
             action = ClientOpcode111CashSlotAction.parse(payload)
@@ -8429,6 +8486,9 @@ class GameplayStateFold:
             cleared_chair_sit_intent = (
                 self.state.requested_chair_item_id is not None
             )
+            cleared_npc_interaction_requests = len(
+                self._pending_npc_interactions
+            )
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -8455,6 +8515,8 @@ class GameplayStateFold:
             self.state.pending_item_uses = 0
             self._pending_item_pickups.clear()
             self.state.pending_item_pickups = 0
+            self._pending_npc_interactions.clear()
+            self.state.pending_npc_interaction_requests = 0
             self.state.requested_chair_item_id = None
             cleared_client_attack_effects = sum(
                 len(pending)
@@ -8478,6 +8540,9 @@ class GameplayStateFold:
                 "cleared_drops": cleared_drops,
                 "cleared_positioned_effects": cleared_positioned_effects,
                 "cleared_chair_sit_intent": cleared_chair_sit_intent,
+                "cleared_npc_interaction_requests": (
+                    cleared_npc_interaction_requests
+                ),
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
                 ),
@@ -9326,34 +9391,43 @@ class GameplayStateFold:
             }
         ):
             envelope = ServerOpcode348TextEnvelope.parse(payload)
-            opcode_64_response: dict[str, object] | None = None
-            if self._pending_client_opcode_64:
+            npc_interaction_response: dict[str, object] | None = None
+            npc_interaction_identifiers: dict[str, object] = {}
+            if self._pending_npc_interactions:
                 (
                     request_frame_index,
                     request_timestamp_ns,
                     request_field_epoch,
-                    request_action,
-                ) = self._pending_client_opcode_64[0]
+                    request,
+                ) = self._pending_npc_interactions[0]
                 if request_field_epoch == self.state.field_epoch:
-                    self._pending_client_opcode_64.popleft()
-                    self.state.pending_client_opcode_64_actions -= 1
-                    self.state.client_opcode_64_server_348_matches += 1
+                    self._pending_npc_interactions.popleft()
+                    self.state.pending_npc_interaction_requests -= 1
+                    self.state.npc_interaction_server_348_matches += 1
                     response_ms = round(
                         (frame.timestamp_ns - request_timestamp_ns) / 1e6,
                         3,
                     )
-                    self.state.last_opcode_64_server_348_ms = response_ms
-                    self.state.max_opcode_64_server_348_ms = max(
-                        self.state.max_opcode_64_server_348_ms or 0.0,
+                    self.state.last_npc_interaction_response_ms = response_ms
+                    self.state.max_npc_interaction_response_ms = max(
+                        self.state.max_npc_interaction_response_ms or 0.0,
                         response_ms,
                     )
-                    opcode_64_response = {
+                    npc_interaction_response = {
                         "request_frame": request_frame_index,
                         "response_ms": response_ms,
-                        "position_x": request_action.position_x,
-                        "position_y": request_action.position_y,
+                        "npc": self._alias(
+                            self._npc_aliases,
+                            request.npc_object_id,
+                            "npc",
+                        ),
+                        "position_x": request.position_x,
+                        "position_y": request.position_y,
                         "field_epoch": self.state.field_epoch,
                     }
+                    npc_interaction_identifiers["npc_object_id"] = (
+                        request.npc_object_id
+                    )
             pending = self._pending_server_opcode_348.setdefault(
                 envelope.selector, deque()
             )
@@ -9376,13 +9450,18 @@ class GameplayStateFold:
                 ),
                 "field_epoch": self.state.field_epoch,
             }
-            if opcode_64_response is not None:
-                details["client_opcode_64_response"] = opcode_64_response
+            if npc_interaction_response is not None:
+                details["npc_interaction_response"] = (
+                    npc_interaction_response
+                )
             self._event(
                 frame,
                 "server_opcode_348_received",
                 details=details,
-                identifiers={"primary_value": envelope.primary_value},
+                identifiers={
+                    "primary_value": envelope.primary_value,
+                    **npc_interaction_identifiers,
+                },
             )
             return self._observation(
                 frame,
@@ -11044,11 +11123,16 @@ class GameplayStateFold:
                 "opcode-426 notifications had no captured client "
                 "opcode-309 acknowledgement"
             )
-        if self.state.client_opcode_64_position_mismatches:
+        if self.state.npc_interaction_requests_for_unknown_npcs:
             self.warnings.append(
-                f"{self.state.client_opcode_64_position_mismatches} client "
-                "opcode-64 positions did not match the last same-epoch "
-                "client life-movement path"
+                f"{self.state.npc_interaction_requests_for_unknown_npcs} NPC "
+                "interaction requests targeted inactive field NPCs"
+            )
+        if self.state.npc_interaction_position_mismatches:
+            self.warnings.append(
+                f"{self.state.npc_interaction_position_mismatches} NPC "
+                "interaction request positions did not match the last "
+                "same-epoch client life-movement path"
             )
         if self.state.client_inner_portal_field_epoch_mismatches:
             self.warnings.append(
@@ -11056,11 +11140,11 @@ class GameplayStateFold:
                 "client inner-portal requests did not match the active field "
                 "epoch"
             )
-        if self.state.pending_client_opcode_64_actions:
+        if self.state.pending_npc_interaction_requests:
             self.warnings.append(
-                f"{self.state.pending_client_opcode_64_actions} client "
-                "opcode-64 actions had no following same-epoch server "
-                "opcode-348 envelope"
+                f"{self.state.pending_npc_interaction_requests} NPC "
+                "interaction requests had no following same-epoch server "
+                "opcode-348 response"
             )
         if self.state.pending_client_opcode_111_actions:
             self.warnings.append(
@@ -13800,19 +13884,23 @@ def render_gameplay_analysis(
             f"max_gap_ms:{state.max_opcode_394_279_gap_ms}"
         ),
         (
-            "client_opcode_64="
-            f"packets:{state.client_opcode_64_packets} "
-            "neutral_values:"
-            f"{dict(sorted(state.client_opcode_64_neutral_values.items()))} "
+            "npc_interactions="
+            f"requests:{state.npc_interaction_requests} "
+            "active_npc_matches:"
+            f"{state.npc_interaction_requests_for_active_npcs} "
+            "unknown_npc_targets:"
+            f"{state.npc_interaction_requests_for_unknown_npcs} "
+            "target_templates:"
+            f"{dict(sorted(state.npc_interaction_target_templates.items()))} "
             "life_position_matches:"
-            f"{state.client_opcode_64_position_matches} "
+            f"{state.npc_interaction_position_matches} "
             "life_position_mismatches:"
-            f"{state.client_opcode_64_position_mismatches} "
+            f"{state.npc_interaction_position_mismatches} "
             "server_348_matches:"
-            f"{state.client_opcode_64_server_348_matches} "
-            f"pending:{state.pending_client_opcode_64_actions} "
-            f"last_ms:{state.last_opcode_64_server_348_ms} "
-            f"max_ms:{state.max_opcode_64_server_348_ms}"
+            f"{state.npc_interaction_server_348_matches} "
+            f"pending:{state.pending_npc_interaction_requests} "
+            f"last_ms:{state.last_npc_interaction_response_ms} "
+            f"max_ms:{state.max_npc_interaction_response_ms}"
         ),
         (
             "client_opcode_111="

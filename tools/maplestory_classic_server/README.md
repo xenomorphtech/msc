@@ -200,12 +200,13 @@ and `385` variants. Both begin with a one-byte discriminator. The level-1
 variants end there. Expanded opcode `156` contains a packet UTF-16 string,
 bool, and three int32 values; expanded opcode `385` contains 89 keyboard
 bindings whose tuple index is the key code. Selector `1` binds a skill id, and
-selector `0` is an empty binding. Selector `5` binds an action id; live control
-identifies action `50` as pickup. Key code `29` is validated evdev Left Ctrl
-and key code `44` is evdev Z. The emitter round-trips and replaces the complete
-records; selectors `2/4/6`, action ids `52..54`, and opcode-`156` field meanings
-remain neutral. Safe output reports empty, skill, action, and pickup bindings
-without naming the other action ids.
+selector `0` is an empty binding. Selector `5` binds an action id; live controls
+identify action `50` as pickup, `51` as chair sit, `53` as jump, and `54` as
+NPC interaction. Key codes `29`, `44`, `56`, and `57` are validated evdev Left
+Ctrl, Z, Left Alt, and Space. The emitter round-trips and replaces the complete
+records; selectors `2/4/6`, action `52`, and opcode-`156` field meanings remain
+neutral. Safe output reports empty, skill, action, pickup, jump, and NPC-
+interaction bindings without naming action `52`.
 
 Use `?keyboard-skill=KEY_CODE:SKILL_ID` on an expanded opcode-`385` PCAP
 reference to replace only the value of an existing selector-`1` binding. For
@@ -232,7 +233,8 @@ to an authentic opcode-`104` skill request. Restoring the exact `5/50` entry
 and presenting an admitted nearby drop produced authentic opcode `185`. The
 folded snapshot sequence reports pickup keys `(44,78) -> (78) -> (44,78)`.
 This names selector `5` as an action binding and value `50` as pickup while
-leaving values `52..54` as neutral action ids.
+leaving action `52` neutral; later physical-input controls identify `53` as
+jump and `54` as NPC interaction.
 
 Physical X at key `45` independently identifies action `51` as chair sit. It
 rendered setup-slot-`1` item `3010370` and emitted client opcode `49` as
@@ -245,6 +247,17 @@ recovery/stand requests with and without an open sit intent, and explicitly
 reports that server acknowledgement remains unmodeled. A field snapshot clears
 any still-open chair intent. This returns the active live transcript to zero
 unknown packets without inventing a response.
+
+Physical Left Alt at evdev key `56` independently identifies action `53` as
+jump: it produced a visually decisive jump after real host pointer focus was
+restored, with no dedicated packet. Physical Space at key `57` identifies
+action `54` as NPC interaction and emitted three opcode-`64` requests while
+held. Each targeted active object `3294`/template `1032005` and carried the
+folded player position `(677,-2695)`. The two reference opcode-`64` ids also
+resolve to active NPCs, templates `2003` and `22000`, so the packet is now a
+full `ClientNpcInteractionRequest` rather than a neutral position action.
+Keypad-zero action `52` remains unnamed; its apparent blue `10` recovery and
+opcode-`101` traffic were already occurring automatically.
 
 The second captured selector-`1` binding is also causal. Physical evdev key
 code `71` under `71 -> 2001002` emitted client opcode `104` as the exact
@@ -2102,10 +2115,10 @@ preserve distinct Unity scan codes in this setup.
     validate Python/Rust exact consumption, eliminate the six pickup-chain
     warnings, and reduce stream `126` to three unknown packets without naming
     the compact/full source distinction.
-71. Decode both 10-byte client opcode-`64` position actions, prove their signed
-    coordinates against the last same-epoch opcode-`47` life-movement endpoint,
-    correlate the next opcode `348`, and validate exact Python/Rust consumption
-    without assigning the neutral u32 or a causal request role.
+71. Initially bound both 10-byte client opcode-`64` records by proving their
+    signed coordinates against the last same-epoch opcode-`47` movement
+    endpoint and correlating the next opcode `348`; later live action evidence
+    in step 94 resolves the u32 and request role.
 72. Decode the sole eight-byte client opcode-`111` Cash-slot action, correlate
     signed slot `3` with the next opcode-`39` Cash remove/add, preserve the u32
     and higher-level purpose as neutral, validate exact Python/Rust consumption,
@@ -2213,3 +2226,8 @@ preserve distinct Unity scan codes in this setup.
     request. Correlate chair `3010370` with Setup slot `1`, retain server
     acknowledgement as an explicit gap, and restore the active transcript to
     zero unknown packets.
+94. Identify action `53`/Left Alt as jump and action `54`/Space as NPC
+    interaction from focused physical inputs. Promote opcode `64` to
+    `ClientNpcInteractionRequest`, resolve both reference targets and three live
+    requests to active NPCs, validate movement positions and opcode-`348`
+    response correlation, and leave only keypad-zero action `52` unnamed.

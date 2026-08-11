@@ -188,15 +188,17 @@ pickup chains with no epoch, drop, effect, result, removal, or pending mismatch,
 reduces its warning set from seven to the single unrelated one-HP combat
 aggregate, and advances to `26,661/44,436/3/0`.
 
-Client opcode `64` is now a capture-bounded position action. Its two exact
-10-byte stream-`126` records contain a neutral u32 followed by signed i16
-coordinates. Both coordinates equal the endpoint of the last same-epoch
-client opcode-`47` life-movement path: `(198,275)` and `(3331,-219)`. The next
-same-epoch server opcode `348` arrives after `439.289` and `396.405` ms,
-respectively. The fold reports endpoint matches, FIFO opcode-`348` correlation,
-pending counts, neutral-value distributions, and latency without claiming the
-u32 role or a causal request/response relationship. Python and native codecs
-consume both records exactly, advancing the corpus to `26,661/44,438/1/0`.
+Client opcode `64` is now a typed NPC-interaction request:
+`uint16 opcode, uint32 npc_object_id, int16 player_x, int16 player_y`. The two
+stream-`126` ids resolve to active NPC templates `2003` and `22000`; their
+positions equal the last same-epoch opcode-`47` movement endpoints
+`(198,275)` and `(3331,-219)`. The next server opcode `348` arrives after
+`439.289` and `396.405` ms. An independent live Space/action-`54` control sent
+three requests for active object `3294`, template `1032005`, at player position
+`(677,-2695)`. The fold aliases runtime ids, reports active/unknown targets and
+template distributions, validates position, and FIFO-correlates opcode `348`.
+Python and native codecs exact-consume the family at full coverage; stream
+`126` currently measures `26,664/44,436/0/0`.
 
 Client opcode `111` is now a capture-bounded Cash-slot action. Its sole exact
 eight-byte stream-`126` record contains a neutral u32 and signed slot `3`. The
@@ -204,7 +206,8 @@ next same-epoch server opcode-`39` change set removes and re-adds Cash slot `3`
 after `486.349` ms. The fold correlates only an exact Cash-slot modification,
 keeps the u32 and higher-level action purpose neutral, and exposes bounded
 match/pending/latency telemetry. Python and native codecs consume the record
-exactly. Stream `126` therefore reaches `26,661/44,439/0/0` with only the
+exactly. With opcode `64` promoted to full coverage, stream `126` currently
+measures `26,664/44,436/0/0` with only the
 unrelated one-HP combat aggregate warning.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
@@ -950,7 +953,9 @@ opcode-`385` entry indices are keyboard key codes and selector `1` carries a
 skill id. Index `29` is the evdev Left Ctrl key. A later selector-only A/B/A
 establishes selector `0` as an empty binding. A subsequent one-entry Z-key
 control establishes selector `5` as an action binding and value `50` as
-pickup; selectors `2/4/6` and selector-`5` action ids `52..54` remain unnamed.
+pickup; later physical-input controls identify action `51` as chair sit, `53`
+as jump, and `54` as NPC interaction. Selectors `2/4/6` and action `52` remain
+unnamed.
 
 The option performs the same valid-fold, exact-length, reparse, unique-index,
 and patch-conflict checks as the fixed emitter. Runtime status exposes only
@@ -997,7 +1002,7 @@ restoring the exact `5/50` entry and presenting an admitted nearby drop
 produced authentic opcode `185`. The three folded snapshots report action
 counts `6 -> 5 -> 6`, skill counts `2 -> 3 -> 2`, and pickup key codes
 `(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
-and action `50` as pickup without assigning roles to `52..54`.
+and action `50` as pickup; the controls below assign `51`, `53`, and `54`.
 
 The same unchanged map identifies action `51` through physical evdev X at key
 `45`. The client rendered its Setup-slot-`1` chair item `3010370` and sent
@@ -1009,6 +1014,22 @@ The gameplay fold models these as `chair_sit_request`,
 Setup inventory, and tracks whether recovery/stand follows an open sit intent.
 Safe state explicitly reports `server_acknowledgement_modeled: false`; no chair
 response is guessed, and a field snapshot clears any still-open chair intent.
+
+Physical Left Alt at evdev key `56` independently identifies action `53` as
+jump: after real host pointer focus was restored to the nested client, it
+produced a visually decisive jump without a dedicated packet. Physical Space
+at key `57` identifies action `54` as NPC interaction. It emitted three held-
+key opcode-`64` requests for active object `3294`, template `1032005`; each
+carried the folded player position `(677,-2695)`. The reference stream's two
+opcode-`64` ids independently resolve to active NPC templates `2003` and
+`22000`, so the fold now treats the packet as full semantic coverage rather
+than a neutral position action. It exposes jump and NPC-interaction key sets in
+safe keyboard state.
+
+Keypad zero at evdev key `82` remains action `52`. Its controlled press produced
+no distinguishable action. The blue `10` recovery display and alternating
+opcode-`101` records were already running automatically, so neither is
+attributed to action `52`.
 
 ## Opt-in live server-packet injection
 

@@ -300,15 +300,17 @@
   codecs consume all six exactly, the fold validates 203/203 pickup chains and
   removes all six pickup warnings, and stream `126` advances to
   `26,661/44,436/3/0` with only the unrelated one-HP combat aggregate warning.
-- Client opcode `64` now consumes both exact 10-byte position actions. Their
-  signed coordinates match the last same-epoch client opcode-`47` life-
-  movement endpoints, and the next same-epoch server opcode `348` follows in
-  `396.405..439.289` ms. The neutral u32 and higher-level causal role remain
-  unassigned. Client opcode `111` consumes its sole exact eight-byte record;
+- Client opcode `64` is now a full NPC-interaction request. Both stream-`126`
+  object ids resolve to active NPC templates (`2003`, `22000`), signed player
+  coordinates match the last same-epoch client opcode-`47` movement endpoints,
+  and the next server opcode `348` follows in `396.405..439.289` ms. An
+  independent physical Space/action-`54` control emitted three requests for
+  active object `3294`, template `1032005`, at `(677,-2695)`. Client opcode
+  `111` consumes its sole exact eight-byte record;
   signed slot `3` matches the next opcode-`39` Cash remove/add after `486.349`
   ms, while its u32 and action purpose remain neutral. Python/native validation
-  consumes all three records, pending/mismatch counters are zero, and stream
-  `126` reaches `26,661/44,439/0/0`.
+  consumes all three records; reference NPC target/position/pending mismatch
+  counters are zero, and stream `126` reaches `26,664/44,436/0/0`.
 - Client opcode `115` now consumes both exact 22-byte stream-`92` inner-portal
   requests. Each carries active field epoch `7`, a redacted four-code-unit
   portal name, and signed source/destination positions. The two paths chain
@@ -457,7 +459,9 @@
   `2001002` produced authentic opcode `104`, while exact restoration plus an
   admitted nearby drop produced opcode `185`. Folded action/skill counts moved
   `6/2 -> 5/3 -> 6/2`, and pickup keys moved `(44,78) -> (78) -> (44,78)`.
-  Selector-`5` values `52..54` and selectors `2/4/6` remain neutral.
+  Later physical-input controls identify action `53`/Left Alt as jump and
+  action `54`/Space as NPC interaction. Action `52` and selectors `2/4/6`
+  remain neutral.
 - Physical X at key `45` now identifies selector-`5` action `51` as chair sit.
   The client rendered Setup-slot-`1` item `3010370` and sent opcode `49` with
   that exact u32 item id, followed 20,006 ms later by empty recovery opcode
@@ -468,6 +472,14 @@
   server response unmodeled; a field snapshot clears stale open intent. The
   active live transcript is valid,
   warning-free, and again has zero unknown packets.
+- Physical Left Alt at key `56` now identifies action `53` as jump without a
+  dedicated packet. Physical Space at key `57` identifies action `54` as NPC
+  interaction and emitted three full opcode-`64` requests for active NPC
+  template `1032005`. The current live fold resolves all three targets and
+  movement positions, with one expected warning because the custom replay does
+  not serve their opcode-`348` response. Keypad-zero action `52` remains
+  unassigned; the adjacent blue `10` recovery display and opcode-`101` cadence
+  were automatic, not caused by that input.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -1240,11 +1252,11 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
    additional item/request shapes only from independently admitted evidence,
    and continue serving `[39,49,312]` only after an authentic opcode-`185` or
    compact opcode-`222` request.
-2. Keep opcode-`385` selectors `2/4/6` and selector-`5` action ids `52..54`
-   neutral until an independently identifiable input/action permits another
-   one-field control. Selector `0` is the bounded empty binding, selector `1`
-   the skill binding, selector `5` the action binding, action `50` pickup, and
-   action `51` chair sit.
+2. Keep opcode-`385` selectors `2/4/6` and selector-`5` action `52` neutral
+   until an independently identifiable input/action permits another control.
+   Selector `0` is the bounded empty binding, selector `1` the skill binding,
+   selector `5` the action binding; actions `50`, `51`, `53`, and `54` are
+   pickup, chair sit, jump, and NPC interaction respectively.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Keep packet injection an explicit loopback-only opt-in while expanding

@@ -169,15 +169,18 @@ without opcode `185`'s control word or optional proof. All six stream-`126`
 records resolve to known same-epoch drops and complete the matching inventory
 or mesos effect, gain notice, and removal chain. Isolated native validation
 consumes all six packets with zero failures.
-Client opcode `64` adds an exact 10-byte capture-backed record containing a
-neutral u32 and signed i16 position. Both stream-`126` positions equal the last
-same-epoch client opcode-`47` life-movement endpoint, and the next same-epoch
-server opcode `348` follows after `396.405..439.289` ms. Client opcode `111`
+Client opcode `64` adds the exact 10-byte NPC-interaction request:
+`uint16 opcode, uint32 npc_object_id, int16 player_x, int16 player_y`. Both
+stream-`126` object ids resolve to active NPCs and both positions equal the last
+same-epoch client opcode-`47` movement endpoint; the next same-epoch server
+opcode `348` follows after `396.405..439.289` ms. Independent live
+action-`54`/Space input emitted three more requests for active NPC template
+`1032005`. Client opcode `111`
 adds an exact eight-byte record containing a neutral u32 and signed slot; its
 sole slot `3` matches the next opcode-`39` Cash remove/add after `486.349` ms.
-The manifest claims exact boundaries only: the u32 values, higher-level action
-roles, and causality remain neutral. Isolated native validation consumes all
-three packets with zero failures.
+The opcode-`111` u32, its higher-level action role, and causality remain
+neutral. Isolated native validation consumes all three reference packets with
+zero failures.
 Client opcode `115` replaces its observed-opaque pin with the exact 22-byte
 inner-portal request shape: active field epoch, redacted four-code-unit UTF-16
 portal name with zero terminator, and signed source/destination positions. The

@@ -6589,41 +6589,39 @@ class ServerOpcode43Envelope:
 
 
 @dataclass(frozen=True)
-class ClientOpcode64PositionAction:
-    """Capture-bounded client position action with one neutral value."""
+class ClientNpcInteractionRequest:
+    """Request to interact with one active field NPC at the player position."""
 
-    neutral_value: int
+    npc_object_id: int
     position_x: int
     position_y: int
     opcode: int = 64
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ClientOpcode64PositionAction":
-        reader = PacketReader(
-            payload, packet_name="client_opcode_64_position_action"
-        )
+    def parse(cls, payload: bytes) -> "ClientNpcInteractionRequest":
+        reader = PacketReader(payload, packet_name="npc_interaction_request")
         _expect_opcode(reader, 64)
-        action = cls(
-            neutral_value=reader.u32("neutral_value"),
+        request = cls(
+            npc_object_id=reader.u32("npc_object_id"),
             position_x=reader.i16("position_x"),
             position_y=reader.i16("position_y"),
         )
         reader.finish()
-        return action
+        return request
 
     def safe_dict(self) -> dict[str, int]:
         return {
-            "neutral_value": self.neutral_value,
+            "npc_object_id": self.npc_object_id,
             "position_x": self.position_x,
             "position_y": self.position_y,
         }
 
     def to_bytes(self) -> bytes:
         if self.opcode != 64:
-            raise PacketShapeError("client position-action opcode must be 64")
-        if not 0 <= self.neutral_value <= 0xFFFF_FFFF:
+            raise PacketShapeError("NPC interaction request opcode must be 64")
+        if not 0 <= self.npc_object_id <= 0xFFFF_FFFF:
             raise PacketShapeError(
-                "client opcode-64 neutral value must fit in u32"
+                "NPC interaction request object id must fit in u32"
             )
         for name, value in (
             ("position x", self.position_x),
@@ -6636,7 +6634,7 @@ class ClientOpcode64PositionAction:
         return struct.pack(
             "<HIhh",
             self.opcode,
-            self.neutral_value,
+            self.npc_object_id,
             self.position_x,
             self.position_y,
         )
@@ -11169,8 +11167,13 @@ class VariableServerRecord:
     SKILL_BINDING_SELECTOR = 1
     ACTION_BINDING_SELECTOR = 5
     PICKUP_ACTION_ID = 50
+    JUMP_ACTION_ID = 53
+    NPC_INTERACTION_ACTION_ID = 54
     LEFT_CTRL_KEY_CODE = 29
     Z_KEY_CODE = 44
+    LEFT_ALT_KEY_CODE = 56
+    SPACE_KEY_CODE = 57
+    KEYPAD_ZERO_KEY_CODE = 82
 
     @property
     def keyboard_skill_bindings(self) -> dict[int, int]:
@@ -11198,6 +11201,22 @@ class VariableServerRecord:
             key_code
             for key_code, action_id in self.keyboard_action_bindings.items()
             if action_id == self.PICKUP_ACTION_ID
+        )
+
+    @property
+    def jump_key_codes(self) -> tuple[int, ...]:
+        return tuple(
+            key_code
+            for key_code, action_id in self.keyboard_action_bindings.items()
+            if action_id == self.JUMP_ACTION_ID
+        )
+
+    @property
+    def npc_interaction_key_codes(self) -> tuple[int, ...]:
+        return tuple(
+            key_code
+            for key_code, action_id in self.keyboard_action_bindings.items()
+            if action_id == self.NPC_INTERACTION_ACTION_ID
         )
 
     @property

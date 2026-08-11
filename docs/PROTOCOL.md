@@ -1224,31 +1224,41 @@ and direct nested-Wayland seat restored the same client to an active field with
 719/719 heartbeats. This is negative state/build-gating evidence, not a
 contradiction of the capture-local one-to-one transaction correlation.
 
-## Client opcode `64` position action
+## Client opcode `64` NPC interaction request
 
-Stream `126` contains two exact 10-byte records with this capture-bounded
-grammar:
+Stream `126` contains two exact 10-byte requests with this grammar:
 
 ```text
 uint16 opcode = 64
-uint32 neutral_value                 # observed 170389 and 11827
-int16  position_x
-int16  position_y
+uint32 npc_object_id                 # observed 170389 and 11827
+int16  player_x
+int16  player_y
 ```
 
-The positions are `(198,275)` and `(3331,-219)`. Each exactly matches the
-endpoint of the last same-epoch client opcode-`47` life-movement path. The next
-same-epoch server opcode `348` follows after `439.289` and `396.405` ms,
-respectively. The fold queues the action, reports life-movement endpoint
-matches and FIFO opcode-`348` timing, and warns on a position mismatch or
-unfinished action. Both records match, both receive a correlated opcode `348`,
-and no action remains pending.
+The two object ids resolve in folded field state to active NPC templates `2003`
+and `22000`. Their player positions `(198,275)` and `(3331,-219)` exactly match
+the endpoint of the last same-epoch client opcode-`47` life-movement path. The
+next same-epoch server opcode `348` follows after `439.289` and `396.405` ms,
+respectively.
 
-The Python codec and native manifest consume and re-emit both records exactly.
-The automatic dump establishes the opcode enum but does not prove this outgoing
-client layout or its semantics, so the u32 field, action purpose, and causal
-relationship to opcode `348` remain neutral. Coverage advances from
-`26,661/44,436/3/0` to `26,661/44,438/1/0`.
+An independent live input control establishes the semantic boundary. The
+expanded opcode-`385` keyboard map binds action `54` to evdev Space (`57`). A
+physical Space press emitted three repeated opcode-`64` requests while held;
+all carried object `3294`, which was the active field NPC template `1032005`,
+and player position `(677,-2695)`. The folded NPC position was `(740,-2693)`.
+The automatic dump establishes only the opcode enum; the object-id role comes
+from this input effect plus the independent active-NPC correlations.
+
+The fold emits `npc_interaction_requested`, aliases the runtime NPC id, reports
+active/unknown target counts and template distributions, validates the player
+position against same-epoch movement, and FIFO-correlates the following opcode
+`348`. It warns on an inactive target, position mismatch, or unfinished
+request. Both reference requests resolve, match position, receive opcode `348`,
+and leave nothing pending. The live custom server does not implement that
+response, so its three otherwise valid requests remain pending with one
+explicit warning. Python and the native manifest consume and re-emit every
+record exactly. Stream `126` currently measures `26,664/44,436/0/0`
+full/partial/unknown/invalid observations.
 
 ## Fixed-width neutral server records
 
@@ -1960,10 +1970,10 @@ The opcode-`385` tuple index is a keyboard key code: index `29` is the Linux
 evdev Left Ctrl code. Selector `1` is a skill binding and its value is the
 skill id. The capture binds key `29` to learned skill `2001005` and key `71`
 to learned skill `2001002`. Selector `0` is an empty binding; selector meanings
-`2/4/6`, selector-`5` action ids other than `50`, and all opcode-`156` field
-meanings remain neutral. Selector `5` is a keyboard action binding, and action
-id `50` is pickup, as established by the live control below. No security meaning
-is inferred.
+`2/4/6`, selector-`5` action id `52`, and all opcode-`156` field meanings
+remain neutral. Selector `5` is a keyboard action binding: action `50` is
+pickup, `51` is chair sit, `53` is jump, and `54` is NPC interaction, as
+established by the live controls below. No security meaning is inferred.
 
 All four forms now have full shape coverage and exact typed round trips. The
 fold records opcode/variant counts, 89 selector/value entries per expanded
@@ -1973,7 +1983,8 @@ retains only text length, flag, value/entry counts, and never the opcode-`156`
 text or raw values. Expanded opcode `385` additionally updates the current
 keyboard selector distribution plus skill- and action-binding maps, validates
 bound skill ids against initial progression, exposes the proven Left Ctrl, Z,
-and pickup bindings, and emits a `keyboard_bindings_loaded` event.
+Left Alt, Space, pickup, jump, and NPC-interaction bindings, and emits a
+`keyboard_bindings_loaded` event.
 
 The empty-binding role comes from a one-byte live A/B/A, not the zero value.
 The typed `keyboard-selector-zero=71` transform changed only key `71`'s
@@ -1996,8 +2007,8 @@ Restoring the exact `5/50` entry and presenting an admitted nearby drop
 produced authentic pickup opcode `185`. Folded snapshots show action-binding
 counts `6 -> 5 -> 6`, skill-binding counts `2 -> 3 -> 2`, and pickup keys
 `(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
-and value `50` as pickup; the fold exposes the numeric `52..54` action ids but
-does not assign them roles.
+and value `50` as pickup. The later controls below assign `51`, `53`, and `54`;
+only action `52` remains neutral.
 
 `--generate-variable-server-records` re-emits every bounded observation at its
 original frame index after length/reparse/uniqueness/conflict validation.
@@ -2059,6 +2070,23 @@ completed a state change.
 Safe state therefore carries `server_acknowledgement_modeled: false`. The live
 transcript is valid, warning-free, and back to zero unknown packets after these
 three codecs.
+
+## Jump and NPC-interaction keyboard actions
+
+The same unchanged opcode-`385` map binds action `53` to evdev Left Alt (`56`)
+and action `54` to Space (`57`). After restoring real host pointer focus to the
+nested client, physical Left Alt produced a visually decisive jump with no
+dedicated request packet. Physical Space emitted client opcode `64`; its object
+id resolved to the active NPC and establishes the request grammar documented
+above. Holding Space produced three repeats, so the fold counts raw requests
+rather than coalescing input repetition.
+
+Evdev keypad zero (`82`) remains bound to action `52`, but the controlled input
+did not produce a distinguishable action. The nearby blue `10` recovery display
+and alternating client opcode-`101` records were already occurring
+automatically; they are not evidence for action `52`. Safe keyboard state now
+publishes the validated key codes and the proven jump/NPC-interaction action
+ids and bindings while leaving action `52` unnamed.
 
 ## Skill-record change transaction (`client 103`, `server 46`, `client 293`)
 
@@ -2413,7 +2441,8 @@ The Python codec and native manifest consume and re-emit the record exactly.
 The automatic dump proves only that the opcode enum exists; it supplies no
 outgoing client handler or shape. The u32 value, action purpose, and causal
 relationship to the authoritative inventory change therefore remain neutral.
-Coverage advances to `26,661/44,439/0/0`.
+With opcode `64` promoted to full coverage, the current stream-`126` total is
+`26,664/44,436/0/0`.
 
 ## Consumable use (`client 80` -> `server 39`, `server 41`)
 
@@ -3644,6 +3673,12 @@ none. All 219 packets consume exactly and re-encode byte-for-byte.
 
 The shape manifest tentatively labeled the 32-bit field `client_tick`, but its
 two discrete, non-monotonic values do not support that semantic interpretation.
+The active local client independently emits alternating `(20,5)` and
+`(0x0a000014,0)` records on an automatic roughly one-second cadence alongside
+the blue `10` recovery display. Stream `92` also changes from sparse `(20,5)`
+records while moving to the same faster paired pattern later in the field.
+This disproves attributing the records or display to the controlled action-`52`
+key press, but does not by itself name the packet's recovery role.
 The codec and fold therefore preserve the exact numeric boundaries under
 neutral names, emit value distributions and events, and classify the family as
 partial semantic coverage.

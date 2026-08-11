@@ -54,7 +54,7 @@ from maple_server.packets import (  # noqa: E402
     ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
-    ClientOpcode64PositionAction,
+    ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
     ClientOpcode101Record,
@@ -705,7 +705,7 @@ def fixture_gameplay_transcript(
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
     opcode_426_acknowledgement: bool = False,
-    opcode_64_position_action: bool = False,
+    npc_interaction: bool = False,
     opcode_111_cash_slot_action: bool = False,
     skill_record_lifecycle: bool = False,
     stat_updates: bool = False,
@@ -1504,11 +1504,11 @@ def fixture_gameplay_transcript(
                 parameter=1,
             ).to_bytes(),
         )
-    if opcode_64_position_action:
+    if npc_interaction:
         append(
             "client_to_server",
-            ClientOpcode64PositionAction(
-                neutral_value=123_456,
+            ClientNpcInteractionRequest(
+                npc_object_id=NPC_OBJECT_ID,
                 position_x=132,
                 position_y=-168,
             ).to_bytes(),
@@ -2683,36 +2683,46 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
             replace(server, opaque_body=b"short").to_bytes()
 
-    def test_client_opcode_64_and_111_actions_round_trip(self) -> None:
-        position_payloads = (
+    def test_npc_interaction_and_client_opcode_111_round_trip(self) -> None:
+        interaction_payloads = (
             bytes.fromhex("400095990200c6001301"),
             bytes.fromhex("4000332e0000030d25ff"),
         )
-        positions = tuple(
-            ClientOpcode64PositionAction.parse(payload)
-            for payload in position_payloads
+        interactions = tuple(
+            ClientNpcInteractionRequest.parse(payload)
+            for payload in interaction_payloads
         )
         cash_payload = bytes.fromhex("6f007d7d06000300")
         cash_action = ClientOpcode111CashSlotAction.parse(cash_payload)
 
         self.assertEqual(
-            tuple(position.to_bytes() for position in positions),
-            position_payloads,
+            tuple(interaction.to_bytes() for interaction in interactions),
+            interaction_payloads,
         )
         self.assertEqual(
-            (positions[0].position_x, positions[0].position_y),
-            (198, 275),
+            (
+                interactions[0].npc_object_id,
+                interactions[0].position_x,
+                interactions[0].position_y,
+            ),
+            (170_389, 198, 275),
         )
         self.assertEqual(
-            (positions[1].position_x, positions[1].position_y),
-            (3_331, -219),
+            (
+                interactions[1].npc_object_id,
+                interactions[1].position_x,
+                interactions[1].position_y,
+            ),
+            (11_827, 3_331, -219),
         )
         self.assertEqual(cash_action.to_bytes(), cash_payload)
         self.assertEqual(cash_action.neutral_value, 425_341)
         self.assertEqual(cash_action.slot, 3)
         self.assertEqual(cash_action.safe_dict()["inventory"], "cash")
         with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
-            replace(positions[0], position_x=0x8000).to_bytes()
+            replace(interactions[0], position_x=0x8000).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
+            replace(interactions[0], npc_object_id=-1).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
             replace(cash_action, slot=0x8000).to_bytes()
 
@@ -3565,16 +3575,23 @@ class GameplayPacketShapeTest(unittest.TestCase):
         action_entries = list(records[2].entries)
         action_entries[44] = VariableServerEntry(selector=5, value=50)
         action_entries[45] = VariableServerEntry(selector=5, value=51)
+        action_entries[56] = VariableServerEntry(selector=5, value=53)
+        action_entries[57] = VariableServerEntry(selector=5, value=54)
         action_entries[78] = VariableServerEntry(selector=5, value=50)
+        action_entries[82] = VariableServerEntry(selector=5, value=52)
         action_record = replace(records[2], entries=tuple(action_entries))
         self.assertEqual(
             action_record.keyboard_action_bindings,
-            {44: 50, 45: 51, 78: 50},
+            {44: 50, 45: 51, 56: 53, 57: 54, 78: 50, 82: 52},
         )
         self.assertEqual(action_record.pickup_key_codes, (44, 78))
+        self.assertEqual(action_record.jump_key_codes, (56,))
+        self.assertEqual(action_record.npc_interaction_key_codes, (57,))
         self.assertEqual(records[3].keyboard_skill_bindings, {})
         self.assertEqual(records[3].keyboard_action_bindings, {})
         self.assertEqual(records[3].pickup_key_codes, ())
+        self.assertEqual(records[3].jump_key_codes, ())
+        self.assertEqual(records[3].npc_interaction_key_codes, ())
         self.assertEqual(records[3].empty_keyboard_binding_count, 0)
 
     def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
@@ -5155,7 +5172,13 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(keyboard_state["key_code_space"], "linux_evdev")
         self.assertEqual(
             keyboard_state["validated_key_codes"],
-            {"left_ctrl": 29, "z": 44},
+            {
+                "left_ctrl": 29,
+                "z": 44,
+                "left_alt": 56,
+                "space": 57,
+                "keypad_zero": 82,
+            },
         )
         self.assertEqual(
             keyboard_state["skill_bindings"],
@@ -6158,30 +6181,41 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
-    def test_correlates_opcode_64_position_and_opcode_111_cash_slot(self) -> None:
+    def test_correlates_npc_interaction_and_opcode_111_cash_slot(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
                 initial_snapshot=True,
                 player_movement=True,
-                opcode_64_position_action=True,
+                npc_interaction=True,
                 opcode_111_cash_slot_action=True,
             )
         )
 
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(analysis.warnings, ())
-        self.assertEqual(analysis.state.client_opcode_64_packets, 1)
+        self.assertEqual(analysis.state.npc_interaction_requests, 1)
         self.assertEqual(
-            analysis.state.client_opcode_64_neutral_values,
-            {123_456: 1},
-        )
-        self.assertEqual(analysis.state.client_opcode_64_position_matches, 1)
-        self.assertEqual(analysis.state.client_opcode_64_position_mismatches, 0)
-        self.assertEqual(
-            analysis.state.client_opcode_64_server_348_matches,
+            analysis.state.npc_interaction_requests_for_active_npcs,
             1,
         )
-        self.assertEqual(analysis.state.pending_client_opcode_64_actions, 0)
+        self.assertEqual(
+            analysis.state.npc_interaction_requests_for_unknown_npcs,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.npc_interaction_target_templates,
+            {1_032_000: 1},
+        )
+        self.assertEqual(analysis.state.npc_interaction_position_matches, 1)
+        self.assertEqual(
+            analysis.state.npc_interaction_position_mismatches,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.npc_interaction_server_348_matches,
+            1,
+        )
+        self.assertEqual(analysis.state.pending_npc_interaction_requests, 0)
         self.assertEqual(analysis.state.client_opcode_111_packets, 1)
         self.assertEqual(analysis.state.client_opcode_111_slots, {3: 1})
         self.assertEqual(
@@ -6199,7 +6233,10 @@ class GameplayStateFoldTest(unittest.TestCase):
             for observation in analysis.observations
             if observation.opcode == 111
         )
-        self.assertEqual(opcode_64.coverage.value, "partial")
+        self.assertEqual(opcode_64.coverage.value, "full")
+        self.assertEqual(opcode_64.kind, "npc_interaction_request")
+        self.assertTrue(opcode_64.details["active_npc"])
+        self.assertEqual(opcode_64.details["npc_template_id"], 1_032_000)
         self.assertTrue(
             opcode_64.details["position_matches_last_life_movement"]
         )
@@ -6210,7 +6247,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             if event.kind == "server_opcode_348_received"
         )
         self.assertEqual(
-            server_response.details["client_opcode_64_response"][
+            server_response.details["npc_interaction_response"][
                 "request_frame"
             ],
             opcode_64.frame_index,
@@ -6227,13 +6264,64 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         report = analysis.safe_dict()["state"]
         self.assertEqual(
-            report["client_opcode_64"]["life_movement_position_matches"],
+            report["npc_interactions"]["active_npc_matches"],
+            1,
+        )
+        self.assertEqual(
+            report["npc_interactions"]["life_movement_position_matches"],
             1,
         )
         self.assertEqual(report["client_opcode_111"]["cash_slot_matches"], 1)
         rendered = render_gameplay_analysis(analysis)
-        self.assertIn("client_opcode_64=packets:1", rendered)
+        self.assertIn("npc_interactions=requests:1", rendered)
         self.assertIn("client_opcode_111=packets:1", rendered)
+
+    def test_warns_on_unresolved_npc_interaction(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                player_movement=True,
+                extra_client_plaintexts=(
+                    ClientNpcInteractionRequest(
+                        npc_object_id=987_654_321,
+                        position_x=0,
+                        position_y=0,
+                    ).to_bytes(),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.npc_interaction_requests, 1)
+        self.assertEqual(
+            analysis.state.npc_interaction_requests_for_unknown_npcs,
+            1,
+        )
+        self.assertEqual(analysis.state.npc_interaction_position_mismatches, 1)
+        self.assertEqual(analysis.state.pending_npc_interaction_requests, 1)
+        self.assertTrue(
+            any(
+                "inactive field NPCs" in warning
+                for warning in analysis.warnings
+            )
+        )
+        self.assertTrue(
+            any(
+                "positions did not match" in warning
+                for warning in analysis.warnings
+            )
+        )
+        self.assertTrue(
+            any("no following" in warning for warning in analysis.warnings)
+        )
+        request = next(
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 64
+        )
+        self.assertEqual(request.coverage.value, "full")
+        self.assertFalse(request.details["active_npc"])
+        self.assertNotIn("987654321", repr(analysis.safe_dict()))
 
     def test_correlates_client_opcode_66_with_server_opcode_348(self) -> None:
         requests = tuple(
@@ -7374,12 +7462,15 @@ class GameplayStateFoldTest(unittest.TestCase):
             {29: 2_001_005, 71: 2_001_002},
         )
 
-    def test_folds_keyboard_pickup_action_binding(self) -> None:
+    def test_folds_keyboard_action_bindings(self) -> None:
         original = fixture_variable_server_records()[2]
         entries = list(original.entries)
         entries[44] = VariableServerEntry(selector=5, value=50)
         entries[45] = VariableServerEntry(selector=5, value=51)
+        entries[56] = VariableServerEntry(selector=5, value=53)
+        entries[57] = VariableServerEntry(selector=5, value=54)
         entries[78] = VariableServerEntry(selector=5, value=50)
+        entries[82] = VariableServerEntry(selector=5, value=52)
         bound = replace(original, entries=tuple(entries))
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -7392,17 +7483,30 @@ class GameplayStateFoldTest(unittest.TestCase):
         keyboard_state = analysis.safe_dict()["state"]["keyboard_bindings"]
         self.assertEqual(
             keyboard_state["action_bindings"],
-            {44: 50, 45: 51, 78: 50},
+            {44: 50, 45: 51, 56: 53, 57: 54, 78: 50, 82: 52},
         )
         self.assertEqual(keyboard_state["pickup_action_id"], 50)
         self.assertEqual(keyboard_state["pickup_key_codes"], (44, 78))
-        self.assertEqual(keyboard_state["validated_key_codes"]["z"], 44)
+        self.assertEqual(keyboard_state["jump_action_id"], 53)
+        self.assertEqual(keyboard_state["jump_key_codes"], (56,))
+        self.assertEqual(keyboard_state["npc_interaction_action_id"], 54)
+        self.assertEqual(keyboard_state["npc_interaction_key_codes"], (57,))
+        self.assertEqual(
+            keyboard_state["validated_key_codes"],
+            {
+                "left_ctrl": 29,
+                "z": 44,
+                "left_alt": 56,
+                "space": 57,
+                "keypad_zero": 82,
+            },
+        )
         loaded = next(
             event
             for event in analysis.events
             if event.kind == "keyboard_bindings_loaded"
         )
-        self.assertEqual(loaded.details["action_binding_count"], 3)
+        self.assertEqual(loaded.details["action_binding_count"], 6)
         self.assertEqual(loaded.details["pickup_binding_count"], 2)
         self.assertEqual(loaded.details["pickup_key_codes"], (44, 78))
 
@@ -8331,10 +8435,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(chair_state["recovery_requests_with_open_sit"], 1)
         self.assertFalse(chair_state["server_acknowledgement_modeled"])
 
-    def test_field_change_clears_open_chair_intent(self) -> None:
+    def test_field_change_clears_open_field_intents(self) -> None:
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
+            player_movement=True,
             extra_directional_plaintexts=(
+                (
+                    "client_to_server",
+                    ClientNpcInteractionRequest(
+                        npc_object_id=NPC_OBJECT_ID,
+                        position_x=132,
+                        position_y=-168,
+                    ).to_bytes(),
+                ),
                 ("client_to_server", ChairSitRequest(3_010_370).to_bytes()),
                 (
                     "server_to_client",
@@ -8351,6 +8464,14 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.field_epoch, 2)
         self.assertEqual(analysis.state.chair_sit_requests, 1)
         self.assertIsNone(analysis.state.requested_chair_item_id)
+        self.assertEqual(analysis.state.npc_interaction_requests, 1)
+        self.assertEqual(analysis.state.pending_npc_interaction_requests, 0)
+        self.assertFalse(
+            any(
+                "NPC interaction requests had no following" in warning
+                for warning in analysis.warnings
+            )
+        )
         field_observations = [
             observation
             for observation in analysis.observations
@@ -8359,6 +8480,10 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(field_observations), 2)
         self.assertFalse(field_observations[0].details["cleared_chair_sit_intent"])
         self.assertTrue(field_observations[1].details["cleared_chair_sit_intent"])
+        self.assertEqual(
+            field_observations[1].details["cleared_npc_interaction_requests"],
+            1,
+        )
 
     def test_correlates_item_pickup_effect_notice_and_removal_chains(self) -> None:
         analysis = analyze_gameplay_transcript(
