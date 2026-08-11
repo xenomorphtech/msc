@@ -840,6 +840,8 @@ class TranscriptTest(unittest.TestCase):
                 "matched-heartbeat",
                 "--mob-movement-policy-cooldown-seconds",
                 "5",
+                "--mob-movement-policy-event-budget",
+                "1",
             ]
         )
 
@@ -857,6 +859,7 @@ class TranscriptTest(unittest.TestCase):
             arguments.mob_movement_policy_trigger, "matched-heartbeat"
         )
         self.assertEqual(arguments.mob_movement_policy_cooldown_seconds, 5)
+        self.assertEqual(arguments.mob_movement_policy_event_budget, 1)
         served_arguments = build_parser().parse_args(
             [
                 "replay",
@@ -2835,7 +2838,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(complete["state"]["next_step"], None)
 
-    async def test_relative_mob_policy_waits_for_matched_heartbeat(
+    async def test_relative_mob_policy_enforces_heartbeat_event_budget(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2858,6 +2861,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.data("server_to_client", greeting + captured_frame)
             source_writer.close()
             source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
             object_id = 20_001
 
             def broadcast(reference_x: int, target_x: int, stance: int):
@@ -2913,7 +2917,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 shortest_sequence_count=1,
             )
             relative_policy = MobMovementRelativeDecisionPolicy(
-                decision_count=1,
+                decision_count=2,
                 max_steps=2,
                 displacement_x=50,
                 displacement_y=0,
@@ -2946,6 +2950,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             strict=False,
+                            transcript_directory=observed_directory,
                             post_transcript_server_frames=(
                                 first_broadcast.to_bytes(),
                             ),
@@ -2953,6 +2958,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             mob_movement_follow_up_policy=relative_policy,
                             mob_movement_evidence_transcript=source,
                             mob_movement_policy_trigger="matched_heartbeat",
+                            mob_movement_policy_event_budget=1,
                             hold_open_seconds=0.2,
                             world_heartbeat_interval_seconds=0.05,
                             runtime_protocol=runtime_protocol,
@@ -3028,6 +3034,37 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     second_broadcast,
                 )
                 planner.assert_called_once()
+
+                second_heartbeat_wire = await reader.readexactly(6)
+                second_heartbeat_iv = shuffle_iv(follow_iv)
+                self.assertEqual(
+                    HeartbeatProbe.parse(
+                        crypt_payload(
+                            second_heartbeat_wire[4:],
+                            second_heartbeat_iv,
+                        )
+                    ),
+                    HeartbeatProbe(),
+                )
+                second_response_iv = shuffle_iv(client_iv)
+                writer.write(
+                    encode_frame_header(
+                        len(response), second_response_iv, 300
+                    )
+                    + crypt_payload(response, second_response_iv)
+                )
+                await writer.drain()
+                await asyncio.sleep(0.01)
+                trigger_metrics = runtime_protocol[
+                    "mob_movement_broadcast"
+                ]["policy_trigger"]
+                self.assertEqual(trigger_metrics["matched_events_observed"], 2)
+                self.assertFalse(trigger_metrics["awaiting_event"])
+                self.assertEqual(
+                    trigger_metrics["last_event_outcome"],
+                    "rejected_by_event_budget",
+                )
+                planner.assert_called_once()
                 writer.close()
                 await writer.wait_closed()
                 await asyncio.gather(*tasks)
@@ -3036,14 +3073,41 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
 
             movement_metrics = runtime_protocol["mob_movement_broadcast"]
             self.assertEqual(movement_metrics["packets_sent"], 2)
-            self.assertEqual(movement_metrics["state"]["phase"], "complete")
+            self.assertEqual(movement_metrics["state"]["phase"], "planning")
             trigger_metrics = movement_metrics["policy_trigger"]
             self.assertFalse(trigger_metrics["awaiting_event"])
-            self.assertEqual(trigger_metrics["matched_events_observed"], 1)
+            self.assertEqual(trigger_metrics["matched_events_observed"], 2)
             self.assertEqual(trigger_metrics["decisions_started"], 1)
             self.assertEqual(trigger_metrics["decisions_completed"], 1)
+            self.assertEqual(trigger_metrics["event_budget"], 1)
+            self.assertEqual(trigger_metrics["event_budget_used"], 1)
+            self.assertEqual(trigger_metrics["event_budget_remaining"], 0)
+            self.assertEqual(trigger_metrics["events_rejected_by_budget"], 1)
+            self.assertEqual(
+                trigger_metrics["last_event_outcome"],
+                "rejected_by_event_budget",
+            )
             self.assertEqual(
                 trigger_metrics["events_ignored_after_completion"], 0
+            )
+            observed_path = next(observed_directory.glob("*.jsonl"))
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(observed_path)
+            )
+            budget_rejection = next(
+                event
+                for event in analysis.events
+                if event.kind == "mob_movement_policy_trigger_rejected"
+            )
+            self.assertEqual(
+                budget_rejection.details,
+                {
+                    "trigger": "matched_heartbeat",
+                    "reason": "event_budget",
+                    "event_budget": 1,
+                    "event_budget_remaining": 0,
+                    "cooldown_remaining_seconds": 0.0,
+                },
             )
 
     async def test_relative_mob_policy_waits_for_served_mob_movement(

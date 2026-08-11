@@ -357,6 +357,10 @@ two owner words to the character id validated between client opcode `8` and
 the initial snapshot. The two rewrites may be composed on the same frame. The
 owner rewrite does not assert pickup eligibility: live owner-only and
 captured-shaped animated-drop probes both produced zero opcode-`185` requests.
+A later bounded control introduced a typed source mob, removed it immediately
+before a mode-`1`/mode-`0` item pair at the player, and repeated the sequence
+with an explicit controller release. All variants retained a known source-mob
+history but still produced neither opcode `185` nor compact opcode `222`.
 Pair the position rewrite with
 `--reactive-item-pickup-responses` to handle a real client opcode-`185` or
 compact opcode-`222` request from modeled state. Pickup quantities and
@@ -1122,6 +1126,14 @@ counted in `events_rejected_by_cooldown` but neither plan nor send movement;
 the first qualifying event after expiry can re-arm one pending decision. Safe
 API state also reports `cooldown_seconds`, `last_event_outcome`, and
 `last_cooldown_remaining_seconds`.
+
+`--mob-movement-policy-event-budget EVENTS` independently caps accepted
+event-driven triggers to `1..8` for one connection. Each accepted trigger
+consumes one unit before planning; once exhausted, later qualifying events are
+observed and counted in `events_rejected_by_budget` but cannot plan or send a
+packet, even after the cooldown expires. The immediate trigger rejects this
+option. Safe status includes the configured, used, and remaining budget, and
+the runtime annotation records `reason: event_budget` without identifiers.
 
 In the browser-free five-second live proof, heartbeat response frame `78`
 authorized movement frames `79`/`80`; response frames `82`, `84`, and `86`

@@ -1404,15 +1404,23 @@ aliased drop, item template, flag, frame/field epoch, patch count, and the
 identifier-free prediction fields `drop_owner_fields: match_initial_player`
 and `pickup_eligibility: requires_additional_client_conditions`.
 
-That conservative prediction follows the real-client result: rewriting the
-mode-`2` owner words did not produce opcode `185`, and neither did a second
-probe that sent a captured-shaped mode-`1`/mode-`0` pair at the final player
-position. The client stayed responsive, the pickup key binding and direct
-Wayland input were verified, and the reactive API recorded zero pickup
-requests. Owner equality and proximity are therefore not sufficient on their
-own; the next experiment must isolate the remaining client eligibility state
-instead of treating a generated response as proof that the client accepted
-the drop.
+That conservative prediction follows two generations of real-client controls.
+Rewriting the mode-`2` owner words did not produce opcode `185`, and neither
+did a captured-shaped mode-`1`/mode-`0` pair at the final player position. The
+fresh transcript
+`downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786458087377858805_replay_12857.jsonl`
+then retained a known typed source-mob lifecycle and tried three animated pairs:
+one after earlier source history, one less than a millisecond after mob entry
+and leave, and one with an explicit controller-level-`0` release before leave.
+All owner fields matched the player and every pair was at the player position;
+none produced opcode `185` or compact opcode `222`, including after verified
+physical pickup-key input. The fold remains `active`, valid, and warning-free
+at the bounded control snapshot, with zero pickup requests and 141/141 matched
+heartbeats. Owner equality, proximity, source-mob presence/history, immediate
+lifecycle timing, and controller release are therefore not sufficient alone.
+The exact captured
+pre-drop neighborhood's combat/reward state remains a bounded candidate; a
+generated server response is not evidence that the client accepted the drop.
 
 ## Reactive mob-health validation
 
@@ -1919,6 +1927,25 @@ folds validly with no warnings through
 type-`0` commands, and 16/16 matched heartbeats. The live client remained
 connected throughout and kept answering probes.
 
+Accepted event-driven decisions can also be capped independently of that
+timer:
+
+```text
+--mob-movement-policy-trigger matched-heartbeat
+--mob-movement-policy-event-budget 1
+```
+
+The budget is optional, bounded to `1..8`, and invalid for the immediate
+trigger. An accepted event consumes one unit before planning. After exhaustion,
+qualifying events remain observable but produce no plan or packet regardless
+of cooldown state. Safe `policy_trigger` telemetry exposes `event_budget`,
+`event_budget_used`, `event_budget_remaining`, and
+`events_rejected_by_budget`; the rejection annotation uses
+`reason: event_budget`. An encrypted integration test drives two matched
+heartbeat responses into a two-decision policy with budget one, proves only
+the first decision is planned and sent, and leaves the second decision
+explicitly budget-blocked.
+
 Recorded replays now preserve the scheduler side of that proof as safe
 `runtime_event` JSONL records. Each qualifying trigger records an observation,
 then a start/completion, cooldown rejection, or completed-queue ignore outcome.
@@ -2187,9 +2214,11 @@ project's own `README.md` for all options.
   slot `7`, quantity `74`, and the four matching stream-`92` effects. Its
   position rewrite round-trips at the same 38-byte width, and encrypted replay
   tests produce the predicted opcodes `39,49,312` and mutable `74 -> 75` state.
-- Live owner-only and captured-shaped animated-drop probes both produced zero
-  opcode-`185` requests, so runtime telemetry now treats owner equality as a
-  modeled field relation rather than proof of pickup eligibility.
+- Live owner-only and captured-shaped animated-drop probes produced zero
+  opcode-`185`/`222` requests. A fresh typed source-mob control also remained
+  negative across delayed leave, immediate enter/leave, and explicit
+  controller-release variants, so owner/proximity/source history and lifecycle
+  timing remain modeled relations rather than proof of pickup eligibility.
 - An opt-in reactive mob-health policy now adopts exact typed mob state and
   emits per-hit opcode-`293` updates plus opcode-`280` reason `1` on death. A
   real typed-snail injection received opcode-`52` damage `[27,32]`, produced
@@ -2212,8 +2241,9 @@ project's own `README.md` for all options.
 Replace the remaining opaque replay portions with stateful handling:
 
 1. Isolate the additional client-side drop eligibility condition using the
-   now-falsified owner/proximity baseline, then run the reactive pickup effect
-   only after the real client emits opcode `185` or compact opcode `222`.
+   now-falsified owner/proximity/source-lifecycle controls; test the captured
+   combat/reward neighborhood next, then run the reactive pickup effect only
+   after the real client emits opcode `185` or compact opcode `222`.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
    retain neutral roles for the opcode-`394`/`279` correlation.

@@ -2282,12 +2282,19 @@ Stream `114` ends with one active mode-`2` item drop: template `4000004` at
 the Etc inventory contains the same template in slot `7`, quantity `74`.
 
 The owner fields are not a sufficient pickup switch. A typed live replay
-rewrote both final mode-`2` owner words to the initial player id, and a second
-probe sent a captured-shaped mode-`1`/mode-`0` pair at the player's position.
-The client remained healthy and direct input was verified, but neither probe
-emitted opcode `185`. Runtime status therefore reports only that the owner
-fields match the initial player and predicts that additional client conditions
-are required; it does not claim that the rewritten drop is pickup-eligible.
+rewrote both final mode-`2` owner words to the initial player id, and later
+controls sent captured-shaped mode-`1`/mode-`0` pairs at the player. The fresh
+source-mob controls preserved a known typed mob in field history, tested a
+pair less than a millisecond after enter/leave, and repeated it with an
+explicit controller-level-`0` release before leave. The client stayed healthy
+and physical pickup input was verified, but no variant emitted opcode `185` or
+compact opcode `222`. The bounded transcript snapshot was valid and
+warning-free with 141/141 matched heartbeats and zero pickup requests. Runtime
+status therefore reports only the modeled owner/source relations: owner
+equality, proximity, source-mob presence/history, immediate lifecycle timing,
+and controller
+release are not independently sufficient. The combat/reward records in the
+captured pre-drop neighborhood remain neutral candidates.
 
 ## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 
@@ -2988,6 +2995,17 @@ two started/completed decisions and three cooldown rejections. The independent
 fold is valid with no warnings, exact
 `785 -> 833 -> 881 -> 929 -> 977 -> 1025` continuity, five broadcasts,
 twenty-five type-`0` commands, and 16/16 matched heartbeats.
+
+An optional connection-local event budget is a separate scheduling invariant.
+Its bound is `1..8`, and it applies only to event-driven triggers. Every
+accepted trigger consumes one unit before planning; after the remaining count
+reaches zero, later qualifying events are observed and rejected without
+planning or emitting opcode `282`, even when no cooldown is active. Safe HTTP
+state exposes configured/used/remaining counts plus
+`events_rejected_by_budget`. Runtime rejection annotations use
+`reason: event_budget`; no wire field or identifier is added. Encrypted test
+coverage sends two valid heartbeat matches to a two-decision policy with a
+budget of one and proves that exactly one follow-up decision drains.
 
 Because trigger acceptance is server policy rather than a Maple wire packet,
 observed replay JSONL can include a separate `runtime_event` record. Its

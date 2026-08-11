@@ -421,6 +421,7 @@ async def replay_connection(
     mob_movement_policy_trigger: str = "immediate",
     mob_movement_proximity_radius: int | None = None,
     mob_movement_policy_cooldown_seconds: float = 0.0,
+    mob_movement_policy_event_budget: int | None = None,
     mob_movement_evidence_transcript: Transcript | None = None,
     mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
@@ -570,6 +571,26 @@ async def replay_connection(
     ):
         raise ValueError(
             "mob movement policy cooldown requires an event-driven trigger"
+        )
+    if (
+        mob_movement_policy_event_budget is not None
+        and not (
+            1
+            <= mob_movement_policy_event_budget
+            <= MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS
+        )
+    ):
+        raise ValueError(
+            "mob movement policy event budget must be in "
+            f"1..{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS}"
+        )
+    if (
+        mob_movement_policy_event_budget is not None
+        and mob_movement_policy_trigger == "immediate"
+    ):
+        raise ValueError(
+            "mob movement policy event budget requires an event-driven "
+            "trigger"
         )
     player_proximity_predicate = (
         PlayerMobProximityPredicate(mob_movement_proximity_radius)
@@ -806,6 +827,16 @@ async def replay_connection(
         movement_policy_trigger_metrics["cooldown_seconds"] = (
             mob_movement_policy_cooldown_seconds
         )
+        movement_policy_trigger_metrics["event_budget"] = (
+            mob_movement_policy_event_budget
+        )
+        movement_policy_trigger_metrics["event_budget_used"] = 0
+        movement_policy_trigger_metrics["event_budget_remaining"] = (
+            mob_movement_policy_event_budget
+        )
+        movement_policy_trigger_metrics.setdefault(
+            "events_rejected_by_budget", 0
+        )
         movement_policy_trigger_metrics.setdefault(
             "events_rejected_by_cooldown", 0
         )
@@ -918,6 +949,9 @@ async def replay_connection(
                 ),
                 "mob_movement_policy_cooldown_seconds": (
                     mob_movement_policy_cooldown_seconds
+                ),
+                "mob_movement_policy_event_budget": (
+                    mob_movement_policy_event_budget
                 ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
@@ -1196,6 +1230,7 @@ async def replay_connection(
                 packets_sent_this_call += 1
 
         movement_policy_cooldown_until = 0.0
+        movement_policy_event_budget_used = 0
 
         def record_runtime_event(
             kind: str,
@@ -1218,9 +1253,19 @@ async def replay_connection(
 
         async def observe_movement_policy_trigger_event() -> None:
             nonlocal movement_policy_cooldown_until
+            nonlocal movement_policy_event_budget_used
             now = asyncio.get_running_loop().time()
             cooldown_remaining = max(
                 0.0, movement_policy_cooldown_until - now
+            )
+            event_budget_remaining = (
+                None
+                if mob_movement_policy_event_budget is None
+                else max(
+                    0,
+                    mob_movement_policy_event_budget
+                    - movement_policy_event_budget_used,
+                )
             )
             if movement_policy_trigger_metrics is not None:
                 movement_policy_trigger_metrics["awaiting_event"] = False
@@ -1240,6 +1285,7 @@ async def replay_connection(
                     "cooldown_remaining_seconds": round(
                         cooldown_remaining, 6
                     ),
+                    "event_budget_remaining": event_budget_remaining,
                 },
             )
             if not isinstance(
@@ -1262,6 +1308,31 @@ async def replay_connection(
                     "mob_movement_policy_trigger_ignored",
                     {
                         "reason": "decision_queue_complete",
+                        "cooldown_remaining_seconds": round(
+                            cooldown_remaining, 6
+                        ),
+                    },
+                )
+                return
+            if event_budget_remaining == 0:
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["awaiting_event"] = False
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "rejected_by_event_budget"
+                    movement_policy_trigger_metrics[
+                        "events_rejected_by_budget"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "events_rejected_by_budget", 0
+                        )
+                    ) + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_trigger_rejected",
+                    {
+                        "reason": "event_budget",
+                        "event_budget": mob_movement_policy_event_budget,
+                        "event_budget_remaining": 0,
                         "cooldown_remaining_seconds": round(
                             cooldown_remaining, 6
                         ),
@@ -1300,7 +1371,23 @@ async def replay_connection(
                 )
                 and not movement_schedule.complete
             ):
+                movement_policy_event_budget_used += 1
+                event_budget_remaining = (
+                    None
+                    if mob_movement_policy_event_budget is None
+                    else max(
+                        0,
+                        mob_movement_policy_event_budget
+                        - movement_policy_event_budget_used,
+                    )
+                )
                 if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["event_budget_used"] = (
+                        movement_policy_event_budget_used
+                    )
+                    movement_policy_trigger_metrics[
+                        "event_budget_remaining"
+                    ] = event_budget_remaining
                     movement_policy_trigger_metrics[
                         "decisions_started"
                     ] = int(
@@ -1336,6 +1423,7 @@ async def replay_connection(
                     )
                     movement_policy_trigger_metrics["awaiting_event"] = (
                         movement_schedule.has_unplanned_decision
+                        and event_budget_remaining != 0
                     )
                     movement_policy_trigger_metrics[
                         "last_event_outcome"
@@ -1347,6 +1435,7 @@ async def replay_connection(
                         "cooldown_seconds": (
                             mob_movement_policy_cooldown_seconds
                         ),
+                        "event_budget_remaining": event_budget_remaining,
                     },
                 )
                 movement_policy_cooldown_until = (
@@ -3280,6 +3369,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--mob-movement-policy-event-budget",
+        type=int,
+        metavar="EVENTS",
+        help=(
+            "accept at most EVENTS qualifying event-driven movement-policy "
+            "triggers, independently of the cooldown; EVENTS must be in "
+            f"1..{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS}"
+        ),
+    )
+    replay.add_argument(
         "--reactive-mob-health-responses",
         action="store_true",
         help=(
@@ -4308,6 +4407,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         mob_movement_policy_cooldown_seconds = (
             arguments.mob_movement_policy_cooldown_seconds
         )
+        mob_movement_policy_event_budget = (
+            arguments.mob_movement_policy_event_budget
+        )
         if (
             mob_movement_follow_up_targets
             and mob_movement_follow_up_policy is not None
@@ -4378,6 +4480,26 @@ async def async_main(arguments: argparse.Namespace) -> None:
         ):
             raise ValueError(
                 "--mob-movement-policy-cooldown-seconds requires an "
+                "event-driven --mob-movement-policy-trigger"
+            )
+        if (
+            mob_movement_policy_event_budget is not None
+            and not (
+                1
+                <= mob_movement_policy_event_budget
+                <= MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS
+            )
+        ):
+            raise ValueError(
+                "--mob-movement-policy-event-budget must be in "
+                f"1..{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS}"
+            )
+        if (
+            mob_movement_policy_event_budget is not None
+            and mob_movement_policy_trigger == "immediate"
+        ):
+            raise ValueError(
+                "--mob-movement-policy-event-budget requires an "
                 "event-driven --mob-movement-policy-trigger"
             )
         if (
@@ -4571,6 +4693,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "cooldown_seconds": (
                     mob_movement_policy_cooldown_seconds
                 ),
+                "event_budget": mob_movement_policy_event_budget,
+                "event_budget_used": 0,
+                "event_budget_remaining": (
+                    mob_movement_policy_event_budget
+                ),
+                "events_rejected_by_budget": 0,
                 "events_rejected_by_cooldown": 0,
                 "last_event_outcome": None,
                 "last_cooldown_remaining_seconds": 0.0,
@@ -4670,6 +4798,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             mob_movement_policy_cooldown_seconds=(
                 mob_movement_policy_cooldown_seconds
             ),
+            mob_movement_policy_event_budget=(
+                mob_movement_policy_event_budget
+            ),
             mob_movement_evidence_transcript=(
                 movement_evidence_transcript
             ),
@@ -4760,6 +4891,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "mob_movement_policy_cooldown_seconds": (
                 mob_movement_policy_cooldown_seconds
+            ),
+            "mob_movement_policy_event_budget": (
+                mob_movement_policy_event_budget
             ),
             "mob_movement_step_delay_seconds": (
                 arguments.mob_movement_step_delay_seconds

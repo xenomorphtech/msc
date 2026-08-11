@@ -702,8 +702,13 @@
 - The corresponding real-client owner/proximity hypothesis was falsified:
   neither a mode-`2` owner rewrite nor a captured-shaped mode-`1`/mode-`0`
   pair at the player position caused opcode `185`, despite verified pickup-key
-  binding and direct Wayland input. Runtime prediction now explicitly says
-  that owner equality requires additional client conditions.
+  binding and direct Wayland input. Fresh typed source-mob controls also stayed
+  negative after delayed leave, an immediate enter/leave-to-drop sequence, and
+  an explicit controller release. The warning-free active fold contains zero
+  opcode-`185`/`222` requests and had 141/141 heartbeats at the bounded control
+  snapshot. Runtime prediction now explicitly says that
+  owner/proximity/source history and lifecycle timing require additional client
+  conditions.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -983,6 +988,15 @@ predicted `(1025,-2677)`, and contains five broadcasts/twenty-five type-`0`
 commands plus 16/16 matched heartbeats. The HTTP status route remains
 read-only.
 
+Event-driven movement policies now also accept an optional connection-local
+`1..8` event budget independent of the cooldown. Accepted triggers consume one
+unit before planning; qualifying events after exhaustion are counted and
+annotated with `reason: event_budget` but emit no movement. Safe status reports
+configured, used, remaining, and rejected counts. An encrypted two-heartbeat
+integration test with a two-decision policy and budget one proves that only
+the first decision is planned/sent and that the second remains explicitly
+budget-blocked. The immediate trigger rejects this option.
+
 Replay transcripts now make policy decisions directly auditable. Bounded,
 JSON-safe `runtime_event` records capture trigger observations, decision
 starts/completions, cooldown rejections, and completed-queue ignores without
@@ -1014,17 +1028,16 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Use the owner/proximity negative controls to isolate the remaining
-   client-side drop eligibility condition; serve a reactive pickup only after
+1. Use the owner/proximity/source-lifecycle negative controls to test the
+   captured combat/reward neighborhood; serve a reactive pickup only after
    observing an authentic opcode-`185` or compact opcode-`222` request.
 2. Determine whether client opcode `104` requires a modeled server response,
    then use one-field controls to test whether opcode-`385` selector `0` is an
    empty binding without assigning meanings to selectors `2/4/5/6`.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
-4. Add a bounded per-trigger event budget so repeated valid gameplay events
-   can be rate-limited independently of the shared cooldown while keeping
-   packet injection an explicit, loopback-only opt-in.
+4. Keep packet injection an explicit loopback-only opt-in while expanding
+   stateful handlers only from independently validated evidence.
 
 ## Useful proof artifacts
 
