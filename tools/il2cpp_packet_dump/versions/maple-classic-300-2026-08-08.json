@@ -365,6 +365,17 @@
       ]
     },
     {
+      "name":"client_positioned_effect_action","direction":"client_to_server","opcode":225,"length":16,
+      "source":"packets.py:ClientOpcode225PositionedEffectAction; 1-10FS stream-126 all 15 records reference a current-field server opcode-320/322/323 primary key and immediately follow client opcode 50",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":225},
+        {"op":"read","name":"primary_value","kind":"i32"},
+        {"op":"read","name":"value_1","kind":"u32"},
+        {"op":"read","name":"value_2","kind":"u32"},
+        {"op":"read","name":"trailing_value","kind":"u16"}
+      ]
+    },
+    {
       "name":"item_use_request","direction":"client_to_server","opcode":80,"length":12,
       "source":"packets.py:ItemUseRequest; capture 111 stream 92",
       "operations":[

@@ -24,6 +24,7 @@ from .packets import (
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
+    ClientOpcode225PositionedEffectAction,
     ClientOpcode279TextEnvelope,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
@@ -986,6 +987,18 @@ class GameplayGameState:
     positioned_effect_updates: int = 0
     positioned_effect_unknown_updates: int = 0
     positioned_effect_control_values: Counter[str] = field(
+        default_factory=Counter
+    )
+    client_positioned_effect_actions: int = 0
+    client_effect_actions_known_entities: int = 0
+    client_effect_actions_after_attack: int = 0
+    client_effect_action_values_1: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_effect_action_values_2: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_effect_action_trailing_values: Counter[int] = field(
         default_factory=Counter
     )
     server_opcode_169_packets: int = 0
@@ -4291,6 +4304,26 @@ class GameplayAnalysis:
                         self.state.positioned_effect_control_values
                     ),
                 },
+                "client_positioned_effect_actions": {
+                    "packet_count": (
+                        self.state.client_positioned_effect_actions
+                    ),
+                    "known_entity_count": (
+                        self.state.client_effect_actions_known_entities
+                    ),
+                    "after_attack_count": (
+                        self.state.client_effect_actions_after_attack
+                    ),
+                    "values_1": dict(
+                        self.state.client_effect_action_values_1
+                    ),
+                    "values_2": dict(
+                        self.state.client_effect_action_values_2
+                    ),
+                    "trailing_values": dict(
+                        self.state.client_effect_action_trailing_values
+                    ),
+                },
                 "server_opcode_169": {
                     "packet_count": self.state.server_opcode_169_packets,
                     "selectors": dict(self.state.server_opcode_169_selectors),
@@ -4575,6 +4608,7 @@ class GameplayStateFold:
         self._last_server_attack_relay: (
             tuple[PlainFrame, ServerAttackRelay] | None
         ) = None
+        self._last_client_packet: tuple[int, int, int] | None = None
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
 
@@ -4950,6 +4984,8 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        previous_client_packet = self._last_client_packet
+        self._last_client_packet = (frame.index, opcode, self.state.field_epoch)
         if opcode == 8:
             request = WorldEntryRequest.parse(payload)
             if self.state.entry_character_id is not None:
@@ -6103,6 +6139,57 @@ class GameplayStateFold:
                 issues=(
                     "client opcode-217 prefix, records, trailer, and effect "
                     "semantics remain opaque",
+                ),
+            )
+        if opcode == 225:
+            action = ClientOpcode225PositionedEffectAction.parse(payload)
+            existing = self.state.positioned_effect_entities.get(
+                action.primary_value
+            )
+            alias = self._alias(
+                self._positioned_effect_aliases,
+                action.primary_value,
+                "effect",
+            )
+            known_entity = existing is not None
+            preceding_attack = (
+                previous_client_packet is not None
+                and previous_client_packet[1] == 50
+                and previous_client_packet[2] == self.state.field_epoch
+            )
+            self.state.client_positioned_effect_actions += 1
+            if known_entity:
+                self.state.client_effect_actions_known_entities += 1
+            if preceding_attack:
+                self.state.client_effect_actions_after_attack += 1
+            self.state.client_effect_action_values_1[action.value_1] += 1
+            self.state.client_effect_action_values_2[action.value_2] += 1
+            self.state.client_effect_action_trailing_values[
+                action.trailing_value
+            ] += 1
+            details: dict[str, object] = {
+                "entity": alias,
+                **action.safe_dict(),
+                "known_entity": known_entity,
+                "preceding_client_attack": preceding_attack,
+                "field_epoch": self.state.field_epoch,
+            }
+            if preceding_attack and previous_client_packet is not None:
+                details["preceding_attack_frame"] = previous_client_packet[0]
+            self._event(
+                frame,
+                "positioned_effect_action_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_positioned_effect_action",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=action,
+                details=details,
+                issues=(
+                    "client opcode-225 values and higher-level action role "
+                    "remain neutral",
                 ),
             )
         return self._observation(
@@ -11675,6 +11762,15 @@ def render_gameplay_analysis(
     positioned_effect_opcodes = json.dumps(
         dict(sorted(state.positioned_effect_records_by_opcode.items()))
     )
+    client_effect_action_values_1 = json.dumps(
+        dict(sorted(state.client_effect_action_values_1.items()))
+    )
+    client_effect_action_values_2 = json.dumps(
+        dict(sorted(state.client_effect_action_values_2.items()))
+    )
+    client_effect_action_trailing_values = json.dumps(
+        dict(sorted(state.client_effect_action_trailing_values.items()))
+    )
     player_stat_masks = json.dumps(
         {
             f"0x{mask:08x}": count
@@ -12292,6 +12388,17 @@ def render_gameplay_analysis(
             f"updates:{state.positioned_effect_updates} "
             f"unknown_updates:{state.positioned_effect_unknown_updates} "
             f"controls:{dict(sorted(state.positioned_effect_control_values.items()))}"
+        ),
+        (
+            "client_positioned_effect_actions="
+            f"packets:{state.client_positioned_effect_actions} "
+            "known_entities:"
+            f"{state.client_effect_actions_known_entities} "
+            "after_attack:"
+            f"{state.client_effect_actions_after_attack} "
+            f"values_1:{client_effect_action_values_1} "
+            f"values_2:{client_effect_action_values_2} "
+            f"trailing_values:{client_effect_action_trailing_values}"
         ),
         (
             "server_opcode_169="

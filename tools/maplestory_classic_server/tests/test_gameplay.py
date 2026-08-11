@@ -54,6 +54,7 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
+    ClientOpcode225PositionedEffectAction,
     ClientOpcode279TextEnvelope,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
@@ -2724,6 +2725,26 @@ class GameplayPacketShapeTest(unittest.TestCase):
             self.assertEqual(encoded.hex(), expected_hex)
             self.assertEqual(type(record).parse(encoded), record)
             self.assertNotIn(str(record.primary_value), str(record.safe_dict()))
+
+        client_action = ClientOpcode225PositionedEffectAction(
+            primary_value=2_357_555,
+            value_1=2,
+            value_2=305,
+            trailing_value=0,
+        )
+        self.assertEqual(
+            client_action.to_bytes().hex(),
+            "e10033f9230002000000310100000000",
+        )
+        self.assertEqual(
+            ClientOpcode225PositionedEffectAction.parse(
+                client_action.to_bytes()
+            ),
+            client_action,
+        )
+        self.assertNotIn("2357555", str(client_action.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            replace(client_action, trailing_value=65_536).to_bytes()
 
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode323PositionedEffectRecord.parse(
@@ -6148,9 +6169,31 @@ class GameplayStateFoldTest(unittest.TestCase):
                 y=20,
             ),
         )
+        client_packets = (
+            ClientAttackAction(
+                opcode=50,
+                local_object_index=7,
+                variant=1,
+                client_token=987_654_321,
+                control_value=0,
+                opaque_common_state=b"state",
+                value_1=1_000,
+                value_2=2_000,
+                opaque_suffix=b"",
+            ),
+            ClientOpcode225PositionedEffectAction(
+                primary_value=12_597,
+                value_1=2,
+                value_2=305,
+                trailing_value=0,
+            ),
+        )
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_server_plaintexts=tuple(record.to_bytes() for record in records),
+            extra_client_plaintexts=tuple(
+                packet.to_bytes() for packet in client_packets
+            ),
         )
 
         analysis = analyze_gameplay_transcript(transcript)
@@ -6165,6 +6208,27 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.positioned_effect_updates, 2)
         self.assertEqual(analysis.state.positioned_effect_unknown_updates, 1)
         self.assertEqual(len(analysis.state.positioned_effect_entities), 2)
+        self.assertEqual(analysis.state.client_positioned_effect_actions, 1)
+        self.assertEqual(
+            analysis.state.client_effect_actions_known_entities,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.client_effect_actions_after_attack,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.client_effect_action_values_1,
+            {2: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_effect_action_values_2,
+            {305: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_effect_action_trailing_values,
+            {0: 1},
+        )
         entity = analysis.state.positioned_effect_entities[12_597]
         self.assertEqual((entity.x, entity.y, entity.last_opcode), (2590, -368, 323))
         observations = [
@@ -6186,6 +6250,23 @@ class GameplayStateFoldTest(unittest.TestCase):
             ),
             4,
         )
+        action_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_positioned_effect_action"
+        )
+        self.assertEqual(action_observation.coverage.value, "partial")
+        self.assertEqual(action_observation.details["entity"], "effect:1")
+        self.assertTrue(action_observation.details["known_entity"])
+        self.assertTrue(
+            action_observation.details["preceding_client_attack"]
+        )
+        action_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "positioned_effect_action_submitted"
+        )
+        self.assertEqual(action_event.details["value_2"], 305)
         safe = analysis.safe_dict()
         self.assertNotIn("12597", str(safe))
         self.assertEqual(
@@ -6194,6 +6275,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "positioned_effect_records=packets:4",
+            render_gameplay_analysis(analysis),
+        )
+        self.assertIn(
+            "client_positioned_effect_actions=packets:1 known_entities:1 "
+            "after_attack:1",
             render_gameplay_analysis(analysis),
         )
 

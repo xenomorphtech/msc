@@ -437,7 +437,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
-44,402 partial, 37 unknown, and zero invalid packet observations. PCAP
+44,417 partial, 22 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
@@ -549,6 +549,11 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcodes `320`/`322`/`323`: exact positioned-effect records with an
   aliased primary key, signed coordinates, neutral controls, and current-field
   update correlation,
+- client opcode `225`: exact 16-byte positioned-effect actions with a redacted
+  primary key, two neutral u32 values, and one neutral u16 trailer; all 15
+  long-corpus keys resolve to a current-field effect alias and all 15 packets
+  immediately follow opcode `50` in client direction order, while safe output
+  exposes aliases and aggregate distributions rather than primary keys,
 - server opcode `169`: selector `3` followed by one redacted, terminated
   counted UTF-16 value; the automatic dump plus native jump-table arm proves
   exact consumption, while safe state/events expose only selector, code-unit
@@ -1355,7 +1360,8 @@ curl http://127.0.0.1:8799/api/v1/status
 `GET /healthz` returns `{"ok":true}`. `GET /api/v1/status` reports the
 listener mode/address, safe replay configuration, start time,
 accepted/active/completed/failed connection counters, and a `protocol` object.
-Inventory-move request/match/pending/latency counters belong to the finalized
+Inventory-move request/match/pending/latency counters and client positioned-
+effect action alias/distribution counters belong to the finalized
 `analyze-gameplay --json` state. The runtime route intentionally reports
 connection and configured-protocol telemetry rather than continuously
 refolding an incomplete transcript, and neither route exposes plaintext.
@@ -1757,3 +1763,8 @@ preserve distinct Unity scan codes in this setup.
     move, validate the 13-byte shape natively and in Python, expose safe
     request/match/pending/latency telemetry, and reduce stream `126` to 37
     unknown packets without assigning a meaning to the trailing signed count.
+67. Decode all 15 fixed client opcode-`225` positioned-effect actions, redact
+    their primary keys behind the existing effect aliases, prove that every key
+    is current-field-known and every packet follows opcode `50` in client order,
+    validate the 16-byte shape natively, and reduce stream `126` to 22 unknown
+    packets without naming the two u32 values or u16 trailer.

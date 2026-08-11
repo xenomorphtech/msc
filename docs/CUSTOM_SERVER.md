@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,661 observations are full, 44,402 partial, 37
+`--fail-on-invalid`: 26,661 observations are full, 44,417 partial, 22
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -131,6 +131,17 @@ with only its position changed to the folded player coordinate `(633,-2677)`
 produced a transient blue `10` over the sprite, gone by one second, while HP
 remained `50/222`. The transcript folded both packets as one aliased entity
 plus one update and matched all 131 heartbeat pairs.
+
+Client opcode `225` is the corresponding capture-bounded action family. All 15
+stream-`126` packets are exactly 16 bytes: one signed primary key, two neutral
+u32 values, and one neutral u16 trailer. Every key resolves to an active
+positioned-effect alias in its field epoch, and every packet immediately
+follows the targetless opcode-`50` attack form in client direction order. The
+fold emits `positioned_effect_action_submitted`, exposes only aliases plus
+aggregate `2/3`, `305/393`, and zero-trailer distributions, and never copies
+the primary key into safe output. Native validation exact-consumes all 15
+records. This moves the long corpus to `26,661/44,417/22/0` without assigning
+higher-level meanings to the remaining values.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
@@ -403,11 +414,15 @@ That older local world socket later timed out without opcode `241`, leaving its
 recorded packet fold in `active` rather than falsely inferring a modeled exit.
 The browser-free launcher then restarted only the local Wine client, and direct
 nested-Wayland input traversed world, channel, and character selection without
-moving the host cursor. The fresh client re-entered map `101000000`; its
-current transcript validates warning-free at `244/622/0/0`, stays `active`,
-and matches all 192 current-session heartbeat probes with none pending.
-Runtime HTTP status reports one active world connection with packet injection
-ready. The programmatic Maple-only audio mute remained active throughout.
+moving the host cursor. The fresh client re-entered map `101000000`. At the
+post-entry sample, transcript
+`positioned_effect_actions_live_20260811/world/1786445521564813241_replay_12857.jsonl`
+validates warning-free at `62/41/0/0`, stays `active` at HP `50/222`, and
+matches all 10 heartbeat probes with none pending. Runtime HTTP status reports
+one active world connection, packet injection ready, and zero injection
+failures. The replay generated the typed initial-field snapshot, fixed and
+variable server records, and NPC spawns; the programmatic Maple-only audio mute
+remained active throughout.
 
 Client opcode `79` now closes the strongest remaining transaction-shaped
 unknown. Its two 13-byte stream-`126` packets parse as client tick, inventory
@@ -509,7 +524,7 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,661 full, 44,402 partial, 37 unknown-but-lossless, and zero invalid. Stream
+26,661 full, 44,417 partial, 22 unknown-but-lossless, and zero invalid. Stream
 `92` now reaches 13,417 full, 21,788 partial, 2 unknown, and zero invalid;
 stream `114` reaches 54/22/0/0.
 

@@ -874,6 +874,30 @@ ending at `(633,-2677)` with zero unknown updates and 131/131 matched heartbeat
 pairs. This validates the coordinate/effect interpretation, but not the
 meaning of the displayed number or any neutral numeric/control field.
 
+Client opcode `225` is an exact capture-bounded action referencing the same
+primary-key space:
+
+```text
+uint16 opcode = 225
+int32  primary_value                 # aliased/redacted
+uint32 value_1                       # observed 2 or 3; role remains neutral
+uint32 value_2                       # observed 305 or 393; role remains neutral
+uint16 trailing_value                # observed 0; role remains neutral
+```
+
+All 15 stream-`126` records are 16 bytes. Their five primary keys each resolve
+to a positioned-effect entity already active in the same field epoch, and
+every record immediately follows a targetless opcode-`50` attack in client
+direction order. This repeated key equality and ordering justify only the
+`positioned_effect_action` boundary; they do not establish the two u32 roles,
+the zero trailer's role, or a request/response direction. The fold emits
+`positioned_effect_action_submitted`, counts all 15 as known-entity and
+after-attack actions, reports `value_1={2:8,3:7}`,
+`value_2={305:6,393:9}`, and `trailing={0:15}`, and exposes the primary only as
+the existing `effect:N` alias. Python and native codecs both consume and
+re-emit every record exactly. Coverage moves from the opcode-`79` checkpoint
+`26,661/44,402/37/0` to `26,661/44,417/22/0`.
+
 ## Redacted text envelope (`348`)
 
 The pinned version-300 opcode-`348` handler performs four common primitive
@@ -1366,10 +1390,13 @@ inventory-move model below. The first local transcript folds
 all three opcode-`310` records with zero unknown packets and an `active` final
 packet state; its socket later timed out without opcode `241`. A fresh
 browser-free relaunch then traversed world/channel/character selection through
-the nested Wayland seat and re-entered map `101000000`. Its current transcript
-is valid and warning-free at `244/622/0/0`, remains `active`, and matches all
-192 current-session heartbeat probes with none pending; runtime status reports
-one active local world connection.
+the nested Wayland seat and re-entered map `101000000`. Its transcript
+`positioned_effect_actions_live_20260811/world/1786445521564813241_replay_12857.jsonl`
+is valid and warning-free at the post-entry `62/41/0/0` sample, remains
+`active` at HP `50/222`, and matches all 10 sampled heartbeat probes with none
+pending. Runtime status reports one active local world connection, injection
+ready, and zero injection failures while the typed initial snapshot,
+fixed/variable records, and NPC spawns are generated.
 
 ## Field-bootstrap ledgers (`147`, `272`)
 
@@ -3275,7 +3302,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,661
-full, 44,402 partial, 37 unknown-but-lossless, and zero invalid packet
+full, 44,417 partial, 22 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
 2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
@@ -3316,10 +3343,10 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 ## Current unknowns
 
 - Gameplay framing is complete for short stream `114`. Stream `92` retains two
-  22-byte client opcode-`115` packets. Long stream `126` retains 39 client
-  packets across opcode/length/count tuples `64/10/2`, `79/13/2`, `111/8/1`,
-  `222/19/6`, `225/16/15`, `276/210/1`, and `298/76/12`; all remain
-  losslessly framed but semantically unmodeled.
+  22-byte client opcode-`115` packets. Long stream `126` retains 22 client
+  packets across opcode/length/count tuples `64/10/2`, `111/8/1`, `222/19/6`,
+  `276/210/1`, and `298/76/12`; all remain losslessly framed but semantically
+  unmodeled.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.

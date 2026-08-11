@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,661 full, 44,402 partial, 37 unknown-but-lossless, and zero invalid
+  26,661 full, 44,417 partial, 22 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,417 full, 21,788 partial,
   2 unknown, and zero invalid; stream `114` reports 54/22/0/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
@@ -208,11 +208,14 @@
   transcript has zero unknown packets; after nine opcode-`308` gaps near 300
   seconds, one 592.004-second gap preceded a later unmodeled socket timeout.
   A fresh browser-free local-Wine launch traversed world/channel/character
-  selection by direct nested-Wayland input and re-entered map `101000000`.
-  Its current transcript is warning-free at `244/622/0/0`, remains `active`,
-  and matches all 192 current-session heartbeat probes with none pending.
-  Runtime HTTP status shows one active world connection, and the programmatic
-  audio mute remains active.
+  selection by direct nested-Wayland input and re-entered map `101000000`. At
+  the post-entry sample, transcript
+  `positioned_effect_actions_live_20260811/world/1786445521564813241_replay_12857.jsonl`
+  is warning-free at `62/41/0/0`, remains `active` at HP `50/222`, and matches
+  all 10 heartbeat probes with none pending. Runtime HTTP status shows one
+  active world connection, injection ready, and zero injection failures while
+  the typed initial snapshot, fixed/variable records, and NPC spawns are
+  generated. The programmatic audio mute remains active.
 - Client opcode `79` is now a typed 13-byte inventory-move request containing
   a client tick, inventory type, signed source/destination slots, and a trailing
   signed count whose higher-level role remains neutral. Both stream-`126`
@@ -222,8 +225,18 @@
   pending requests,
   emits `inventory_move_requested`/`inventory_move_confirmed`, and exposes safe
   request/match/pending/latency counters through analysis JSON. Native shape
-  validation consumes both packets exactly. Long-corpus coverage is now
+  validation consumes both packets exactly. This checkpoint brings long-corpus
+  coverage to
   `26,661/44,402/37/0`; streams `92` and `114` are unchanged.
+- Client opcode `225` now models all 15 fixed 16-byte positioned-effect
+  actions. Each redacted signed primary key resolves to an active effect alias
+  in the same field epoch, and each packet immediately follows targetless
+  opcode `50` in client direction order. The two u32 roles and zero u16 trailer
+  remain neutral. The fold emits `positioned_effect_action_submitted`, records
+  all 15 known-entity/after-attack correlations, and exposes only aliases and
+  aggregate value distributions. Native validation consumes every packet
+  exactly, bringing stream `126` to `26,661/44,417/22/0` while leaving streams
+  `92` and `114` unchanged.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

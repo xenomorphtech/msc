@@ -5843,6 +5843,60 @@ class ClientOpcode217RecordSet:
 
 
 @dataclass(frozen=True)
+class ClientOpcode225PositionedEffectAction:
+    """Client action referencing a positioned-effect primary key."""
+
+    primary_value: int = field(repr=False)
+    value_1: int
+    value_2: int
+    trailing_value: int
+    opcode: int = 225
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode225PositionedEffectAction":
+        reader = PacketReader(
+            payload, packet_name="client_opcode_225_positioned_effect_action"
+        )
+        _expect_opcode(reader, 225)
+        action = cls(
+            primary_value=reader.i32("primary_value"),
+            value_1=reader.u32("value_1"),
+            value_2=reader.u32("value_2"),
+            trailing_value=reader.u16("trailing_value"),
+        )
+        reader.finish()
+        return action
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "primary_value_redacted": True,
+            "value_1": self.value_1,
+            "value_2": self.value_2,
+            "trailing_value": self.trailing_value,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 225:
+            raise PacketShapeError(
+                "client opcode-225 positioned-effect action opcode must be 225"
+            )
+        try:
+            return struct.pack(
+                "<HiIIH",
+                self.opcode,
+                self.primary_value,
+                self.value_1,
+                self.value_2,
+                self.trailing_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                "client opcode-225 positioned-effect action value is out of "
+                f"range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class LifeMovementCommand:
     command_type: int
     opaque_payload: bytes
