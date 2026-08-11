@@ -828,10 +828,12 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `241`, client status opcode `45`/`46`, and terminal server
   opcode `9`: a repeated world-exit transaction that enters `exit_requested`,
   redacts the one-u32 status, and reaches `terminated` after 165–167 ms,
-- client opcodes `100`, `307`, `308`, and `311`: exact fixed-width redacted
-  records whose bodies remain opaque; the latter two additionally expose only
-  their observed approximately 300/600-second intervals. Client opcode `310`
-  is a separate 41-byte live-only record repeated by three controlled
+- client opcodes `100` and `307`: exact fixed-width redacted records whose
+  bodies remain opaque. Periodic opcode `308` is now typed as two redacted
+  doubles, two redacted `u64`s, a `u32` mirrored by two doubles, and fixed
+  controls; opcode `311` is zero-bounded around one redacted `u32`. The fold
+  retains their observed cadence without assigning purpose. Client opcode
+  `310` is a separate 41-byte live-only record repeated by three controlled
   direct-Wayland menu confirmations, with no opcode-`241` or phase transition,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
   records with two raw-byte-preserving IL2CPP booleans and two signed values per
@@ -2111,3 +2113,7 @@ preserve distinct Unity scan codes in this setup.
     empty-list character-creation path, prove request/response appearance and
     response/selection/handoff id continuity, and reach zero unknowns across
     both references and the active live login.
+87. Promote periodic client opcodes `308` and `311` from opaque widths to
+    cross-capture typed neutral records, validate 17 reference and 20 active-
+    live samples, and split their redacted values/cadence from the remaining
+    fixed opaque client-record state.

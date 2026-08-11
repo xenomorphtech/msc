@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 128 semantic/manual shapes and 88 explicitly
+manifest currently declares 130 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -98,8 +98,9 @@ The live-only, non-overlapping opcode-`310` width, local opcode-`0` probe, and
 capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add ten active shapes.
 Five non-overlapping legacy-login layouts add the next five active shapes.
-The final four stream-`116` login layouts add four more. This leaves 195 active
-shapes and 67 active
+The final four stream-`116` login layouts add four more. Typed opcode-`308` and
+opcode-`311` layouts suppress two opaque pins without increasing the effective
+shape count. This leaves 195 active shapes and 65 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -118,12 +119,16 @@ already declared for opcode `45`; both occur between opcode `241` and final
 server opcode `9` in their respective world streams. These three shapes
 suppress matching opaque pins without using the incoming-handler dump to claim
 outgoing-client semantics it cannot provide.
-Client opcodes `100`, `307`, `308`, and `311` remain exact-width opaque pins in
-the automatic manifest; the gameplay fold raises them to partial observations
-using only their validated widths, counts, and `308`/`311` cadence. Opcode
-`310` is separately pinned to the 41-byte packet repeated by three controlled
-local-Wine menu confirmations. Its 39-byte body and UI role remain opaque, and
-the manifest does not equate it with the captured opcode-`241` exit request.
+Client opcodes `100` and `307` remain exact-width opaque pins. Opcodes `308` and
+`311` now suppress their opaque pins with cross-capture typed shapes. Across 11
+reference and 13 active-live opcode-`308` records, the layout is two redacted
+`f64`s, two redacted `u64`s, one `u32` mirrored by two `f64`s, and fixed control
+values. All 24 mirrors agree. All six reference and seven live opcode-`311`
+records are `zero u64 + redacted u32 + zero u64`. Purpose remains neutral;
+cadence is observational. Opcode `310` is separately pinned to the 41-byte
+packet repeated by three controlled local-Wine menu confirmations. Its 39-byte
+body and UI role remain opaque, and the manifest does not equate it with the
+captured opcode-`241` exit request.
 Client opcode `79` adds a 13-byte semantic shape from two stream-`126`
 transactions: `u32 client tick + u8 inventory type + i16 source + i16
 destination + i16 trailing count`. Each request is followed by a server

@@ -1643,7 +1643,7 @@ each, with no phase transition or later opcode `241`. This leaves the captured
 transaction exact and independently repeated, but its live UI trigger unproven
 in the current replay state.
 
-## Fixed-width opaque client reports
+## Fixed-width and typed periodic client reports
 
 Four additional outgoing-client families repeat at exact widths in the two
 sustained gameplay captures. A fifth width is independently bounded by the
@@ -1653,14 +1653,20 @@ three controlled local-Wine menu confirmations:
 | --- | ---: | ---: | ---: | ---: | --- |
 | `100` | `26/24` | 1 | 1 | 0 | one fixed record per sustained capture |
 | `307` | `14/12` | 1 | 1 | 1 | one fixed record near bootstrap |
-| `308` | `74/72` | 2 | 11 | 10 | approximately 300-second cadence |
+| `308` | `74/72` | 2 | 11 | 13 | typed mirrored-value record; approximately 300-second cadence while continuously running |
 | `310` | `41/39` | 0 | 0 | 3 | one per controlled menu confirmation |
-| `311` | `22/20` | 2 | 6 | 6 | bootstrap-skewed first gap, then approximately 600 seconds |
+| `311` | `22/20` | 2 | 6 | 7 | zero-bounded `u32`; bootstrap-skewed first gap, then approximately 600 seconds |
 
-The codec consumes and re-emits each exact body but never includes its bytes in
-safe output. State exposes packet and opaque-byte counts by opcode. Events add
-only opcode, body length, field epoch, and phase; opcodes `308` and `311` also
-report the observed interval after the first record. Stream `92` observes a
+Opcodes `100/307/310` retain exact opaque bodies that never appear in safe
+output. Opcode `308` instead decodes two redacted `f64`s, two redacted `u64`s,
+one `u32` mirrored by two `f64`s, controls `50/1`, a `0/1` variant, and terminal
+controls `1/0`. The mirror holds for all 11 stream-`126` and 13 latest-live
+records; observed `(mirror, variant)` pairs are reference `59/60,0` and live
+`3/56/59/60,0/1`. Opcode `311` is exactly
+`zero u64 + redacted u32 + zero u64` for all six reference and seven live
+samples. State exposes typed aggregates separately from opaque-byte counts.
+Events add opcode, field epoch, phase, and the observed interval after the first
+record. Stream `92` observes a
 301.474-second opcode-`308` gap and a 584.534-second opcode-`311` gap. Stream
 `126` keeps opcode `308` within `299.995..310.551` seconds and opcode `311`
 within `557.141..610.544` seconds. In the first local run, the first nine
@@ -1669,11 +1675,11 @@ opcode-`308` gaps stay within `299.992..300.017` seconds before one later
 followed by approximately 600-second gaps. Cadence is therefore descriptive,
 not a guarantee that every interval produces a packet.
 
-These remain partial observations: cadence and controlled UI correlation do
-not establish field semantics, identifier safety, or replay safety. The
-automatic packet manifest retains the capture-pinned opaque widths and adds an
-explicit live-only opcode-`310` shape; it does not invent outgoing-client
-semantics from incoming handler reads. Coverage becomes
+These remain partial observations: numeric structure, cadence, and controlled
+UI correlation do not establish field semantics or replay safety. The
+automatic packet manifest replaces the `308/311` opaque pins with typed neutral
+shapes and retains an explicit live-only opcode-`310` shape; it does not invent
+outgoing-client semantics from incoming handler reads. Coverage remains
 `13,417/21,788/2/0` for stream `92`, remains `54/22/0/0` for stream `114`, and
 becomes `26,661/44,400/39/0` for stream `126` before the opcode-`79`
 inventory-move model below. The first local transcript folds

@@ -62,7 +62,9 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode276RecordGroup,
     ClientOpcode279TextEnvelope,
     ClientOpcode298ItemAcquisitionRequest,
+    ClientOpcode308PeriodicRecord,
     ClientOpcode309Acknowledgement,
+    ClientOpcode311PeriodicRecord,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
     ClientWorldExitRequest,
@@ -3350,9 +3352,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         for opcode, body_length in (
             (100, 24),
             (307, 12),
-            (308, 72),
             (310, 39),
-            (311, 20),
         ):
             with self.subTest(opcode=opcode):
                 body = bytes(range(body_length))
@@ -3373,6 +3373,36 @@ class GameplayPacketShapeTest(unittest.TestCase):
                         opaque_body=body[:-1],
                         opcode=opcode,
                     ).to_bytes()
+
+    def test_client_periodic_records_round_trip_and_redact(self) -> None:
+        opcode_308 = ClientOpcode308PeriodicRecord(
+            neutral_f64_values=(4.5, 2.0),
+            neutral_u64_values=(123, 456),
+            mirrored_value=59,
+            variant=0,
+        )
+        opcode_311 = ClientOpcode311PeriodicRecord(
+            neutral_value=0xDEAD_BEEF
+        )
+
+        self.assertEqual(
+            ClientOpcode308PeriodicRecord.parse(opcode_308.to_bytes()),
+            opcode_308,
+        )
+        self.assertEqual(len(opcode_308.to_bytes()), 74)
+        self.assertEqual(
+            ClientOpcode311PeriodicRecord.parse(opcode_311.to_bytes()),
+            opcode_311,
+        )
+        self.assertEqual(len(opcode_311.to_bytes()), 22)
+        safe = [opcode_308.safe_dict(), opcode_311.safe_dict()]
+        self.assertNotIn("4.5", str(safe))
+        self.assertNotIn(str(0xDEAD_BEEF), str(safe))
+
+        malformed_mirror = bytearray(opcode_308.to_bytes())
+        malformed_mirror[50:58] = struct.pack("<d", 58.0)
+        with self.assertRaisesRegex(PacketShapeError, "do not mirror"):
+            ClientOpcode308PeriodicRecord.parse(bytes(malformed_mirror))
 
     def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
         self,
@@ -6689,12 +6719,22 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
-    def test_folds_fixed_and_periodic_client_opaque_records(self) -> None:
+    def test_folds_fixed_opaque_and_typed_periodic_client_records(self) -> None:
         def record(opcode: int, body_length: int) -> bytes:
             return ClientFixedOpaqueRecord(
                 opaque_body=bytes([opcode & 0xFF]) * body_length,
                 opcode=opcode,
             ).to_bytes()
+
+        opcode_308 = ClientOpcode308PeriodicRecord(
+            neutral_f64_values=(4.5, 2.0),
+            neutral_u64_values=(123, 456),
+            mirrored_value=59,
+            variant=0,
+        ).to_bytes()
+        opcode_311 = ClientOpcode311PeriodicRecord(
+            neutral_value=0xDEAD_BEEF
+        ).to_bytes()
 
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -6702,10 +6742,10 @@ class GameplayStateFoldTest(unittest.TestCase):
                 record(100, 24),
                 record(307, 12),
                 record(310, 39),
-                record(308, 72),
-                record(311, 20),
-                record(308, 72),
-                record(311, 20),
+                opcode_308,
+                opcode_311,
+                opcode_308,
+                opcode_311,
             ),
         )
 
@@ -6714,11 +6754,23 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(
             analysis.state.client_fixed_opaque_records_by_opcode,
-            {100: 1, 307: 1, 308: 2, 310: 1, 311: 2},
+            {100: 1, 307: 1, 310: 1},
         )
         self.assertEqual(
             analysis.state.client_fixed_opaque_bytes_by_opcode,
-            {100: 24, 307: 12, 308: 144, 310: 39, 311: 40},
+            {100: 24, 307: 12, 310: 39},
+        )
+        self.assertEqual(
+            analysis.state.client_periodic_records_by_opcode,
+            {308: 2, 311: 2},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_308_mirrored_values,
+            {59: 2},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_308_variants,
+            {0: 2},
         )
         self.assertEqual(
             set(analysis.state.client_periodic_report_last_interval_ms),
@@ -6727,9 +6779,10 @@ class GameplayStateFoldTest(unittest.TestCase):
         observations = [
             observation
             for observation in analysis.observations
-            if observation.kind == "client_fixed_opaque_record"
+            if observation.kind.startswith("client_opcode_3")
+            and observation.kind.endswith("_periodic_record")
         ]
-        self.assertEqual(len(observations), 7)
+        self.assertEqual(len(observations), 4)
         self.assertTrue(
             all(
                 observation.coverage.value == "partial"
@@ -6741,7 +6794,12 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(event_counts["client_periodic_report_submitted"], 4)
         self.assertIn(
             "client_fixed_opaque_records=packets:"
-            "{100: 1, 307: 1, 308: 2, 310: 1, 311: 2}",
+            "{100: 1, 307: 1, 310: 1}",
+            render_gameplay_analysis(analysis),
+        )
+        self.assertIn(
+            "client_periodic_records=packets:{308: 2, 311: 2} "
+            "opcode308_mirrors:{59: 2} opcode308_variants:{0: 2}",
             render_gameplay_analysis(analysis),
         )
 

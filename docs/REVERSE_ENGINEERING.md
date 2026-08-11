@@ -413,18 +413,22 @@ exit attempt did not emit opcode `241`; no server terminal packet was forced,
 so the live effect remains explicitly unproven.
 
 The remaining fixed-width outgoing records use the same capture-bounded rule.
-Opcodes `100`, `307`, `308`, and `311` have exact 26/14/74/22-byte packets in
-both sustained captures, so the codec can validate and round-trip their bodies
-without naming them. Timing supplies only a cadence observation: opcode `308`
-repeats near five minutes and opcode `311` near ten minutes after its first
-bootstrap-skewed interval. A later 592.004-second local opcode-`308` gap keeps
-that cadence observational rather than mandatory. Three controlled nested-
-Wayland menu confirmations in the local Wine session each emitted a 41-byte
-opcode-`310` record but no
+Opcodes `100` and `307` retain exact opaque 26/14-byte packets. Opcodes `308`
+and `311` now have stronger cross-capture boundaries. The 74-byte opcode-`308`
+record is two redacted doubles, two redacted `u64`s, a `u32` mirrored by two
+doubles, and fixed controls; all 24 reference/latest-live mirrors agree. The
+22-byte opcode-`311` record is zero `u64`, redacted `u32`, zero `u64` in all 13
+samples. Timing still supplies only a cadence observation: opcode `308` repeats
+near five minutes and opcode `311` near ten minutes after its first
+bootstrap-skewed interval. Longer paused-live gaps keep that cadence
+observational rather than mandatory. Three controlled nested-Wayland menu
+confirmations in the local Wine session each emitted a 41-byte opcode-`310`
+record but no
 opcode `241` or phase change. The automatic manifest therefore adds a
-live-only opaque opcode-`310` shape, while the gameplay fold exposes only
-widths, counts, phase/epoch, and intervals. It does not promote timing or UI
-adjacency into a semantic or replay claim.
+live-only opaque opcode-`310` shape and typed `308/311` shapes. The gameplay
+fold redacts neutral values and exposes only structural aggregates,
+phase/epoch, and intervals. It does not promote timing or UI adjacency into a
+semantic or replay claim.
 
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor

@@ -216,6 +216,17 @@
   active world connection, injection ready, and zero injection failures while
   the typed initial snapshot, fixed/variable records, and NPC spawns are
   generated. The programmatic audio mute remains active.
+- Periodic client opcodes `308` and `311` are no longer opaque bodies. All 11
+  stream-`126` and 13 latest-live opcode-`308` samples share two redacted
+  doubles, two redacted `u64`s, a `u32` copied exactly into two doubles, and
+  fixed controls `50/1/.../1/0`; the mirror holds in all 24 records. All six
+  reference and seven live opcode-`311` samples are exactly
+  `zero u64 + redacted u32 + zero u64`. The reference reports mirror values
+  `59/60` with variant `0`; live independently exercises `3/56/59/60` and
+  variants `0/1`. Purpose remains neutral and timing remains descriptive. The
+  fold now separates these typed aggregates under `client_periodic_records`
+  from opaque opcodes `100/307/310`, and isolated native validation consumes
+  all 17 reference packets.
 - Client opcode `79` is now a typed 13-byte inventory-move request containing
   a client tick, inventory type, signed source/destination slots, and a trailing
   signed count whose higher-level role remains neutral. Both stream-`126`

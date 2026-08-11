@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address
+import math
 import struct
 
 
@@ -11394,9 +11395,7 @@ class SkillRecordUpdateAcknowledgement:
 CLIENT_FIXED_OPAQUE_BODY_LENGTHS = {
     100: 24,
     307: 12,
-    308: 72,
     310: 39,
-    311: 20,
 }
 
 
@@ -11439,6 +11438,165 @@ class ClientFixedOpaqueRecord:
                 f"bytes, got {len(self.opaque_body)}"
             )
         return struct.pack("<H", self.opcode) + self.opaque_body
+
+
+@dataclass(frozen=True)
+class ClientOpcode308PeriodicRecord:
+    """Cross-capture typed periodic record with neutral numeric values."""
+
+    neutral_f64_values: tuple[float, float] = field(repr=False)
+    neutral_u64_values: tuple[int, int] = field(repr=False)
+    mirrored_value: int
+    variant: int
+    opcode: int = 308
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode308PeriodicRecord":
+        reader = PacketReader(payload, packet_name="client_opcode_308_periodic")
+        _expect_opcode(reader, 308)
+        neutral_f64_values = tuple(
+            struct.unpack("<d", reader.bytes(8, f"neutral_f64[{index}]"))[0]
+            for index in range(2)
+        )
+        neutral_u64_values = tuple(
+            reader.u64(f"neutral_u64[{index}]") for index in range(2)
+        )
+        mirrored_value = reader.u32("mirrored_value")
+        if reader.u32("constant_50") != 50:
+            raise PacketShapeError("client opcode-308 constant_50 must be 50")
+        if reader.u32("constant_1_a") != 1:
+            raise PacketShapeError("client opcode-308 constant_1_a must be 1")
+        variant = reader.u32("variant")
+        mirrored_f64_values = tuple(
+            struct.unpack("<d", reader.bytes(8, f"mirrored_f64[{index}]"))[0]
+            for index in range(2)
+        )
+        if reader.u32("constant_1_b") != 1:
+            raise PacketShapeError("client opcode-308 constant_1_b must be 1")
+        if reader.u32("reserved_zero") != 0:
+            raise PacketShapeError(
+                "client opcode-308 reserved trailer must be zero"
+            )
+        reader.finish()
+        record = cls(
+            neutral_f64_values=neutral_f64_values,
+            neutral_u64_values=neutral_u64_values,
+            mirrored_value=mirrored_value,
+            variant=variant,
+        )
+        record._validate(mirrored_f64_values=mirrored_f64_values)
+        return record
+
+    def _validate(
+        self, *, mirrored_f64_values: tuple[float, float] | None = None
+    ) -> None:
+        if self.opcode != 308:
+            raise PacketShapeError("periodic record opcode must be 308")
+        if len(self.neutral_f64_values) != 2 or not all(
+            math.isfinite(value) for value in self.neutral_f64_values
+        ):
+            raise PacketShapeError(
+                "client opcode-308 requires two finite neutral doubles"
+            )
+        if len(self.neutral_u64_values) != 2 or any(
+            not 0 <= value <= 0xFFFF_FFFF_FFFF_FFFF
+            for value in self.neutral_u64_values
+        ):
+            raise PacketShapeError(
+                "client opcode-308 requires two neutral u64 values"
+            )
+        if not 0 <= self.mirrored_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-308 mirrored value must fit u32"
+            )
+        if self.variant not in {0, 1}:
+            raise PacketShapeError(
+                "client opcode-308 variant must be zero or one"
+            )
+        expected_mirror = (float(self.mirrored_value),) * 2
+        if (
+            mirrored_f64_values is not None
+            and mirrored_f64_values != expected_mirror
+        ):
+            raise PacketShapeError(
+                "client opcode-308 doubles do not mirror the u32 value"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "neutral_f64_values": 2,
+            "neutral_f64_values_redacted": True,
+            "neutral_u64_values": 2,
+            "neutral_u64_values_redacted": True,
+            "mirrored_value": self.mirrored_value,
+            "mirrored_double_copies": 2,
+            "variant": self.variant,
+            "fixed_controls": [50, 1, 1, 0],
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        mirror = float(self.mirrored_value)
+        try:
+            return struct.pack(
+                "<H2d2Q4I2d2I",
+                self.opcode,
+                *self.neutral_f64_values,
+                *self.neutral_u64_values,
+                self.mirrored_value,
+                50,
+                1,
+                self.variant,
+                mirror,
+                mirror,
+                1,
+                0,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-308 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ClientOpcode311PeriodicRecord:
+    """Cross-capture zero-bounded periodic u32 record."""
+
+    neutral_value: int = field(repr=False)
+    opcode: int = 311
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode311PeriodicRecord":
+        reader = PacketReader(payload, packet_name="client_opcode_311_periodic")
+        _expect_opcode(reader, 311)
+        if reader.u64("reserved_prefix") != 0:
+            raise PacketShapeError(
+                "client opcode-311 reserved prefix must be zero"
+            )
+        neutral_value = reader.u32("neutral_value")
+        if reader.u64("reserved_suffix") != 0:
+            raise PacketShapeError(
+                "client opcode-311 reserved suffix must be zero"
+            )
+        reader.finish()
+        return cls(neutral_value=neutral_value)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "reserved_prefix_zero": True,
+            "neutral_value_width_bits": 32,
+            "neutral_value_redacted": True,
+            "reserved_suffix_zero": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 311:
+            raise PacketShapeError("periodic record opcode must be 311")
+        if not 0 <= self.neutral_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-311 neutral value must fit u32"
+            )
+        return struct.pack("<HQIQ", self.opcode, 0, self.neutral_value, 0)
 
 
 @dataclass(frozen=True)

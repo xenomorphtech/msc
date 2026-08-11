@@ -459,20 +459,24 @@ client opcode-`310` packets. No confirmation changed phase or led to opcode
 `241`; the client remained active in map `101000000`. The two independent
 captured terminal sequences remain the evidence for the exit transaction.
 
-Client opcodes `100`, `307`, `308`, and `311` now consume as fixed-width,
-redacted records. Their body widths are `24`, `12`, `72`, and `20` bytes.
+Client opcodes `100`, `307`, `308`, and `311` consume at fixed widths. Their
+body widths are `24`, `12`, `72`, and `20` bytes.
 Streams `92`/`126` contain `1/1`, `1/1`, `2/11`, and `2/6` records,
 respectively. Opcode `308` repeats at approximately 300 seconds and opcode
 `311` at approximately 600 seconds after the bootstrap-skewed first interval.
-The current local-Wine transcript independently contains opcode `307`, ten
+The earlier local-Wine transcript independently contains opcode `307`, ten
 opcode-`308`, six opcode-`311`, and the three controlled opcode-`310` records.
 Its first nine opcode-`308` gaps are within `299.992..300.017` seconds; a later
 592.004-second gap prevents treating the cadence as a guaranteed periodic send.
-The fold publishes only opcode/body-byte counts, field epoch, phase, and the
-periodic intervals; all bodies stay private and every record remains partial.
-The analyzer's safe JSON state exposes these aggregates under
-`client_fixed_opaque_records` and emits `client_fixed_record_submitted` or
-`client_periodic_report_submitted` events without packet bytes.
+Opcodes `100/307` remain opaque. Opcode `308` is now typed across 11 reference
+and 13 latest-live samples as two redacted doubles, two redacted `u64`s, a
+`u32` mirrored by two doubles, and fixed controls. Opcode `311` is typed across
+six reference and seven live samples as `zero u64 + redacted u32 + zero u64`.
+All 24 opcode-`308` mirrors agree; meaning and cadence remain neutral. The fold
+publishes opaque counts under `client_fixed_opaque_records`, typed structure and
+intervals under `client_periodic_records`, and emits
+`client_fixed_record_submitted` or `client_periodic_report_submitted` without
+private values.
 
 That older local world socket later timed out without opcode `241`, leaving its
 recorded packet fold in `active` rather than falsely inferring a modeled exit.

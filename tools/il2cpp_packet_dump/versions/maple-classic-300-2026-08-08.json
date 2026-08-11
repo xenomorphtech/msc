@@ -1111,6 +1111,33 @@
       ]
     },
     {
+      "name":"client_opcode_308_periodic_record","direction":"client_to_server","opcode":308,"length":74,
+      "source":"packets.py:ClientOpcode308PeriodicRecord; 11 stream-126 and 13 active-live records share two f64, two u64, mirrored u32/f64/f64, and fixed control boundaries at periodic cadence",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":308},
+        {"op":"bytes","name":"neutral_f64_values","length":16},
+        {"op":"read","name":"neutral_u64_0","kind":"u64"},
+        {"op":"read","name":"neutral_u64_1","kind":"u64"},
+        {"op":"read","name":"mirrored_value","kind":"u32"},
+        {"op":"read","name":"constant_50","kind":"u32","equals":50},
+        {"op":"read","name":"constant_1_a","kind":"u32","equals":1},
+        {"op":"read","name":"variant","kind":"u32"},
+        {"op":"bytes","name":"mirrored_f64_values","length":16},
+        {"op":"read","name":"constant_1_b","kind":"u32","equals":1},
+        {"op":"read","name":"reserved_zero","kind":"u32","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_311_periodic_record","direction":"client_to_server","opcode":311,"length":22,
+      "source":"packets.py:ClientOpcode311PeriodicRecord; all six stream-126 and seven active-live records are zero-u64/redacted-u32/zero-u64 at periodic cadence",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":311},
+        {"op":"read","name":"reserved_prefix","kind":"u64","equals":0},
+        {"op":"read","name":"neutral_value","kind":"u32"},
+        {"op":"read","name":"reserved_suffix","kind":"u64","equals":0}
+      ]
+    },
+    {
       "name":"server_opcode_45","direction":"server_to_client","opcode":45,"length":2,
       "source":"IL2CPP opcode-45 handler f6a0ba7f... opcode-only branch; 14 capture frames",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":45}]
