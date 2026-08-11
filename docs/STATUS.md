@@ -1090,7 +1090,17 @@ stream `116`, and the current local login supply distinct packet lengths
 `183/275/201` and text-length patterns `10/0/38`, `7/51/36`, and `1/51/5` while
 agreeing on every fixed field. All three consume and round-trip exactly; safe
 analysis exposes only lengths and counts. The live login's remaining unknown
-client inventory is now only its opcode-`6` record.
+client inventory was then only its opcode-`6` record.
+
+Login opcode `6` is now structurally bounded as nine redacted `uint32` header
+fields, a `uint32` record count, and repeated `(uint16 index, uint32 opaque
+value)` entries. Zero-based fields `1` and `5` of the header are zero in all
+three samples. Stream `83` has 299 entries/1,836 bytes; stream `116` and the
+current live login each have 152 entries/954 bytes. Every sample contains the
+complete unique index set `0..count-1`, in non-sequential wire order, and
+round-trips exactly. Safe analysis retains only structural counts/checks, so
+the current live login now has zero unknown client packets without exposing header or
+record values or assigning a higher-level role.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.

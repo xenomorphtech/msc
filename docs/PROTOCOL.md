@@ -66,6 +66,7 @@ the main blocker is obsolete.
 ```text
 server 0   bootstrap/login prelude
 server 10  empty heartbeat probe
+client 6   redacted indexed record set
 client 23  8-byte opaque-token heartbeat response
 client 31  three redacted UTF-16 fields and a 48-byte opaque blob
 client 13  typed opcode-13 envelope or status message
@@ -94,6 +95,26 @@ immediately follows a probe. Successful stream `83` has one matched pair at
 eight matched pairs, zero unmatched/pending responses, and a maximum 2,594.990
 ms round trip caused by replay pacing. Safe output exposes only token byte
 count, pair counters, and round-trip timing.
+
+Client opcode `6` is a variable indexed record set with an exact shared
+boundary across stream `83`, stream `116`, and the current live login:
+
+```text
+uint16 opcode = 6
+uint32 neutral_header[9]            # redacted; zero-based fields 1 and 5 = 0
+uint32 record_count
+repeat record_count:
+    uint16 record_index             # complete unique set 0..count-1
+    uint32 opaque_value             # redacted
+```
+
+The total width is therefore `42 + 6 * record_count`. Stream `83` carries 299
+records in 1,836 bytes; stream `116` and the current live login each carry 152
+records in 954 bytes. All three contain every index exactly once, although
+their wire order is not sequential. Safe output exposes only the fixed header
+width, common zero-field indices, record count, complete-index check, and
+aggregate counts. Header and record values—and the higher-level role of the
+set—remain neutral.
 
 Client opcode `31` is a capture-bounded variable record rather than an opaque
 width pin. Stream `83`, stream `116`, and the current live login independently

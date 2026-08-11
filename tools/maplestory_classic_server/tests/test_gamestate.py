@@ -25,6 +25,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterListRecord,
     CharacterLookEntry,
     CharacterSelection,
+    ClientOpcode6RecordSet,
     ClientOpcode31Record,
     ClientStatusMessage,
     HeartbeatProbe,
@@ -160,6 +161,7 @@ def fixture_login_transcript(
     selected_character: int = 300_001,
     heartbeat_rounds: int = 0,
     pending_heartbeat_probe: bool = False,
+    opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
 ) -> Transcript:
     events = [
@@ -206,6 +208,8 @@ def fixture_login_transcript(
         )
     if pending_heartbeat_probe:
         append("server_to_client", HeartbeatProbe().to_bytes())
+    if opcode_6_record_set is not None:
+        append("client_to_server", opcode_6_record_set.to_bytes())
     if opcode_31_record is not None:
         append("client_to_server", opcode_31_record.to_bytes())
     append("server_to_client", fixture_account().to_bytes())
@@ -256,6 +260,34 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_client_opcode_6_indexed_record_set_round_trip_and_redact(
+        self,
+    ) -> None:
+        record_set = ClientOpcode6RecordSet(
+            neutral_header=(2, 0, 1, 3, 42, 0, 7, 9, 11),
+            opaque_entries=(
+                (2, 0xDEAD_BEEF),
+                (0, 0x1234_5678),
+                (1, 0xCAFE_BABE),
+            ),
+        )
+
+        payload = record_set.to_bytes()
+        parsed = ClientOpcode6RecordSet.parse(payload)
+
+        self.assertEqual(parsed, record_set)
+        self.assertEqual(parsed.safe_dict()["record_count"], 3)
+        self.assertEqual(
+            parsed.safe_dict()["reserved_zero_field_indices"], [1, 5]
+        )
+        self.assertNotIn(str(0xDEAD_BEEF), str(parsed.safe_dict()))
+        self.assertNotIn(str(0x1234_5678), str(parsed.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "complete unique range"):
+            ClientOpcode6RecordSet(
+                neutral_header=(2, 0, 1, 3, 42, 0, 7, 9, 11),
+                opaque_entries=((0, 1), (0, 2)),
+            ).to_bytes()
+
     def test_client_opcode_31_variable_record_round_trip_and_redact(self) -> None:
         record = ClientOpcode31Record(
             reserved_prefix=b"\x00" * 20,
@@ -478,6 +510,41 @@ class GameStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "heartbeats=probes:4 responses:3 matched:3 unmatched:0 pending:1",
+            render_login_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_6_record_set_without_values(self) -> None:
+        record_set = ClientOpcode6RecordSet(
+            neutral_header=(2, 0, 1, 3, 42, 0, 7, 9, 11),
+            opaque_entries=(
+                (2, 0xDEAD_BEEF),
+                (0, 0x1234_5678),
+                (1, 0xCAFE_BABE),
+            ),
+        )
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(opcode_6_record_set=record_set)
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_opcode_6_record_sets, 1)
+        self.assertEqual(
+            analysis.state.client_opcode_6_entry_count_patterns, {"3": 1}
+        )
+        self.assertEqual(analysis.state.client_opcode_6_opaque_values, 3)
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_6_record_set"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(observation.details["record_count"], 3)
+        self.assertTrue(observation.details["complete_index_set"])
+        self.assertNotIn(str(0xDEAD_BEEF), str(analysis.safe_dict()))
+        self.assertNotIn(str(0x1234_5678), str(analysis.safe_dict()))
+        self.assertIn(
+            "client_opcode_6=record_sets:1 entry_counts:{'3': 1} "
+            "opaque_values:3",
             render_login_analysis(analysis),
         )
 

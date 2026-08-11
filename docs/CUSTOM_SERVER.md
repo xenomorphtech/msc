@@ -2367,7 +2367,13 @@ project's own `README.md` for all options.
   counted UTF-16 fields, a fixed 48-byte length-prefixed opaque blob, and a
   zero suffix. Safe reports expose only text-length patterns and blob byte
   totals, leaving all retained contents and their higher-level purpose neutral;
-  only opcode `6` remains unknown in the current live login transcript.
+  at that checkpoint, only opcode `6` remained unknown in the live login.
+- Login client opcode `6` now closes that live unknown inventory with a shared
+  `42 + 6*count` record-set shape. Stream `83` carries 299 entries; stream `116`
+  and live each carry 152. Each entry is a unique `uint16` index covering the
+  complete `0..count-1` set plus a redacted `uint32` value, following nine
+  redacted header words and the count. Safe state publishes only counts and
+  boundary checks; all values and the higher-level record-set role stay neutral.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

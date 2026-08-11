@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 111 semantic/manual shapes and 95 explicitly
+manifest currently declares 112 semantic/manual shapes and 94 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -97,7 +97,7 @@ opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 The live-only, non-overlapping
 opcode-`310` width and capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add nine active shapes.
-This leaves 185 active shapes and 74 active
+This leaves 185 active shapes and 73 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -167,6 +167,14 @@ portal name with zero terminator, and signed source/destination positions. The
 two stream-`92` paths chain within one pixel and remain in the same field epoch.
 The native shape intentionally accepts only the captured four-code-unit width;
 isolated validation consumes both records with zero failures.
+Login client opcode `6` replaces its 1,836-byte observed-opaque pin with a
+variable shape containing nine neutral `u32` header fields, a `u32` record
+count, and repeated `(u16 index, u32 opaque value)` pairs. Stream `83` carries
+299 records while stream `116` and the current live login each carry 152; all
+three lengths satisfy `42 + 6*count`, and every Python-decoded sample has the
+complete unique `0..count-1` index set. Isolated native validation exactly
+consumes both capture records. Header and record values remain redacted and no
+higher-level role is assigned.
 Login client opcode `31` replaces its 183-byte observed-opaque pin with one
 variable redacted shape shared by stream `83`, stream `116`, and the current
 live login transcript. All three records have a 20-byte zero prefix, variant

@@ -551,6 +551,17 @@ four probes/three matches/one final pending probe, and the current local login
 has eight matched pairs. JSON/text state reports match/pending counts and
 round-trip timing without exposing token bytes.
 
+Client opcode `6` is a shared variable indexed-record grammar across successful
+stream `83`, stream `116`, and the current live login: nine redacted `uint32`
+header fields, a `uint32` count, then that many `(uint16 index, uint32 opaque
+value)` entries. Zero-based header fields `1` and `5` are zero, and every
+sample contains the complete unique index set `0..count-1` in non-sequential
+wire order. Stream `83` has 299 entries/1,836 bytes; the other two each have
+152 entries/954 bytes.
+The codec and manifest consume/re-emit the records exactly while safe output
+retains only structural checks and counts. The header/entry values and packet
+role remain neutral.
+
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
 prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
@@ -2001,3 +2012,8 @@ preserve distinct Unity scan codes in this setup.
     redacted text/blob lengths and distributions, and reduce the live login's
     unknown client inventory to only opcode `6` without assigning a semantic
     role to the retained contents.
+79. Replace the login opcode-`6` 1,836-byte opaque pin with the shared
+    `42 + 6*count` indexed-record grammar, validate 299 stream-`83` entries and
+    152 entries in both stream `116` and the live transcript as complete unique
+    index sets, redact all header/record values, and reduce the live login to
+    zero unknown client packets without naming the record-set role.

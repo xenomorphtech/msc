@@ -11,6 +11,7 @@ from .packets import (
     ChannelSelection,
     CharacterListEnvelope,
     CharacterSelection,
+    ClientOpcode6RecordSet,
     ClientOpcode31Record,
     ClientStatusMessage,
     HeartbeatProbe,
@@ -118,6 +119,11 @@ class LoginGameState:
     pending_heartbeat_probes: int = 0
     last_heartbeat_round_trip_ms: float | None = None
     max_heartbeat_round_trip_ms: float | None = None
+    client_opcode_6_record_sets: int = 0
+    client_opcode_6_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    client_opcode_6_opaque_values: int = 0
     client_opcode_31_records: int = 0
     client_opcode_31_text_code_unit_patterns: dict[str, int] = field(
         default_factory=dict
@@ -260,6 +266,15 @@ class LoginAnalysis:
                 ),
                 "max_heartbeat_round_trip_ms": (
                     self.state.max_heartbeat_round_trip_ms
+                ),
+                "client_opcode_6_record_sets": (
+                    self.state.client_opcode_6_record_sets
+                ),
+                "client_opcode_6_entry_count_patterns": (
+                    self.state.client_opcode_6_entry_count_patterns
+                ),
+                "client_opcode_6_opaque_values": (
+                    self.state.client_opcode_6_opaque_values
                 ),
                 "client_opcode_31_records": (
                     self.state.client_opcode_31_records
@@ -768,6 +783,29 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 6:
+            record_set = ClientOpcode6RecordSet.parse(payload)
+            entry_count = str(len(record_set.opaque_entries))
+            self.state.client_opcode_6_record_sets += 1
+            self.state.client_opcode_6_entry_count_patterns[entry_count] = (
+                self.state.client_opcode_6_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.client_opcode_6_opaque_values += len(
+                record_set.opaque_entries
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_6_record_set",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record_set,
+                details=record_set.safe_dict(),
+                issues=(
+                    "opcode-6 header and indexed record values remain neutral",
+                ),
+            )
         if opcode == 31:
             record = ClientOpcode31Record.parse(payload)
             text_pattern = "/".join(
@@ -994,6 +1032,13 @@ def render_login_analysis(
             f"matched:{state['matched_heartbeat_responses']} "
             f"unmatched:{state['unmatched_heartbeat_responses']} "
             f"pending:{state['pending_heartbeat_probes']}"
+        ),
+        (
+            "client_opcode_6="
+            f"record_sets:{state['client_opcode_6_record_sets']} "
+            "entry_counts:"
+            f"{state['client_opcode_6_entry_count_patterns']} "
+            f"opaque_values:{state['client_opcode_6_opaque_values']}"
         ),
         (
             "client_opcode_31="

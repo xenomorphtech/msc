@@ -602,6 +602,113 @@ class ServerTime:
 
 
 @dataclass(frozen=True)
+class ClientOpcode6RecordSet:
+    """Capture-bounded, value-redacted indexed record set for client opcode 6."""
+
+    neutral_header: tuple[int, int, int, int, int, int, int, int, int] = field(
+        repr=False
+    )
+    opaque_entries: tuple[tuple[int, int], ...] = field(repr=False)
+    opcode: int = 6
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode6RecordSet":
+        reader = PacketReader(payload, packet_name="client_opcode_6_record_set")
+        _expect_opcode(reader, 6)
+        neutral_header = (
+            reader.u32("neutral_header_0"),
+            reader.u32("neutral_header_1"),
+            reader.u32("neutral_header_2"),
+            reader.u32("neutral_header_3"),
+            reader.u32("neutral_header_4"),
+            reader.u32("neutral_header_5"),
+            reader.u32("neutral_header_6"),
+            reader.u32("neutral_header_7"),
+            reader.u32("neutral_header_8"),
+        )
+        record_count = reader.u32("record_count")
+        if record_count > 0x1_0000:
+            raise PacketShapeError(
+                "client opcode-6 record count must fit the u16 index space"
+            )
+        if reader.remaining != record_count * 6:
+            raise PacketShapeError(
+                "client opcode-6 record count does not match remaining bytes"
+            )
+        record_set = cls(
+            neutral_header=neutral_header,
+            opaque_entries=tuple(
+                (
+                    reader.u16(f"opaque_entries[{index}].index"),
+                    reader.u32(f"opaque_entries[{index}].value"),
+                )
+                for index in range(record_count)
+            ),
+        )
+        reader.finish()
+        record_set._validate()
+        return record_set
+
+    def _validate(self) -> None:
+        if self.opcode != 6:
+            raise PacketShapeError("client opcode-6 record-set opcode must be 6")
+        if len(self.neutral_header) != 9:
+            raise PacketShapeError(
+                "client opcode-6 record-set header must contain nine u32 fields"
+            )
+        if any(
+            value < 0 or value > 0xFFFF_FFFF
+            for value in self.neutral_header
+        ):
+            raise PacketShapeError(
+                "client opcode-6 neutral header values must fit in u32"
+            )
+        if self.neutral_header[1] != 0 or self.neutral_header[5] != 0:
+            raise PacketShapeError(
+                "client opcode-6 reserved header fields 1 and 5 must be zero"
+            )
+        record_count = len(self.opaque_entries)
+        if record_count > 0x1_0000:
+            raise PacketShapeError(
+                "client opcode-6 record count must fit the u16 index space"
+            )
+        indices = {index for index, _ in self.opaque_entries}
+        if indices != set(range(record_count)):
+            raise PacketShapeError(
+                "client opcode-6 record indices must be a complete unique range"
+            )
+        if any(
+            value < 0 or value > 0xFFFF_FFFF
+            for _, value in self.opaque_entries
+        ):
+            raise PacketShapeError(
+                "client opcode-6 opaque record values must fit in u32"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "neutral_header_fields": len(self.neutral_header),
+            "reserved_zero_field_indices": [1, 5],
+            "record_count": len(self.opaque_entries),
+            "complete_index_set": True,
+            "header_values_redacted": True,
+            "opaque_values_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return (
+            struct.pack("<H", self.opcode)
+            + struct.pack("<9I", *self.neutral_header)
+            + struct.pack("<I", len(self.opaque_entries))
+            + b"".join(
+                struct.pack("<HI", index, value)
+                for index, value in self.opaque_entries
+            )
+        )
+
+
+@dataclass(frozen=True)
 class ClientOpcode31Record:
     """Capture-bounded, content-redacted variable record for client opcode 31."""
 
