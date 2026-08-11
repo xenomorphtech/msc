@@ -657,6 +657,85 @@ class LoginServerFixedRecord:
 
 
 @dataclass(frozen=True)
+class ServerOpcode22IndexedTextLedger:
+    """Capture-bounded, text-redacted indexed ledger for server opcode 22."""
+
+    opaque_entries: tuple[tuple[int, str], ...] = field(repr=False)
+    opcode: int = 22
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode22IndexedTextLedger":
+        reader = PacketReader(
+            payload, packet_name="server_opcode_22_indexed_text_ledger"
+        )
+        _expect_opcode(reader, 22)
+        entry_count = reader.u32("entry_count")
+        if entry_count > 0x1_0000:
+            raise PacketShapeError(
+                "server opcode-22 entry count must fit the u16 index space"
+            )
+        entries: list[tuple[int, str]] = []
+        for entry_index in range(entry_count):
+            text = reader.utf16_string(
+                f"opaque_entries[{entry_index}].text",
+                trailing_byte=True,
+            )
+            index = reader.u16(f"opaque_entries[{entry_index}].index")
+            entries.append((index, text))
+        reader.finish()
+        ledger = cls(opaque_entries=tuple(entries))
+        ledger._validate()
+        return ledger
+
+    @property
+    def text_code_units(self) -> int:
+        return sum(
+            len(text.encode("utf-16-le")) // 2
+            for _, text in self.opaque_entries
+        )
+
+    def _validate(self) -> None:
+        if self.opcode != 22:
+            raise PacketShapeError(
+                "server opcode-22 indexed-text ledger opcode must be 22"
+            )
+        entry_count = len(self.opaque_entries)
+        if entry_count > 0x1_0000:
+            raise PacketShapeError(
+                "server opcode-22 entry count must fit the u16 index space"
+            )
+        indices = {index for index, _ in self.opaque_entries}
+        if indices != set(range(entry_count)):
+            raise PacketShapeError(
+                "server opcode-22 indices must be a complete unique range"
+            )
+        for _, text in self.opaque_entries:
+            encode_utf16_string(text, trailing_byte=True)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "entry_count": len(self.opaque_entries),
+            "complete_index_set": True,
+            "text_code_units": self.text_code_units,
+            "nonempty_text_entries": sum(
+                bool(text) for _, text in self.opaque_entries
+            ),
+            "text_values_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return (
+            struct.pack("<HI", self.opcode, len(self.opaque_entries))
+            + b"".join(
+                encode_utf16_string(text, trailing_byte=True)
+                + struct.pack("<H", index)
+                for index, text in self.opaque_entries
+            )
+        )
+
+
+@dataclass(frozen=True)
 class ClientOpcode6RecordSet:
     """Capture-bounded, value-redacted indexed record set for client opcode 6."""
 

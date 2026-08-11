@@ -73,6 +73,7 @@ client 13  typed opcode-13 envelope or status message
 server 13  typed opcode-13 envelope or three-byte acknowledgment
 server 27  counted redacted integer/text ledger
 server 28  counted redacted paired-text ledger
+server 22  counted redacted indexed-text ledger
 server 20  redacted neutral uint32 record
 server 21  zero uint8 record
 server 23  zero uint32 record
@@ -132,6 +133,16 @@ replays the same four-entry, 164-byte opcode-`28` variant. Every record consumes
 and round-trips exactly at full shape coverage. Safe login state exposes only
 packet/entry counts and text code-unit totals; all text and numeric values stay
 redacted and their higher-level roles remain neutral.
+
+Server opcode `22` carries a `uint32` entry count followed by repeated
+`(trailing-zero counted UTF-16 text, uint16 index)` entries. Stream `83` has
+299 entries and 16,473 text code units in 34,447 bytes; stream `116` and the
+live login share the same 152-entry, 10,502-code-unit, 21,770-byte record.
+Every sample exact-consumes, all text trailing bytes are zero, and each index
+set is the complete unique range `0..count-1`. The later client opcode-`6`
+record uses the same index set in all three sessions, although ordering differs.
+The fold reports only counts, code-unit totals, and that correlation; text and
+the family's higher-level role stay redacted and neutral.
 
 Four small login-server records also share exact boundaries across stream `83`
 and stream `116`. Opcodes `21` and `161` are each a two-byte opcode followed by

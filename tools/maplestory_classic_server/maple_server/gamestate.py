@@ -20,6 +20,7 @@ from .packets import (
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    ServerOpcode22IndexedTextLedger,
     ServerOpcode27IntegerLedger,
     ServerOpcode28TextLedger,
     ServerTime,
@@ -127,6 +128,14 @@ class LoginGameState:
         default_factory=dict
     )
     login_server_fixed_zero_values: int = 0
+    server_opcode_22_ledgers: int = 0
+    server_opcode_22_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    server_opcode_22_text_code_units: int = 0
+    server_opcode_22_pending_client_record_sets: int = 0
+    client_opcode_6_matching_server_opcode_22_index_sets: int = 0
+    client_opcode_6_mismatched_server_opcode_22_index_sets: int = 0
     server_opcode_27_ledgers: int = 0
     server_opcode_27_entry_count_patterns: dict[str, int] = field(
         default_factory=dict
@@ -294,6 +303,22 @@ class LoginAnalysis:
                 ),
                 "login_server_fixed_zero_values": (
                     self.state.login_server_fixed_zero_values
+                ),
+                "server_opcode_22_ledgers": self.state.server_opcode_22_ledgers,
+                "server_opcode_22_entry_count_patterns": (
+                    self.state.server_opcode_22_entry_count_patterns
+                ),
+                "server_opcode_22_text_code_units": (
+                    self.state.server_opcode_22_text_code_units
+                ),
+                "server_opcode_22_pending_client_record_sets": (
+                    self.state.server_opcode_22_pending_client_record_sets
+                ),
+                "client_opcode_6_matching_server_opcode_22_index_sets": (
+                    self.state.client_opcode_6_matching_server_opcode_22_index_sets
+                ),
+                "client_opcode_6_mismatched_server_opcode_22_index_sets": (
+                    self.state.client_opcode_6_mismatched_server_opcode_22_index_sets
                 ),
                 "server_opcode_27_ledgers": (
                     self.state.server_opcode_27_ledgers
@@ -530,6 +555,9 @@ class LoginStateFold:
         self.issues: list[str] = []
         self.warnings: list[str] = []
         self._pending_heartbeat_probes: deque[int] = deque()
+        self._pending_server_opcode_22_index_sets: deque[frozenset[int]] = (
+            deque()
+        )
 
     def _invalid(
         self, frame: PlainFrame, kind: str, error: PacketShapeError
@@ -659,6 +687,33 @@ class LoginStateFold:
                 details=record.safe_dict(),
                 issues=(
                     "fixed login-server record value and role remain neutral",
+                ),
+            )
+        if opcode == 22:
+            ledger = ServerOpcode22IndexedTextLedger.parse(payload)
+            entry_count = str(len(ledger.opaque_entries))
+            self.state.server_opcode_22_ledgers += 1
+            self.state.server_opcode_22_entry_count_patterns[entry_count] = (
+                self.state.server_opcode_22_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.server_opcode_22_text_code_units += (
+                ledger.text_code_units
+            )
+            self.state.server_opcode_22_pending_client_record_sets += 1
+            self._pending_server_opcode_22_index_sets.append(
+                frozenset(index for index, _ in ledger.opaque_entries)
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_22_indexed_text_ledger",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=ledger,
+                details=ledger.safe_dict(),
+                issues=(
+                    "opcode-22 text values and higher-level role remain neutral",
                 ),
             )
         if opcode == 27:
@@ -910,12 +965,35 @@ class LoginStateFold:
             self.state.client_opcode_6_opaque_values += len(
                 record_set.opaque_entries
             )
+            details = record_set.safe_dict()
+            if self._pending_server_opcode_22_index_sets:
+                server_indices = (
+                    self._pending_server_opcode_22_index_sets.popleft()
+                )
+                self.state.server_opcode_22_pending_client_record_sets -= 1
+                client_indices = frozenset(
+                    index for index, _ in record_set.opaque_entries
+                )
+                index_set_match = client_indices == server_indices
+                details["server_opcode_22_index_set_match"] = index_set_match
+                if index_set_match:
+                    self.state.client_opcode_6_matching_server_opcode_22_index_sets += 1
+                else:
+                    self.state.client_opcode_6_mismatched_server_opcode_22_index_sets += (
+                        1
+                    )
+                    self.warnings.append(
+                        "client opcode-6 index set does not match the preceding "
+                        "server opcode-22 ledger"
+                    )
+            else:
+                details["server_opcode_22_index_set_match"] = None
             return self._observation(
                 frame,
                 kind="client_opcode_6_record_set",
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=record_set,
-                details=record_set.safe_dict(),
+                details=details,
                 issues=(
                     "opcode-6 header and indexed record values remain neutral",
                 ),
@@ -1152,6 +1230,21 @@ def render_login_analysis(
             f"total:{state['login_server_fixed_records']} "
             f"by_opcode:{state['login_server_fixed_records_by_opcode']} "
             f"zero_values:{state['login_server_fixed_zero_values']}"
+        ),
+        (
+            "server_opcode_22="
+            f"ledgers:{state['server_opcode_22_ledgers']} "
+            f"entry_counts:{state['server_opcode_22_entry_count_patterns']} "
+            f"text_code_units:{state['server_opcode_22_text_code_units']} "
+            f"pending_client_sets:"
+            f"{state['server_opcode_22_pending_client_record_sets']}"
+        ),
+        (
+            "opcode_22_to_client_opcode_6="
+            f"matched:"
+            f"{state['client_opcode_6_matching_server_opcode_22_index_sets']} "
+            f"mismatched:"
+            f"{state['client_opcode_6_mismatched_server_opcode_22_index_sets']}"
         ),
         (
             "server_opcode_27="

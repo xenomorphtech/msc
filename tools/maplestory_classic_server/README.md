@@ -580,6 +580,15 @@ output exposes only opcode counts, widths, and zero/nonzero status. Stream `83`
 is reduced to two unknown packets and the live login to server opcodes `0` and
 `22` only.
 
+Server opcode `22` is a variable redacted indexed-text ledger. Its `uint32`
+count covers repeated trailing-zero counted UTF-16 text plus `uint16` index
+entries. Stream `83` has 299 entries/16,473 code units; stream `116` and live
+share a byte-identical 152-entry/10,502-code-unit body. All three index sets are
+complete `0..count-1` ranges and match the later client opcode-`6` set despite
+different orderings. Both reference records exact-consume natively, while safe
+state publishes only counts, text-length totals, and set-match status. Stream
+`83` now has only client opcode `274` unknown and live only server opcode `0`.
+
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
 prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
@@ -2044,3 +2053,7 @@ preserve distinct Unity scan codes in this setup.
     live opcode-`23` sample without exposing the varying opcode-`20` value, and
     reduce stream `83` to two unknown packets and live to server opcodes `0` and
     `22`.
+82. Replace login server opcode `22`'s opaque width with one variable redacted
+    indexed-text ledger, validate the 299-entry and 152-entry reference bodies
+    plus the byte-identical live body, and correlate each complete index set
+    with the later client opcode-`6` record without publishing text.

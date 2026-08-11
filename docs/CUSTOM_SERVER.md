@@ -2384,6 +2384,12 @@ project's own `README.md` for all options.
   contain all four and live contains opcode `23`; the manifest exact-consumes
   all eight reference packets. Safe state reports only widths, opcode counts,
   and zero status, leaving opcode `20`'s varying `uint32` neutral and private.
+- Login server opcode `22` now exact-consumes one counted indexed-text ledger:
+  299 entries in stream `83`, and the same 152-entry body in stream `116` and
+  live. Every index set is complete and matches the later client opcode-`6`
+  set. Text stays redacted; safe state exposes only entry/code-unit totals and
+  match status. This leaves only client opcode `274` unknown in stream `83`
+  and the shortened account opcode `0` unknown live.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

@@ -35,6 +35,7 @@ from maple_server.packets import (  # noqa: E402
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    ServerOpcode22IndexedTextLedger,
     ServerOpcode27IntegerLedger,
     ServerOpcode27IntegerLedgerEntry,
     ServerOpcode28TextLedger,
@@ -168,6 +169,7 @@ def fixture_login_transcript(
     pending_heartbeat_probe: bool = False,
     opcode_27_ledger: ServerOpcode27IntegerLedger | None = None,
     opcode_28_ledger: ServerOpcode28TextLedger | None = None,
+    opcode_22_ledger: ServerOpcode22IndexedTextLedger | None = None,
     login_server_fixed_records: tuple[LoginServerFixedRecord, ...] = (),
     opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
@@ -220,6 +222,8 @@ def fixture_login_transcript(
         append("server_to_client", opcode_27_ledger.to_bytes())
     if opcode_28_ledger is not None:
         append("server_to_client", opcode_28_ledger.to_bytes())
+    if opcode_22_ledger is not None:
+        append("server_to_client", opcode_22_ledger.to_bytes())
     for fixed_record in login_server_fixed_records:
         append("server_to_client", fixed_record.to_bytes())
     if opcode_6_record_set is not None:
@@ -274,6 +278,38 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_server_opcode_22_indexed_text_ledger_round_trip_and_redact(
+        self,
+    ) -> None:
+        ledger = ServerOpcode22IndexedTextLedger(
+            opaque_entries=(
+                (2, "private-gamma"),
+                (0, "private-alpha"),
+                (1, "private-beta"),
+            )
+        )
+
+        parsed = ServerOpcode22IndexedTextLedger.parse(ledger.to_bytes())
+
+        self.assertEqual(parsed, ledger)
+        self.assertEqual(parsed.safe_dict()["entry_count"], 3)
+        self.assertTrue(parsed.safe_dict()["complete_index_set"])
+        self.assertNotIn("private-alpha", str(parsed.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "complete unique range"):
+            ServerOpcode22IndexedTextLedger(
+                opaque_entries=((0, "a"), (0, "b"))
+            ).to_bytes()
+
+        corrupt = bytearray(
+            ServerOpcode22IndexedTextLedger(
+                opaque_entries=((0, "private"),)
+            ).to_bytes()
+        )
+        corrupt[-3] = 1
+        with self.assertRaisesRegex(PacketShapeError, "trailing byte"):
+            ServerOpcode22IndexedTextLedger.parse(bytes(corrupt))
+
     def test_login_server_fixed_records_round_trip_and_redact(self) -> None:
         records = (
             LoginServerFixedRecord(opcode=20, value=0xDEAD_BEEF),
@@ -545,6 +581,13 @@ class GameStateFoldTest(unittest.TestCase):
         )
 
     def test_folds_client_opcode_6_record_set_without_values(self) -> None:
+        server_ledger = ServerOpcode22IndexedTextLedger(
+            opaque_entries=(
+                (1, "private-beta"),
+                (2, "private-gamma"),
+                (0, "private-alpha"),
+            )
+        )
         record_set = ClientOpcode6RecordSet(
             neutral_header=(2, 0, 1, 3, 42, 0, 7, 9, 11),
             opaque_entries=(
@@ -554,10 +597,32 @@ class GameStateFoldTest(unittest.TestCase):
             ),
         )
         analysis = analyze_login_transcript(
-            fixture_login_transcript(opcode_6_record_set=record_set)
+            fixture_login_transcript(
+                opcode_22_ledger=server_ledger,
+                opcode_6_record_set=record_set,
+            )
         )
 
         self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_22_ledgers, 1)
+        self.assertEqual(
+            analysis.state.server_opcode_22_entry_count_patterns, {"3": 1}
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_22_text_code_units,
+            len("private-alpha") + len("private-beta") + len("private-gamma"),
+        )
+        self.assertEqual(
+            analysis.state.server_opcode_22_pending_client_record_sets, 0
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_6_matching_server_opcode_22_index_sets,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_6_mismatched_server_opcode_22_index_sets,
+            0,
+        )
         self.assertEqual(analysis.state.client_opcode_6_record_sets, 1)
         self.assertEqual(
             analysis.state.client_opcode_6_entry_count_patterns, {"3": 1}
@@ -571,11 +636,29 @@ class GameStateFoldTest(unittest.TestCase):
         self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
         self.assertEqual(observation.details["record_count"], 3)
         self.assertTrue(observation.details["complete_index_set"])
+        self.assertTrue(observation.details["server_opcode_22_index_set_match"])
+        server_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_22_indexed_text_ledger"
+        )
+        self.assertEqual(server_observation.coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(server_observation.details["entry_count"], 3)
+        self.assertNotIn("private-alpha", str(analysis.safe_dict()))
         self.assertNotIn(str(0xDEAD_BEEF), str(analysis.safe_dict()))
         self.assertNotIn(str(0x1234_5678), str(analysis.safe_dict()))
         self.assertIn(
             "client_opcode_6=record_sets:1 entry_counts:{'3': 1} "
             "opaque_values:3",
+            render_login_analysis(analysis),
+        )
+        self.assertIn(
+            "server_opcode_22=ledgers:1 entry_counts:{'3': 1} "
+            "text_code_units:38 pending_client_sets:0",
+            render_login_analysis(analysis),
+        )
+        self.assertIn(
+            "opcode_22_to_client_opcode_6=matched:1 mismatched:0",
             render_login_analysis(analysis),
         )
 

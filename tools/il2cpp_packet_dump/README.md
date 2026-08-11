@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 116 semantic/manual shapes and 90 explicitly
+manifest currently declares 117 semantic/manual shapes and 89 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -97,7 +97,7 @@ opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 The live-only, non-overlapping
 opcode-`310` width and capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add nine active shapes.
-This leaves 185 active shapes and 69 active
+This leaves 185 active shapes and 68 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -190,6 +190,12 @@ zero `uint8`, and opcode `23` carries a zero `uint32`. The live login supplies
 an independent opcode-`23` observation. Isolated native validation consumes
 all eight reference packets; safe Python state reports only widths, opcode
 counts, and zero status while the varying opcode-`20` value remains redacted.
+Login server opcode `22` replaces its 34,447-byte observed-opaque pin with one
+variable shape: `u32` entry count plus repeated trailing-zero counted UTF-16
+text and `u16` index. The 299-entry stream-`83` packet and 152-entry
+stream-`116` packet both exact-consume in isolated native validation; live is
+byte-identical to the latter. All three index sets are complete and match the
+later client opcode-`6` sets. Text and higher-level roles remain redacted.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short

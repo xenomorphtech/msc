@@ -1116,9 +1116,17 @@ opcode `20` carries a varying redacted `uint32`, opcodes `21`/`161` carry zero
 `uint8` values, and opcode `23` carries a zero `uint32`. The live login adds an
 independent opcode-`23` sample. All eight reference packets exact-consume under
 the native manifest and all nine samples round-trip in Python; safe output
-reports only opcode/width and zero-value aggregates. Stream `83` now has only
-client opcode `274` and server opcode `22` unknown; live has only server
-opcodes `0` and `22` unknown.
+reports only opcode/width and zero-value aggregates.
+
+Login server opcode `22` is now an exact variable indexed-text ledger rather
+than a 34,447-byte opaque pin. Stream `83` carries 299 entries; stream `116`
+and live share a byte-identical 152-entry, 21,770-byte record. Each entry is
+trailing-zero counted UTF-16 plus a `uint16` index, and every sample has a
+complete unique `0..count-1` index set. The later client opcode-`6` record has
+the same set in all three sessions. Safe output retains only counts, text
+code-unit totals, and set-match status. Both reference packets exact-consume
+natively. Stream `83` now has only client opcode `274` unknown, while live has
+only its shortened server opcode `0` account record unknown.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
