@@ -55,6 +55,7 @@ from .packets import (
     VariableServerRecord,
     InventoryChangeSet,
     InventoryModification,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     LifeMovementBroadcast,
@@ -284,6 +285,13 @@ class PendingItemUse:
     effect_field: str | None
     expected_effect_value: int | None
     inventory_confirmed: bool = False
+
+
+@dataclass(frozen=True)
+class PendingInventoryMove:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: InventoryMoveRequest
 
 
 @dataclass
@@ -529,6 +537,15 @@ class GameplayGameState:
     inventory_update_flags: Counter[int] = field(default_factory=Counter)
     inventory_empty_change_packets: int = 0
     inventory_unknown_slot_modifications: int = 0
+    inventory_move_requests: int = 0
+    inventory_move_requests_by_inventory: Counter[str] = field(
+        default_factory=Counter
+    )
+    inventory_move_request_matches: int = 0
+    inventory_move_updates_without_request: int = 0
+    pending_inventory_move_requests: int = 0
+    last_inventory_move_response_ms: float | None = None
+    max_inventory_move_response_ms: float | None = None
     item_use_requests: int = 0
     item_use_requests_by_item: Counter[int] = field(default_factory=Counter)
     item_use_unknown_slots: int = 0
@@ -3450,6 +3467,25 @@ class GameplayAnalysis:
                 "inventory_unknown_slot_modifications": (
                     self.state.inventory_unknown_slot_modifications
                 ),
+                "inventory_move_requests": self.state.inventory_move_requests,
+                "inventory_move_requests_by_inventory": dict(
+                    self.state.inventory_move_requests_by_inventory
+                ),
+                "inventory_move_request_matches": (
+                    self.state.inventory_move_request_matches
+                ),
+                "inventory_move_updates_without_request": (
+                    self.state.inventory_move_updates_without_request
+                ),
+                "pending_inventory_move_requests": (
+                    self.state.pending_inventory_move_requests
+                ),
+                "last_inventory_move_response_ms": (
+                    self.state.last_inventory_move_response_ms
+                ),
+                "max_inventory_move_response_ms": (
+                    self.state.max_inventory_move_response_ms
+                ),
                 "item_use_requests": self.state.item_use_requests,
                 "item_use_requests_by_item": {
                     str(item_id): count
@@ -4528,6 +4564,7 @@ class GameplayStateFold:
             tuple[int, int]
         ] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
+        self._pending_inventory_moves: deque[PendingInventoryMove] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._pending_client_attacks: dict[
             int, deque[PendingClientAttackHit]
@@ -5129,6 +5166,55 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=stage,
                 details=stage_details,
+            )
+        if opcode == 79:
+            request = InventoryMoveRequest.parse(payload)
+            inventory_name = request.inventory_name
+            items = self.state.inventory_items.get(inventory_name, ())
+            source_item = next(
+                (
+                    item
+                    for item in items
+                    if item.slot == request.source_slot
+                ),
+                None,
+            )
+            destination_item = next(
+                (
+                    item
+                    for item in items
+                    if item.slot == request.destination_slot
+                ),
+                None,
+            )
+            self.state.inventory_move_requests += 1
+            self.state.inventory_move_requests_by_inventory[inventory_name] += 1
+            self.state.pending_inventory_move_requests += 1
+            self._pending_inventory_moves.append(
+                PendingInventoryMove(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                )
+            )
+            details: dict[str, object] = {
+                **request.safe_dict(),
+                "source_known": source_item is not None,
+                "destination_known": destination_item is not None,
+                "field_epoch": self.state.field_epoch,
+            }
+            if source_item is not None:
+                details["item_id"] = source_item.item_id
+            self._event(frame, "inventory_move_requested", details=details)
+            return self._observation(
+                frame,
+                kind="inventory_move_request",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=request,
+                details=details,
+                issues=(
+                    "client tick and trailing signed-count roles remain neutral",
+                ),
             )
         if opcode == 80:
             request = ItemUseRequest.parse(payload)
@@ -6205,6 +6291,62 @@ class GameplayStateFold:
                         applied_modifications += 1
                 elif modification.operation == InventoryModification.MOVE:
                     destination_slot = modification.destination_slot
+                    pending_inventory_move = next(
+                        (
+                            pending
+                            for pending in self._pending_inventory_moves
+                            if (
+                                pending.request.inventory_type
+                                == modification.inventory_type
+                                and pending.request.source_slot
+                                == modification.slot
+                                and pending.request.destination_slot
+                                == destination_slot
+                            )
+                        ),
+                        None,
+                    )
+                    if pending_inventory_move is None:
+                        self.state.inventory_move_updates_without_request += 1
+                    else:
+                        self._pending_inventory_moves.remove(
+                            pending_inventory_move
+                        )
+                        self.state.pending_inventory_move_requests -= 1
+                        self.state.inventory_move_request_matches += 1
+                        response_ms = round(
+                            (
+                                frame.timestamp_ns
+                                - pending_inventory_move.request_timestamp_ns
+                            )
+                            / 1e6,
+                            3,
+                        )
+                        self.state.last_inventory_move_response_ms = response_ms
+                        self.state.max_inventory_move_response_ms = max(
+                            self.state.max_inventory_move_response_ms or 0.0,
+                            response_ms,
+                        )
+                        details["inventory_move_request_frame"] = (
+                            pending_inventory_move.request_frame_index
+                        )
+                        details["inventory_move_response_ms"] = response_ms
+                        details["inventory_move_trailing_count"] = (
+                            pending_inventory_move.request.trailing_count
+                        )
+                        self._event(
+                            frame,
+                            "inventory_move_confirmed",
+                            details={
+                                **pending_inventory_move.request.safe_dict(),
+                                "request_frame": (
+                                    pending_inventory_move.request_frame_index
+                                ),
+                                "response_ms": response_ms,
+                                "server_move_flag": modification.move_flag,
+                                "field_epoch": self.state.field_epoch,
+                            },
+                        )
                     if (
                         existing is None
                         or existing_index is None
@@ -9668,6 +9810,11 @@ class GameplayStateFold:
                 f"{self.state.pending_item_uses} item-use requests had no "
                 "complete captured inventory/effect response"
             )
+        if self.state.pending_inventory_move_requests:
+            self.warnings.append(
+                f"{self.state.pending_inventory_move_requests} inventory-move "
+                "requests had no matching captured move update"
+            )
         if self.state.pending_item_pickups:
             self.warnings.append(
                 f"{self.state.pending_item_pickups} item-pickup requests had no "
@@ -9703,6 +9850,9 @@ class GameplayStateFold:
                         self.state.pending_skill_record_update_acknowledgements
                     ),
                     "pending_item_uses": self.state.pending_item_uses,
+                    "pending_inventory_move_requests": (
+                        self.state.pending_inventory_move_requests
+                    ),
                     "pending_item_pickups": self.state.pending_item_pickups,
                     "pending_client_attack_effects": (
                         self.state.pending_client_attack_effects
@@ -11598,7 +11748,14 @@ def render_gameplay_analysis(
             f"modifications:{state.inventory_modifications} "
             f"operations:{inventory_modification_operations} "
             f"empty_packets:{state.inventory_empty_change_packets} "
-            f"unknown_slots:{state.inventory_unknown_slot_modifications}"
+            f"unknown_slots:{state.inventory_unknown_slot_modifications} "
+            f"move_requests:{state.inventory_move_requests} "
+            f"move_matches:{state.inventory_move_request_matches} "
+            "move_updates_without_request:"
+            f"{state.inventory_move_updates_without_request} "
+            f"pending_moves:{state.pending_inventory_move_requests} "
+            f"last_move_ms:{state.last_inventory_move_response_ms} "
+            f"max_move_ms:{state.max_inventory_move_response_ms}"
         ),
         (
             f"item_use=requests:{state.item_use_requests} "

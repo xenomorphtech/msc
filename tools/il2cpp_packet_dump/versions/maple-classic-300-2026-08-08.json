@@ -353,6 +353,18 @@
       ]
     },
     {
+      "name":"inventory_move_request","direction":"client_to_server","opcode":79,"length":13,
+      "source":"packets.py:InventoryMoveRequest; 1-10FS stream-126 frames 31564/63904 each match the next same-slot server opcode-39 move",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":79},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"inventory_type","kind":"u8"},
+        {"op":"read","name":"source_slot","kind":"i16"},
+        {"op":"read","name":"destination_slot","kind":"i16"},
+        {"op":"read","name":"trailing_count","kind":"i16"}
+      ]
+    },
+    {
       "name":"item_use_request","direction":"client_to_server","opcode":80,"length":12,
       "source":"packets.py:ItemUseRequest; capture 111 stream 92",
       "operations":[

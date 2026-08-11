@@ -437,7 +437,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
-44,400 partial, 39 unknown, and zero invalid packet observations. PCAP
+44,402 partial, 37 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
@@ -459,6 +459,11 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `39`: inventory change sets with empty, add, stack-quantity,
   equip-slot move, and remove operations plus lossless equipment, stack, and
   cash item records; cash-tab adds accept both captured stack and cash records,
+- client opcode `79`: exact 13-byte inventory-move requests with typed client
+  tick, inventory type, signed source/destination slots, and a neutral trailing
+  signed count; both long-corpus requests FIFO-match the authoritative
+  same-slot server opcode-`39` move, and safe analysis exposes only structural
+  fields plus request/match/pending/latency counters,
 - client opcode `80`: a 12-byte Use-item request containing client tick, signed
   slot, and item template; the fold correlates it with the following opcode-`39`
   quantity change and captured opcode-`41` potion effect,
@@ -1350,6 +1355,10 @@ curl http://127.0.0.1:8799/api/v1/status
 `GET /healthz` returns `{"ok":true}`. `GET /api/v1/status` reports the
 listener mode/address, safe replay configuration, start time,
 accepted/active/completed/failed connection counters, and a `protocol` object.
+Inventory-move request/match/pending/latency counters belong to the finalized
+`analyze-gameplay --json` state. The runtime route intentionally reports
+connection and configured-protocol telemetry rather than continuously
+refolding an incomplete transcript, and neither route exposes plaintext.
 When periodic world heartbeats are enabled,
 `protocol.world_heartbeat` reports the interval, probes sent, responses
 observed, pending probes, and last/maximum round-trip milliseconds.
@@ -1743,3 +1752,8 @@ preserve distinct Unity scan codes in this setup.
     confirmations as a separate opaque opcode-`310` record. Validate both
     sustained captures plus the live transcript without equating opcode `310`
     with the captured opcode-`241` exit request.
+66. Decode both client opcode-`79` inventory-move requests, match each FIFO to
+    the authoritative same-inventory/source/destination server opcode-`39`
+    move, validate the 13-byte shape natively and in Python, expose safe
+    request/match/pending/latency telemetry, and reduce stream `126` to 37
+    unknown packets without assigning a meaning to the trailing signed count.

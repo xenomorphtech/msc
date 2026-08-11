@@ -89,6 +89,7 @@ from maple_server.packets import (  # noqa: E402
     VariableServerRecord,
     InventoryChangeSet,
     InventoryModification,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     LifeMovementBroadcast,
@@ -692,6 +693,7 @@ def fixture_gameplay_transcript(
     skill_record_lifecycle: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
+    inventory_move: bool = False,
     item_use: bool = False,
     item_pickup: bool = False,
     active_item_drop: bool = False,
@@ -820,6 +822,49 @@ def fixture_gameplay_transcript(
                 request_flag=1,
                 stat_mask=CharacterStatUpdate.MESOS,
                 mesos=9_001,
+            ).to_bytes(),
+        )
+    if inventory_move:
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=1,
+                        slot=2,
+                        item=fixture_equipment_inventory_item(
+                            slot=2,
+                            item_id=1_332_066,
+                        ),
+                    ),
+                ),
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            InventoryMoveRequest(
+                client_tick=1_640_184,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=-11,
+                trailing_count=-1,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=1,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.MOVE,
+                        inventory_type=1,
+                        slot=2,
+                        destination_slot=-11,
+                        move_flag=2,
+                    ),
+                ),
             ).to_bytes(),
         )
     if inventory_changes:
@@ -1642,6 +1687,49 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(PacketShapeError, "between 1 and 32767"):
             ItemUseRequest(client_tick=0, slot=0, item_id=2_000_014).to_bytes()
+
+    def test_inventory_move_request_round_trip(self) -> None:
+        requests = (
+            InventoryMoveRequest(
+                client_tick=1_640_184,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=-11,
+                trailing_count=-1,
+            ),
+            InventoryMoveRequest(
+                client_tick=3_131_327,
+                inventory_type=1,
+                source_slot=3,
+                destination_slot=-11,
+                trailing_count=-1,
+            ),
+        )
+
+        for request in requests:
+            with self.subTest(source_slot=request.source_slot):
+                encoded = request.to_bytes()
+                self.assertEqual(len(encoded), 13)
+                self.assertEqual(InventoryMoveRequest.parse(encoded), request)
+                self.assertEqual(request.safe_dict()["inventory"], "equip")
+                self.assertEqual(request.safe_dict()["trailing_count"], -1)
+
+        with self.assertRaisesRegex(PacketShapeError, "between one and five"):
+            InventoryMoveRequest(
+                client_tick=0,
+                inventory_type=0,
+                source_slot=1,
+                destination_slot=2,
+                trailing_count=1,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must differ"):
+            InventoryMoveRequest(
+                client_tick=0,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=2,
+                trailing_count=-1,
+            ).to_bytes()
 
     def test_item_pickup_packet_family_round_trip(self) -> None:
         base_payload = bytes.fromhex(
@@ -6908,6 +6996,57 @@ class GameplayStateFoldTest(unittest.TestCase):
         report = analysis.safe_dict()
         self.assertEqual(report["state"]["inventory"]["item_counts"]["etc"], 1)
         self.assertEqual(report["state"]["inventory_modifications"], 4)
+
+    def test_correlates_inventory_move_request_with_change_set(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(inventory_move=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.inventory_move_requests, 1)
+        self.assertEqual(
+            analysis.state.inventory_move_requests_by_inventory,
+            {"equip": 1},
+        )
+        self.assertEqual(analysis.state.inventory_move_request_matches, 1)
+        self.assertEqual(
+            analysis.state.inventory_move_updates_without_request, 0
+        )
+        self.assertEqual(analysis.state.pending_inventory_move_requests, 0)
+        self.assertEqual(
+            analysis.state.inventory_items["equip"][0].slot, -11
+        )
+        request_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_move_requested"
+        )
+        self.assertTrue(request_event.details["source_known"])
+        self.assertFalse(request_event.details["destination_known"])
+        self.assertEqual(request_event.details["trailing_count"], -1)
+        confirmation = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_move_confirmed"
+        )
+        self.assertEqual(confirmation.details["source_slot"], 2)
+        self.assertEqual(confirmation.details["destination_slot"], -11)
+        inventory_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_change_set_received"
+            and event.details["modifications"][0]["operation"] == "move"
+        )
+        self.assertIn(
+            "inventory_move_request_frame",
+            inventory_event.details["modifications"][0],
+        )
+        report = analysis.safe_dict()
+        self.assertEqual(report["state"]["inventory_move_requests"], 1)
+        self.assertEqual(
+            report["state"]["pending_inventory_move_requests"], 0
+        )
 
     def test_correlates_item_use_request_inventory_and_stat_effects(self) -> None:
         transcript = fixture_gameplay_transcript(

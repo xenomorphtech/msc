@@ -3706,6 +3706,88 @@ class InventoryChangeSet:
 
 
 @dataclass(frozen=True)
+class InventoryMoveRequest:
+    """Client request to move one inventory entry between signed slots."""
+
+    client_tick: int
+    inventory_type: int
+    source_slot: int
+    destination_slot: int
+    trailing_count: int
+    opcode: int = 79
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "InventoryMoveRequest":
+        reader = PacketReader(payload, packet_name="inventory_move_request")
+        _expect_opcode(reader, 79)
+        client_tick = reader.u32("client_tick")
+        inventory_type = reader.u8("inventory_type")
+        if inventory_type not in InventoryModification.INVENTORY_NAMES:
+            raise PacketShapeError(
+                f"inventory move request type is {inventory_type}, expected "
+                "one through five"
+            )
+        source_slot = reader.i16("source_slot")
+        destination_slot = reader.i16("destination_slot")
+        trailing_count = reader.i16("trailing_count")
+        reader.finish()
+        if source_slot == destination_slot:
+            raise PacketShapeError(
+                "inventory move request source and destination must differ"
+            )
+        return cls(
+            client_tick=client_tick,
+            inventory_type=inventory_type,
+            source_slot=source_slot,
+            destination_slot=destination_slot,
+            trailing_count=trailing_count,
+        )
+
+    @property
+    def inventory_name(self) -> str:
+        return InventoryModification.INVENTORY_NAMES[self.inventory_type]
+
+    def safe_dict(self) -> dict[str, int | str]:
+        return {
+            "client_tick": self.client_tick,
+            "inventory": self.inventory_name,
+            "source_slot": self.source_slot,
+            "destination_slot": self.destination_slot,
+            "trailing_count": self.trailing_count,
+        }
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= self.client_tick <= 0xFFFF_FFFF:
+            raise PacketShapeError("inventory-move client tick must fit in u32")
+        if self.inventory_type not in InventoryModification.INVENTORY_NAMES:
+            raise PacketShapeError(
+                "inventory move request type must be between one and five"
+            )
+        for name, value in (
+            ("source", self.source_slot),
+            ("destination", self.destination_slot),
+            ("trailing count", self.trailing_count),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(
+                    f"inventory move request {name} must fit in a signed short"
+                )
+        if self.source_slot == self.destination_slot:
+            raise PacketShapeError(
+                "inventory move request source and destination must differ"
+            )
+        return struct.pack(
+            "<HIBhhh",
+            self.opcode,
+            self.client_tick,
+            self.inventory_type,
+            self.source_slot,
+            self.destination_slot,
+            self.trailing_count,
+        )
+
+
+@dataclass(frozen=True)
 class ItemUseRequest:
     """Client request to consume one stack item from a Use-inventory slot."""
 

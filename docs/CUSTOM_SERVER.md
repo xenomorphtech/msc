@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 219 tests.
+The last run passed all 245 tests.
 
 ## Inspect and compare captures
 
@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,661 observations are full, 44,400 partial, 39
+`--fail-on-invalid`: 26,661 observations are full, 44,402 partial, 37
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -403,10 +403,28 @@ That older local world socket later timed out without opcode `241`, leaving its
 recorded packet fold in `active` rather than falsely inferring a modeled exit.
 The browser-free launcher then restarted only the local Wine client, and direct
 nested-Wayland input traversed world, channel, and character selection without
-moving the host cursor. The fresh client re-entered map `101000000`; its new
-transcript validates warning-free at `60/43/0/0`, and runtime HTTP status
-reports one active world connection with packet injection ready. The
-programmatic Maple-only audio mute remained active throughout.
+moving the host cursor. The fresh client re-entered map `101000000`; its
+current transcript validates warning-free at `244/622/0/0`, stays `active`,
+and matches all 192 current-session heartbeat probes with none pending.
+Runtime HTTP status reports one active world connection with packet injection
+ready. The programmatic Maple-only audio mute remained active throughout.
+
+Client opcode `79` now closes the strongest remaining transaction-shaped
+unknown. Its two 13-byte stream-`126` packets parse as client tick, inventory
+type, signed source slot, signed destination slot, and a trailing signed count.
+Both are equip requests ending at slot `-11`; server opcode `39` applies the
+same `2 -> -11` and `3 -> -11` moves after 13 frames/1,040.241 ms and one
+frame/402.275 ms. The fold
+matches them FIFO, moves the modeled items only when the server update arrives,
+and emits `inventory_move_requested` plus `inventory_move_confirmed`. Safe JSON
+adds `inventory_move_requests`, per-inventory counts, matches, unmatched server
+updates, pending requests, and last/maximum response milliseconds without
+including packet bytes. The Rust manifest independently exact-consumes both
+records, and stream `126` advances to `26,661/44,402/37/0`.
+These counters are part of finalized `analyze-gameplay --json` output.
+`GET /api/v1/status` remains the loopback runtime endpoint for connection,
+injection, heartbeat, and configured-protocol telemetry; it does not
+continuously refold or expose the current plaintext transcript.
 
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
@@ -491,7 +509,7 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,661 full, 44,400 partial, 39 unknown-but-lossless, and zero invalid. Stream
+26,661 full, 44,402 partial, 37 unknown-but-lossless, and zero invalid. Stream
 `92` now reaches 13,417 full, 21,788 partial, 2 unknown, and zero invalid;
 stream `114` reaches 54/22/0/0.
 

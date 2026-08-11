@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 101 semantic/manual shapes and 96 explicitly
+manifest currently declares 102 semantic/manual shapes and 96 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -94,8 +94,8 @@ fourteenth overlaps; opcode `135` adds the fifteenth. Opcode `169` adds a
 non-overlapping shape found only in `1-10FS`; server opcode `394` and client
 opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 `75`, and `241` add overlaps 18 through 20. The live-only, non-overlapping
-opcode-`310` width adds one active shape. This leaves 177 active shapes and 76
-active opaque pins.
+opcode-`310` width and capture-backed client opcode-`79` layout add two active
+shapes. This leaves 178 active shapes and 76 active opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
 re-emits the sole 3,725-byte stream-`114` packet exactly; the checked-in shape
@@ -119,6 +119,12 @@ using only their validated widths, counts, and `308`/`311` cadence. Opcode
 `310` is separately pinned to the 41-byte packet repeated by three controlled
 local-Wine menu confirmations. Its 39-byte body and UI role remain opaque, and
 the manifest does not equate it with the captured opcode-`241` exit request.
+Client opcode `79` adds a 13-byte semantic shape from two stream-`126`
+transactions: `u32 client tick + u8 inventory type + i16 source + i16
+destination + i16 trailing count`. Each request is followed by a server
+opcode-`39` move with the exact same inventory/source/destination tuple. Native
+validation consumes both records; the trailing signed-count role remains
+neutral rather than being inferred from its captured value `-1`.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short

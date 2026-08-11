@@ -1361,13 +1361,15 @@ automatic packet manifest retains the capture-pinned opaque widths and adds an
 explicit live-only opcode-`310` shape; it does not invent outgoing-client
 semantics from incoming handler reads. Coverage becomes
 `13,417/21,788/2/0` for stream `92`, remains `54/22/0/0` for stream `114`, and
-becomes `26,661/44,400/39/0` for stream `126`. The first local transcript folds
+becomes `26,661/44,400/39/0` for stream `126` before the opcode-`79`
+inventory-move model below. The first local transcript folds
 all three opcode-`310` records with zero unknown packets and an `active` final
 packet state; its socket later timed out without opcode `241`. A fresh
 browser-free relaunch then traversed world/channel/character selection through
-the nested Wayland seat and re-entered map `101000000`. Its new transcript is
-valid and warning-free at `60/43/0/0`, already folds opcodes `307` and `311`,
-and runtime status reports one active local world connection.
+the nested Wayland seat and re-entered map `101000000`. Its current transcript
+is valid and warning-free at `244/622/0/0`, remains `active`, and matches all
+192 current-session heartbeat probes with none pending; runtime status reports
+one active local world connection.
 
 ## Field-bootstrap ledgers (`147`, `272`)
 
@@ -1884,6 +1886,38 @@ distributions plus opaque-byte totals, and never copies any of the three text
 fields into safe JSON, text reports, events, or HTTP status. The family keeps a
 neutral name because the four variants span multiple visible-message forms;
 frequency and readable strings alone do not establish one gameplay role.
+
+## Inventory moves (`client 79` -> `server 39`)
+
+The level-1-to-10 capture contains two exact 13-byte requests:
+
+```text
+uint16 opcode = 79
+uint32 client_tick
+uint8  inventory_type                 # 1 equip in both observations
+int16  source_slot                    # observed 2 and 3
+int16  destination_slot               # observed -11 in both
+int16  trailing_count                 # observed -1; role remains neutral
+```
+
+The first request is followed 13 combined gameplay frames/1,040.241 ms later
+by a single server opcode-`39` move for the same inventory and slots. The
+second is followed in the next frame/402.275 ms by the same exact transaction
+shape. This repeated
+field equality is the semantic evidence for the inventory-move name; the
+layout alone is not used to infer it. The client tick and trailing signed count
+remain neutral, and no unobserved opcode-`79` length is accepted by the native
+manifest.
+
+The state fold queues requests FIFO, correlates only an opcode-`39` operation
+`2` with matching inventory/source/destination, and updates inventory from the
+authoritative server packet rather than the request. It emits
+`inventory_move_requested` and `inventory_move_confirmed`. Safe analysis JSON
+reports request counts by inventory, matches, server moves without a request,
+pending requests, and last/maximum response milliseconds; plaintext bytes are
+never copied into those fields. Both native-manifest records and Python codecs
+consume/re-emit exactly. The two observations move stream `126` from 39 to 37
+unknown packets, yielding `26,661/44,402/37/0`.
 
 ## Inventory change sets (`server 39`)
 
@@ -3241,7 +3275,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,661
-full, 44,400 partial, 39 unknown-but-lossless, and zero invalid packet
+full, 44,402 partial, 37 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
 2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
