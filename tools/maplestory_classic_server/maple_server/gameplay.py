@@ -17,7 +17,6 @@ from .packets import (
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
-    ClientFixedOpaqueRecord,
     ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
@@ -32,8 +31,10 @@ from .packets import (
     ClientOpcode276Envelope,
     ClientOpcode279TextEnvelope,
     ClientOpcode298ItemAcquisitionRequest,
+    ClientOpcode307NeutralRecord,
     ClientOpcode308PeriodicRecord,
     ClientOpcode309Acknowledgement,
+    ClientOpcode310TextRecord,
     ClientOpcode311PeriodicRecord,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
@@ -1188,10 +1189,11 @@ class GameplayGameState:
     left_ctrl_skill_known: bool = False
     pending_movements: int = 0
     client_opcode_75_empty_records: int = 0
-    client_fixed_opaque_records_by_opcode: Counter[int] = field(
+    client_neutral_records_by_opcode: Counter[int] = field(
         default_factory=Counter
     )
-    client_fixed_opaque_bytes_by_opcode: Counter[int] = field(
+    client_opcode_307_nonzero_redacted_values: int = 0
+    client_opcode_310_text_code_units: Counter[int] = field(
         default_factory=Counter
     )
     client_periodic_records_by_opcode: Counter[int] = field(
@@ -4767,14 +4769,17 @@ class GameplayAnalysis:
                         self.state.left_ctrl_skill_known
                     ),
                 },
-                "client_fixed_opaque_records": {
+                "client_neutral_records": {
                     "packets_by_opcode": dict(
-                        self.state.client_fixed_opaque_records_by_opcode
+                        self.state.client_neutral_records_by_opcode
                     ),
-                    "opaque_bytes_by_opcode": dict(
-                        self.state.client_fixed_opaque_bytes_by_opcode
+                    "opcode_307_nonzero_redacted_values": (
+                        self.state.client_opcode_307_nonzero_redacted_values
                     ),
-                    "bodies_redacted": True,
+                    "opcode_310_text_code_units": dict(
+                        self.state.client_opcode_310_text_code_units
+                    ),
+                    "neutral_values_redacted": True,
                 },
                 "client_periodic_records": {
                     "packets_by_opcode": dict(
@@ -5471,24 +5476,34 @@ class GameplayStateFold:
                 details=details,
             )
         if opcode in {307, 310}:
-            record = ClientFixedOpaqueRecord.parse(payload)
-            body_length = len(record.opaque_body)
-            self.state.client_fixed_opaque_records_by_opcode[opcode] += 1
-            self.state.client_fixed_opaque_bytes_by_opcode[opcode] += body_length
+            record = (
+                ClientOpcode307NeutralRecord.parse(payload)
+                if opcode == 307
+                else ClientOpcode310TextRecord.parse(payload)
+            )
+            self.state.client_neutral_records_by_opcode[opcode] += 1
+            if isinstance(record, ClientOpcode307NeutralRecord):
+                if record.redacted_value != 0:
+                    self.state.client_opcode_307_nonzero_redacted_values += 1
+            else:
+                self.state.client_opcode_310_text_code_units[
+                    record.text_code_units
+                ] += 1
             details: dict[str, object] = {
                 **record.safe_dict(),
+                "opcode": opcode,
                 "field_epoch": self.state.field_epoch,
                 "phase": self.state.phase.value,
             }
-            self._event(frame, "client_fixed_record_submitted", details=details)
+            self._event(frame, "client_neutral_record_submitted", details=details)
             return self._observation(
                 frame,
-                kind="client_fixed_opaque_record",
+                kind=f"client_opcode_{opcode}_neutral_record",
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=record,
                 details=details,
                 issues=(
-                    f"client opcode-{opcode} fixed body remains opaque",
+                    f"client opcode-{opcode} record purpose remains neutral",
                 ),
             )
         if opcode == 241:
@@ -13553,11 +13568,13 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
         ),
         (
-            "client_fixed_opaque_records="
+            "client_neutral_records="
             "packets:"
-            f"{dict(sorted(state.client_fixed_opaque_records_by_opcode.items()))} "
-            "opaque_bytes:"
-            f"{dict(sorted(state.client_fixed_opaque_bytes_by_opcode.items()))}"
+            f"{dict(sorted(state.client_neutral_records_by_opcode.items()))} "
+            "opcode307_nonzero:"
+            f"{state.client_opcode_307_nonzero_redacted_values} "
+            "opcode310_code_units:"
+            f"{dict(sorted(state.client_opcode_310_text_code_units.items()))}"
         ),
         (
             "client_periodic_records="

@@ -831,13 +831,15 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `100`: a counted ability-point allocation request containing a
   client tick plus repeated stat-mask/increment pairs. Both captures allocate
   LUK/INT, and their opcode-`41` responses apply the exact requested gains and
-  AP expenditure after 107.555/406.248 ms. Client opcode `307` remains an exact
-  fixed-width redacted record. Periodic opcode `308` is typed as two redacted
+  AP expenditure after 107.555/406.248 ms. Client opcode `307` is typed as two
+  redacted `u32`s plus a zero trailer across two references and 28 live records.
+  Periodic opcode `308` is typed as two redacted
   doubles, two redacted `u64`s, a `u32` mirrored by two doubles, and fixed
   controls; opcode `311` is zero-bounded around one redacted `u32`. The fold
   retains their observed cadence without assigning purpose. Client opcode
-  `310` is a separate 41-byte live-only record repeated by three controlled
-  direct-Wayland menu confirmations, with no opcode-`241` or phase transition,
+  `310` is counted redacted UTF-16 plus a zero-u32/zero-u8 suffix in three
+  controlled direct-Wayland confirmations, with no opcode-`241` or phase
+  transition,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
   records with two raw-byte-preserving IL2CPP booleans and two signed values per
   entry; zero is false and every nonzero byte is true, and the three-byte
@@ -2124,3 +2126,6 @@ preserve distinct Unity scan codes in this setup.
     correlate both reference requests with exact LUK/INT and AP deltas in the
     following opcode-`41` responses, and retain only `307/310` as fixed opaque
     client records.
+89. Replace the final fixed-opaque client bucket with typed neutral opcode-
+    `307` and counted/redacted UTF-16 opcode-`310` records, validating 30 and
+    three samples respectively without assigning purpose.

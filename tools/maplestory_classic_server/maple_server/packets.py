@@ -11527,51 +11527,110 @@ class ClientAbilityPointAllocationRequest:
         )
 
 
-CLIENT_FIXED_OPAQUE_BODY_LENGTHS = {
-    307: 12,
-    310: 39,
-}
-
-
 @dataclass(frozen=True)
-class ClientFixedOpaqueRecord:
-    """Capture-bounded client record whose fixed body remains redacted."""
+class ClientOpcode307NeutralRecord:
+    """Cross-capture three-word record with redacted neutral values."""
 
-    opaque_body: bytes = field(repr=False)
-    opcode: int
+    neutral_value: int = field(repr=False)
+    redacted_value: int = field(repr=False)
+    opcode: int = 307
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ClientFixedOpaqueRecord":
-        reader = PacketReader(payload, packet_name="client_fixed_opaque_record")
-        opcode = reader.u16("opcode")
-        body_length = CLIENT_FIXED_OPAQUE_BODY_LENGTHS.get(opcode)
-        if body_length is None:
+    def parse(cls, payload: bytes) -> "ClientOpcode307NeutralRecord":
+        reader = PacketReader(payload, packet_name="client_opcode_307_neutral")
+        _expect_opcode(reader, 307)
+        neutral_value = reader.u32("neutral_value")
+        redacted_value = reader.u32("redacted_value")
+        if reader.u32("reserved_zero") != 0:
             raise PacketShapeError(
-                f"fixed client record opcode is unsupported: {opcode}"
+                "client opcode-307 reserved trailer must be zero"
             )
-        opaque_body = reader.bytes(body_length, "opaque_body")
         reader.finish()
-        return cls(opaque_body=opaque_body, opcode=opcode)
+        return cls(
+            neutral_value=neutral_value,
+            redacted_value=redacted_value,
+        )
 
     def safe_dict(self) -> dict[str, object]:
         return {
-            "opcode": self.opcode,
-            "opaque_body_bytes": len(self.opaque_body),
-            "opaque_body_redacted": True,
+            "neutral_value_redacted": True,
+            "redacted_value_redacted": True,
+            "redacted_value_zero": self.redacted_value == 0,
+            "reserved_zero": True,
         }
 
     def to_bytes(self) -> bytes:
-        expected_length = CLIENT_FIXED_OPAQUE_BODY_LENGTHS.get(self.opcode)
-        if expected_length is None:
+        if self.opcode != 307:
+            raise PacketShapeError("neutral record opcode must be 307")
+        for name, value in (
+            ("neutral", self.neutral_value),
+            ("redacted", self.redacted_value),
+        ):
+            if not 0 <= value <= 0xFFFF_FFFF:
+                raise PacketShapeError(
+                    f"client opcode-307 {name} value must fit u32"
+                )
+        return struct.pack(
+            "<HIII", self.opcode, self.neutral_value, self.redacted_value, 0
+        )
+
+
+@dataclass(frozen=True)
+class ClientOpcode310TextRecord:
+    """Counted UTF-16 client record whose text and purpose stay redacted."""
+
+    redacted_text: str = field(repr=False)
+    opcode: int = 310
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode310TextRecord":
+        reader = PacketReader(payload, packet_name="client_opcode_310_text")
+        _expect_opcode(reader, 310)
+        redacted_text = reader.utf16_string(
+            "redacted_text", trailing_byte=False
+        )
+        if reader.u32("reserved_zero_u32") != 0:
             raise PacketShapeError(
-                f"fixed client record opcode is unsupported: {self.opcode}"
+                "client opcode-310 reserved u32 must be zero"
             )
-        if len(self.opaque_body) != expected_length:
+        if reader.u8("reserved_zero_u8") != 0:
             raise PacketShapeError(
-                f"client opcode-{self.opcode} body must be {expected_length} "
-                f"bytes, got {len(self.opaque_body)}"
+                "client opcode-310 reserved u8 must be zero"
             )
-        return struct.pack("<H", self.opcode) + self.opaque_body
+        reader.finish()
+        return cls(redacted_text=redacted_text)
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.redacted_text.encode("utf-16-le")) // 2
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+            "reserved_zero_u32": True,
+            "reserved_zero_u8": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 310:
+            raise PacketShapeError("text record opcode must be 310")
+        try:
+            encoded = self.redacted_text.encode("utf-16-le")
+        except UnicodeEncodeError as error:
+            raise PacketShapeError(
+                "client opcode-310 text is not valid UTF-16"
+            ) from error
+        code_units = len(encoded) // 2
+        if code_units > 0xFFFF:
+            raise PacketShapeError(
+                "client opcode-310 text exceeds the u16 code-unit count"
+            )
+        return (
+            struct.pack("<HH", self.opcode, code_units)
+            + encoded
+            + struct.pack("<IB", 0, 0)
+        )
 
 
 @dataclass(frozen=True)

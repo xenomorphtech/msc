@@ -1103,11 +1103,23 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":241}]
     },
     {
-      "name":"client_opcode_310_live_fixed_record","direction":"client_to_server","opcode":310,"length":41,
-      "source":"three controlled direct-Wayland game-menu confirmations in the local-Wine world session each emitted one 41-byte client packet; no opcode 241 or phase transition followed, so the 39-byte body and UI role remain explicitly opaque",
+      "name":"client_opcode_307_neutral_record","direction":"client_to_server","opcode":307,"length":14,
+      "source":"packets.py:ClientOpcode307NeutralRecord; two references and 28 live sessions share redacted u32/redacted u32/zero-u32, with all four nonzero middle values page-aligned; purpose remains neutral",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":307},
+        {"op":"read","name":"neutral_value","kind":"u32"},
+        {"op":"read","name":"redacted_value","kind":"u32"},
+        {"op":"read","name":"reserved_zero","kind":"u32","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_310_text_record","direction":"client_to_server","opcode":310,"length":41,
+      "source":"packets.py:ClientOpcode310TextRecord; three controlled direct-Wayland confirmations share a counted 16-unit UTF-16 value and zero-u32/zero-u8 suffix; text, purpose, and UI role remain redacted/neutral",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":310},
-        {"op":"bytes","name":"opaque_body","length":39}
+        {"op":"utf16","name":"redacted_text","trailing_zero":false},
+        {"op":"read","name":"reserved_zero_u32","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_zero_u8","kind":"u8","equals":0}
       ]
     },
     {

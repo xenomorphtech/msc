@@ -413,7 +413,10 @@ exit attempt did not emit opcode `241`; no server terminal packet was forced,
 so the live effect remains explicitly unproven.
 
 The remaining fixed-width outgoing records use the same capture-bounded rule.
-Opcode `307` retains an exact opaque 14-byte packet. Opcode `100` no longer
+Opcode `307` no longer retains an opaque body: two references and 28 live
+records all split as redacted `u32`, redacted `u32`, zero `u32`. Its second
+value is zero 26 times and page-aligned in all four nonzero samples, but both
+values and the record purpose stay neutral. Opcode `100` similarly no longer
 does: both 26-byte samples decode as client tick, count `2`, then LUK/INT
 stat-mask and increment pairs. The following opcode-`41` responses apply the
 requested `1/4` and `9/29` gains exactly while consuming the summed `5/38` AP,
@@ -427,10 +430,10 @@ near five minutes and opcode `311` near ten minutes after its first
 bootstrap-skewed interval. Longer paused-live gaps keep that cadence
 observational rather than mandatory. Three controlled nested-Wayland menu
 confirmations in the local Wine session each emitted a 41-byte opcode-`310`
-record but no
-opcode `241` or phase change. The automatic manifest therefore adds a
-live-only opaque opcode-`310` shape and typed `308/311` shapes. The gameplay
-fold redacts neutral values and exposes only structural aggregates,
+record with counted 16-unit UTF-16 and a zero-u32/zero-u8 suffix, but no opcode
+`241` or phase change. The automatic manifest therefore adds typed neutral
+`307/308/310/311` shapes. The gameplay fold redacts neutral values and exposes
+only structural aggregates,
 phase/epoch, and intervals. It does not promote timing or UI adjacency into a
 semantic or replay claim.
 

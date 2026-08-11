@@ -1652,9 +1652,9 @@ three controlled local-Wine menu confirmations:
 | opcode | packet/body bytes | stream `92` | stream `126` | local Wine | bounded observation |
 | --- | ---: | ---: | ---: | ---: | --- |
 | `100` | `26/24` | 1 | 1 | 0 | counted ability-point allocation request |
-| `307` | `14/12` | 1 | 1 | 1 | one fixed record near bootstrap |
+| `307` | `14/12` | 1 | 1 | 28 | two redacted words plus zero trailer near bootstrap |
 | `308` | `74/72` | 2 | 11 | 13 | typed mirrored-value record; approximately 300-second cadence while continuously running |
-| `310` | `41/39` | 0 | 0 | 3 | one per controlled menu confirmation |
+| `310` | `41/39` | 0 | 0 | 3 | counted redacted UTF-16 plus zero suffix |
 | `311` | `22/20` | 2 | 6 | 7 | zero-bounded `u32`; bootstrap-skewed first gap, then approximately 600 seconds |
 
 Opcode `100` is fully modeled as:
@@ -1676,14 +1676,19 @@ lowers AP from `38` to `0`. The fold correlates both responses with zero
 pending, mismatched, or unverified requests and exposes safe per-stat totals and
 latency.
 
-Opcodes `307/310` retain exact opaque bodies that never appear in safe output.
-Opcode `308` instead decodes two redacted `f64`s, two redacted `u64`s,
+Opcode `307` decodes as `redacted u32 + redacted u32 + zero u32` in two
+references and 28 live records. The middle value is zero in 26 samples and all
+four nonzero values are page-aligned; that distribution does not establish a
+role, so both values remain redacted. Opcode `310` decodes as one counted
+redacted UTF-16 value plus `zero u32 + zero u8`; all three controlled records
+use 16 code units and the same text, but neither text nor UI role is exposed or
+named. Opcode `308` decodes two redacted `f64`s, two redacted `u64`s,
 one `u32` mirrored by two `f64`s, controls `50/1`, a `0/1` variant, and terminal
 controls `1/0`. The mirror holds for all 11 stream-`126` and 13 latest-live
 records; observed `(mirror, variant)` pairs are reference `59/60,0` and live
 `3/56/59/60,0/1`. Opcode `311` is exactly
 `zero u64 + redacted u32 + zero u64` for all six reference and seven live
-samples. State exposes typed aggregates separately from opaque-byte counts.
+samples. State exposes typed/redacted aggregates without raw values.
 Events add opcode, field epoch, phase, and the observed interval after the first
 record. Stream `92` observes a
 301.474-second opcode-`308` gap and a 584.534-second opcode-`311` gap. Stream
@@ -1698,8 +1703,8 @@ Opcodes `307/308/310/311` remain partial observations: numeric structure,
 cadence, and controlled UI correlation do not establish field semantics or
 replay safety. Opcode `100` is full because the repeated masks and increments
 match the authoritative stat/AP deltas in both captures. The automatic packet
-manifest replaces the `100/308/311` opaque pins with typed shapes and retains
-an explicit live-only opcode-`310` shape; it does not invent outgoing-client
+manifest replaces the `100/307/308/311` opaque pins with typed shapes and adds
+an explicit typed/redacted live-only opcode-`310` shape; it does not invent outgoing-client
 semantics from incoming handler reads. Current coverage is
 `13,420/21,787/0/0` for stream `92`, remains `54/22/0/0` for stream `114`, and
 is `26,662/44,438/0/0` for stream `126`. The first local transcript folds

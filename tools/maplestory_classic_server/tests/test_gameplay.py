@@ -48,7 +48,6 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
-    ClientFixedOpaqueRecord,
     ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
@@ -64,8 +63,10 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode276RecordGroup,
     ClientOpcode279TextEnvelope,
     ClientOpcode298ItemAcquisitionRequest,
+    ClientOpcode307NeutralRecord,
     ClientOpcode308PeriodicRecord,
     ClientOpcode309Acknowledgement,
+    ClientOpcode310TextRecord,
     ClientOpcode311PeriodicRecord,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
@@ -3402,30 +3403,39 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 ),
             ).to_bytes()
 
-    def test_client_fixed_opaque_records_round_trip_and_redact(self) -> None:
-        for opcode, body_length in (
-            (307, 12),
-            (310, 39),
-        ):
-            with self.subTest(opcode=opcode):
-                body = bytes(range(body_length))
-                record = ClientFixedOpaqueRecord(
-                    opaque_body=body,
-                    opcode=opcode,
-                )
+    def test_client_neutral_records_round_trip_and_redact(self) -> None:
+        opcode_307 = ClientOpcode307NeutralRecord(
+            neutral_value=0x1234,
+            redacted_value=0x5678_9000,
+        )
+        opcode_310 = ClientOpcode310TextRecord(
+            redacted_text="private-value-01"
+        )
 
-                self.assertEqual(len(record.to_bytes()), body_length + 2)
-                self.assertEqual(
-                    ClientFixedOpaqueRecord.parse(record.to_bytes()),
-                    record,
-                )
-                self.assertTrue(record.safe_dict()["opaque_body_redacted"])
-                self.assertNotIn(body.hex(), str(record.safe_dict()))
-                with self.assertRaisesRegex(PacketShapeError, "body must be"):
-                    ClientFixedOpaqueRecord(
-                        opaque_body=body[:-1],
-                        opcode=opcode,
-                    ).to_bytes()
+        self.assertEqual(len(opcode_307.to_bytes()), 14)
+        self.assertEqual(
+            ClientOpcode307NeutralRecord.parse(opcode_307.to_bytes()),
+            opcode_307,
+        )
+        self.assertEqual(len(opcode_310.to_bytes()), 41)
+        self.assertEqual(
+            ClientOpcode310TextRecord.parse(opcode_310.to_bytes()),
+            opcode_310,
+        )
+        safe = [opcode_307.safe_dict(), opcode_310.safe_dict()]
+        self.assertNotIn(str(opcode_307.neutral_value), str(safe))
+        self.assertNotIn(str(opcode_307.redacted_value), str(safe))
+        self.assertNotIn(opcode_310.redacted_text, str(safe))
+
+        malformed_307 = bytearray(opcode_307.to_bytes())
+        malformed_307[-1] = 1
+        with self.assertRaisesRegex(PacketShapeError, "trailer must be zero"):
+            ClientOpcode307NeutralRecord.parse(bytes(malformed_307))
+
+        malformed_310 = bytearray(opcode_310.to_bytes())
+        malformed_310[-1] = 1
+        with self.assertRaisesRegex(PacketShapeError, "reserved u8"):
+            ClientOpcode310TextRecord.parse(bytes(malformed_310))
 
     def test_client_periodic_records_round_trip_and_redact(self) -> None:
         opcode_308 = ClientOpcode308PeriodicRecord(
@@ -6772,13 +6782,14 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
-    def test_folds_fixed_opaque_and_typed_periodic_client_records(self) -> None:
-        def record(opcode: int, body_length: int) -> bytes:
-            return ClientFixedOpaqueRecord(
-                opaque_body=bytes([opcode & 0xFF]) * body_length,
-                opcode=opcode,
-            ).to_bytes()
-
+    def test_folds_typed_neutral_and_periodic_client_records(self) -> None:
+        opcode_307 = ClientOpcode307NeutralRecord(
+            neutral_value=0x1234,
+            redacted_value=0x5678_9000,
+        ).to_bytes()
+        opcode_310 = ClientOpcode310TextRecord(
+            redacted_text="private-value-01"
+        ).to_bytes()
         opcode_308 = ClientOpcode308PeriodicRecord(
             neutral_f64_values=(4.5, 2.0),
             neutral_u64_values=(123, 456),
@@ -6792,8 +6803,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_client_plaintexts=(
-                record(307, 12),
-                record(310, 39),
+                opcode_307,
+                opcode_310,
                 opcode_308,
                 opcode_311,
                 opcode_308,
@@ -6805,12 +6816,16 @@ class GameplayStateFoldTest(unittest.TestCase):
 
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(
-            analysis.state.client_fixed_opaque_records_by_opcode,
+            analysis.state.client_neutral_records_by_opcode,
             {307: 1, 310: 1},
         )
         self.assertEqual(
-            analysis.state.client_fixed_opaque_bytes_by_opcode,
-            {307: 12, 310: 39},
+            analysis.state.client_opcode_307_nonzero_redacted_values,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_310_text_code_units,
+            {16: 1},
         )
         self.assertEqual(
             analysis.state.client_periodic_records_by_opcode,
@@ -6842,11 +6857,11 @@ class GameplayStateFoldTest(unittest.TestCase):
             )
         )
         event_counts = Counter(event.kind for event in analysis.events)
-        self.assertEqual(event_counts["client_fixed_record_submitted"], 2)
+        self.assertEqual(event_counts["client_neutral_record_submitted"], 2)
         self.assertEqual(event_counts["client_periodic_report_submitted"], 4)
         self.assertIn(
-            "client_fixed_opaque_records=packets:"
-            "{307: 1, 310: 1}",
+            "client_neutral_records=packets:{307: 1, 310: 1} "
+            "opcode307_nonzero:1 opcode310_code_units:{16: 1}",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(

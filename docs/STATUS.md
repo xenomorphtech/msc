@@ -226,7 +226,7 @@
   `59/60` with variant `0`; live independently exercises `3/56/59/60` and
   variants `0/1`. Purpose remains neutral and timing remains descriptive. The
   fold now separates these typed aggregates under `client_periodic_records`
-  from opaque opcodes `307/310`, and isolated native validation consumes
+  from the other client-neutral records, and isolated native validation consumes
   all 17 reference packets.
 - Client opcode `100` is now a full counted ability-point allocation request:
   `u32 client tick + u32 allocation count + repeated (u32 stat mask, u32
@@ -238,8 +238,17 @@
   response deltas, matches, and latency; isolated native validation consumes
   both requests. Both strict reference analyses retain zero unknowns; current
   coverage is `13,420/21,787/0/0` for stream `92` and
-  `26,662/44,438/0/0` for stream `126`. Only client opcodes `307/310` remain
-  fixed opaque records.
+  `26,662/44,438/0/0` for stream `126`. At this checkpoint only client opcodes
+  `307/310` remained fixed opaque records.
+- The final fixed-opaque client bucket is now gone. Opcode `307` is typed from
+  two reference and 28 live samples as `redacted u32 + redacted u32 + zero
+  u32`; the middle value is zero 26 times and page-aligned in all four nonzero
+  samples, but its purpose remains neutral. Opcode `310` is typed from three
+  controlled records as counted 16-unit redacted UTF-16 plus
+  `zero u32 + zero u8`; its text and UI role remain neutral. Safe state exposes
+  only packet counts, opcode-`307` nonzero counts, and opcode-`310` code-unit
+  counts under `client_neutral_records`. Strict reference/live analysis stays
+  valid, and isolated native validation consumes all 33 applicable records.
 - Client opcode `79` is now a typed 13-byte inventory-move request containing
   a client tick, inventory type, signed source/destination slots, and a trailing
   signed count whose higher-level role remains neutral. Both stream-`126`
