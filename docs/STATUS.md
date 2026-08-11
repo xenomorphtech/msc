@@ -735,7 +735,18 @@
   updated fold preserves all 62 wire requests as one admitted chain plus 61
   retries and is warning-free with 900/900 heartbeats. Safe state now exposes
   raw/chain/retry counts and admitted drop-kind/item-template aggregates while
-  keeping object ids aliased. Typed PCAP transforms support sole-field
+  keeping object ids aliased. A second officially admitted `4000004` pair then
+  produced opcode `185` without its source-mob/combat/reward prefix and before
+  fresh input: the first request arrived 1,584.485 ms after live spawn versus
+  1,591.279 ms officially. A reason-`1` cleanup closed that deliberately
+  unanswered ten-attempt request as an interrupted chain; reinjection produced
+  another request in 1,595.243 ms and completed `75 -> 76`. The fold now
+  distinguishes interrupted from malformed expected removals and is
+  warning-free with 76 requests, three admitted chains, 73 retries, two
+  completions, one interruption, no pending pickup, and 1,064/1,064
+  heartbeats. This proves the admitted pair plus already-active pickup state
+  does not require the combat/reward prefix; a fresh neutral-input connection
+  remains the next boundary. Typed PCAP transforms support sole-field
   opcode-`41` stat replacement and opcode-`311` destination/source-position
   replacement.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
@@ -1057,9 +1068,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Minimize the proven reference-admitted opcode-`311` combat/reward/drop
-   family one typed component at a time, serving `[39,49,312]` only after an
-   authentic opcode-`185` or compact opcode-`222` request.
+1. Reset pickup-action state on a fresh world connection and replay only the
+   exact admitted opcode-`311` pair with precisely timed physical input,
+   serving `[39,49,312]` only after an authentic opcode-`185` or compact
+   opcode-`222` request.
 2. Keep opcode-`385` selectors `2/4/5/6` neutral until an independently
    identifiable input/action permits another one-field control; selector `0`
    is now the bounded empty binding and selector `1` the skill binding.

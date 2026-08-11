@@ -2348,6 +2348,24 @@ rewrite only the sole captured opcode-`41` stat value and opcode-`311`
 destination/animated-source positions; every other byte-bearing field is
 preserved.
 
+A second proven `4000004` object isolates the drop boundary from that prefix.
+Its official pair has animated source offset `(+10,-3)`, a controller release
+398.819 ms after spawn, and a request 1,591.279 ms after spawn at horizontal
+distance seven. The live control sent only this exact mode-`1`/mode-`0` pair,
+retargeted it to the current player while preserving the offset, and sent the
+same controller release in 394.459 ms. No mob spawn, attack, health, leave,
+reward record, or fresh input preceded the first opcode-`185` request, which
+arrived in 1,584.485 ms; the fold consequently marks the source mob unknown.
+This establishes that the admitted pair plus the client's already-active
+pickup-action state is sufficient, while it does not claim the pair initiates
+pickup from a neutral input state. A reason-`1` cleanup interrupted that
+deliberately unanswered ten-attempt chain. Reinjecting the same pair produced
+another request in 1,595.243 ms before the deliberately delayed new input and
+one `[39,49,312]` response changed `75 -> 76`. The aggregate live fold is
+warning-free with 76 raw requests, three admitted chains, 73 retries, two
+matched completions, one interruption, zero pending pickups, and 1,064/1,064
+heartbeats.
+
 ## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 
 The capture-validated client request has a 23-byte base form and a 35-byte
@@ -2406,7 +2424,13 @@ one-based attempt number and retry flag. Effect/result/removal events correlate
 to the latest attempt for latency while retaining the first request frame and
 total attempt count. Stream `92` remains 54 chains/zero retries and proves four
 admitted `4000004` objects; stream `126` remains 203 chains/zero retries. The
-live admitted control is one chain/61 retries, not 62 incomplete pickups.
+first live admitted control is one chain/61 retries, not 62 incomplete pickups.
+A removal whose reason differs from the request's local-result reason and
+arrives before any effect/result closes that chain as
+`item_pickup_interrupted_chains`. It is neither a successful pickup removal nor
+a mismatch and cannot remain pending. The expected local removal without its
+effect/result remains a mismatch. The second live cut exercises one interrupted
+ten-attempt chain followed by a completed four-attempt chain.
 
 The corresponding short server opcode-`49` records have three exact variants:
 

@@ -1472,6 +1472,20 @@ The snapshot is active, valid, and warning-free with 62 raw requests folded as
 one admitted chain plus 61 retries, one matching effect/result/removal, and
 900/900 heartbeats.
 
+The next cut uses the second independently admitted `4000004` object. Its
+official pair has source offset `(+10,-3)`, controller release at 398.819 ms,
+and request at 1,591.279 ms. The live control sent only that pair at the player
+and its release at 394.459 ms. It deliberately omitted source-mob entry,
+attack, HP, leave, and reward packets, and the fold marked the referenced mob
+unknown. Even before any fresh key input, the client's pickup-action state
+emitted opcode `185` in 1,584.485 ms and then every three seconds. A reason-`1`
+cleanup closed the intentionally unanswered ten-attempt chain. The same pair
+was then reinjected and requested in 1,595.243 ms, again before the delayed
+fresh input; one guarded response changed `75 -> 76` and removed it. This
+proves the admitted pair and an already-active pickup action do not need the
+combat/reward prefix, but does not yet prove the pair initiates pickup from a
+fresh neutral input state.
+
 Two reusable PCAP transforms encode those bounded rewrites.
 `?character-stat=FIELD:VALUE` accepts only an opcode-`41` packet whose sole
 captured stat is `FIELD`, preserving its mask, request flag, and tail.
@@ -1481,7 +1495,12 @@ preserves the drop, owner, source-mob, item, timing, and flag fields. The
 fold now coalesces same-epoch/same-drop retries without hiding packet counts.
 Safe state exposes logical chain/retry totals and admitted drop kinds/templates,
 and result/removal timing is correlated to the latest attempt while retaining
-the first request frame and attempt count.
+the first request frame and attempt count. A different-reason removal before
+any effect/result records one interrupted chain rather than a false response
+mismatch; an expected local-pickup removal with no result still fails. The
+aggregate live fold is warning-free with 76 requests, three chains, 73 retries,
+two completions, one interruption, no pending pickup, and 1,064/1,064
+heartbeats.
 
 ## Reactive mob-health validation
 
@@ -2285,6 +2304,11 @@ project's own `README.md` for all options.
   changed Etc quantity `74 -> 75` and removed the drop. Sixty-one later
   same-drop attempts coalesce as retries of that one completed chain, leaving
   the active fold warning-free with 900/900 heartbeat pairs.
+- A second officially admitted pair was requested twice without replaying its
+  source mob, combat, or reward prefix and before any fresh pickup input. One
+  unanswered ten-attempt chain was explicitly interrupted; the reinjected
+  four-attempt chain completed `75 -> 76`. The fold distinguishes both cases,
+  has no pending pickup or warnings, and retains 1,064/1,064 heartbeat pairs.
 - An opt-in reactive mob-health policy now adopts exact typed mob state and
   emits per-hit opcode-`293` updates plus opcode-`280` reason `1` on death. A
   real typed-snail injection received opcode-`52` damage `[27,32]`, produced
@@ -2306,9 +2330,9 @@ project's own `README.md` for all options.
 
 Replace the remaining opaque replay portions with stateful handling:
 
-1. Minimize the proven reference-admitted combat/reward/drop family one typed
-   component at a time, continuing to gate `[39,49,312]` on an authentic client
-   opcode `185` or compact opcode `222` request.
+1. Reset the pickup-action state with a fresh world connection, then test the
+   exact admitted pair with precisely timed physical input and continue to gate
+   `[39,49,312]` on an authentic opcode `185` or compact opcode `222` request.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
    retain neutral roles for the opcode-`394`/`279` correlation.

@@ -604,6 +604,7 @@ class GameplayGameState:
     item_pickup_inferred_mesos_baselines: int = 0
     item_pickup_removal_matches: int = 0
     item_pickup_removal_mismatches: int = 0
+    item_pickup_interrupted_chains: int = 0
     item_pickup_policy_rejections: int = 0
     pending_item_pickups: int = 0
     item_pickup_request_chains: int = 0
@@ -3680,6 +3681,9 @@ class GameplayAnalysis:
                 ),
                 "item_pickup_removal_mismatches": (
                     self.state.item_pickup_removal_mismatches
+                ),
+                "item_pickup_interrupted_chains": (
+                    self.state.item_pickup_interrupted_chains
                 ),
                 "item_pickup_policy_rejections": (
                     self.state.item_pickup_policy_rejections
@@ -7876,6 +7880,11 @@ class GameplayStateFold:
                     pending.result_confirmed
                     and removal.reason == expected_removal_reason
                 )
+                chain_interrupted = (
+                    not pending.result_confirmed
+                    and pending.effect is None
+                    and removal.reason != expected_removal_reason
+                )
                 details.update(
                     {
                         "request_frame": pending.last_request_frame_index,
@@ -7886,6 +7895,7 @@ class GameplayStateFold:
                         "result_confirmed": pending.result_confirmed,
                         "expected_removal_reason": expected_removal_reason,
                         "pickup_removal_matches": removal_matches,
+                        "pickup_chain_interrupted": chain_interrupted,
                         "response_ms": round(
                             (
                                 frame.timestamp_ns
@@ -7898,6 +7908,8 @@ class GameplayStateFold:
                 )
                 if removal_matches:
                     self.state.item_pickup_removal_matches += 1
+                elif chain_interrupted:
+                    self.state.item_pickup_interrupted_chains += 1
                 else:
                     self.state.item_pickup_removal_mismatches += 1
                     self.warnings.append(
@@ -12670,6 +12682,7 @@ def render_gameplay_analysis(
             f"{state.item_pickup_inferred_mesos_baselines} "
             f"removal_matches:{state.item_pickup_removal_matches} "
             f"removal_mismatches:{state.item_pickup_removal_mismatches} "
+            f"interrupted:{state.item_pickup_interrupted_chains} "
             f"policy_rejections:{state.item_pickup_policy_rejections} "
             f"field_removals:{state.field_drop_removals} "
             f"chains:{state.item_pickup_request_chains} "

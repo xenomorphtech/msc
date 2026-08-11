@@ -8172,6 +8172,93 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
+    def test_closes_interrupted_pickup_chain_on_nonresult_removal(self) -> None:
+        request = ItemPickupRequest(
+            control_value=0,
+            field_epoch=1,
+            client_tick=102_100,
+            position_x=-863,
+            position_y=-1742,
+            drop_object_id=40_004,
+            item_validation_token=1_352_639_939,
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                active_item_drop=True,
+                extra_directional_plaintexts=(
+                    ("client_to_server", request.to_bytes()),
+                    (
+                        "server_to_client",
+                        FieldDropRemoval(
+                            reason=1,
+                            drop_object_id=40_004,
+                        ).to_bytes(),
+                    ),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.item_pickup_request_chains, 1)
+        self.assertEqual(analysis.state.item_pickup_interrupted_chains, 1)
+        self.assertEqual(analysis.state.item_pickup_removal_matches, 0)
+        self.assertEqual(analysis.state.item_pickup_removal_mismatches, 0)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+        removal = next(
+            event
+            for event in analysis.events
+            if event.kind == "field_drop_removed"
+        )
+        self.assertTrue(removal.details["matched_pickup_request"])
+        self.assertTrue(removal.details["pickup_chain_interrupted"])
+        self.assertFalse(removal.details["pickup_removal_matches"])
+        self.assertFalse(removal.details["result_confirmed"])
+        self.assertEqual(
+            analysis.safe_dict()["state"]["item_pickup_interrupted_chains"],
+            1,
+        )
+        self.assertIn("interrupted:1", render_gameplay_analysis(analysis))
+
+    def test_expected_pickup_removal_without_result_remains_mismatch(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                active_item_drop=True,
+                extra_directional_plaintexts=(
+                    (
+                        "client_to_server",
+                        ItemPickupRequest(
+                            control_value=0,
+                            field_epoch=1,
+                            client_tick=102_100,
+                            position_x=-863,
+                            position_y=-1742,
+                            drop_object_id=40_004,
+                            item_validation_token=1_352_639_939,
+                        ).to_bytes(),
+                    ),
+                    (
+                        "server_to_client",
+                        FieldDropRemoval(
+                            reason=5,
+                            drop_object_id=40_004,
+                            actor_id=CHARACTER_ID,
+                            trailing_value=0,
+                        ).to_bytes(),
+                    ),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.item_pickup_interrupted_chains, 0)
+        self.assertEqual(analysis.state.item_pickup_removal_mismatches, 1)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+        self.assertEqual(len(analysis.warnings), 1)
+        self.assertIn("did not complete", analysis.warnings[0])
+
     def test_correlates_compact_item_pickup_requests(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(

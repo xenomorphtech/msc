@@ -423,15 +423,30 @@ that packet family and timing; it did not test a reference-admitted object.
 The corrected control uses the first stream-`92` `4000004` drop whose exact
 object is followed by an official pickup request. It preserves the complete
 attack/death/reward/drop family, the one-unit animated-source Y offset, and the
-controller release 450.451 ms after spawn, then applies physical pickup input
-at the official 2.939-second admission delay. The client emitted a base
-opcode-`185` request for the known drop and retried it every three seconds
-until the server answered once with `[39,49,312]`. Etc slot `7` advanced
-`74 -> 75`, the exact drop was removed, and the live fold is valid and
-warning-free with one admitted chain, 61 coalesced retries, and 900/900
-heartbeats at the validation snapshot. No response was sent before an
-authentic request. PCAP references support `?character-stat=FIELD:VALUE` for a
-packet's sole captured stat and
+controller release 450.451 ms after spawn. The corresponding live family
+produced a base opcode-`185` request 1.517 seconds after spawn and retried it
+every three seconds until the server answered once with `[39,49,312]`. Etc
+slot `7` advanced `74 -> 75`, the exact drop was removed, and the first
+validation snapshot was warning-free with one admitted chain, 61 coalesced
+retries, and 900/900 heartbeats. No response was sent before an authentic
+request.
+
+A second independently admitted `4000004` object isolates the boundary
+further. Officially, its controller release follows the pair by 398.819 ms and
+its request follows by 1,591.279 ms. Replaying only that exact pair at the
+player plus the release—without a source-mob spawn, attack, death, reward
+records, or fresh pickup input—produced the first live request in 1,584.485 ms.
+The source mob was unknown to the live fold, so the earlier combat/reward
+prefix is not required once the client's prior pickup-action state is active.
+A reason-`1` cleanup interrupted the intentionally unanswered ten-attempt
+chain; reinjecting the same pair produced another request in 1,595.243 ms and
+one guarded response advanced the stack `75 -> 76`. The warning-free fold now
+contains 76 raw requests, three admitted chains, 73 retries, two completed
+effect/result/removal chains, one interrupted chain, no pending pickup, and
+1,064/1,064 heartbeats at the second snapshot.
+
+PCAP references support `?character-stat=FIELD:VALUE` for a packet's sole
+captured stat and
 `?field-drop-position=X:Y[:SOURCE_X:SOURCE_Y]` for these typed controls; both
 preserve the packet's other fields exactly.
 Pair the position rewrite with
@@ -474,7 +489,10 @@ logical chain: raw request totals remain visible, while safe state separately
 reports `item_pickup_request_chains`, `item_pickup_request_retries`, admitted
 drop kinds, and admitted item-template counts. Response latency is measured
 from the latest retry and result/removal events also retain the first request
-frame plus total attempt count.
+frame plus total attempt count. A different-reason drop removal before any
+effect/result closes the request as `item_pickup_interrupted_chains`; it does
+not become a false completed-removal mismatch or remain pending. An expected
+local-pickup removal without its result still remains a mismatch.
 
 Runtime prediction for the owner patch reports
 `drop_owner_fields: match_initial_player` and
@@ -1922,3 +1940,9 @@ preserve distinct Unity scan codes in this setup.
     chain while retaining raw request, retry, admitted-kind/template, and
     first/latest-attempt telemetry; the live fold is warning-free with
     900/900 heartbeats.
+75. Replay a second officially admitted `4000004` pair without its source-mob,
+    combat, or reward prefix and observe capture-matched live admission before
+    any fresh input. Serve one reinjected chain as `75 -> 76`, and model an
+    unanswered chain removed for a different reason as interrupted rather than
+    malformed. The resulting fold is warning-free with two completions, one
+    interruption, no pending pickup, and 1,064/1,064 heartbeats.
