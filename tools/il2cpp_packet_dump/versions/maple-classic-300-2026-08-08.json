@@ -234,7 +234,7 @@
     },
     {
       "name":"client_transport_envelope","direction":"client_to_server","opcode":13,
-      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator; all capture-111 branches compare as length-prefixed envelopes except type 1 acknowledgement",
+      "source":"capture-derived client direction: all 561 capture-111 and 970 level-1-to-10 packets compare as exact length-prefixed type-6/type-13 envelopes or fixed-width type-1 acknowledgements; the attributed receive handler separately confirms the shared server-direction u8 discriminator",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":13},
         {"op":"read","name":"message_type","kind":"u8"},
@@ -247,7 +247,7 @@
     },
     {
       "name":"server_transport_envelope","direction":"server_to_client","opcode":13,
-      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator; types 7, 12, and 14 are exact u32-length-prefixed capture envelopes",
+      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator; all 23 capture-111 server packets use exact u32-length-prefixed types 7, 12, or 14; the level-1-to-10 capture has no server opcode-13 packet",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":13},
         {"op":"read","name":"message_type","kind":"u8"},
@@ -775,9 +775,32 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":301},{"op":"read","name":"value","kind":"u32"}]
     },
     {
-      "name":"client_opcode_45","direction":"client_to_server","opcode":45,"length":6,
-      "source":"capture-111 request branch",
+      "name":"client_world_exit_status_45","direction":"client_to_server","opcode":45,"length":6,
+      "source":"capture-111 stream-114 terminal sequence: one redacted u32 status 66.699 ms after empty client opcode 241 and 100.305 ms before terminal server opcode 9",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":45},{"op":"read","name":"value","kind":"u32"}]
+    },
+    {
+      "name":"client_world_exit_status_46","direction":"client_to_server","opcode":46,"length":6,
+      "source":"capture-111 stream-92 terminal sequence: one redacted u32 status 64.396 ms after empty client opcode 241 and 100.677 ms before terminal server opcode 9",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":46},{"op":"read","name":"value","kind":"u32"}]
+    },
+    {
+      "name":"client_opcode_75_empty_bootstrap_marker","direction":"client_to_server","opcode":75,"length":2,
+      "source":"capture-111 stream 92 and 1-10FS stream 126: opcode-only client packet once during initial field bootstrap in each independent sustained session",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":75}]
+    },
+    {
+      "name":"client_world_exit_request","direction":"client_to_server","opcode":241,"length":2,
+      "source":"capture-111 streams 92 and 114: opcode-only client packet 165.073 and 167.004 ms before each final server opcode-9 termination",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":241}]
+    },
+    {
+      "name":"client_opcode_310_live_fixed_record","direction":"client_to_server","opcode":310,"length":41,
+      "source":"three controlled direct-Wayland game-menu confirmations in the local-Wine world session each emitted one 41-byte client packet; no opcode 241 or phase transition followed, so the 39-byte body and UI role remain explicitly opaque",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":310},
+        {"op":"bytes","name":"opaque_body","length":39}
+      ]
     },
     {
       "name":"server_opcode_45","direction":"server_to_client","opcode":45,"length":2,
@@ -902,6 +925,224 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":94},{"op":"read","name":"flag","kind":"bool"},{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]
     },
     {
+      "name":"server_opcode_137_primitive_prefix","direction":"server_to_client","opcode":137,"length":84,
+      "source":"generated opcode-137 handler e7a5869c... directly reads i16/i32/i32; all three gameplay packets retain the same 72-byte capture-bounded tail",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":137},{"op":"read","name":"first_value","kind":"i16"},{"op":"read","name":"second_value","kind":"i32"},{"op":"read","name":"third_value","kind":"i32"},{"op":"bytes","name":"opaque_tail","length":72}]
+    },
+    {
+      "name":"server_opcode_169_text_instruction","direction":"server_to_client","opcode":169,"length":54,
+      "source":"generated opcode-169 handler b047ac0a... dispatches on a u8 selector; selector 3 jumps to native arm 0x180BC3281, reads one trailing-zero UTF-16 value, and exactly consumes the sole 1-10FS packet",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":169},{"op":"read","name":"selector","kind":"u8","equals":3},{"op":"utf16","name":"text","trailing_zero":true}]
+    },
+    {
+      "name":"server_opcode_228_u32_opaque_tail","direction":"server_to_client","opcode":228,"length":10,
+      "source":"generated handler bee2b258... reads one u32; the sole 111 gameplay packet retains four unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":228},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":4}]
+    },
+    {
+      "name":"server_opcode_230_u32_short_tail","direction":"server_to_client","opcode":230,"length":7,
+      "source":"generated handler e49edb9d... reads one u32; 111 and 1-10FS gameplay packets retain one unconsumed capture-bounded byte",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":1}]
+    },
+    {
+      "name":"server_opcode_230_u32_long_tail","direction":"server_to_client","opcode":230,"length":13,
+      "source":"generated handler e49edb9d... reads one u32; one 1-10FS gameplay packet retains seven unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":7}]
+    },
+    {
+      "name":"server_opcode_231_u32_opaque_tail","direction":"server_to_client","opcode":231,"length":26,
+      "source":"generated handler add56c3f... reads one u32; the sole 1-10FS gameplay packet retains 20 unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":231},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":20}]
+    },
+    {
+      "name":"server_opcode_232_u32_opaque_tail","direction":"server_to_client","opcode":232,"length":22,
+      "source":"generated handler a73a2819... reads one u32; the sole 111 gameplay packet retains 16 unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":232},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":16}]
+    },
+    {
+      "name":"server_opcode_234_u32_opaque_tail","direction":"server_to_client","opcode":234,"length":9,
+      "source":"generated handler fc681013... reads one u32; all three gameplay packets retain three unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":234},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":3}]
+    },
+    {
+      "name":"server_opcode_235_u32_opaque_tail","direction":"server_to_client","opcode":235,"length":12,
+      "source":"generated handler ead463fb... reads one u32; all three gameplay packets retain six unconsumed capture-bounded bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":235},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":6}]
+    },
+    {
+      "name":"server_opcode_27_integer_ledger_large","direction":"server_to_client","opcode":27,"length":1056,
+      "source":"generated opcode-27 handler reads an i32 count; exact 111 gameplay/login packets decode as repeated i32/i32/i32/trailing-zero UTF-16 entries",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":27},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_27_integer_ledger_compact","direction":"server_to_client","opcode":27,"length":27,
+      "source":"generated opcode-27 handler reads an i32 count; exact 1-10FS stream-126 packet is the one-entry form of the repeated i32/i32/i32/trailing-zero UTF-16 grammar",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":27},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_28_text_ledger_large","direction":"server_to_client","opcode":28,"length":260,
+      "source":"generated opcode-28 handler reads an i32 count; exact 111 gameplay/login packets decode as repeated i32/i32 and two trailing-zero UTF-16 strings",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":28},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_28_text_ledger_compact","direction":"server_to_client","opcode":28,"length":164,
+      "source":"generated opcode-28 handler reads an i32 count; exact 1-10FS stream-126 packet is the four-entry form of the repeated i32/i32/paired UTF-16 grammar",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":28},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_29_text_ledger","direction":"server_to_client","opcode":29,"length":327,
+      "source":"generated opcode-29 handler b7bc850c... delegates to constructor 0x180CB4390, which reads a u8 count and loops through record constructor 0x180CB3F20; both byte-identical 111 packets exactly decode as four i32/i32/trailing-zero UTF-16/i32/i16 records",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":29},
+        {"op":"read","name":"entry_count","kind":"u8"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"value_1","kind":"i32"},
+          {"op":"utf16","name":"text","trailing_zero":true},
+          {"op":"read","name":"value_2","kind":"i32"},
+          {"op":"read","name":"short_value","kind":"i16"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_135_bootstrap_ledger","direction":"server_to_client","opcode":135,"length":3725,
+      "source":"generated opcode-135 handler aecdc2fe... plus a detached local-Wine primitive-reader trace: 1,305 hooked u8/bool/i32 reads and 45 exact two-byte gaps assigned to the generated i16 reader form a 1,350-read ledger through framed cursor 3729; the 111 packet fully decodes and re-emits with section totals 2/166, 2/21, 10, and 21/260/260",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":135},
+        {"op":"read","name":"section_a_entry_count","kind":"u8"},
+        {"op":"repeat","count_from":"section_a_entry_count","operations":[
+          {"op":"read","name":"section_a_enabled","kind":"bool"},
+          {"op":"read","name":"section_a_value","kind":"i32"},
+          {"op":"read","name":"section_a_value_count","kind":"i32"},
+          {"op":"repeat","count_from":"section_a_value_count","operations":[
+            {"op":"read","name":"section_a_repeated_value","kind":"i32"}
+          ]}
+        ]},
+        {"op":"read","name":"section_b_entry_count","kind":"u8"},
+        {"op":"repeat","count_from":"section_b_entry_count","operations":[
+          {"op":"read","name":"section_b_enabled","kind":"bool"},
+          {"op":"read","name":"section_b_value_1","kind":"i32"},
+          {"op":"read","name":"section_b_value_2","kind":"u8"},
+          {"op":"read","name":"section_b_pair_count","kind":"i16"},
+          {"op":"repeat","count_from":"section_b_pair_count","operations":[
+            {"op":"read","name":"section_b_pair_value_1","kind":"i32"},
+            {"op":"read","name":"section_b_pair_value_2","kind":"i32"}
+          ]}
+        ]},
+        {"op":"read","name":"section_c_value","kind":"u8"},
+        {"op":"read","name":"section_c_pair_count","kind":"i16"},
+        {"op":"repeat","count_from":"section_c_pair_count","operations":[
+          {"op":"read","name":"section_c_pair_value_1","kind":"i32"},
+          {"op":"read","name":"section_c_pair_value_2","kind":"i32"}
+        ]},
+        {"op":"read","name":"section_d_entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"section_d_entry_count","operations":[
+          {"op":"read","name":"section_d_value","kind":"i32"},
+          {"op":"read","name":"section_d_group_1_count","kind":"i16"},
+          {"op":"repeat","count_from":"section_d_group_1_count","operations":[
+            {"op":"read","name":"section_d_group_1_value_1","kind":"i32"},
+            {"op":"read","name":"section_d_group_1_value_2","kind":"u8"}
+          ]},
+          {"op":"read","name":"section_d_group_2_count","kind":"i16"},
+          {"op":"repeat","count_from":"section_d_group_2_count","operations":[
+            {"op":"read","name":"section_d_group_2_value_1","kind":"i32"},
+            {"op":"read","name":"section_d_group_2_value_2","kind":"u8"}
+          ]}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_142_text_ledger_large","direction":"server_to_client","opcode":142,"length":254,
+      "source":"generated opcode-142 handler reads a bool then delegates when true; exact 111 gameplay packet decodes as header UTF-16 plus counted keyed text/control entries",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":142},
+        {"op":"read","name":"enabled","kind":"bool","equals":1},
+        {"op":"utf16","name":"header_text","trailing_zero":true},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true},
+          {"op":"read","name":"flag_1","kind":"bool"},
+          {"op":"read","name":"flag_2","kind":"bool"},
+          {"op":"read","name":"value_1","kind":"i32"},
+          {"op":"read","name":"value_2","kind":"i32"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_142_text_ledger_compact","direction":"server_to_client","opcode":142,"length":190,
+      "source":"generated opcode-142 handler reads a bool then delegates when true; exact 1-10FS stream-126 packet is the three-entry form of the header/count/text grammar",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":142},
+        {"op":"read","name":"enabled","kind":"bool","equals":1},
+        {"op":"utf16","name":"header_text","trailing_zero":true},
+        {"op":"read","name":"entry_count","kind":"i32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"read","name":"key","kind":"i32"},
+          {"op":"read","name":"control","kind":"i32"},
+          {"op":"utf16","name":"text_1","trailing_zero":true},
+          {"op":"utf16","name":"text_2","trailing_zero":true},
+          {"op":"read","name":"flag_1","kind":"bool"},
+          {"op":"read","name":"flag_2","kind":"bool"},
+          {"op":"read","name":"value_1","kind":"i32"},
+          {"op":"read","name":"value_2","kind":"i32"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_425_value_ledger","direction":"server_to_client","opcode":425,"length":68,
+      "source":"identical 111/1-10FS gameplay packets plus live handler trace: u16 count 12, twelve i32 reader calls, and fixed four-i32 trailer",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":425},
+        {"op":"read","name":"value_count","kind":"u16"},
+        {"op":"repeat","count_from":"value_count","operations":[
+          {"op":"read","name":"value","kind":"i32"}
+        ]},
+        {"op":"read","name":"trailer_1","kind":"i32","equals":0},
+        {"op":"read","name":"trailer_2","kind":"i32","equals":0},
+        {"op":"read","name":"trailer_3","kind":"i32","equals":1},
+        {"op":"read","name":"trailer_4","kind":"i32","equals":1}
+      ]
+    },
+    {
       "name":"server_opcode_147_bounds_ledger","direction":"server_to_client","opcode":147,"length":94,
       "source":"IL2CPP opcode-147 handler a1b62634... reads two Rect values, an i32 count, and repeated i32 values; all gameplay captures share the exact 14-value form",
       "operations":[
@@ -955,6 +1196,14 @@
       ]
     },
     {
+      "name":"server_opcode_276_boolean_flag","direction":"server_to_client","opcode":276,"length":3,
+      "source":"generated opcode-276 handler reads one bool; the pinned IL2CPP reader calls BitConverter.ToBoolean and both gameplay captures carry the valid true byte 0x05",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":276},
+        {"op":"read","name":"enabled","kind":"bool","equals":1}
+      ]
+    },
+    {
       "name":"server_opcode_148_envelope","direction":"server_to_client","opcode":148,
       "source":"IL2CPP opcode-148 handler acda95d7... delegates to manager c5b43350...; variants 9/10/12/13 and exact bounded branches verified across 1-10FS stream 126 and 111 stream 92",
       "operations":[
@@ -966,6 +1215,23 @@
           {"equals":12,"operations":[{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]},
           {"equals":13,"operations":[{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]}
         ]}
+      ]
+    },
+    {
+      "name":"server_opcode_394_text_envelope","direction":"server_to_client","opcode":394,"length":119,
+      "source":"the automatic dump confirms enum opcode 394 but finds no attributed managed handler; the sole capture-111 packet exactly decodes as one 57-code-unit trailing-zero UTF-16 value and is followed 58 ms later by the correlated client opcode-279 text envelope; local-Wine injection did not cause an opcode-279 packet, so causality remains unproven",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":394},
+        {"op":"utf16","name":"text","trailing_zero":true}
+      ]
+    },
+    {
+      "name":"client_opcode_279_text_envelope","direction":"client_to_server","opcode":279,"length":120,
+      "source":"the sole capture-111 packet follows server opcode 394 by 58 ms and contains one neutral u8 plus the same 57-code-unit trailing-zero UTF-16 envelope; code units 10 through 14 change and the other 52 are identical",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":279},
+        {"op":"read","name":"control_value","kind":"u8"},
+        {"op":"utf16","name":"text","trailing_zero":true}
       ]
     },
     {

@@ -86,11 +86,40 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 76 semantic/manual shapes and 96 explicitly
-observed-opaque exact-width variants. Two exact-width opaque pins overlap the
-semantic opcode-`147` and opcode-`272` shapes and are retained as raw capture
-evidence but suppressed from the effective shape set, leaving 170 active
-shapes and 94 active opaque pins. Opcode `94` is no longer an
+manifest currently declares 101 semantic/manual shapes and 96 explicitly
+observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
+semantic shapes and are retained as raw capture evidence but suppressed from
+the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
+fourteenth overlaps; opcode `135` adds the fifteenth. Opcode `169` adds a
+non-overlapping shape found only in `1-10FS`; server opcode `394` and client
+opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
+`75`, and `241` add overlaps 18 through 20. The live-only, non-overlapping
+opcode-`310` width adds one active shape. This leaves 177 active shapes and 76
+active opaque pins.
+Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
+primitive-reader trace. Its 1,350-read nested count grammar consumes and
+re-emits the sole 3,725-byte stream-`114` packet exactly; the checked-in shape
+contains no captured numeric values.
+The opcode-`394`/`279` shapes are explicitly capture/correlation-backed. The
+automatic dump proves that server enum member `394` exists but attributes no
+managed handler. Exact framing supplies the server's trailing-zero UTF-16
+envelope and the client's neutral-byte-plus-UTF-16 envelope; both contain 57
+code units and suppress their matching opaque pins. A live local-Wine injection
+did not elicit opcode `279`, so the manifest source and higher-level model do
+not claim causal response or security semantics.
+Client opcodes `75` and `241` add exact opcode-only shapes from repeated
+cross-capture positions. Client opcode `46` adds the same redacted-u32 boundary
+already declared for opcode `45`; both occur between opcode `241` and final
+server opcode `9` in their respective world streams. These three shapes
+suppress matching opaque pins without using the incoming-handler dump to claim
+outgoing-client semantics it cannot provide.
+Client opcodes `100`, `307`, `308`, and `311` remain exact-width opaque pins in
+the automatic manifest; the gameplay fold raises them to partial observations
+using only their validated widths, counts, and `308`/`311` cadence. Opcode
+`310` is separately pinned to the 41-byte packet repeated by three controlled
+local-Wine menu confirmations. Its 39-byte body and UI role remain opaque, and
+the manifest does not equate it with the captured opcode-`241` exit request.
+Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
 form and four `datetime/i64` values. Opcode `148` is represented by one
@@ -129,5 +158,46 @@ consumes and re-emits all six cross-corpus packets (three identical packets per
 opcode) without an
 unsupported, short-read, trailing-byte, constant, boolean, or ambiguity
 failure.
+Server opcodes `27` and `28` add the generated handlers' signed record counts
+and exact repeated integer/text grammars. Opcode `142` adds its generated
+boolean gate and the exact delegated header plus counted text/control records.
+Each has separate fixed-width declarations for the `111` and `1-10FS`
+variants. Opcode `425` adds a 68-byte `u16`-counted signed-value ledger with a
+four-word trailer; the three gameplay packets are identical, and a live trace
+independently observed all 12 repeated `i32` reads. Targeted native validation
+consumes all 13 selected packets without unsupported, short-read, trailing-byte,
+constant, boolean, or ambiguity failures.
+Server opcodes `228`, `230`, `231`, `232`, `234`, and `235` share generated
+handlers that directly read exactly one `u32`. Seven fixed-width shapes retain
+their remaining capture-bounded bytes as explicit opaque tails: five replace
+matching `111` pins and two add widths seen only in `1-10FS`. Targeted native
+validation consumes all 12 packets with zero unsupported or consumption
+failures; higher-level analysis keeps them partial because the client handler
+does not assign readable roles to the tails.
+Server opcode `276` adds one direct generated `bool` read. Both gameplay
+captures encode true as byte `0x05`; the pinned reader's ISIL calls
+`BitConverter.ToBoolean`, so native boolean validation normalizes zero to false
+and every nonzero byte to true before constant/branch checks. The semantic
+three-byte shape suppresses the matching opaque pin, and targeted validation
+consumes both cross-corpus packets without failure.
+Server opcode `137` adds the generated handler's direct `i16/i32/i32` prefix
+and a 72-byte capture-bounded tail. The semantic 84-byte shape suppresses the
+matching opaque pin and validates both stream-`92` packets plus the one
+stream-`126` packet; safe gameplay analysis keeps these observations partial
+and redacts the prefix and tail.
+Server opcode `169` adds the generated handler's selector-`3` arm rather than
+its flattened branch superset. The first `u8` indexes an eight-way native jump
+table; arm `3` calls the UTF-16 reader once and reaches the common return. The
+semantic `u16 opcode + u8 selector + trailing-zero UTF-16` shape consumes the
+sole 54-byte stream-`126` packet exactly. The payload text remains private and
+only its 24-code-unit length is exposed by higher-level analysis.
+Server opcode `29` adds the delegated grammar missing from its top-level
+handler's empty direct-read list. Handler `b7bc850c...` constructs the ledger
+through `0x180CB4390`, which reads a `u8` count and loops over record
+constructor `0x180CB3F20`; each record reads
+`i32/i32/trailing-zero UTF-16/i32/i16`. The semantic 327-byte shape suppresses
+the matching opaque pin and exactly consumes both byte-identical four-record
+packets from streams `92` and `114`. Text and numeric fields remain private;
+higher-level analysis publishes only record and code-unit counts.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

@@ -436,13 +436,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,655 full,
-44,373 partial, 72 unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
+44,400 partial, 39 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,406 full, 21,755 partial,
-46 unknown, and zero invalid observations; short stream `114` reaches 46 full,
-20 partial, 10 unknown, and zero invalid.
+metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
+2 unknown, and zero invalid observations; short stream `114` reaches 54 full,
+22 partial, zero unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -483,6 +483,9 @@ The gameplay fold currently models these capture-backed boundaries:
   neutral flag/tail values,
 - client opcode `13`: neutral fixed type-`1` and length-prefixed type-`6`/`13`
   envelopes whose bodies remain opaque and are omitted from safe reports,
+- server opcode `13`: the same handler-confirmed discriminator followed by a
+  capture-bounded `uint32` body length for types `7`, `12`, and `14`; safe
+  state/events expose only type and body-length distributions,
 - client/server opcode `43`: neutral, redacted status envelopes; the client
   uses either a sequence, opaque identifier, counted UTF-16 field, and six-byte
   tail or a 12-byte compact form, while the server uses a message byte and
@@ -541,6 +544,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcodes `320`/`322`/`323`: exact positioned-effect records with an
   aliased primary key, signed coordinates, neutral controls, and current-field
   update correlation,
+- server opcode `169`: selector `3` followed by one redacted, terminated
+  counted UTF-16 value; the automatic dump plus native jump-table arm proves
+  exact consumption, while safe state/events expose only selector, code-unit
+  count, and field epoch,
 - server opcode `348`: capture-bounded redacted text envelopes with a common
   u8/i32/selector/i32 prefix, terminated counted UTF-16 text, and two trailing
   controls only on observed selector `0`; selectors `3`/`6`/`17` end after the
@@ -549,11 +556,48 @@ The gameplay fold currently models these capture-backed boundaries:
   selector/status pair and one redacted optional u32 on the captured `6/1`
   branch; the fold matches same-selector requests FIFO, emits acknowledgement
   events, and reports pending/unmatched transactions and round-trip timing,
-- server opcodes `69`/`93`/`94`/`148`/`201`/`205`/`379`: capture-bounded neutral
-  record families; numeric fields are typed, potentially identifying primary
-  values are omitted from safe output, fixed unknown regions remain explicit, and the
-  opcode-`94`/`148`/`379` layouts come directly from the generated IL2CPP read
-  dump; opcode `148` retains one legacy nonempty record body as opaque,
+- server opcodes `69`/`93`/`94`/`137`/`148`/`201`/`205`/`276`/`379`:
+  capture-bounded neutral record families; numeric fields are typed,
+  potentially identifying primary values are omitted from safe output, fixed
+  unknown regions remain explicit, and the opcode-`94`/`137`/`148`/`276`/`379`
+  layouts come directly from the generated IL2CPP read dump; opcode `137`
+  retains a redacted 72-byte tail, opcode `276` preserves captured boolean byte
+  `0x05` while folding it as true, and opcode `148` retains one legacy nonempty
+  record body as opaque,
+- server opcode `27`: a counted integer/control/text ledger with required
+  trailing-zero UTF-16 strings; safe state reports only entry and text-length
+  distributions,
+- server opcode `28`: a counted ledger of neutral integer pairs and two
+  trailing-zero UTF-16 strings per record; all keys, values, and text remain
+  redacted,
+- server opcode `29`: a delegated `u8`-counted ledger whose record constructor
+  reads two signed integers, one trailing-zero UTF-16 value, another signed
+  integer, and a neutral signed 16-bit value; both byte-identical stream-`92`/`114`
+  packets consume and round-trip exactly while safe output exposes only counts
+  and text lengths,
+- server opcode `135`: a four-section bootstrap ledger proven by the automatic
+  handler dump plus an executed local-Wine reader trace; nested `u8`, `i16`, and
+  `i32` counts bound integer vectors, integer pairs, and two integer/byte groups,
+  while safe output exposes only structural totals and boolean counts,
+- server opcode `394` and client opcode `279`: exact 57-code-unit redacted
+  UTF-16 envelopes separated by 57.92 ms in stream `92`; the client adds one
+  neutral byte and changes only code-unit span `10..14`. The fold reports FIFO
+  correlation and observed gap, not a guaranteed response: exact local-Wine
+  injection produced no opcode `279` while the field client stayed responsive,
+- client opcode `75`: an exact empty field-bootstrap marker repeated in streams
+  `92`/`126` and independently emitted by the current local-Wine client,
+- client opcode `241`, client status opcode `45`/`46`, and terminal server
+  opcode `9`: a repeated world-exit transaction that enters `exit_requested`,
+  redacts the one-u32 status, and reaches `terminated` after 165–167 ms,
+- client opcodes `100`, `307`, `308`, and `311`: exact fixed-width redacted
+  records whose bodies remain opaque; the latter two additionally expose only
+  their observed approximately 300/600-second intervals. Client opcode `310`
+  is a separate 41-byte live-only record repeated by three controlled
+  direct-Wayland menu confirmations, with no opcode-`241` or phase transition,
+- server opcode `142`: a boolean-gated header and counted keyed text/control
+  records with two raw-byte-preserving IL2CPP booleans and two signed values per
+  entry; zero is false and every nonzero byte is true, and the three-byte
+  disabled branch is also modeled,
 - server opcode `147`: two signed-`i32` rectangles followed by a counted
   signed-`i32` vector; the fold redacts vector values while reporting the
   rectangle and count shapes,
@@ -561,6 +605,13 @@ The gameplay fold currently models these capture-backed boundaries:
   a neutral header, 11 counted entries, two booleans and two counted groups of
   signed-`i32` triples per entry, plus a terminal signed value; entry selectors
   and triple values remain redacted,
+- server opcode `425`: a primitive-traced `u16` count, repeated signed values,
+  and four-word trailer; all three gameplay captures use count `12`, trailer
+  `(0,0,1,1)`, and the repeated values are redacted,
+- server opcodes `228`/`230`/`231`/`232`/`234`/`235`: generated-handler
+  envelopes with one redacted `u32` followed by an explicitly ignored,
+  capture-bounded tail; the fold reports opcode/tail-length distributions and
+  keeps all 12 observations partial,
 - server opcodes `11`/`24`/`56`/`58`/`59`/`60`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`
@@ -726,13 +777,16 @@ client tail tags `17/18/21/24` have capture-derived fixed widths; their field
 roles, the client control value, and the tail marker remain neutral, so reports
 classify the family as partial semantic coverage and omit the token value.
 
-Client opcode `13` also continues on the world connection. The fixed type-`1`
+Opcode `13` also continues in both directions on the world connection. The
+fixed client type-`1`
 variant is exactly 11 bytes: opcode, discriminator, and eight opaque bytes.
 Types `6` and `13` carry a 32-bit byte count followed by that many opaque
 bytes. Stream `92` has 446 type-`1`, 104 type-`6`, and five type-`13` packets;
 stream `126` has 970 type-`1` packets. Every envelope round-trips exactly. The
-fold records type/body-size distributions and emits redacted events without
-assigning a security meaning to the body.
+server uses the same length prefix: stream `92` has 14 type-`7`, one type-`12`,
+and five type-`14` envelopes, while stream `114` has one each of type `12` and
+`14`. The fold records direction-specific type/body-size distributions and
+emits redacted events without assigning a security meaning to any body.
 
 Client opcode `217` is distinct from the server-to-client life-movement opcode
 with the same number. In stream `126`, 345 packets use an exact eight-byte
@@ -1657,3 +1711,35 @@ preserve distinct Unity scan codes in this setup.
     to exact full coverage, fold their redacted structural ledgers, and replay
     opcode `272` twice through the active real client with the predicted core
     gamestate unchanged.
+60. Drive server opcodes `27`, `28`, `142`, and `425` from the automatic dump
+    plus exact cross-corpus parsing, promote all 11 gameplay packets to full
+    coverage, and validate all 13 selected private-regression packets natively
+    and through round-trip Python codecs. Trace opcode `425` live, replay it
+    through the loopback packet API, observe the predicted second neutral
+    ledger event with unchanged core state, then restore a browser-free,
+    direct-Wayland, audio-muted client to the field.
+61. Bound server opcodes `228`, `230`, `231`, `232`, `234`, and `235` from
+    their generated one-`u32` handlers, preserve all seven observed ignored-tail
+    widths without inventing semantics, and move all 12 packets from unknown
+    to redacted partial neutral events. Defer live replay because the leading
+    value and tails may be session-local state.
+62. Replace the 3,725-byte opcode-`135` opaque pin with the automatic handler's
+    complete four-section count grammar, validate its 1,350 primitive reads and
+    exact Python/Rust consumption, fold only redacted structural totals, and
+    replay the captured plaintext through the sole local-Wine connection with
+    the world socket and generated heartbeats still active.
+63. Replace the opcode-`394` and client-opcode-`279` opaque pins with exact
+    redacted UTF-16 envelopes, correlate the sole captured pair without
+    inventing security semantics, validate both codecs and manifest shapes,
+    and record the local-Wine negative replay result that kept gameplay healthy
+    but emitted no opcode `279`.
+64. Promote the repeated client opcode-`75` field-bootstrap marker and both
+    opcode-`241`/status/terminal world-exit sequences into exact redacted
+    gamestate events, close every unknown packet in short stream `114`, and
+    confirm opcode `75` independently in the running local-Wine transcript.
+65. Fold client opcodes `100`, `307`, `308`, and `311` as exact-width redacted
+    records, publish only counts, body widths, phases/epochs, and the captured
+    `308`/`311` cadence, then bound the three controlled local-Wine menu
+    confirmations as a separate opaque opcode-`310` record. Validate both
+    sustained captures plus the live transcript without equating opcode `310`
+    with the captured opcode-`241` exit request.

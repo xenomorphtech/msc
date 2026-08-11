@@ -38,7 +38,46 @@ the observed payload. The current increment proves server opcode `60` as one
 signed `i32`, opcode `94` as `bool + i32 + i32`, and opcode `379` as a `u8`
 branch with four `datetime/i64` reads on variant `36`. Fourteen reference
 packets consume exactly under those shapes. The Rust validator has a native
-boolean primitive and rejects bytes other than `0` or `1`.
+boolean primitive matching the pinned reader's `BitConverter.ToBoolean` call:
+zero is false and every nonzero byte is true. The validator normalizes that
+truth value for branch/constant checks while typed Python codecs retain a
+noncanonical raw byte for lossless re-emission. Captured opcode `276` provides
+the concrete cross-corpus case: wire byte `0x05` is accepted as true.
+Opcode `137` is the complementary partial case: the dump proves direct
+`i16/i32/i32` reads, while capture comparison leaves the following 72 bytes
+opaque until delegated-reader evidence is available.
+Opcode `169` demonstrates why the flattened direct-read list must be paired
+with native control flow. Its handler's first `u8` selects one of eight jump
+table arms; selector `3` lands at `0x180BC3281`, calls the pinned UTF-16 reader
+once, and exits through the common return. That executed arm consumes the sole
+54-byte gameplay packet exactly, while the other reads in the generated list
+belong to mutually exclusive selector branches.
+Opcode `29` demonstrates the complementary delegated-reader case. The
+automatic dump correctly identifies handler `b7bc850c...` but reports no
+direct reads because the handler passes its reader into ledger constructor
+`0x180CB4390`. Native tracing shows a `u8` count there and a loop over record
+constructor `0x180CB3F20`, whose ordered calls are
+`i32/i32/UTF-16/i32/i16`. That call graph exactly consumes both byte-identical
+327-byte `111.pcapng` packets as four records. The checked-in semantic manifest
+records the proven delegated grammar while the generated handler entry remains
+the authoritative evidence that the top-level handler itself has no direct
+reader calls.
+
+Opcode `135` adds an executed-loop case. Generated handler `aecdc2fe...`
+contains flattened `u8/bool/i16/i32` call sites across several nested branches.
+The IL2CPP code is copied into an anonymous executable mapping under Wine, so
+file-backed perf uprobes correctly produced no samples; a long-lived GDB attach
+also blocked Unity scheduling. A version-bound shared-object hook was instead
+loaded in one brief attach, patched four candidate primitive readers, and
+detached before replay. It logged packet pointer, pre-read cursor, opcode, and
+caller without payload values. One local-client replay produced 1,305 ordered
+`u8/bool/i32` records on a single opcode-`135` packet object. The sequence is
+strictly monotonic from framed cursor `6` through `3729`; its 45 gaps are all
+two bytes, the generated `u16` reader never executes, and the generated `i16`
+reader supplies exactly those 45 reads. Replaying the reconstructed 1,350-read
+grammar against the private plaintext consumes all 3,725 bytes and re-emits it
+byte-for-byte. The checked-in manifest records only this structural grammar and
+redacted count evidence; the private trace and plaintext remain ignored.
 
 Exported plaintext JSONL under `target/private/` is evidence, not source: it
 contains private captured bytes, remains ignored, and must not be committed or
@@ -346,6 +385,46 @@ browser-free launcher and direct nested-Wayland seat returned it to the field
 with 719/719 matched heartbeats. This negative cross-state result prevents the
 offline adjacency from being generalized into a state-independent injection
 recipe.
+
+The final stream-`92` opaque pair demonstrates the same evidence discipline.
+The automatic `tools/il2cpp_packet_dump` artifact contains the opcode-`394`
+enum member but no attributed managed handler, so it cannot supply a reader
+grammar. Exact capture accounting instead closes the 119-byte server payload
+as a 57-code-unit trailing-zero UTF-16 envelope and the client opcode-`279`
+payload 57.92 ms later as one neutral byte plus the same envelope width. A
+private code-unit comparison finds one changed span, indices `10..14`, with all
+52 other units equal. That is strong temporal and structural correlation, but
+an exact injection into the live local-Wine field session produced no opcode
+`279` while leaving the client responsive. The checked-in model therefore
+records redacted envelopes, correlation, and gap timing without calling the
+pair security state or treating opcode `279` as a guaranteed response.
+
+The remaining short-stream client exit cluster is capture-driven because the
+automatic dump describes incoming server handlers, not these outgoing client
+writes. Two independent world sessions provide the same ordering: empty opcode
+`241`, a six-byte client status packet after roughly 65 ms, and terminal server
+opcode `9` after roughly 166 ms. The status opcode differs (`46` in stream `92`,
+`45` in stream `114`), but both bodies are exactly one redacted `u32`. That
+repetition supports an `exit_requested` gamestate transition and temporal
+pairing while leaving the value and reason semantics unnamed. Empty opcode `75`
+is separately repeated at the same initial field-loading boundary in streams
+`92` and `126`, and the local-Wine replay independently emitted it. A local UI
+exit attempt did not emit opcode `241`; no server terminal packet was forced,
+so the live effect remains explicitly unproven.
+
+The remaining fixed-width outgoing records use the same capture-bounded rule.
+Opcodes `100`, `307`, `308`, and `311` have exact 26/14/74/22-byte packets in
+both sustained captures, so the codec can validate and round-trip their bodies
+without naming them. Timing supplies only a cadence observation: opcode `308`
+repeats near five minutes and opcode `311` near ten minutes after its first
+bootstrap-skewed interval. A later 592.004-second local opcode-`308` gap keeps
+that cadence observational rather than mandatory. Three controlled nested-
+Wayland menu confirmations in the local Wine session each emitted a 41-byte
+opcode-`310` record but no
+opcode `241` or phase change. The automatic manifest therefore adds a
+live-only opaque opcode-`310` shape, while the gameplay fold exposes only
+widths, counts, phase/epoch, and intervals. It does not promote timing or UI
+adjacency into a semantic or replay claim.
 
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor

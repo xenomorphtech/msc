@@ -122,11 +122,18 @@ launches also emit a fully decoded type-`15` status message containing “Please
 check the network connection status.”
 
 The world-session gameplay fold uses the same neutral family. Stream `92`
-contains 446 fixed type-`1` envelopes, 104 type-`6` length-prefixed envelopes,
-and five type-`13` length-prefixed envelopes. Stream `126` contains 970 fixed
-type-`1` envelopes. Every packet consumes exactly and round-trips byte-for-byte;
-the fold emits type and opaque-byte counts without exposing any body. The
-payload meanings remain partial rather than being labeled as security traffic.
+contains 446 fixed client type-`1` envelopes, 104 client type-`6` envelopes,
+and five client type-`13` envelopes. Stream `126` contains 970 fixed client
+type-`1` envelopes. On the server direction, stream `92` contains 14 type-`7`,
+one type-`12`, and five type-`14` envelopes; stream `114` contains one each of
+types `12` and `14`. Across login and gameplay, all 23 captured server packets
+have a body length that reaches the exact packet end; the automatic dump's
+handler confirms the leading discriminator read. The fold emits
+direction-specific type/body-length distributions and redaction flags without
+exposing any body. Server packets fold as partial
+`server_opcode_13_envelope` observations and
+`server_opcode_13_message_received` events. The payload meanings remain
+partial rather than being labeled as security traffic.
 
 ## World opcode `43` neutral envelopes
 
@@ -990,9 +997,9 @@ probes. The status API reported `frames_patched:21` and the exact 21-opcode
 plan. The expanded emitter also has exhaustive byte-for-byte PCAP round-trip
 coverage.
 
-## Neutral server records (`69`, `93`, `94`, `148`, `201`, `205`, `379`)
+## Neutral server records (`69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, `379`)
 
-These seven opcodes recur with capture-bounded layouts in the gameplay
+These nine opcodes recur with capture-bounded layouts in the gameplay
 streams. Their semantic roles remain neutral, and fields that may carry a
 character/session value are redacted from safe output:
 
@@ -1012,6 +1019,13 @@ opcode 94:
     bool flag
     int32 primary_value
     int32 secondary_value
+
+opcode 137:
+    uint16 opcode
+    int16 first_value               # redacted
+    int32 second_value              # redacted
+    int32 third_value               # redacted
+    byte[72] opaque_tail
 
 opcode 148:
     uint16 opcode
@@ -1035,6 +1049,10 @@ opcode 205:
     uint64 numeric_value
     uint8 trailing_value
 
+opcode 276:
+    uint16 opcode
+    bool8 enabled                    # captured raw byte 0x05 => true
+
 opcode 379, variant 35:
     uint16 opcode
     uint8 variant
@@ -1048,25 +1066,29 @@ opcode 379, variant 36:
     int64 time_4
 ```
 
-Streams `92/114/126` contribute `49/5/122` records respectively. By opcode,
-the combined counts are `69:50`, `93:7`, `94:3`, `148:23`, `201:46`, `205:42`,
-and `379:5`. Every
+Streams `92/114/126` contribute `52/6/123` records respectively. By opcode,
+the combined counts are `69:50`, `93:7`, `94:3`, `137:3`, `148:23`, `201:46`,
+`205:42`, `276:2`, and `379:5`. Every
 opcode-`69` header is `7` and all 263 retained bytes are zero in these
 captures. Every opcode-`93` packet counts four u32 values. Opcode `205` is
 fully bounded, as is the counted opcode-`93` vector. The generated handler dump
-independently supplies the exact direct-read sequences for opcodes `94` and
-`379`; both opcode-`379` short packets use variant `35`, and its three
+independently supplies the exact direct-read sequences for opcodes `94`, `137`,
+`276`, and `379`. Opcode `137` directly reads `i16/i32/i32`; the two stream-`92`
+packets and one stream-`126` packet are all 84 bytes, leaving the same 72-byte
+capture-bounded tail after that prefix. Both opcode-`276` packets are the
+three-byte `0x05` true form, both opcode-`379` short packets use variant `35`,
+and its three
 four-datetime packets use variant `36`. Opcode `148` contributes one empty
 variant-`9`, nine empty variant-`10`, nine variant-`12`, three variant-`13`, and
 one nonempty variant-`9` packet. The current delegated IL2CPP record mask is
 `0x9`; the legacy nonempty body does not consume under that current parser and
 therefore retains 1,632 record bytes as one explicit partial observation.
-Together the family provides 79 full and 97 partial observations with 15,794
+Together the family provides 81 full and 100 partial observations with 16,010
 opaque bytes rather than inventing suffix or record semantics.
 
 The gamestate fold emits `neutral_server_record_received`, tracks packets by
 opcode, typed-value counts, and opaque-byte totals, and exposes only redacted
-safe details. All 176 packets reparse and round-trip byte-for-byte.
+safe details. All 181 packets reparse and round-trip byte-for-byte.
 
 A typed live replay of captured opcode-`94` values (`flag=true`, primary
 `2380000`, secondary `2`) added exactly one neutral event while phase, field
@@ -1081,6 +1103,271 @@ opcode-`148` variant-`10` packet. Its transcript added one full
 advanced matched heartbeat probes from 11 to 18, and retained one active world
 connection with zero injection failures. This validates the bounded empty
 branch and predicted neutral fold only.
+
+Opcode `276` also exposes why IL2CPP `bool` cannot be constrained to wire bytes
+`0` and `1`. The generated handler directly calls the pinned boolean reader,
+whose ISIL calls `BitConverter.ToBoolean`; both reference packets carry
+`0x05`, which therefore means true. Native validation now normalizes every
+nonzero byte to true for comparisons, while the Python record keeps the raw
+byte for exact re-emission. A loopback replay of exact packet `140105` added a
+second full opcode-`276` event. The core-state digest was unchanged, phase/map
+remained `active`/`101000000`, the next three heartbeats matched with no pending
+probe, and packet injection retained zero failures.
+
+Opcode `137` remains deliberately partial. Its three generated prefix values
+and 72-byte tail are retained for exact re-emission but redacted from safe
+analysis; only typed-value and tail-length counts are published. All three
+packets validate natively and in the state fold. Live replay is deferred because
+the generated handler does not name the values or consume the delegated tail,
+so cross-session injection would not be a bounded semantic test.
+
+## Server opcode `169` text instruction
+
+The automatic dump identifies an eight-way selector handler. Native jump-table
+inspection is required because its direct-read list is the union of mutually
+exclusive branches. Selector `3` lands at `0x180BC3281`, calls the pinned
+UTF-16 reader once, then exits through the common return:
+
+```text
+uint16 opcode = 169
+uint8  selector = 3
+uint16 text_code_units
+utf16  text[text_code_units]        # redacted
+uint8  trailing_zero = 0
+```
+
+The sole reference occurrence is a 54-byte server packet in
+`1-10FS.pcapng` stream `126`; its string has 24 code units and the shape
+consumes the frame exactly. `ServerOpcode169TextInstruction` preserves the
+text for exact re-emission but omits it from safe dictionaries, events, JSON,
+and text reports. The gamestate fold increments selector/text-length counters
+and emits `server_opcode_169_text_instruction_received` with selector, length,
+and field epoch only. The observed event occurs at epoch `31` and moves the
+packet from unknown to full coverage. No cross-session replay is claimed until
+the client resource effect is independently bounded.
+
+## Server opcode `29` delegated text ledger
+
+The generated opcode table identifies handler `b7bc850c...`, but its direct
+packet-read list is empty because it constructs a separate ledger object. The
+handler passes the `PacketReader` to constructor `0x180CB4390`; native control
+flow proves that constructor reads a `u8` count and invokes record constructor
+`0x180CB3F20` once per entry. The record constructor performs the exact ordered
+reads below:
+
+```text
+uint16 opcode = 29
+uint8  entry_count
+repeat entry_count:
+    int32  key                       # redacted, role unproven
+    int32  value_1                   # redacted, role unproven
+    uint16 text_code_units
+    utf16  text[text_code_units]     # redacted
+    uint8  trailing_zero = 0
+    int32  value_2                   # redacted, role unproven
+    int16  short_value               # redacted, role unproven
+```
+
+`111.pcapng` contains one 327-byte server packet in stream `92` and one in
+stream `114`. They are byte-identical, have `entry_count = 4`, and contain
+text lengths `30`, `36`, `31`, and `31` code units. The grammar consumes all
+327 bytes, both native manifest validations pass, and
+`ServerOpcode29TextLedger` parses and re-emits both payloads byte-for-byte.
+
+Safe state publishes only packet count, entry-count distribution, total and
+per-entry text lengths, redaction flags, and field epoch. The fold emits
+`server_opcode_29_ledger_received` and a full
+`server_opcode_29_text_ledger` observation. At that decoder checkpoint, stream
+`92` coverage changed to `13,412/21,762/33/0` and stream `114` to
+`51/20/5/0`; the level-1-to-10
+stream remains `26,660/44,381/59/0`. No live replay is claimed because the
+obfuscated numeric fields and captured text have not yet been shown safe across
+sessions.
+
+## Server opcode `135` bootstrap ledger
+
+The generated opcode table maps server opcode `135` to handler
+`aecdc2fee9fbe41bb513947bf2cc9b43154d7eb6d73fbc67a79d1f3b2aa4810`.
+Its flattened read list contains `u8`, IL2CPP `bool`, `i16`, and `i32` calls
+from mutually nested loops. A non-stalling in-process trace on the local Wine
+client recorded every executed non-`i16` primitive for the exact captured
+packet: 1,305 calls on one packet object, monotonically advancing from framed
+cursor `6` to `3729`. The only 45 unhooked spans are two bytes each; inserting
+the generated `i16` primitive at those spans produces this exact grammar:
+
+```text
+uint16 opcode = 135
+uint8  section_a_entry_count
+repeat section_a_entry_count:
+    bool    enabled
+    int32   value                         # redacted, role unproven
+    int32   value_count
+    repeat value_count:
+        int32 value                       # redacted
+
+uint8  section_b_entry_count
+repeat section_b_entry_count:
+    bool    enabled
+    int32   value_1                       # redacted, role unproven
+    uint8   value_2                       # redacted, role unproven
+    int16   pair_count
+    repeat pair_count:
+        int32 value_1                     # redacted
+        int32 value_2                     # redacted
+
+uint8  section_c_value                    # redacted, role unproven
+int16  section_c_pair_count
+repeat section_c_pair_count:
+    int32 value_1                         # redacted
+    int32 value_2                         # redacted
+
+int32  section_d_entry_count
+repeat section_d_entry_count:
+    int32 value                           # redacted, role unproven
+    int16 group_1_count
+    repeat group_1_count:
+        int32 value_1                     # redacted
+        uint8 value_2                     # redacted
+    int16 group_2_count
+    repeat group_2_count:
+        int32 value_1                     # redacted
+        uint8 value_2                     # redacted
+```
+
+The sole `111.pcapng` stream-`114` packet is 3,725 plaintext bytes. Section A
+contains two entries and 166 repeated values; section B contains two entries
+and 21 pairs; section C contains ten pairs; section D contains 21 entries with
+260 members in each nested group. The Python codec consumes all bytes and
+re-emits the original packet exactly, while the generated manifest independently
+validates the same count grammar. Safe analysis omits every numeric value and
+exposes only entry/group counts, enabled counts, redaction flags, and field
+epoch.
+
+The fold emits `server_opcode_135_ledger_received` and a full
+`server_opcode_135_bootstrap_ledger` observation, moving stream `114` to
+`52/20/4/0`. The exact captured plaintext was also sent through loopback-only
+`POST /api/v1/server-packets` while the local Wine client was the sole replay
+peer. The client processed the ledger and retained its field connection and
+heartbeat exchange. This proves packet shape and non-blocking handling, not the
+meaning or cross-session safety of the redacted values.
+
+## Correlated opcode `394` / client opcode `279` text envelopes
+
+The automatic packet dump contains the server opcode-`394` enum member but no
+attributed managed handler, so the shape below comes from exact capture
+consumption rather than a flattened read list:
+
+```text
+uint16 opcode = 394
+uint16 text_code_units = 57
+utf16  text[text_code_units]          # redacted
+uint8  trailing_zero = 0
+```
+
+The sole server packet is 119 bytes. The next client packet, 57.92 ms later,
+has this exact 120-byte boundary:
+
+```text
+uint16 opcode = 279
+uint8  control_value                  # observed 1; neutral role
+uint16 text_code_units = 57
+utf16  text[text_code_units]          # redacted
+uint8  trailing_zero = 0
+```
+
+The two strings have equal lengths and 52 of 57 code units are identical; the
+only changed span is indices `10..14`. Both codecs preserve the text privately
+for exact re-emission while safe state, events, and packet observations expose
+only lengths, the control byte, changed count/span, temporal correlation, and
+the observed gap. FIFO pairing is an analysis correlation, not a causal claim:
+injecting the exact server packet through the local replay's loopback HTTP API
+did not produce client opcode `279` within seven seconds, and the local Wine
+client remained connected and responsive in-field. The model therefore uses
+neutral envelope/event names and does not require opcode `394` for login or
+gameplay. The two full observations move stream `92` to
+`13,414/21,782/11/0`; stream `114` remains `52/22/2/0` and stream `126` remains
+`26,660/44,381/59/0`.
+
+## Client field bootstrap and world exit
+
+Client opcode `75` is an exact opcode-only marker:
+
+```text
+uint16 opcode = 75
+```
+
+It occurs once during the initial `field_loading` phase in `111.pcapng` stream
+`92` and `1-10FS.pcapng` stream `126`. The browser-free local-Wine transcript
+independently emits the same marker at field epoch `1`. No stronger semantic
+role is assigned.
+
+Both terminating `111.pcapng` world sessions share this client/server sequence:
+
+```text
+uint16 opcode = 241                    # empty world-exit request
+
+uint16 opcode = 45 or 46               # stream 114 or 92
+uint32 value                            # redacted status value
+
+uint16 opcode = 9
+byte[7] opaque_reason                   # existing terminal server packet
+```
+
+The request is emitted from `active`. Status opcode `46` follows by 64.396 ms
+in stream `92`; status opcode `45` follows by 66.699 ms in stream `114`. The
+final server packet follows the request by 165.073 and 167.004 ms respectively.
+The fold enters `exit_requested`, reports the status value only as redacted,
+then enters `terminated` and records FIFO correlation plus round-trip timing on
+opcode `9`. Exact packet observations promote all three client boundaries to
+full coverage. Stream `92` reaches `13,417/21,782/8/0`, stream `114` reaches
+`54/22/0/0`, and stream `126` reaches `26,661/44,381/58/0`.
+
+The current local client's game-menu confirmation did not emit opcode `241`,
+so a terminal injection was intentionally not attempted. Three controlled
+direct-Wayland confirmations instead emitted one client opcode-`310` packet
+each, with no phase transition or later opcode `241`. This leaves the captured
+transaction exact and independently repeated, but its live UI trigger unproven
+in the current replay state.
+
+## Fixed-width opaque client reports
+
+Four additional outgoing-client families repeat at exact widths in the two
+sustained gameplay captures. A fifth width is independently bounded by the
+three controlled local-Wine menu confirmations:
+
+| opcode | packet/body bytes | stream `92` | stream `126` | local Wine | bounded observation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `100` | `26/24` | 1 | 1 | 0 | one fixed record per sustained capture |
+| `307` | `14/12` | 1 | 1 | 1 | one fixed record near bootstrap |
+| `308` | `74/72` | 2 | 11 | 10 | approximately 300-second cadence |
+| `310` | `41/39` | 0 | 0 | 3 | one per controlled menu confirmation |
+| `311` | `22/20` | 2 | 6 | 6 | bootstrap-skewed first gap, then approximately 600 seconds |
+
+The codec consumes and re-emits each exact body but never includes its bytes in
+safe output. State exposes packet and opaque-byte counts by opcode. Events add
+only opcode, body length, field epoch, and phase; opcodes `308` and `311` also
+report the observed interval after the first record. Stream `92` observes a
+301.474-second opcode-`308` gap and a 584.534-second opcode-`311` gap. Stream
+`126` keeps opcode `308` within `299.995..310.551` seconds and opcode `311`
+within `557.141..610.544` seconds. In the first local run, the first nine
+opcode-`308` gaps stay within `299.992..300.017` seconds before one later
+592.004-second gap; opcode `311` has one bootstrap-skewed 346.476-second gap
+followed by approximately 600-second gaps. Cadence is therefore descriptive,
+not a guarantee that every interval produces a packet.
+
+These remain partial observations: cadence and controlled UI correlation do
+not establish field semantics, identifier safety, or replay safety. The
+automatic packet manifest retains the capture-pinned opaque widths and adds an
+explicit live-only opcode-`310` shape; it does not invent outgoing-client
+semantics from incoming handler reads. Coverage becomes
+`13,417/21,788/2/0` for stream `92`, remains `54/22/0/0` for stream `114`, and
+becomes `26,661/44,400/39/0` for stream `126`. The first local transcript folds
+all three opcode-`310` records with zero unknown packets and an `active` final
+packet state; its socket later timed out without opcode `241`. A fresh
+browser-free relaunch then traversed world/channel/character selection through
+the nested Wayland seat and re-entered map `101000000`. Its new transcript is
+valid and warning-free at `60/43/0/0`, already folds opcodes `307` and `311`,
+and runtime status reports one active local world connection.
 
 ## Field-bootstrap ledgers (`147`, `272`)
 
@@ -1148,6 +1435,144 @@ NPCs, and phase unchanged. Heartbeat responses continued after detach; the
 focused debugger pause accounts for the 36.6-second maximum round trip. This
 validates packet acceptance and the predicted neutral fold, not a semantic name
 for the ledger fields.
+
+## Counted bootstrap ledgers (`27`, `28`, `142`, `425`)
+
+These shapes are driven by the current automatic
+`tools/il2cpp_packet_dump` handler output and exact parsing of both gameplay
+corpora. The opcode-`27` and opcode-`28` top-level handlers each read one
+signed record count before delegating their entries:
+
+```text
+uint16 opcode = 27
+int32 entry_count
+repeat entry_count:
+    int32 key
+    int32 value
+    int32 control
+    utf16z text                 # uint16 code-unit count + UTF-16LE + zero byte
+
+uint16 opcode = 28
+int32 entry_count
+repeat entry_count:
+    int32 key
+    int32 value
+    utf16z text_1
+    utf16z text_2
+```
+
+The 1,056-byte opcode-`27` form in `111` has 18 records and 390 total text
+code units; the 27-byte stream-`126` form has one record and three code units.
+The 260-byte opcode-`28` form has five records and `56/36` code units in its
+two text columns; stream `126` uses a 164-byte, four-record form with `18/33`
+code units. Keys, values, controls, and text are retained only for exact
+round-trip encoding and omitted from safe output.
+
+Opcode `142` reads one boolean directly and delegates only when it is true:
+
+```text
+uint16 opcode = 142
+bool8 enabled
+if enabled:
+    utf16z header_text
+    int32 entry_count
+    repeat entry_count:
+        int32 key
+        int32 control
+        utf16z text_1
+        utf16z text_2
+        bool8 flag_1
+        bool8 flag_2
+        int32 value_1
+        int32 value_2
+```
+
+The disabled branch ends after three bytes. Both captured packets use the
+enabled branch: stream `92` is 254 bytes with four records, nine header code
+units, and 65 entry-text code units; stream `126` is 190 bytes with three
+records, nine header units, and 45 entry-text units. Every captured `flag_1` is
+true and every `flag_2` is false. The typed decoder preserves each raw byte and
+applies the same zero/nonzero truth rule as the IL2CPP reader; the current
+ledger captures happen to use canonical `0` and `1`. The count remains bounded
+before parsing.
+
+Opcode `425` has the following capture-complete neutral shape:
+
+```text
+uint16 opcode = 425
+uint16 value_count
+repeat value_count:
+    int32 value
+int32 trailer[4]
+```
+
+The packets in streams `92`, `114`, and `126` are byte-identical, 68 bytes
+long, have count `12`, and end with trailer `(0,0,1,1)`. A focused live trace
+independently entered the delegated handler at reader cursor 6, observed its
+internally consumed count, and recorded exactly 12 repeated `i32` reader calls
+at cursors `8,12,...,52`. The four trailer words are also identical across all
+three captures and required for exact final-cursor consumption. Repeated values
+remain redacted; safe analysis publishes only the count and neutral trailer.
+
+The native manifest uses seven fixed-width semantic declarations so each
+captured width replaces only its matching opaque pin. All 13 selected
+private-regression packets validate natively (`9` from the selected `111`
+streams, including the login duplicates, plus `4` from `1-10FS`) and every one
+round-trips through the Python codecs. The state fold emits one full ledger
+observation/event per packet and reports only record counts, text lengths,
+boolean counts, and trailer shapes. That batch raised coverage to
+`26,659/44,373/68/0` on stream `126`, `13,410/21,755/42/0` on stream `92`,
+and `49/20/7/0` on stream `114`.
+
+The loopback-only `POST /api/v1/server-packets` route accepted one exact
+opcode-`425` packet while the real client was in the field. The resulting
+transcript folds the captured packet and injected copy as two full
+`server_opcode_425_ledger_received` events and keeps phase, map `101000000`,
+player, inventory, and progression state unchanged. The later process exit
+followed the debugger session rather than a synchronous packet rejection; a
+fresh browser-free direct-Wayland launch returned to the field with sound
+muted and a ready world connection.
+
+## Generated `u32` envelopes (`228`, `230`, `231`, `232`, `234`, `235`)
+
+These six opcodes are registered on the same generated handler class. Each
+handler makes exactly one direct `PacketReader` call, a `u32`, then invokes its
+local state method without another reader call. The captures contain additional
+bytes after that value, so the honest boundary is a typed leading value plus an
+ignored, capture-bounded tail:
+
+```text
+uint16 opcode
+uint32 primary_value
+bytes  opaque_tail
+```
+
+Only these observed opcode/tail-length combinations are accepted:
+
+| Opcode | Tail bytes | Packet bytes | Occurrences |
+| ---: | ---: | ---: | ---: |
+| `228` | `4` | `10` | `1` in stream `92` |
+| `230` | `1` | `7` | `1` in stream `92`, `1` in stream `126` |
+| `230` | `7` | `13` | `1` in stream `126` |
+| `231` | `20` | `26` | `1` in stream `126` |
+| `232` | `16` | `22` | `1` in stream `92` |
+| `234` | `3` | `9` | `1` in stream `92`, `2` in stream `126` |
+| `235` | `6` | `12` | `1` in stream `92`, `2` in stream `126` |
+
+The shared Python envelope consumes and re-emits all 12 packets exactly.
+Safe state and `neutral_server_record_received` events publish only opcode,
+typed-value count, and opaque-tail length; the `u32` and tail bytes are
+redacted. Observations remain partial because the client handler does not give
+the tail bytes a readable role. Seven semantic manifest declarations replace
+the five matching `111` opaque pins and add the two widths found only in
+`1-10FS`; targeted native validation passes `12/12` with no unsupported or
+consumption failures.
+
+The family moves seven long-stream and five stream-`92` observations from
+unknown to partial. Strict totals become `26,659/44,380/61/0` for stream `126`,
+`13,410/21,760/37/0` for stream `92`, and `49/20/7/0` for stream `114`. Live
+replay is deferred: the leading value may identify session-local state, and
+replaying an untyped ignored tail across sessions would not be a bounded test.
 
 ## Variable server records (`156`, `385`)
 
@@ -2815,10 +3240,10 @@ mode-`0` spawn whose two owner words equal the initial player id. The four
 mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,655
-full, 44,373 partial, 72 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,406 full, 21,755 partial,
-46 unknown, and zero invalid; stream `114` reaches 46/20/10/0. The long fold
+coverage. Strict validation succeeds across all 71,100 frames with 26,661
+full, 44,400 partial, 39 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
+2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six
@@ -2856,6 +3281,11 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 
 ## Current unknowns
 
+- Gameplay framing is complete for short stream `114`. Stream `92` retains two
+  22-byte client opcode-`115` packets. Long stream `126` retains 39 client
+  packets across opcode/length/count tuples `64/10/2`, `79/13/2`, `111/8/1`,
+  `222/19/6`, `225/16/15`, `276/210/1`, and `298/76/12`; all remain
+  losslessly framed but semantically unmodeled.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.

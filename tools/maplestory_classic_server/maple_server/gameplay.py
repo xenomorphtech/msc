@@ -16,15 +16,20 @@ from .gamestate import (
 from .packets import (
     CharacterStatUpdate,
     ClientAttackAction,
+    ClientFixedOpaqueRecord,
     ClientOpcode43Envelope,
     ClientOpcode66Acknowledgement,
+    ClientOpcode75EmptyRecord,
     ClientOpcode101Record,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
+    ClientOpcode279TextEnvelope,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
+    ClientWorldExitRequest,
+    ClientWorldExitStatus,
     CompactFieldTransition,
     CompactInitialProgressionSnapshot,
     FieldDropRemoval,
@@ -84,6 +89,13 @@ from .packets import (
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
+    ServerOpcode137OpaqueTailEnvelope,
+    ServerOpcode169TextInstruction,
+    ServerOpcode27IntegerLedger,
+    ServerOpcode28TextLedger,
+    ServerOpcode29TextLedger,
+    ServerOpcode135BootstrapLedger,
+    ServerOpcode142TextLedger,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
     ServerOpcode201Record,
@@ -91,14 +103,18 @@ from .packets import (
     ServerOpcode239Envelope,
     ServerOpcode244DialogueInstruction,
     ServerOpcode272Ledger,
+    ServerOpcode276BooleanFlag,
     ServerOpcode320PositionedEffectRecord,
     ServerOpcode322PositionedEffectRecord,
     ServerOpcode323PositionedEffectRecord,
     ServerOpcode348TextEnvelope,
+    ServerOpcode394TextEnvelope,
     ServerOpcode379Record,
+    ServerOpcode425ValueLedger,
     ServerOpcode49Envelope,
     ServerOpcode77Envelope,
     ServerOpcode426Notification,
+    ServerU32OpaqueTailEnvelope,
     SkillLevelChangeRequest,
     SkillRecordUpdate,
     SkillRecordUpdateAcknowledgement,
@@ -168,6 +184,7 @@ class GameplayPhase(str, Enum):
     ENTRY_REQUESTED = "entry_requested"
     FIELD_LOADING = "field_loading"
     ACTIVE = "active"
+    EXIT_REQUESTED = "exit_requested"
     TERMINATED = "terminated"
 
 
@@ -778,6 +795,17 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_13_opaque_bytes: int = 0
+    client_opcode_13_opaque_lengths: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_13_messages: int = 0
+    server_opcode_13_messages_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_13_opaque_bytes: int = 0
+    server_opcode_13_opaque_lengths: Counter[int] = field(
+        default_factory=Counter
+    )
     client_opcode_43_packets: int = 0
     client_opcode_43_sequences: Counter[int] = field(default_factory=Counter)
     client_opcode_43_variants: Counter[str] = field(default_factory=Counter)
@@ -837,6 +865,70 @@ class GameplayGameState:
     server_opcode_239_trailing_values: Counter[int] = field(
         default_factory=Counter
     )
+    server_opcode_27_packets: int = 0
+    server_opcode_27_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_27_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_28_packets: int = 0
+    server_opcode_28_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_28_text_1_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_28_text_2_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_29_packets: int = 0
+    server_opcode_29_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_29_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_packets: int = 0
+    server_opcode_135_section_a_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_a_enabled_count: int = 0
+    server_opcode_135_section_a_value_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_b_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_b_enabled_count: int = 0
+    server_opcode_135_section_b_pair_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_c_pair_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_d_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_d_group_1_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_135_section_d_group_2_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_packets: int = 0
+    server_opcode_142_enabled_packets: int = 0
+    server_opcode_142_entry_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_header_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_entry_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_142_flag_1_true_count: int = 0
+    server_opcode_142_flag_2_true_count: int = 0
     server_opcode_147_packets: int = 0
     server_opcode_147_value_counts: Counter[int] = field(
         default_factory=Counter
@@ -853,6 +945,13 @@ class GameplayGameState:
     server_opcode_272_flag_1_true_count: int = 0
     server_opcode_272_flag_2_true_count: int = 0
     server_opcode_272_trailer_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_425_packets: int = 0
+    server_opcode_425_value_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    server_opcode_425_trailer_shapes: Counter[str] = field(
         default_factory=Counter
     )
     instructional_dialogue_requests: int = 0
@@ -872,6 +971,11 @@ class GameplayGameState:
     positioned_effect_control_values: Counter[str] = field(
         default_factory=Counter
     )
+    server_opcode_169_packets: int = 0
+    server_opcode_169_selectors: Counter[int] = field(default_factory=Counter)
+    server_opcode_169_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
     server_opcode_348_packets: int = 0
     server_opcode_348_categories: Counter[int] = field(default_factory=Counter)
     server_opcode_348_selectors: Counter[int] = field(default_factory=Counter)
@@ -882,6 +986,30 @@ class GameplayGameState:
     server_opcode_348_control_pairs: Counter[str] = field(
         default_factory=Counter
     )
+    server_opcode_394_packets: int = 0
+    server_opcode_394_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_text_packets: int = 0
+    client_opcode_279_control_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_changed_code_unit_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_279_changed_span_shapes: Counter[str] = field(
+        default_factory=Counter
+    )
+    correlated_client_opcode_279_packets: int = 0
+    uncorrelated_client_opcode_279_packets: int = 0
+    client_opcode_279_transform_matches: int = 0
+    client_opcode_279_transform_mismatches: int = 0
+    pending_server_opcode_394_envelopes: int = 0
+    last_opcode_394_279_gap_ms: float | None = None
+    max_opcode_394_279_gap_ms: float | None = None
     client_opcode_66_acknowledgements: int = 0
     client_opcode_66_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_66_status_values: Counter[int] = field(
@@ -918,6 +1046,32 @@ class GameplayGameState:
     left_ctrl_skill_id: int | None = None
     left_ctrl_skill_known: bool = False
     pending_movements: int = 0
+    client_opcode_75_empty_records: int = 0
+    client_fixed_opaque_records_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_fixed_opaque_bytes_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_periodic_report_last_interval_ms: dict[int, float] = field(
+        default_factory=dict
+    )
+    client_periodic_report_min_interval_ms: dict[int, float] = field(
+        default_factory=dict
+    )
+    client_periodic_report_max_interval_ms: dict[int, float] = field(
+        default_factory=dict
+    )
+    world_exit_requests: int = 0
+    world_exit_requests_from_active_phase: int = 0
+    world_exit_status_packets: int = 0
+    world_exit_status_packets_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    matched_world_exit_terminations: int = 0
+    pending_world_exit_requests: int = 0
+    last_world_exit_round_trip_ms: float | None = None
+    max_world_exit_round_trip_ms: float | None = None
     termination_received: bool = False
 
 
@@ -1002,10 +1156,13 @@ NeutralServerRecord = (
     ServerOpcode69Record
     | ServerOpcode93Record
     | ServerOpcode94Record
+    | ServerOpcode137OpaqueTailEnvelope
     | ServerOpcode148Envelope
     | ServerOpcode201Record
     | ServerOpcode205Record
+    | ServerOpcode276BooleanFlag
     | ServerOpcode379Record
+    | ServerU32OpaqueTailEnvelope
 )
 
 FIXED_SERVER_OPCODES = frozenset({11, 59}).union(
@@ -3842,6 +3999,20 @@ class GameplayAnalysis:
                 "client_opcode_13_opaque_bytes": (
                     self.state.client_opcode_13_opaque_bytes
                 ),
+                "client_opcode_13_opaque_lengths": dict(
+                    self.state.client_opcode_13_opaque_lengths
+                ),
+                "server_opcode_13": {
+                    "message_count": self.state.server_opcode_13_messages,
+                    "messages_by_type": dict(
+                        self.state.server_opcode_13_messages_by_type
+                    ),
+                    "opaque_bytes": self.state.server_opcode_13_opaque_bytes,
+                    "opaque_lengths": dict(
+                        self.state.server_opcode_13_opaque_lengths
+                    ),
+                    "body_redacted": True,
+                },
                 "client_opcode_43": {
                     "packet_count": self.state.client_opcode_43_packets,
                     "sequences": dict(self.state.client_opcode_43_sequences),
@@ -3945,6 +4116,90 @@ class GameplayAnalysis:
                         self.state.server_opcode_239_trailing_values
                     ),
                 },
+                "server_opcode_27": {
+                    "packet_count": self.state.server_opcode_27_packets,
+                    "entry_counts": dict(
+                        self.state.server_opcode_27_entry_counts
+                    ),
+                    "text_code_units": dict(
+                        self.state.server_opcode_27_text_code_units
+                    ),
+                },
+                "server_opcode_28": {
+                    "packet_count": self.state.server_opcode_28_packets,
+                    "entry_counts": dict(
+                        self.state.server_opcode_28_entry_counts
+                    ),
+                    "text_1_code_units": dict(
+                        self.state.server_opcode_28_text_1_code_units
+                    ),
+                    "text_2_code_units": dict(
+                        self.state.server_opcode_28_text_2_code_units
+                    ),
+                },
+                "server_opcode_29": {
+                    "packet_count": self.state.server_opcode_29_packets,
+                    "entry_counts": dict(
+                        self.state.server_opcode_29_entry_counts
+                    ),
+                    "text_code_units": dict(
+                        self.state.server_opcode_29_text_code_units
+                    ),
+                },
+                "server_opcode_135": {
+                    "packet_count": self.state.server_opcode_135_packets,
+                    "section_a_entry_counts": dict(
+                        self.state.server_opcode_135_section_a_entry_counts
+                    ),
+                    "section_a_enabled_count": (
+                        self.state.server_opcode_135_section_a_enabled_count
+                    ),
+                    "section_a_value_counts": dict(
+                        self.state.server_opcode_135_section_a_value_counts
+                    ),
+                    "section_b_entry_counts": dict(
+                        self.state.server_opcode_135_section_b_entry_counts
+                    ),
+                    "section_b_enabled_count": (
+                        self.state.server_opcode_135_section_b_enabled_count
+                    ),
+                    "section_b_pair_counts": dict(
+                        self.state.server_opcode_135_section_b_pair_counts
+                    ),
+                    "section_c_pair_counts": dict(
+                        self.state.server_opcode_135_section_c_pair_counts
+                    ),
+                    "section_d_entry_counts": dict(
+                        self.state.server_opcode_135_section_d_entry_counts
+                    ),
+                    "section_d_group_1_counts": dict(
+                        self.state.server_opcode_135_section_d_group_1_counts
+                    ),
+                    "section_d_group_2_counts": dict(
+                        self.state.server_opcode_135_section_d_group_2_counts
+                    ),
+                },
+                "server_opcode_142": {
+                    "packet_count": self.state.server_opcode_142_packets,
+                    "enabled_packet_count": (
+                        self.state.server_opcode_142_enabled_packets
+                    ),
+                    "entry_counts": dict(
+                        self.state.server_opcode_142_entry_counts
+                    ),
+                    "header_text_code_units": dict(
+                        self.state.server_opcode_142_header_text_code_units
+                    ),
+                    "entry_text_code_units": dict(
+                        self.state.server_opcode_142_entry_text_code_units
+                    ),
+                    "flag_1_true_count": (
+                        self.state.server_opcode_142_flag_1_true_count
+                    ),
+                    "flag_2_true_count": (
+                        self.state.server_opcode_142_flag_2_true_count
+                    ),
+                },
                 "server_opcode_147": {
                     "packet_count": self.state.server_opcode_147_packets,
                     "value_counts": dict(
@@ -3952,6 +4207,15 @@ class GameplayAnalysis:
                     ),
                     "rectangle_shapes": dict(
                         self.state.server_opcode_147_rectangle_shapes
+                    ),
+                },
+                "server_opcode_425": {
+                    "packet_count": self.state.server_opcode_425_packets,
+                    "value_counts": dict(
+                        self.state.server_opcode_425_value_counts
+                    ),
+                    "trailer_shapes": dict(
+                        self.state.server_opcode_425_trailer_shapes
                     ),
                 },
                 "server_opcode_272": {
@@ -3991,6 +4255,13 @@ class GameplayAnalysis:
                         self.state.positioned_effect_control_values
                     ),
                 },
+                "server_opcode_169": {
+                    "packet_count": self.state.server_opcode_169_packets,
+                    "selectors": dict(self.state.server_opcode_169_selectors),
+                    "text_code_units": dict(
+                        self.state.server_opcode_169_text_code_units
+                    ),
+                },
                 "server_opcode_348": {
                     "packet_count": self.state.server_opcode_348_packets,
                     "categories": dict(
@@ -4004,6 +4275,53 @@ class GameplayAnalysis:
                     "control_pairs": dict(
                         self.state.server_opcode_348_control_pairs
                     ),
+                },
+                "opcode_394_279": {
+                    "server_packet_count": self.state.server_opcode_394_packets,
+                    "server_text_code_units": dict(
+                        self.state.server_opcode_394_text_code_units
+                    ),
+                    "client_packet_count": (
+                        self.state.client_opcode_279_text_packets
+                    ),
+                    "client_control_values": dict(
+                        self.state.client_opcode_279_control_values
+                    ),
+                    "client_text_code_units": dict(
+                        self.state.client_opcode_279_text_code_units
+                    ),
+                    "changed_code_unit_counts": dict(
+                        self.state.client_opcode_279_changed_code_unit_counts
+                    ),
+                    "changed_span_shapes": dict(
+                        self.state.client_opcode_279_changed_span_shapes
+                    ),
+                    "correlated_pair_count": (
+                        self.state.correlated_client_opcode_279_packets
+                    ),
+                    "uncorrelated_client_packet_count": (
+                        self.state.uncorrelated_client_opcode_279_packets
+                    ),
+                    "captured_transform_matches": (
+                        self.state.client_opcode_279_transform_matches
+                    ),
+                    "captured_transform_mismatches": (
+                        self.state.client_opcode_279_transform_mismatches
+                    ),
+                    "pending_server_envelope_count": (
+                        self.state.pending_server_opcode_394_envelopes
+                    ),
+                    "last_observed_gap_ms": (
+                        None
+                        if self.state.last_opcode_394_279_gap_ms is None
+                        else round(self.state.last_opcode_394_279_gap_ms, 3)
+                    ),
+                    "max_observed_gap_ms": (
+                        None
+                        if self.state.max_opcode_394_279_gap_ms is None
+                        else round(self.state.max_opcode_394_279_gap_ms, 3)
+                    ),
+                    "text_redacted": True,
                 },
                 "client_opcode_66": {
                     "packet_count": (
@@ -4086,6 +4404,67 @@ class GameplayAnalysis:
                         self.state.left_ctrl_skill_known
                     ),
                 },
+                "client_fixed_opaque_records": {
+                    "packets_by_opcode": dict(
+                        self.state.client_fixed_opaque_records_by_opcode
+                    ),
+                    "opaque_bytes_by_opcode": dict(
+                        self.state.client_fixed_opaque_bytes_by_opcode
+                    ),
+                    "periodic_last_interval_ms": {
+                        opcode: round(interval, 3)
+                        for opcode, interval in (
+                            self.state.client_periodic_report_last_interval_ms.items()
+                        )
+                    },
+                    "periodic_min_interval_ms": {
+                        opcode: round(interval, 3)
+                        for opcode, interval in (
+                            self.state.client_periodic_report_min_interval_ms.items()
+                        )
+                    },
+                    "periodic_max_interval_ms": {
+                        opcode: round(interval, 3)
+                        for opcode, interval in (
+                            self.state.client_periodic_report_max_interval_ms.items()
+                        )
+                    },
+                    "bodies_redacted": True,
+                },
+                "world_exit": {
+                    "bootstrap_marker_count": (
+                        self.state.client_opcode_75_empty_records
+                    ),
+                    "request_count": self.state.world_exit_requests,
+                    "requests_from_active_phase": (
+                        self.state.world_exit_requests_from_active_phase
+                    ),
+                    "status_packet_count": (
+                        self.state.world_exit_status_packets
+                    ),
+                    "status_packets_by_opcode": dict(
+                        self.state.world_exit_status_packets_by_opcode
+                    ),
+                    "status_values_redacted": (
+                        self.state.world_exit_status_packets
+                    ),
+                    "matched_termination_count": (
+                        self.state.matched_world_exit_terminations
+                    ),
+                    "pending_request_count": (
+                        self.state.pending_world_exit_requests
+                    ),
+                    "last_round_trip_ms": (
+                        None
+                        if self.state.last_world_exit_round_trip_ms is None
+                        else round(self.state.last_world_exit_round_trip_ms, 3)
+                    ),
+                    "max_round_trip_ms": (
+                        None
+                        if self.state.max_world_exit_round_trip_ms is None
+                        else round(self.state.max_world_exit_round_trip_ms, 3)
+                    ),
+                },
                 "termination_received": self.state.termination_received,
                 "transport_closed": self.transport_closed,
             },
@@ -4139,6 +4518,9 @@ class GameplayStateFold:
         self._pending_heartbeat_probes: deque[int] = deque()
         self._pending_opcode_426_notifications: deque[int] = deque()
         self._pending_server_opcode_348: dict[int, deque[int]] = {}
+        self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
+        self._pending_world_exit_requests: deque[int] = deque()
+        self._last_client_periodic_report_timestamp_ns: dict[int, int] = {}
         self._pending_skill_level_changes: deque[
             tuple[int, int, SkillLevelChangeRequest]
         ] = deque()
@@ -4556,6 +4938,130 @@ class GameplayStateFold:
                 details=entry_details,
                 issues=("world entry value and ticket tail remain opaque",),
             )
+        if opcode == 75:
+            marker = ClientOpcode75EmptyRecord.parse(payload)
+            self.state.client_opcode_75_empty_records += 1
+            details = {
+                "field_epoch": self.state.field_epoch,
+                "phase": self.state.phase.value,
+            }
+            self._event(
+                frame,
+                "client_opcode_75_empty_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_75_empty_record",
+                coverage=ShapeCoverage.FULL,
+                parsed=marker,
+                details=details,
+            )
+        if opcode in {100, 307, 308, 310, 311}:
+            record = ClientFixedOpaqueRecord.parse(payload)
+            body_length = len(record.opaque_body)
+            self.state.client_fixed_opaque_records_by_opcode[opcode] += 1
+            self.state.client_fixed_opaque_bytes_by_opcode[opcode] += body_length
+            interval_ms: float | None = None
+            if opcode in {308, 311}:
+                previous_timestamp_ns = (
+                    self._last_client_periodic_report_timestamp_ns.get(opcode)
+                )
+                self._last_client_periodic_report_timestamp_ns[opcode] = (
+                    frame.timestamp_ns
+                )
+                if previous_timestamp_ns is not None:
+                    interval_ms = (
+                        frame.timestamp_ns - previous_timestamp_ns
+                    ) / 1e6
+                    self.state.client_periodic_report_last_interval_ms[
+                        opcode
+                    ] = interval_ms
+                    self.state.client_periodic_report_min_interval_ms[
+                        opcode
+                    ] = min(
+                        self.state.client_periodic_report_min_interval_ms.get(
+                            opcode, interval_ms
+                        ),
+                        interval_ms,
+                    )
+                    self.state.client_periodic_report_max_interval_ms[
+                        opcode
+                    ] = max(
+                        self.state.client_periodic_report_max_interval_ms.get(
+                            opcode, interval_ms
+                        ),
+                        interval_ms,
+                    )
+            details: dict[str, object] = {
+                **record.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+                "phase": self.state.phase.value,
+            }
+            if interval_ms is not None:
+                details["interval_ms"] = round(interval_ms, 3)
+            event_kind = (
+                "client_periodic_report_submitted"
+                if opcode in {308, 311}
+                else "client_fixed_record_submitted"
+            )
+            self._event(frame, event_kind, details=details)
+            return self._observation(
+                frame,
+                kind="client_fixed_opaque_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=details,
+                issues=(
+                    f"client opcode-{opcode} fixed body remains opaque",
+                ),
+            )
+        if opcode == 241:
+            request = ClientWorldExitRequest.parse(payload)
+            phase_before = self.state.phase
+            self._pending_world_exit_requests.append(frame.timestamp_ns)
+            self.state.world_exit_requests += 1
+            self.state.pending_world_exit_requests += 1
+            if phase_before == GameplayPhase.ACTIVE:
+                self.state.world_exit_requests_from_active_phase += 1
+            self.state.phase = GameplayPhase.EXIT_REQUESTED
+            details = {
+                "field_epoch": self.state.field_epoch,
+                "phase_before": phase_before.value,
+                "pending_requests": self.state.pending_world_exit_requests,
+            }
+            self._event(frame, "world_exit_requested", details=details)
+            return self._observation(
+                frame,
+                kind="client_world_exit_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode in {45, 46}:
+            status = ClientWorldExitStatus.parse(payload)
+            self.state.world_exit_status_packets += 1
+            self.state.world_exit_status_packets_by_opcode[opcode] += 1
+            details = {
+                **status.safe_dict(),
+                "correlated_exit_request": bool(
+                    self._pending_world_exit_requests
+                ),
+                "pending_requests": self.state.pending_world_exit_requests,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "world_exit_status_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_world_exit_status",
+                coverage=ShapeCoverage.FULL,
+                parsed=status,
+                details=details,
+            )
         if opcode == 301:
             acknowledgement = WorldBootstrapAcknowledgement.parse(payload)
             self.state.bootstrap_acknowledgements += 1
@@ -4971,6 +5477,91 @@ class GameplayStateFold:
                 parsed=acknowledgement,
                 details=details,
             )
+        if opcode == 279:
+            envelope = ClientOpcode279TextEnvelope.parse(payload)
+            correlated_server_envelope = bool(self._pending_server_opcode_394)
+            observed_gap_ms: float | None = None
+            changed_indices: tuple[int, ...] = ()
+            same_text_length: bool | None = None
+            captured_transform_match: bool | None = None
+            changed_span = "uncorrelated"
+            if correlated_server_envelope:
+                server_timestamp_ns, server_text = (
+                    self._pending_server_opcode_394.popleft()
+                )
+                self.state.pending_server_opcode_394_envelopes -= 1
+                self.state.correlated_client_opcode_279_packets += 1
+                observed_gap_ms = (
+                    frame.timestamp_ns - server_timestamp_ns
+                ) / 1e6
+                self.state.last_opcode_394_279_gap_ms = observed_gap_ms
+                self.state.max_opcode_394_279_gap_ms = max(
+                    self.state.max_opcode_394_279_gap_ms or 0.0,
+                    observed_gap_ms,
+                )
+                server_code_units = len(server_text.encode("utf-16le")) // 2
+                same_text_length = (
+                    server_code_units == envelope.text_code_units
+                )
+                changed_indices = envelope.changed_code_unit_indices(
+                    server_text
+                )
+                contiguous = bool(changed_indices) and changed_indices == tuple(
+                    range(changed_indices[0], changed_indices[-1] + 1)
+                )
+                if contiguous:
+                    changed_span = f"{changed_indices[0]}:{changed_indices[-1]}"
+                elif not changed_indices:
+                    changed_span = "none"
+                else:
+                    changed_span = "noncontiguous"
+                captured_transform_match = (
+                    same_text_length
+                    and changed_indices == (10, 11, 12, 13, 14)
+                )
+                if captured_transform_match:
+                    self.state.client_opcode_279_transform_matches += 1
+                else:
+                    self.state.client_opcode_279_transform_mismatches += 1
+            else:
+                self.state.uncorrelated_client_opcode_279_packets += 1
+            self.state.client_opcode_279_text_packets += 1
+            self.state.client_opcode_279_control_values[
+                envelope.control_value
+            ] += 1
+            self.state.client_opcode_279_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.client_opcode_279_changed_code_unit_counts[
+                len(changed_indices)
+            ] += 1
+            self.state.client_opcode_279_changed_span_shapes[changed_span] += 1
+            details: dict[str, object] = {
+                **envelope.safe_dict(),
+                "correlated_server_envelope": correlated_server_envelope,
+                "same_text_length": same_text_length,
+                "changed_code_unit_count": len(changed_indices),
+                "changed_span": changed_span,
+                "captured_transform_match": captured_transform_match,
+                "pending_server_envelopes": (
+                    self.state.pending_server_opcode_394_envelopes
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            if observed_gap_ms is not None:
+                details["observed_gap_ms"] = round(observed_gap_ms, 3)
+            self._event(
+                frame,
+                "client_opcode_279_text_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_279_text_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=envelope,
+                details=details,
+            )
         if opcode == 309:
             acknowledgement = ClientOpcode309Acknowledgement.parse(payload)
             matched_notification = bool(
@@ -5234,6 +5825,7 @@ class GameplayStateFold:
             self.state.client_opcode_13_messages += 1
             self.state.client_opcode_13_messages_by_type[message_type] += 1
             self.state.client_opcode_13_opaque_bytes += opaque_bytes
+            self.state.client_opcode_13_opaque_lengths[opaque_bytes] += 1
             details = {
                 "message_type": message_type,
                 "opaque_payload_bytes": opaque_bytes,
@@ -6416,19 +7008,40 @@ class GameplayStateFold:
             )
         if opcode == 9:
             termination = WorldSessionTermination.parse(payload)
+            correlated_exit_request = bool(self._pending_world_exit_requests)
+            round_trip_ms: float | None = None
+            if correlated_exit_request:
+                request_timestamp_ns = self._pending_world_exit_requests.popleft()
+                self.state.pending_world_exit_requests -= 1
+                self.state.matched_world_exit_terminations += 1
+                round_trip_ms = (
+                    frame.timestamp_ns - request_timestamp_ns
+                ) / 1e6
+                self.state.last_world_exit_round_trip_ms = round_trip_ms
+                self.state.max_world_exit_round_trip_ms = max(
+                    self.state.max_world_exit_round_trip_ms or 0.0,
+                    round_trip_ms,
+                )
             self.state.termination_received = True
             self.state.phase = GameplayPhase.TERMINATED
+            details: dict[str, object] = {
+                "opaque_reason_bytes": 7,
+                "correlated_exit_request": correlated_exit_request,
+                "pending_exit_requests": self.state.pending_world_exit_requests,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
             self._event(
                 frame,
                 "world_session_termination_received",
-                details={"opaque_reason_bytes": 7},
+                details=details,
             )
             return self._observation(
                 frame,
                 kind="world_session_termination",
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=termination,
-                details={"opaque_reason_bytes": 7},
+                details=details,
                 issues=("world-session termination reason remains opaque",),
             )
         if opcode == 157:
@@ -6904,6 +7517,203 @@ class GameplayStateFold:
                 parsed=instruction,
                 details=details,
             )
+        if opcode == 13 and len(payload) >= 3:
+            message_type = payload[2]
+            if message_type not in {7, 12, 14}:
+                return self._observation(
+                    frame,
+                    kind="server_opcode_13",
+                    coverage=ShapeCoverage.UNKNOWN,
+                )
+            message = Opcode13Envelope.parse(payload)
+            opaque_bytes = len(message.opaque_payload)
+            self.state.server_opcode_13_messages += 1
+            self.state.server_opcode_13_messages_by_type[message_type] += 1
+            self.state.server_opcode_13_opaque_bytes += opaque_bytes
+            self.state.server_opcode_13_opaque_lengths[opaque_bytes] += 1
+            details = {
+                "message_type": message_type,
+                "opaque_payload_bytes": opaque_bytes,
+                "body_redacted": True,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_13_message_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_13_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=message,
+                details=details,
+                issues=("server opcode-13 payload remains opaque",),
+            )
+        if opcode == 27:
+            ledger_27 = ServerOpcode27IntegerLedger.parse(payload)
+            self.state.server_opcode_27_packets += 1
+            self.state.server_opcode_27_entry_counts[
+                len(ledger_27.entries)
+            ] += 1
+            self.state.server_opcode_27_text_code_units[
+                ledger_27.text_code_units
+            ] += 1
+            details = {
+                **ledger_27.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_27_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_27_integer_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_27,
+                details=details,
+            )
+        if opcode == 28:
+            ledger_28 = ServerOpcode28TextLedger.parse(payload)
+            self.state.server_opcode_28_packets += 1
+            self.state.server_opcode_28_entry_counts[
+                len(ledger_28.entries)
+            ] += 1
+            self.state.server_opcode_28_text_1_code_units[
+                ledger_28.text_1_code_units
+            ] += 1
+            self.state.server_opcode_28_text_2_code_units[
+                ledger_28.text_2_code_units
+            ] += 1
+            details = {
+                **ledger_28.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_28_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_28_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_28,
+                details=details,
+            )
+        if opcode == 29:
+            ledger_29 = ServerOpcode29TextLedger.parse(payload)
+            self.state.server_opcode_29_packets += 1
+            self.state.server_opcode_29_entry_counts[
+                len(ledger_29.entries)
+            ] += 1
+            self.state.server_opcode_29_text_code_units[
+                ledger_29.text_code_units
+            ] += 1
+            details = {
+                **ledger_29.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_29_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_29_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_29,
+                details=details,
+            )
+        if opcode == 135:
+            ledger_135 = ServerOpcode135BootstrapLedger.parse(payload)
+            self.state.server_opcode_135_packets += 1
+            self.state.server_opcode_135_section_a_entry_counts[
+                len(ledger_135.section_a)
+            ] += 1
+            self.state.server_opcode_135_section_a_enabled_count += sum(
+                entry.enabled for entry in ledger_135.section_a
+            )
+            self.state.server_opcode_135_section_a_value_counts[
+                ledger_135.section_a_value_count
+            ] += 1
+            self.state.server_opcode_135_section_b_entry_counts[
+                len(ledger_135.section_b)
+            ] += 1
+            self.state.server_opcode_135_section_b_enabled_count += sum(
+                entry.enabled for entry in ledger_135.section_b
+            )
+            self.state.server_opcode_135_section_b_pair_counts[
+                ledger_135.section_b_pair_count
+            ] += 1
+            self.state.server_opcode_135_section_c_pair_counts[
+                len(ledger_135.section_c_pairs)
+            ] += 1
+            self.state.server_opcode_135_section_d_entry_counts[
+                len(ledger_135.section_d)
+            ] += 1
+            self.state.server_opcode_135_section_d_group_1_counts[
+                ledger_135.section_d_group_1_count
+            ] += 1
+            self.state.server_opcode_135_section_d_group_2_counts[
+                ledger_135.section_d_group_2_count
+            ] += 1
+            details = {
+                **ledger_135.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_135_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_135_bootstrap_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_135,
+                details=details,
+            )
+        if opcode == 142:
+            ledger_142 = ServerOpcode142TextLedger.parse(payload)
+            self.state.server_opcode_142_packets += 1
+            self.state.server_opcode_142_enabled_packets += int(
+                ledger_142.enabled
+            )
+            self.state.server_opcode_142_entry_counts[
+                len(ledger_142.entries)
+            ] += 1
+            self.state.server_opcode_142_header_text_code_units[
+                ledger_142.header_text_code_units
+            ] += 1
+            self.state.server_opcode_142_entry_text_code_units[
+                ledger_142.entry_text_code_units
+            ] += 1
+            self.state.server_opcode_142_flag_1_true_count += sum(
+                entry.flag_1 for entry in ledger_142.entries
+            )
+            self.state.server_opcode_142_flag_2_true_count += sum(
+                entry.flag_2 for entry in ledger_142.entries
+            )
+            details = {
+                **ledger_142.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_142_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_142_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_142,
+                details=details,
+            )
         if opcode == 147:
             ledger = ServerOpcode147BoundsLedger.parse(payload)
             rectangle_shape = (
@@ -6965,6 +7775,30 @@ class GameplayStateFold:
                 kind="server_opcode_272_ledger",
                 coverage=ShapeCoverage.FULL,
                 parsed=ledger_272,
+                details=details,
+            )
+        if opcode == 425:
+            ledger_425 = ServerOpcode425ValueLedger.parse(payload)
+            trailer_shape = str(ledger_425.trailer)
+            self.state.server_opcode_425_packets += 1
+            self.state.server_opcode_425_value_counts[
+                len(ledger_425.values)
+            ] += 1
+            self.state.server_opcode_425_trailer_shapes[trailer_shape] += 1
+            details = {
+                **ledger_425.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_425_ledger_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_425_value_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger_425,
                 details=details,
             )
         if (
@@ -7085,6 +7919,29 @@ class GameplayStateFold:
                 parsed=effect_record,
                 details=details,
             )
+        if opcode == 169:
+            instruction = ServerOpcode169TextInstruction.parse(payload)
+            self.state.server_opcode_169_packets += 1
+            self.state.server_opcode_169_selectors[instruction.selector] += 1
+            self.state.server_opcode_169_text_code_units[
+                instruction.text_code_units
+            ] += 1
+            details = {
+                **instruction.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_169_text_instruction_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_169_text_instruction",
+                coverage=ShapeCoverage.FULL,
+                parsed=instruction,
+                details=details,
+            )
         if (
             opcode == 348
             and len(payload) >= 8
@@ -7130,21 +7987,74 @@ class GameplayStateFold:
                 parsed=envelope,
                 details=details,
             )
-        if opcode in {69, 93, 94, 148, 201, 205, 379}:
-            if opcode == 69:
+        if opcode == 394:
+            envelope = ServerOpcode394TextEnvelope.parse(payload)
+            self._pending_server_opcode_394.append(
+                (frame.timestamp_ns, envelope.text)
+            )
+            self.state.server_opcode_394_packets += 1
+            self.state.server_opcode_394_text_code_units[
+                envelope.text_code_units
+            ] += 1
+            self.state.pending_server_opcode_394_envelopes += 1
+            details = {
+                **envelope.safe_dict(),
+                "pending_client_envelopes": (
+                    self.state.pending_server_opcode_394_envelopes
+                ),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "server_opcode_394_text_received",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_394_text_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=envelope,
+                details=details,
+            )
+        if opcode in {
+            69,
+            93,
+            94,
+            137,
+            148,
+            201,
+            205,
+            228,
+            230,
+            231,
+            232,
+            234,
+            235,
+            276,
+            379,
+        }:
+            if opcode in ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS:
                 neutral_record: NeutralServerRecord = (
-                    ServerOpcode69Record.parse(payload)
+                    ServerU32OpaqueTailEnvelope.parse(payload)
                 )
+            elif opcode == 69:
+                neutral_record = ServerOpcode69Record.parse(payload)
             elif opcode == 93:
                 neutral_record = ServerOpcode93Record.parse(payload)
             elif opcode == 94:
                 neutral_record = ServerOpcode94Record.parse(payload)
+            elif opcode == 137:
+                neutral_record = ServerOpcode137OpaqueTailEnvelope.parse(
+                    payload
+                )
             elif opcode == 148:
                 neutral_record = ServerOpcode148Envelope.parse(payload)
             elif opcode == 201:
                 neutral_record = ServerOpcode201Record.parse(payload)
             elif opcode == 205:
                 neutral_record = ServerOpcode205Record.parse(payload)
+            elif opcode == 276:
+                neutral_record = ServerOpcode276BooleanFlag.parse(payload)
             else:
                 neutral_record = ServerOpcode379Record.parse(payload)
             details: dict[str, object] = {
@@ -7163,7 +8073,12 @@ class GameplayStateFold:
                 "neutral_server_record_received",
                 details=details,
             )
-            partial = opcode in {69, 201} or (
+            partial = opcode in {
+                69,
+                137,
+                201,
+                *ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS,
+            } or (
                 isinstance(neutral_record, ServerOpcode148Envelope)
                 and not neutral_record.fully_bounded
             )
@@ -8709,6 +9624,29 @@ class GameplayStateFold:
                 "opcode-348 requests had no captured client opcode-66 "
                 "acknowledgement"
             )
+        if self.state.uncorrelated_client_opcode_279_packets:
+            self.warnings.append(
+                f"{self.state.uncorrelated_client_opcode_279_packets} client "
+                "opcode-279 text envelopes had no preceding unmatched server "
+                "opcode-394 envelope"
+            )
+        if self.state.pending_server_opcode_394_envelopes:
+            self.warnings.append(
+                f"{self.state.pending_server_opcode_394_envelopes} server "
+                "opcode-394 text envelopes had no later captured client "
+                "opcode-279 envelope"
+            )
+        if self.state.client_opcode_279_transform_mismatches:
+            self.warnings.append(
+                f"{self.state.client_opcode_279_transform_mismatches} correlated "
+                "opcode-394/279 text pairs did not match the captured five-code-"
+                "unit transformation"
+            )
+        if self.state.pending_world_exit_requests:
+            self.warnings.append(
+                f"{self.state.pending_world_exit_requests} client world-exit "
+                "requests had no captured terminal server opcode-9 packet"
+            )
         if self.state.pending_skill_level_change_requests:
             self.warnings.append(
                 f"{self.state.pending_skill_level_change_requests} skill "
@@ -8751,6 +9689,12 @@ class GameplayStateFold:
                     ),
                     "pending_opcode_426_notifications": (
                         self.state.pending_opcode_426_notifications
+                    ),
+                    "pending_server_opcode_394_envelopes": (
+                        self.state.pending_server_opcode_394_envelopes
+                    ),
+                    "pending_world_exit_requests": (
+                        self.state.pending_world_exit_requests
                     ),
                     "pending_skill_level_change_requests": (
                         self.state.pending_skill_level_change_requests
@@ -10469,6 +11413,15 @@ def render_gameplay_analysis(
     client_opcode_13_message_types = json.dumps(
         dict(sorted(state.client_opcode_13_messages_by_type.items()))
     )
+    client_opcode_13_opaque_lengths = json.dumps(
+        dict(sorted(state.client_opcode_13_opaque_lengths.items()))
+    )
+    server_opcode_13_message_types = json.dumps(
+        dict(sorted(state.server_opcode_13_messages_by_type.items()))
+    )
+    server_opcode_13_opaque_lengths = json.dumps(
+        dict(sorted(state.server_opcode_13_opaque_lengths.items()))
+    )
     client_attack_opcodes = json.dumps(
         dict(sorted(state.client_attack_actions_by_opcode.items()))
     )
@@ -11041,7 +11994,14 @@ def render_gameplay_analysis(
         (
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "
             f"message_types:{client_opcode_13_message_types} "
+            f"opaque_lengths:{client_opcode_13_opaque_lengths} "
             f"opaque_bytes:{state.client_opcode_13_opaque_bytes}"
+        ),
+        (
+            f"server_opcode_13=messages:{state.server_opcode_13_messages} "
+            f"message_types:{server_opcode_13_message_types} "
+            f"opaque_lengths:{server_opcode_13_opaque_lengths} "
+            f"opaque_bytes:{state.server_opcode_13_opaque_bytes}"
         ),
         (
             "neutral_server_records="
@@ -11058,6 +12018,65 @@ def render_gameplay_analysis(
             f"value_2:{tutorial_ui_value_2} "
             f"controls:{tutorial_ui_control_values} "
             f"extended:{state.tutorial_ui_extended_instructions}"
+        ),
+        (
+            "server_opcode_27="
+            f"packets:{state.server_opcode_27_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_27_entry_counts.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_27_text_code_units.items()))}"
+        ),
+        (
+            "server_opcode_28="
+            f"packets:{state.server_opcode_28_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_28_entry_counts.items()))} "
+            "text_1_code_units:"
+            f"{dict(sorted(state.server_opcode_28_text_1_code_units.items()))} "
+            "text_2_code_units:"
+            f"{dict(sorted(state.server_opcode_28_text_2_code_units.items()))}"
+        ),
+        (
+            "server_opcode_29="
+            f"packets:{state.server_opcode_29_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_29_entry_counts.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_29_text_code_units.items()))}"
+        ),
+        (
+            "server_opcode_135="
+            f"packets:{state.server_opcode_135_packets} "
+            "section_a_entries:"
+            f"{dict(sorted(state.server_opcode_135_section_a_entry_counts.items()))} "
+            "section_a_values:"
+            f"{dict(sorted(state.server_opcode_135_section_a_value_counts.items()))} "
+            "section_b_entries:"
+            f"{dict(sorted(state.server_opcode_135_section_b_entry_counts.items()))} "
+            "section_b_pairs:"
+            f"{dict(sorted(state.server_opcode_135_section_b_pair_counts.items()))} "
+            "section_c_pairs:"
+            f"{dict(sorted(state.server_opcode_135_section_c_pair_counts.items()))} "
+            "section_d_entries:"
+            f"{dict(sorted(state.server_opcode_135_section_d_entry_counts.items()))} "
+            "section_d_group_1:"
+            f"{dict(sorted(state.server_opcode_135_section_d_group_1_counts.items()))} "
+            "section_d_group_2:"
+            f"{dict(sorted(state.server_opcode_135_section_d_group_2_counts.items()))}"
+        ),
+        (
+            "server_opcode_142="
+            f"packets:{state.server_opcode_142_packets} "
+            f"enabled:{state.server_opcode_142_enabled_packets} "
+            "entry_counts:"
+            f"{dict(sorted(state.server_opcode_142_entry_counts.items()))} "
+            "header_text_code_units:"
+            f"{dict(sorted(state.server_opcode_142_header_text_code_units.items()))} "
+            "entry_text_code_units:"
+            f"{dict(sorted(state.server_opcode_142_entry_text_code_units.items()))} "
+            f"flag_1_true:{state.server_opcode_142_flag_1_true_count} "
+            f"flag_2_true:{state.server_opcode_142_flag_2_true_count}"
         ),
         (
             "server_opcode_147="
@@ -11078,6 +12097,14 @@ def render_gameplay_analysis(
             f"flag_2_true:{state.server_opcode_272_flag_2_true_count} "
             "trailer_values:"
             f"{dict(sorted(state.server_opcode_272_trailer_values.items()))}"
+        ),
+        (
+            "server_opcode_425="
+            f"packets:{state.server_opcode_425_packets} "
+            "value_counts:"
+            f"{dict(sorted(state.server_opcode_425_value_counts.items()))} "
+            "trailer_shapes:"
+            f"{dict(sorted(state.server_opcode_425_trailer_shapes.items()))}"
         ),
         (
             "server_opcode_239="
@@ -11110,6 +12137,13 @@ def render_gameplay_analysis(
             f"controls:{dict(sorted(state.positioned_effect_control_values.items()))}"
         ),
         (
+            "server_opcode_169="
+            f"packets:{state.server_opcode_169_packets} "
+            f"selectors:{dict(sorted(state.server_opcode_169_selectors.items()))} "
+            "text_code_units:"
+            f"{dict(sorted(state.server_opcode_169_text_code_units.items()))}"
+        ),
+        (
             "server_opcode_348="
             f"packets:{state.server_opcode_348_packets} "
             f"categories:{dict(sorted(state.server_opcode_348_categories.items()))} "
@@ -11119,6 +12153,56 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
             "control_pairs:"
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
+        ),
+        (
+            "client_fixed_opaque_records="
+            "packets:"
+            f"{dict(sorted(state.client_fixed_opaque_records_by_opcode.items()))} "
+            "opaque_bytes:"
+            f"{dict(sorted(state.client_fixed_opaque_bytes_by_opcode.items()))} "
+            "periodic_last_ms:"
+            f"{dict(sorted(state.client_periodic_report_last_interval_ms.items()))} "
+            "periodic_min_ms:"
+            f"{dict(sorted(state.client_periodic_report_min_interval_ms.items()))} "
+            "periodic_max_ms:"
+            f"{dict(sorted(state.client_periodic_report_max_interval_ms.items()))}"
+        ),
+        (
+            "world_exit="
+            f"bootstrap_markers:{state.client_opcode_75_empty_records} "
+            f"requests:{state.world_exit_requests} "
+            "active_requests:"
+            f"{state.world_exit_requests_from_active_phase} "
+            f"statuses:{state.world_exit_status_packets} "
+            "status_opcodes:"
+            f"{dict(sorted(state.world_exit_status_packets_by_opcode.items()))} "
+            f"matched:{state.matched_world_exit_terminations} "
+            f"pending:{state.pending_world_exit_requests} "
+            f"last_rtt_ms:{state.last_world_exit_round_trip_ms} "
+            f"max_rtt_ms:{state.max_world_exit_round_trip_ms}"
+        ),
+        (
+            "opcode_394_279="
+            f"server:{state.server_opcode_394_packets} "
+            "server_text_code_units:"
+            f"{dict(sorted(state.server_opcode_394_text_code_units.items()))} "
+            f"client:{state.client_opcode_279_text_packets} "
+            "controls:"
+            f"{dict(sorted(state.client_opcode_279_control_values.items()))} "
+            "client_text_code_units:"
+            f"{dict(sorted(state.client_opcode_279_text_code_units.items()))} "
+            "changed_counts:"
+            f"{dict(sorted(state.client_opcode_279_changed_code_unit_counts.items()))} "
+            "changed_spans:"
+            f"{dict(sorted(state.client_opcode_279_changed_span_shapes.items()))} "
+            f"correlated:{state.correlated_client_opcode_279_packets} "
+            f"uncorrelated:{state.uncorrelated_client_opcode_279_packets} "
+            f"transform_matches:{state.client_opcode_279_transform_matches} "
+            "transform_mismatches:"
+            f"{state.client_opcode_279_transform_mismatches} "
+            f"pending:{state.pending_server_opcode_394_envelopes} "
+            f"last_gap_ms:{state.last_opcode_394_279_gap_ms} "
+            f"max_gap_ms:{state.max_opcode_394_279_gap_ms}"
         ),
         (
             "client_opcode_66="
