@@ -188,8 +188,15 @@ same input to opcode-`52` variant `17`; restoring the original binding restored
 opcode `104`. The gameplay fold reports these as full
 `client_skill_use_request` observations and `client_skill_use_submitted` events,
 including progression/binding correlations and tick deltas. No opcode-`104`
-sample occurs in reference streams `92`, `114`, or `126`, and no required
-server response is inferred yet.
+sample occurs in reference streams `92`, `114`, or `126`. A fresh live
+response-free control emitted the same request twice, 10,684.712 ms apart,
+with exactly two periodic server opcode-`10` probes and no non-heartbeat server
+packet between them; the bounded snapshot had 275/275 matched heartbeats and
+none pending. This proves that no immediate gameplay response is required for
+repeat dispatch or connection liveness, but not the skill's client effect.
+Per-request details report the elapsed time and intervening non-heartbeat
+opcode counts; safe aggregate state reports same-skill repeats with and without
+such a packet.
 
 Server opcode `42` now has a deliberately partial
 `LocalTemporaryStatSetHeader` decoder. It reads four `uint32` mask words; only

@@ -804,6 +804,8 @@ class GameplayGameState:
     client_skill_use_level_mismatches: int = 0
     client_skill_use_binding_matches: int = 0
     client_skill_use_binding_mismatches: int = 0
+    client_skill_use_same_skill_repeats: int = 0
+    client_skill_use_response_free_same_skill_repeats: int = 0
     last_client_skill_tick: int | None = None
     client_skill_tick_decreases: int = 0
     local_temporary_stat_sets: int = 0
@@ -4082,6 +4084,12 @@ class GameplayAnalysis:
                     "binding_mismatches": (
                         self.state.client_skill_use_binding_mismatches
                     ),
+                    "same_skill_repeats": (
+                        self.state.client_skill_use_same_skill_repeats
+                    ),
+                    "response_free_same_skill_repeats": (
+                        self.state.client_skill_use_response_free_same_skill_repeats
+                    ),
                     "last_client_tick": self.state.last_client_skill_tick,
                     "tick_decreases": self.state.client_skill_tick_decreases,
                 },
@@ -4804,6 +4812,7 @@ class GameplayStateFold:
         self._last_client_skill_use: (
             tuple[int, int, ClientSkillUseRequest] | None
         ) = None
+        self._server_opcodes_since_skill_use: Counter[int] = Counter()
         self._last_server_attack_relay: (
             tuple[PlainFrame, ServerAttackRelay] | None
         ) = None
@@ -6099,6 +6108,42 @@ class GameplayStateFold:
             )
         if opcode == 104:
             request = ClientSkillUseRequest.parse(payload)
+            previous_skill_use = self._last_client_skill_use
+            previous_request_frame: int | None = None
+            previous_request_elapsed_ms: float | None = None
+            same_skill_as_previous: bool | None = None
+            if previous_skill_use is not None:
+                (
+                    previous_request_frame,
+                    previous_request_timestamp_ns,
+                    previous_request,
+                ) = previous_skill_use
+                previous_request_elapsed_ms = round(
+                    (
+                        frame.timestamp_ns
+                        - previous_request_timestamp_ns
+                    )
+                    / 1e6,
+                    3,
+                )
+                same_skill_as_previous = (
+                    previous_request.skill_id == request.skill_id
+                )
+                if same_skill_as_previous:
+                    self.state.client_skill_use_same_skill_repeats += 1
+                    if not self._server_opcodes_since_skill_use:
+                        self.state.client_skill_use_response_free_same_skill_repeats += 1
+            intervening_nonheartbeat_server_opcodes = dict(
+                sorted(self._server_opcodes_since_skill_use.items())
+            )
+            intervening_nonheartbeat_server_packets = sum(
+                intervening_nonheartbeat_server_opcodes.values()
+            )
+            response_free_same_skill_repeat = (
+                same_skill_as_previous is True
+                and intervening_nonheartbeat_server_packets == 0
+            )
+            self._server_opcodes_since_skill_use.clear()
             modeled_skill_level = self.state.skill_levels.get(
                 request.skill_id
             )
@@ -6164,6 +6209,19 @@ class GameplayStateFold:
                 "bound_key_codes": bound_key_codes,
                 "binding_matches_model": binding_matches,
                 "client_tick_delta": tick_delta,
+                "previous_request_frame": previous_request_frame,
+                "previous_request_elapsed_ms": previous_request_elapsed_ms,
+                "same_skill_as_previous": same_skill_as_previous,
+                "intervening_nonheartbeat_server_packets": (
+                    intervening_nonheartbeat_server_packets
+                ),
+                "intervening_nonheartbeat_server_opcodes": (
+                    intervening_nonheartbeat_server_opcodes
+                ),
+                (
+                    "same_skill_repeat_without_intervening_"
+                    "nonheartbeat_server_packet"
+                ): response_free_same_skill_repeat,
             }
             self._event(
                 frame,
@@ -6608,6 +6666,8 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if self._last_client_skill_use is not None and opcode != 10:
+            self._server_opcodes_since_skill_use[opcode] += 1
         if opcode == 43:
             envelope = ServerOpcode43Envelope.parse(payload)
             self.state.server_opcode_43_packets += 1
@@ -12851,6 +12911,9 @@ def render_gameplay_analysis(
             f"level_mismatches:{state.client_skill_use_level_mismatches} "
             f"binding_matches:{state.client_skill_use_binding_matches} "
             f"binding_mismatches:{state.client_skill_use_binding_mismatches} "
+            f"same_skill_repeats:{state.client_skill_use_same_skill_repeats} "
+            "response_free_same_skill_repeats:"
+            f"{state.client_skill_use_response_free_same_skill_repeats} "
             f"last_tick:{state.last_client_skill_tick} "
             f"tick_decreases:{state.client_skill_tick_decreases}"
         ),

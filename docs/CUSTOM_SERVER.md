@@ -1159,6 +1159,20 @@ outside the capture during controlled shutdown. This validates the request
 model and binding-dependent dispatch, not the server-side effect or response
 semantics of skill `2001002`.
 
+A fresh no-injection control sharpened the server-side boundary. Physical key
+`71` emitted two more modeled opcode-`104` requests for skill `2001002`, level
+`1`, and trailing zero, 10,684.712 ms apart. The only server packets between
+them were two periodic opcode-`10` heartbeat probes; there was no non-heartbeat
+server packet. The second request therefore proves that an immediate gameplay
+response is unnecessary for repeat request dispatch. At the bounded snapshot,
+the transcript remained `active`, valid, and warning-free with 275/275 matched
+heartbeats and none pending. The source is
+`downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786458087377858805_replay_12857.jsonl`.
+The analyzer now records each request's prior-frame/elapsed interval and exact
+intervening non-heartbeat opcode counts, plus aggregate same-skill and
+response-free same-skill repeat counts. This is liveness/dispatch evidence,
+not proof of the skill's visual or state effect.
+
 ### Opcode-42 response probe: decoded prefix, unsafe packet
 
 The next response candidate was tested through the same opt-in injection API.

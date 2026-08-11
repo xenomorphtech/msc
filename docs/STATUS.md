@@ -466,6 +466,14 @@
   learned skills and current bindings, and emits `client_skill_use_submitted`.
   The frozen run remains active and valid with 38 matched heartbeats; its only
   warning is the final shutdown-raced pending probe.
+- A fresh response-free opcode-`104` control emitted the same modeled skill
+  request twice, 10,684.712 ms apart, with only two periodic opcode-`10`
+  heartbeat probes and no non-heartbeat server packet between. The second
+  request proves that an immediate gameplay response is unnecessary for repeat
+  dispatch; the warning-free active snapshot retained 275/275 matched
+  heartbeats and none pending. Analyzer events/state now expose this exact
+  interval and same-skill response-free-repeat relation without claiming the
+  skill's client-visible effect.
 - Server opcode `42` now has partial structural coverage rather than a raw hex
   dump. Static client inspection and a live parser trace establish four
   `uint32` mask words; the all-zero branch then reads two `uint8` values and
@@ -1031,9 +1039,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 1. Use the owner/proximity/source-lifecycle negative controls to test the
    captured combat/reward neighborhood; serve a reactive pickup only after
    observing an authentic opcode-`185` or compact opcode-`222` request.
-2. Determine whether client opcode `104` requires a modeled server response,
-   then use one-field controls to test whether opcode-`385` selector `0` is an
-   empty binding without assigning meanings to selectors `2/4/5/6`.
+2. Use one-field controls to test whether opcode-`385` selector `0` is an empty
+   binding without assigning meanings to selectors `2/4/5/6`; opcode `104`
+   now has a response-free repeat/liveness bound, while its effect remains
+   unproven.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Keep packet injection an explicit loopback-only opt-in while expanding

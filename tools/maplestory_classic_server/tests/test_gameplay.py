@@ -711,6 +711,7 @@ def fixture_gameplay_transcript(
     active_item_drop_owner: int | None = None,
     extra_server_plaintexts: tuple[bytes, ...] = (),
     extra_client_plaintexts: tuple[bytes, ...] = (),
+    extra_directional_plaintexts: tuple[tuple[str, bytes], ...] = (),
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -1532,6 +1533,8 @@ def fixture_gameplay_transcript(
         append("server_to_client", plaintext)
     for plaintext in extra_client_plaintexts:
         append("client_to_server", plaintext)
+    for direction, plaintext in extra_directional_plaintexts:
+        append(direction, plaintext)
     if terminate:
         append(
             "server_to_client",
@@ -5064,6 +5067,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.client_skill_use_level_mismatches, 0)
         self.assertEqual(analysis.state.client_skill_use_binding_matches, 2)
         self.assertEqual(analysis.state.client_skill_use_binding_mismatches, 0)
+        self.assertEqual(analysis.state.client_skill_use_same_skill_repeats, 1)
+        self.assertEqual(
+            analysis.state.client_skill_use_response_free_same_skill_repeats,
+            1,
+        )
         self.assertEqual(analysis.state.last_client_skill_tick, 623_660)
         self.assertEqual(analysis.state.client_skill_tick_decreases, 0)
         observations = [
@@ -5082,6 +5090,28 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(observations[0].details["skill_level_matches_model"])
         self.assertEqual(observations[1].details["client_tick_delta"], 230_024)
         self.assertEqual(
+            observations[1].details["previous_request_elapsed_ms"],
+            0.0,
+        )
+        self.assertEqual(
+            observations[1].details[
+                "intervening_nonheartbeat_server_packets"
+            ],
+            0,
+        )
+        self.assertEqual(
+            observations[1].details[
+                "intervening_nonheartbeat_server_opcodes"
+            ],
+            {},
+        )
+        self.assertTrue(
+            observations[1].details[
+                "same_skill_repeat_without_intervening_"
+                "nonheartbeat_server_packet"
+            ]
+        )
+        self.assertEqual(
             sum(
                 event.kind == "client_skill_use_submitted"
                 for event in analysis.events
@@ -5091,10 +5121,97 @@ class GameplayStateFoldTest(unittest.TestCase):
         safe = analysis.safe_dict()["state"]["client_skill_uses"]
         self.assertEqual(safe["requests_by_skill_id"], {2_001_002: 2})
         self.assertEqual(safe["level_matches"], 2)
+        self.assertEqual(safe["same_skill_repeats"], 1)
+        self.assertEqual(
+            safe["response_free_same_skill_repeats"],
+            1,
+        )
         self.assertIn(
             "client_skill_uses=requests:2",
             render_gameplay_analysis(analysis),
         )
+
+    def test_tracks_server_packets_between_same_skill_requests(self) -> None:
+        keyboard = fixture_variable_server_records()[2]
+        first_request = ClientSkillUseRequest(
+            client_tick=700_000,
+            skill_id=2_001_002,
+            skill_level=1,
+            trailing_value=0,
+        )
+        second_request = replace(first_request, client_tick=701_000)
+        third_request = replace(first_request, client_tick=702_000)
+        temporary_stat = LocalTemporaryStatSetHeader(
+            mask_words=(0, 0, 0, 0),
+            zero_mask_flag_a=0,
+            zero_mask_flag_b=0,
+            zero_mask_trailing_i16=0,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(keyboard.to_bytes(),),
+            extra_directional_plaintexts=(
+                ("client_to_server", first_request.to_bytes()),
+                ("server_to_client", HeartbeatProbe().to_bytes()),
+                (
+                    "client_to_server",
+                    HeartbeatResponse(opaque_token=b"response").to_bytes(),
+                ),
+                ("client_to_server", second_request.to_bytes()),
+                ("server_to_client", temporary_stat.to_bytes()),
+                ("client_to_server", third_request.to_bytes()),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_skill_use_request"
+        ]
+        self.assertEqual(len(observations), 3)
+        self.assertEqual(
+            observations[1].details[
+                "intervening_nonheartbeat_server_packets"
+            ],
+            0,
+        )
+        self.assertTrue(
+            observations[1].details[
+                "same_skill_repeat_without_intervening_"
+                "nonheartbeat_server_packet"
+            ]
+        )
+        self.assertEqual(
+            observations[2].details[
+                "intervening_nonheartbeat_server_packets"
+            ],
+            1,
+        )
+        self.assertEqual(
+            observations[2].details[
+                "intervening_nonheartbeat_server_opcodes"
+            ],
+            {42: 1},
+        )
+        self.assertFalse(
+            observations[2].details[
+                "same_skill_repeat_without_intervening_"
+                "nonheartbeat_server_packet"
+            ]
+        )
+        self.assertEqual(
+            analysis.state.client_skill_use_same_skill_repeats,
+            2,
+        )
+        self.assertEqual(
+            analysis.state.client_skill_use_response_free_same_skill_repeats,
+            1,
+        )
+        self.assertEqual(analysis.state.matched_heartbeat_responses, 2)
+        self.assertEqual(analysis.state.pending_heartbeat_probes, 0)
 
     def test_folds_local_temporary_stat_zero_mask_without_state_change(
         self,

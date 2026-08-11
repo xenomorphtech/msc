@@ -1909,8 +1909,20 @@ opcode-`104` samples are from the controlled live transcript; streams `92`,
 The gameplay fold gives this packet full structural coverage, correlates the
 skill id with both current keyboard bindings and learned skill levels, checks
 the submitted level, tracks tick deltas/decreases and neutral trailing values,
-and emits `client_skill_use_submitted`. It does not yet infer a required server
-response or assign a meaning to `trailing_value` beyond the observed zero.
+and emits `client_skill_use_submitted`. It does not assign any server packet as
+the request's semantic response or name `trailing_value` beyond the observed
+zero.
+
+A later live response-free control provides a narrower server invariant. Two
+physical key-`71` presses produced same-skill requests 10,684.712 ms apart.
+Exactly two periodic server opcode-`10` probes occurred between the requests;
+no non-heartbeat server packet did. The second request and subsequent matched
+heartbeats prove that an immediate gameplay response is not required for repeat
+dispatch or connection liveness. They do not prove the skill's client-visible
+or authoritative state effect. Each request event now reports its previous
+request frame/elapsed time, same-skill relation, and intervening non-heartbeat
+server opcode counts. Safe state separately counts same-skill repeats and the
+subset with no intervening non-heartbeat packet.
 
 ## Local temporary-stat set prefix (`server 42`, partial)
 
