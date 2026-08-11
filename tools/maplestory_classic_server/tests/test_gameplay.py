@@ -44,7 +44,9 @@ from maple_server.gameplay import (  # noqa: E402
 )
 from maple_server.gamestate import PlainFrame  # noqa: E402
 from maple_server.packets import (  # noqa: E402
+    AbilityPointAllocationEntry,
     CharacterStatUpdate,
+    ClientAbilityPointAllocationRequest,
     ClientAttackAction,
     ClientFixedOpaqueRecord,
     ClientInnerPortalRequest,
@@ -3348,9 +3350,60 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "45 or 46"):
             ClientWorldExitStatus(value=0, opcode=47).to_bytes()
 
+    def test_ability_point_allocation_request_round_trip(self) -> None:
+        request = ClientAbilityPointAllocationRequest(
+            client_tick=0x002E_A79F,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=9,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=29,
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            request.to_bytes(),
+            bytes.fromhex(
+                "64009fa72e00020000000002000009000000000100001d000000"
+            ),
+        )
+        self.assertEqual(
+            ClientAbilityPointAllocationRequest.parse(request.to_bytes()),
+            request,
+        )
+        self.assertEqual(
+            request.safe_dict()["allocations"],
+            [
+                {"stat": "luck", "stat_mask": "0x00000200", "increment": 9},
+                {
+                    "stat": "intelligence",
+                    "stat_mask": "0x00000100",
+                    "increment": 29,
+                },
+            ],
+        )
+        self.assertEqual(request.total_increment, 38)
+        with self.assertRaisesRegex(PacketShapeError, "must be unique"):
+            ClientAbilityPointAllocationRequest(
+                client_tick=1,
+                allocations=(
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=1,
+                    ),
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=1,
+                    ),
+                ),
+            ).to_bytes()
+
     def test_client_fixed_opaque_records_round_trip_and_redact(self) -> None:
         for opcode, body_length in (
-            (100, 24),
             (307, 12),
             (310, 39),
         ):
@@ -6739,7 +6792,6 @@ class GameplayStateFoldTest(unittest.TestCase):
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_client_plaintexts=(
-                record(100, 24),
                 record(307, 12),
                 record(310, 39),
                 opcode_308,
@@ -6754,11 +6806,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(
             analysis.state.client_fixed_opaque_records_by_opcode,
-            {100: 1, 307: 1, 310: 1},
+            {307: 1, 310: 1},
         )
         self.assertEqual(
             analysis.state.client_fixed_opaque_bytes_by_opcode,
-            {100: 24, 307: 12, 310: 39},
+            {307: 12, 310: 39},
         )
         self.assertEqual(
             analysis.state.client_periodic_records_by_opcode,
@@ -6790,16 +6842,99 @@ class GameplayStateFoldTest(unittest.TestCase):
             )
         )
         event_counts = Counter(event.kind for event in analysis.events)
-        self.assertEqual(event_counts["client_fixed_record_submitted"], 3)
+        self.assertEqual(event_counts["client_fixed_record_submitted"], 2)
         self.assertEqual(event_counts["client_periodic_report_submitted"], 4)
         self.assertIn(
             "client_fixed_opaque_records=packets:"
-            "{100: 1, 307: 1, 310: 1}",
+            "{307: 1, 310: 1}",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(
             "client_periodic_records=packets:{308: 2, 311: 2} "
             "opcode308_mirrors:{59: 2} opcode308_variants:{0: 2}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_correlates_ability_point_allocation_with_stat_update(self) -> None:
+        request = ClientAbilityPointAllocationRequest(
+            client_tick=0x0008_9CF4,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=1,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=4,
+                ),
+            ),
+        )
+        initial_ap = CharacterStatUpdate(
+            request_flag=0,
+            stat_mask=CharacterStatUpdate.ABILITY_POINTS,
+            ability_points=5,
+        )
+        response = CharacterStatUpdate(
+            request_flag=1,
+            stat_mask=(
+                CharacterStatUpdate.INTELLIGENCE
+                | CharacterStatUpdate.LUCK
+                | CharacterStatUpdate.ABILITY_POINTS
+            ),
+            intelligence=61,
+            luck=16,
+            ability_points=0,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_directional_plaintexts=(
+                ("server_to_client", initial_ap.to_bytes()),
+                ("client_to_server", request.to_bytes()),
+                ("server_to_client", response.to_bytes()),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.ability_point_allocation_requests, 1)
+        self.assertEqual(analysis.state.ability_point_allocation_entries, 2)
+        self.assertEqual(analysis.state.ability_points_requested, 5)
+        self.assertEqual(
+            analysis.state.ability_points_requested_by_stat,
+            {"luck": 1, "intelligence": 4},
+        )
+        self.assertEqual(analysis.state.ability_point_allocation_responses, 1)
+        self.assertEqual(
+            analysis.state.ability_point_allocation_response_matches,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.ability_point_allocation_response_mismatches,
+            0,
+        )
+        self.assertEqual(analysis.state.pending_ability_point_allocations, 0)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "ability_point_allocation_request"
+        )
+        self.assertEqual(request_observation.coverage.value, "full")
+        response_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "player_stats_updated"
+            and "ability_point_allocation" in event.details
+        )
+        allocation = response_event.details["ability_point_allocation"]
+        self.assertEqual(
+            allocation["actual_increments"],
+            {"luck": 1, "intelligence": 4},
+        )
+        self.assertEqual(allocation["ability_points_spent"], 5)
+        self.assertTrue(allocation["matches"])
+        self.assertIn(
+            "ability_point_allocation=requests:1 entries:2 points:5",
             render_gameplay_analysis(analysis),
         )
 

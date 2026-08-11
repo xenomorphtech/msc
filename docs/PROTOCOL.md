@@ -1643,7 +1643,7 @@ each, with no phase transition or later opcode `241`. This leaves the captured
 transaction exact and independently repeated, but its live UI trigger unproven
 in the current replay state.
 
-## Fixed-width and typed periodic client reports
+## Fixed-width and typed client reports
 
 Four additional outgoing-client families repeat at exact widths in the two
 sustained gameplay captures. A fifth width is independently bounded by the
@@ -1651,14 +1651,33 @@ three controlled local-Wine menu confirmations:
 
 | opcode | packet/body bytes | stream `92` | stream `126` | local Wine | bounded observation |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `100` | `26/24` | 1 | 1 | 0 | one fixed record per sustained capture |
+| `100` | `26/24` | 1 | 1 | 0 | counted ability-point allocation request |
 | `307` | `14/12` | 1 | 1 | 1 | one fixed record near bootstrap |
 | `308` | `74/72` | 2 | 11 | 13 | typed mirrored-value record; approximately 300-second cadence while continuously running |
 | `310` | `41/39` | 0 | 0 | 3 | one per controlled menu confirmation |
 | `311` | `22/20` | 2 | 6 | 7 | zero-bounded `u32`; bootstrap-skewed first gap, then approximately 600 seconds |
 
-Opcodes `100/307/310` retain exact opaque bodies that never appear in safe
-output. Opcode `308` instead decodes two redacted `f64`s, two redacted `u64`s,
+Opcode `100` is fully modeled as:
+
+```text
+uint16 opcode = 100
+uint32 client_tick
+uint32 allocation_count
+repeat allocation_count:
+  uint32 stat_mask
+  uint32 increment
+```
+
+Both captures use count `2` and the existing opcode-`41` masks for LUK and INT.
+Stream `92` requests increments `1/4`; 107.555 ms later opcode `41` raises the
+two stats by exactly `1/4` and lowers AP from `5` to `0`. Stream `126` requests
+`9/29`; 406.248 ms later the response raises the stats by exactly `9/29` and
+lowers AP from `38` to `0`. The fold correlates both responses with zero
+pending, mismatched, or unverified requests and exposes safe per-stat totals and
+latency.
+
+Opcodes `307/310` retain exact opaque bodies that never appear in safe output.
+Opcode `308` instead decodes two redacted `f64`s, two redacted `u64`s,
 one `u32` mirrored by two `f64`s, controls `50/1`, a `0/1` variant, and terminal
 controls `1/0`. The mirror holds for all 11 stream-`126` and 13 latest-live
 records; observed `(mirror, variant)` pairs are reference `59/60,0` and live
@@ -1675,14 +1694,15 @@ opcode-`308` gaps stay within `299.992..300.017` seconds before one later
 followed by approximately 600-second gaps. Cadence is therefore descriptive,
 not a guarantee that every interval produces a packet.
 
-These remain partial observations: numeric structure, cadence, and controlled
-UI correlation do not establish field semantics or replay safety. The
-automatic packet manifest replaces the `308/311` opaque pins with typed neutral
-shapes and retains an explicit live-only opcode-`310` shape; it does not invent
-outgoing-client semantics from incoming handler reads. Coverage remains
-`13,417/21,788/2/0` for stream `92`, remains `54/22/0/0` for stream `114`, and
-becomes `26,661/44,400/39/0` for stream `126` before the opcode-`79`
-inventory-move model below. The first local transcript folds
+Opcodes `307/308/310/311` remain partial observations: numeric structure,
+cadence, and controlled UI correlation do not establish field semantics or
+replay safety. Opcode `100` is full because the repeated masks and increments
+match the authoritative stat/AP deltas in both captures. The automatic packet
+manifest replaces the `100/308/311` opaque pins with typed shapes and retains
+an explicit live-only opcode-`310` shape; it does not invent outgoing-client
+semantics from incoming handler reads. Current coverage is
+`13,420/21,787/0/0` for stream `92`, remains `54/22/0/0` for stream `114`, and
+is `26,662/44,438/0/0` for stream `126`. The first local transcript folds
 all three opcode-`310` records with zero unknown packets and an `active` final
 packet state; its socket later timed out without opcode `241`. A fresh
 browser-free relaunch then traversed world/channel/character selection through

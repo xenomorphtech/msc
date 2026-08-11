@@ -1111,6 +1111,19 @@
       ]
     },
     {
+      "name":"client_ability_point_allocation_request","direction":"client_to_server","opcode":100,"length":26,
+      "source":"packets.py:ClientAbilityPointAllocationRequest; stream-92 and stream-126 requests allocate LUK/INT by 1/4 and 9/29, and the following opcode-41 responses apply those exact gains while consuming 5/38 AP",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":100},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"allocation_count","kind":"u32"},
+        {"op":"repeat","count_from":"allocation_count","operations":[
+          {"op":"read","name":"stat_mask","kind":"u32"},
+          {"op":"read","name":"increment","kind":"u32"}
+        ]}
+      ]
+    },
+    {
       "name":"client_opcode_308_periodic_record","direction":"client_to_server","opcode":308,"length":74,
       "source":"packets.py:ClientOpcode308PeriodicRecord; 11 stream-126 and 13 active-live records share two f64, two u64, mirrored u32/f64/f64, and fixed control boundaries at periodic cadence",
       "operations":[

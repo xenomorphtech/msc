@@ -11392,8 +11392,142 @@ class SkillRecordUpdateAcknowledgement:
             ) from error
 
 
+ABILITY_POINT_ALLOCATION_STAT_NAMES = {
+    CharacterStatUpdate.STRENGTH: "strength",
+    CharacterStatUpdate.DEXTERITY: "dexterity",
+    CharacterStatUpdate.INTELLIGENCE: "intelligence",
+    CharacterStatUpdate.LUCK: "luck",
+}
+
+
+@dataclass(frozen=True)
+class AbilityPointAllocationEntry:
+    """One stat-mask/increment pair from a client allocation request."""
+
+    stat_mask: int
+    increment: int
+
+    @property
+    def stat_name(self) -> str:
+        try:
+            return ABILITY_POINT_ALLOCATION_STAT_NAMES[self.stat_mask]
+        except KeyError as error:
+            raise PacketShapeError(
+                "ability-point allocation stat mask is unsupported: "
+                f"0x{self.stat_mask:08x}"
+            ) from error
+
+    def _validate(self) -> None:
+        _ = self.stat_name
+        if not 1 <= self.increment <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "ability-point allocation increment must be a positive u32"
+            )
+
+    def safe_dict(self) -> dict[str, int | str]:
+        self._validate()
+        return {
+            "stat": self.stat_name,
+            "stat_mask": f"0x{self.stat_mask:08x}",
+            "increment": self.increment,
+        }
+
+
+@dataclass(frozen=True)
+class ClientAbilityPointAllocationRequest:
+    """Client opcode-100 request allocating AP across base attributes."""
+
+    client_tick: int
+    allocations: tuple[AbilityPointAllocationEntry, ...]
+    opcode: int = 100
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientAbilityPointAllocationRequest":
+        reader = PacketReader(
+            payload, packet_name="ability_point_allocation_request"
+        )
+        _expect_opcode(reader, 100)
+        client_tick = reader.u32("client_tick")
+        allocation_count = reader.u32("allocation_count")
+        if not 1 <= allocation_count <= len(
+            ABILITY_POINT_ALLOCATION_STAT_NAMES
+        ):
+            raise PacketShapeError(
+                "ability-point allocation count must be between one and four"
+            )
+        if reader.remaining != allocation_count * 8:
+            raise PacketShapeError(
+                "ability-point allocation count does not match packet length"
+            )
+        allocations = tuple(
+            AbilityPointAllocationEntry(
+                stat_mask=reader.u32(f"allocation[{index}].stat_mask"),
+                increment=reader.u32(f"allocation[{index}].increment"),
+            )
+            for index in range(allocation_count)
+        )
+        reader.finish()
+        request = cls(client_tick=client_tick, allocations=allocations)
+        request._validate()
+        return request
+
+    def _validate(self) -> None:
+        if self.opcode != 100:
+            raise PacketShapeError(
+                "ability-point allocation request opcode must be 100"
+            )
+        if not 0 <= self.client_tick <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "ability-point allocation client tick must fit u32"
+            )
+        if not 1 <= len(self.allocations) <= len(
+            ABILITY_POINT_ALLOCATION_STAT_NAMES
+        ):
+            raise PacketShapeError(
+                "ability-point allocation count must be between one and four"
+            )
+        seen_masks: set[int] = set()
+        for allocation in self.allocations:
+            allocation._validate()
+            if allocation.stat_mask in seen_masks:
+                raise PacketShapeError(
+                    "ability-point allocation stat masks must be unique"
+                )
+            seen_masks.add(allocation.stat_mask)
+
+    @property
+    def total_increment(self) -> int:
+        return sum(allocation.increment for allocation in self.allocations)
+
+    def safe_dict(self) -> dict[str, object]:
+        self._validate()
+        return {
+            "client_tick": self.client_tick,
+            "allocation_count": len(self.allocations),
+            "allocations": [
+                allocation.safe_dict() for allocation in self.allocations
+            ],
+            "total_increment": self.total_increment,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return b"".join(
+            (
+                struct.pack(
+                    "<HII", self.opcode, self.client_tick, len(self.allocations)
+                ),
+                *(
+                    struct.pack(
+                        "<II", allocation.stat_mask, allocation.increment
+                    )
+                    for allocation in self.allocations
+                ),
+            )
+        )
+
+
 CLIENT_FIXED_OPAQUE_BODY_LENGTHS = {
-    100: 24,
     307: 12,
     310: 39,
 }

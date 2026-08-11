@@ -196,11 +196,12 @@
   `92`, `114`, and `126` before the fixed-width client records below. The
   current game-menu attempt emitted no opcode `241`, so live terminal replay
   remains unclaimed.
-- Client opcodes `100`, `307`, `308`, and `311` now consume and round-trip at
-  exact packet widths `26`, `14`, `74`, and `22`. Streams `92`/`126` contain
+- Client opcodes `100`, `307`, `308`, and `311` first gained exact
+  consume-and-round-trip boundaries at packet widths `26`, `14`, `74`, and
+  `22`. Streams `92`/`126` contain
   `1/1`, `1/1`, `2/11`, and `2/6`; opcode `308` repeats near 300 seconds and
-  opcode `311` near 600 seconds after its first bootstrap-skewed gap. Bodies
-  remain redacted and partial. Three direct-Wayland menu confirmations in the
+  opcode `311` near 600 seconds after its first bootstrap-skewed gap. Three
+  direct-Wayland menu confirmations in the
   local Wine client independently emitted three 41-byte opcode-`310` records,
   not opcode `241`, and caused no phase transition. The safe fold reports only
   opcode/body-size counts and periodic intervals. Coverage is now
@@ -225,8 +226,20 @@
   `59/60` with variant `0`; live independently exercises `3/56/59/60` and
   variants `0/1`. Purpose remains neutral and timing remains descriptive. The
   fold now separates these typed aggregates under `client_periodic_records`
-  from opaque opcodes `100/307/310`, and isolated native validation consumes
+  from opaque opcodes `307/310`, and isolated native validation consumes
   all 17 reference packets.
+- Client opcode `100` is now a full counted ability-point allocation request:
+  `u32 client tick + u32 allocation count + repeated (u32 stat mask, u32
+  increment)`. Stream `92` requests LUK/INT `+1/+4`; 107.555 ms later opcode
+  `41` raises those fields by exactly `1/4` and reduces AP `5 -> 0`. Stream
+  `126` independently requests `+9/+29`; 406.248 ms later the response applies
+  exactly `9/29` and reduces AP `38 -> 0`. Both correlations match with none
+  pending or mismatched. The fold publishes safe per-stat request totals,
+  response deltas, matches, and latency; isolated native validation consumes
+  both requests. Both strict reference analyses retain zero unknowns; current
+  coverage is `13,420/21,787/0/0` for stream `92` and
+  `26,662/44,438/0/0` for stream `126`. Only client opcodes `307/310` remain
+  fixed opaque records.
 - Client opcode `79` is now a typed 13-byte inventory-move request containing
   a client tick, inventory type, signed source/destination slots, and a trailing
   signed count whose higher-level role remains neutral. Both stream-`126`

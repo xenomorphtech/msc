@@ -468,14 +468,19 @@ The earlier local-Wine transcript independently contains opcode `307`, ten
 opcode-`308`, six opcode-`311`, and the three controlled opcode-`310` records.
 Its first nine opcode-`308` gaps are within `299.992..300.017` seconds; a later
 592.004-second gap prevents treating the cadence as a guaranteed periodic send.
-Opcodes `100/307` remain opaque. Opcode `308` is now typed across 11 reference
-and 13 latest-live samples as two redacted doubles, two redacted `u64`s, a
+Opcode `307` remains opaque. Opcode `100` is now a counted ability-point
+allocation request. Stream `92` requests LUK/INT `+1/+4` and receives those
+exact gains while AP falls `5 -> 0` after 107.555 ms; stream `126` independently
+requests `+9/+29` and receives exact gains while AP falls `38 -> 0` after
+406.248 ms. Opcode `308` is typed across 11 reference and 13 latest-live
+samples as two redacted doubles, two redacted `u64`s, a
 `u32` mirrored by two doubles, and fixed controls. Opcode `311` is typed across
 six reference and seven live samples as `zero u64 + redacted u32 + zero u64`.
 All 24 opcode-`308` mirrors agree; meaning and cadence remain neutral. The fold
-publishes opaque counts under `client_fixed_opaque_records`, typed structure and
-intervals under `client_periodic_records`, and emits
-`client_fixed_record_submitted` or `client_periodic_report_submitted` without
+publishes opcode `100` request/response totals and latency under
+`ability_point_allocation`, opaque `307/310` counts under
+`client_fixed_opaque_records`, typed periodic structure and intervals under
+`client_periodic_records`, and emits the corresponding safe events without
 private values.
 
 That older local world socket later timed out without opcode `241`, leaving its

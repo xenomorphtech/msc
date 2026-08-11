@@ -413,8 +413,12 @@ exit attempt did not emit opcode `241`; no server terminal packet was forced,
 so the live effect remains explicitly unproven.
 
 The remaining fixed-width outgoing records use the same capture-bounded rule.
-Opcodes `100` and `307` retain exact opaque 26/14-byte packets. Opcodes `308`
-and `311` now have stronger cross-capture boundaries. The 74-byte opcode-`308`
+Opcode `307` retains an exact opaque 14-byte packet. Opcode `100` no longer
+does: both 26-byte samples decode as client tick, count `2`, then LUK/INT
+stat-mask and increment pairs. The following opcode-`41` responses apply the
+requested `1/4` and `9/29` gains exactly while consuming the summed `5/38` AP,
+after 107.555/406.248 ms. Opcodes `308` and `311` also have stronger
+cross-capture boundaries. The 74-byte opcode-`308`
 record is two redacted doubles, two redacted `u64`s, a `u32` mirrored by two
 doubles, and fixed controls; all 24 reference/latest-live mirrors agree. The
 22-byte opcode-`311` record is zero `u64`, redacted `u32`, zero `u64` in all 13

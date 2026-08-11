@@ -828,8 +828,11 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `241`, client status opcode `45`/`46`, and terminal server
   opcode `9`: a repeated world-exit transaction that enters `exit_requested`,
   redacts the one-u32 status, and reaches `terminated` after 165–167 ms,
-- client opcodes `100` and `307`: exact fixed-width redacted records whose
-  bodies remain opaque. Periodic opcode `308` is now typed as two redacted
+- client opcode `100`: a counted ability-point allocation request containing a
+  client tick plus repeated stat-mask/increment pairs. Both captures allocate
+  LUK/INT, and their opcode-`41` responses apply the exact requested gains and
+  AP expenditure after 107.555/406.248 ms. Client opcode `307` remains an exact
+  fixed-width redacted record. Periodic opcode `308` is typed as two redacted
   doubles, two redacted `u64`s, a `u32` mirrored by two doubles, and fixed
   controls; opcode `311` is zero-bounded around one redacted `u32`. The fold
   retains their observed cadence without assigning purpose. Client opcode
@@ -2117,3 +2120,7 @@ preserve distinct Unity scan codes in this setup.
     cross-capture typed neutral records, validate 17 reference and 20 active-
     live samples, and split their redacted values/cadence from the remaining
     fixed opaque client-record state.
+88. Promote client opcode `100` to a counted ability-point allocation request,
+    correlate both reference requests with exact LUK/INT and AP deltas in the
+    following opcode-`41` responses, and retain only `307/310` as fixed opaque
+    client records.

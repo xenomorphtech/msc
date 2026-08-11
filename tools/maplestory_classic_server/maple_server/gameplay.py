@@ -15,6 +15,7 @@ from .gamestate import (
 )
 from .packets import (
     CharacterStatUpdate,
+    ClientAbilityPointAllocationRequest,
     ClientAttackAction,
     ClientFixedOpaqueRecord,
     ClientInnerPortalRequest,
@@ -298,6 +299,15 @@ class PendingItemUse:
 
 
 @dataclass(frozen=True)
+class PendingAbilityPointAllocation:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: ClientAbilityPointAllocationRequest
+    previous_ability_points: int | None
+    previous_stat_values: tuple[tuple[str, int | None], ...]
+
+
+@dataclass(frozen=True)
 class PendingInventoryMove:
     request_frame_index: int
     request_timestamp_ns: int
@@ -550,6 +560,19 @@ class GameplayGameState:
     player_stat_fields_updated: Counter[str] = field(default_factory=Counter)
     player_stat_request_flags: Counter[int] = field(default_factory=Counter)
     player_stat_zero_mask_updates: int = 0
+    ability_point_allocation_requests: int = 0
+    ability_point_allocation_entries: int = 0
+    ability_points_requested: int = 0
+    ability_points_requested_by_stat: Counter[str] = field(
+        default_factory=Counter
+    )
+    ability_point_allocation_responses: int = 0
+    ability_point_allocation_response_matches: int = 0
+    ability_point_allocation_response_mismatches: int = 0
+    ability_point_allocation_response_unverified: int = 0
+    pending_ability_point_allocations: int = 0
+    last_ability_point_allocation_response_ms: float | None = None
+    max_ability_point_allocation_response_ms: float | None = None
     inventory_change_packets: int = 0
     inventory_modifications: int = 0
     inventory_modifications_by_operation: Counter[str] = field(
@@ -3564,6 +3587,31 @@ class GameplayAnalysis:
                 "player_stat_zero_mask_updates": (
                     self.state.player_stat_zero_mask_updates
                 ),
+                "ability_point_allocation": {
+                    "requests": self.state.ability_point_allocation_requests,
+                    "entries": self.state.ability_point_allocation_entries,
+                    "points_requested": self.state.ability_points_requested,
+                    "points_requested_by_stat": dict(
+                        self.state.ability_points_requested_by_stat
+                    ),
+                    "responses": self.state.ability_point_allocation_responses,
+                    "response_matches": (
+                        self.state.ability_point_allocation_response_matches
+                    ),
+                    "response_mismatches": (
+                        self.state.ability_point_allocation_response_mismatches
+                    ),
+                    "response_unverified": (
+                        self.state.ability_point_allocation_response_unverified
+                    ),
+                    "pending": self.state.pending_ability_point_allocations,
+                    "last_response_ms": (
+                        self.state.last_ability_point_allocation_response_ms
+                    ),
+                    "max_response_ms": (
+                        self.state.max_ability_point_allocation_response_ms
+                    ),
+                },
                 "inventory_change_packets": self.state.inventory_change_packets,
                 "inventory_modifications": self.state.inventory_modifications,
                 "inventory_modifications_by_operation": dict(
@@ -4867,6 +4915,9 @@ class GameplayStateFold:
             tuple[int, int]
         ] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
+        self._pending_ability_point_allocations: deque[
+            PendingAbilityPointAllocation
+        ] = deque()
         self._pending_inventory_moves: deque[PendingInventoryMove] = deque()
         self._pending_item_acquisitions: deque[
             PendingItemAcquisition
@@ -5371,7 +5422,55 @@ class GameplayStateFold:
                     f"client opcode-{opcode} periodic values remain neutral",
                 ),
             )
-        if opcode in {100, 307, 310}:
+        if opcode == 100:
+            request = ClientAbilityPointAllocationRequest.parse(payload)
+            previous_stat_values = tuple(
+                (
+                    allocation.stat_name,
+                    getattr(self.state, allocation.stat_name),
+                )
+                for allocation in request.allocations
+            )
+            self._pending_ability_point_allocations.append(
+                PendingAbilityPointAllocation(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                    previous_ability_points=self.state.ability_points,
+                    previous_stat_values=previous_stat_values,
+                )
+            )
+            self.state.ability_point_allocation_requests += 1
+            self.state.ability_point_allocation_entries += len(
+                request.allocations
+            )
+            self.state.ability_points_requested += request.total_increment
+            for allocation in request.allocations:
+                self.state.ability_points_requested_by_stat[
+                    allocation.stat_name
+                ] += allocation.increment
+            self.state.pending_ability_point_allocations += 1
+            details: dict[str, object] = {
+                **request.safe_dict(),
+                "pending_requests": (
+                    self.state.pending_ability_point_allocations
+                ),
+                "field_epoch": self.state.field_epoch,
+                "phase": self.state.phase.value,
+            }
+            self._event(
+                frame,
+                "ability_point_allocation_requested",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="ability_point_allocation_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode in {307, 310}:
             record = ClientFixedOpaqueRecord.parse(payload)
             body_length = len(record.opaque_body)
             self.state.client_fixed_opaque_records_by_opcode[opcode] += 1
@@ -7523,6 +7622,99 @@ class GameplayStateFold:
                     "current": current_value,
                 }
                 self.state.player_stat_fields_updated[field_name] += 1
+            ability_point_allocation: dict[str, object] | None = None
+            pending_allocation = next(
+                (
+                    pending
+                    for pending in self._pending_ability_point_allocations
+                    if "ability_points" in update.values
+                    and all(
+                        allocation.stat_name in update.values
+                        for allocation in pending.request.allocations
+                    )
+                ),
+                None,
+            )
+            if pending_allocation is not None:
+                previous_stat_values = dict(
+                    pending_allocation.previous_stat_values
+                )
+                actual_increments: dict[str, int | None] = {}
+                for allocation in pending_allocation.request.allocations:
+                    previous_value = previous_stat_values[allocation.stat_name]
+                    current_value = update.values[allocation.stat_name]
+                    actual_increments[allocation.stat_name] = (
+                        None
+                        if previous_value is None
+                        else current_value - previous_value
+                    )
+                current_ability_points = update.values["ability_points"]
+                ability_points_spent = (
+                    None
+                    if pending_allocation.previous_ability_points is None
+                    else (
+                        pending_allocation.previous_ability_points
+                        - current_ability_points
+                    )
+                )
+                response_ms = (
+                    frame.timestamp_ns
+                    - pending_allocation.request_timestamp_ns
+                ) / 1e6
+                increments_match = all(
+                    actual_increments[allocation.stat_name]
+                    == allocation.increment
+                    for allocation in pending_allocation.request.allocations
+                )
+                matches: bool | None = (
+                    None
+                    if ability_points_spent is None
+                    or any(
+                        increment is None
+                        for increment in actual_increments.values()
+                    )
+                    else (
+                        increments_match
+                        and ability_points_spent
+                        == pending_allocation.request.total_increment
+                    )
+                )
+                ability_point_allocation = {
+                    "request_frame": pending_allocation.request_frame_index,
+                    "requested_increments": {
+                        allocation.stat_name: allocation.increment
+                        for allocation in pending_allocation.request.allocations
+                    },
+                    "actual_increments": actual_increments,
+                    "requested_total": (
+                        pending_allocation.request.total_increment
+                    ),
+                    "ability_points_spent": ability_points_spent,
+                    "matches": matches,
+                    "response_ms": round(response_ms, 3),
+                }
+                self.state.ability_point_allocation_responses += 1
+                self.state.last_ability_point_allocation_response_ms = (
+                    response_ms
+                )
+                self.state.max_ability_point_allocation_response_ms = max(
+                    self.state.max_ability_point_allocation_response_ms or 0.0,
+                    response_ms,
+                )
+                if matches is True:
+                    self.state.ability_point_allocation_response_matches += 1
+                elif matches is False:
+                    self.state.ability_point_allocation_response_mismatches += 1
+                    self.warnings.append(
+                        "ability-point allocation response did not apply the "
+                        "requested increments"
+                    )
+                else:
+                    self.state.ability_point_allocation_response_unverified += 1
+                self._pending_ability_point_allocations.remove(
+                    pending_allocation
+                )
+                self.state.pending_ability_point_allocations -= 1
             item_use_effect: dict[str, object] | None = None
             pending_item_use = next(
                 (
@@ -7616,6 +7808,10 @@ class GameplayStateFold:
                 details["item_use_effect"] = item_use_effect
             if item_pickup_effect is not None:
                 details["item_pickup_effect"] = item_pickup_effect
+            if ability_point_allocation is not None:
+                details["ability_point_allocation"] = (
+                    ability_point_allocation
+                )
             self._event(frame, "player_stats_updated", details=details)
             issues = [
                 "stat update request flag and final marker semantics remain neutral"
@@ -12662,6 +12858,9 @@ def render_gameplay_analysis(
     player_stat_fields = json.dumps(
         dict(sorted(state.player_stat_fields_updated.items()))
     )
+    ability_points_requested_by_stat = json.dumps(
+        dict(sorted(state.ability_points_requested_by_stat.items()))
+    )
     acknowledgement_template_values = json.dumps(
         {
             template_id: sorted(status_values)
@@ -12725,6 +12924,22 @@ def render_gameplay_analysis(
             f"player_stat_updates=count:{state.player_stat_updates} "
             f"masks:{player_stat_masks} fields:{player_stat_fields} "
             f"zero_mask:{state.player_stat_zero_mask_updates}"
+        ),
+        (
+            "ability_point_allocation="
+            f"requests:{state.ability_point_allocation_requests} "
+            f"entries:{state.ability_point_allocation_entries} "
+            f"points:{state.ability_points_requested} "
+            f"by_stat:{ability_points_requested_by_stat} "
+            f"responses:{state.ability_point_allocation_responses} "
+            f"matches:{state.ability_point_allocation_response_matches} "
+            f"mismatches:{state.ability_point_allocation_response_mismatches} "
+            f"unverified:{state.ability_point_allocation_response_unverified} "
+            f"pending:{state.pending_ability_point_allocations} "
+            "last_ms:"
+            f"{state.last_ability_point_allocation_response_ms} "
+            "max_ms:"
+            f"{state.max_ability_point_allocation_response_ms}"
         ),
         (
             "inventory="

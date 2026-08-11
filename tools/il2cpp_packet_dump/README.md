@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 130 semantic/manual shapes and 88 explicitly
+manifest currently declares 131 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -98,9 +98,10 @@ The live-only, non-overlapping opcode-`310` width, local opcode-`0` probe, and
 capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add ten active shapes.
 Five non-overlapping legacy-login layouts add the next five active shapes.
-The final four stream-`116` login layouts add four more. Typed opcode-`308` and
-opcode-`311` layouts suppress two opaque pins without increasing the effective
-shape count. This leaves 195 active shapes and 65 active
+The final four stream-`116` login layouts add four more. Typed opcode-`308`,
+opcode-`311`, and ability-point opcode-`100` layouts suppress three opaque pins
+without increasing the effective shape count. This leaves 195 active shapes
+and 64 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -119,8 +120,13 @@ already declared for opcode `45`; both occur between opcode `241` and final
 server opcode `9` in their respective world streams. These three shapes
 suppress matching opaque pins without using the incoming-handler dump to claim
 outgoing-client semantics it cannot provide.
-Client opcodes `100` and `307` remain exact-width opaque pins. Opcodes `308` and
-`311` now suppress their opaque pins with cross-capture typed shapes. Across 11
+Client opcode `307` remains an exact-width opaque pin. Opcode `100` now
+suppresses its opaque pin with a counted ability-point allocation shape: client
+tick, allocation count, and repeated stat-mask/increment pairs. Stream `92`
+requests LUK/INT `+1/+4`, then opcode `41` applies those exact gains and spends
+all five AP after 107.555 ms. Stream `126` independently requests `+9/+29` and
+applies those gains while spending 38 AP after 406.248 ms. Opcodes `308` and
+`311` also suppress their opaque pins with cross-capture typed shapes. Across 11
 reference and 13 active-live opcode-`308` records, the layout is two redacted
 `f64`s, two redacted `u64`s, one `u32` mirrored by two `f64`s, and fixed control
 values. All 24 mirrors agree. All six reference and seven live opcode-`311`
