@@ -21,6 +21,7 @@ from .packets import (
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    ServerOpcode0AccountBootstrapProbe,
     ServerOpcode22IndexedTextLedger,
     ServerOpcode27IntegerLedger,
     ServerOpcode28TextLedger,
@@ -162,6 +163,7 @@ class LoginGameState:
     client_opcode_274_text_code_unit_patterns: dict[str, int] = field(
         default_factory=dict
     )
+    local_account_bootstrap_probes: int = 0
 
 
 @dataclass(frozen=True)
@@ -367,6 +369,9 @@ class LoginAnalysis:
                 "client_opcode_274_records": self.state.client_opcode_274_records,
                 "client_opcode_274_text_code_unit_patterns": (
                     self.state.client_opcode_274_text_code_unit_patterns
+                ),
+                "local_account_bootstrap_probes": (
+                    self.state.local_account_bootstrap_probes
                 ),
             },
             "packets": [
@@ -767,6 +772,19 @@ class LoginStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=ledger,
                 details=ledger.safe_dict(),
+            )
+        if opcode == 0 and len(payload) == 36:
+            probe = ServerOpcode0AccountBootstrapProbe.parse(payload)
+            self.state.local_account_bootstrap_probes += 1
+            return self._observation(
+                frame,
+                kind="local_account_bootstrap_probe",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=probe,
+                details=probe.safe_dict(),
+                issues=(
+                    "local diagnostic prefix is not a complete account result",
+                ),
             )
         account_shape_candidate = opcode == 1 or (
             opcode == 0 and len(payload) >= 31 and len(payload) % 2 == 1
@@ -1312,6 +1330,10 @@ def render_login_analysis(
             f"records:{state['client_opcode_274_records']} "
             f"text_code_units:"
             f"{state['client_opcode_274_text_code_unit_patterns']}"
+        ),
+        (
+            "local_account_bootstrap_probes="
+            f"{state['local_account_bootstrap_probes']}"
         ),
         f"packet_shapes={json.dumps(packet_counts, sort_keys=True)}",
     ]

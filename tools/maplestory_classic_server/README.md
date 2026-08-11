@@ -597,6 +597,15 @@ constants, and boundaries; safe analysis redacts both text values and keeps the
 higher-level role neutral. Live still has one unknown: its shortened server
 opcode-`0` account record.
 
+That live 36-byte opcode-`0` record is the exact documented local
+`--server-frame-patch` account-bootstrap probe, not a full account result. It
+contains the result/account prefix, three zero flags, a redacted four-code-unit
+name, and a 16-byte zero suffix. The fold reports it as partial and leaves
+authentication to the later complete opcode-`1` response. Python and isolated
+native validation exact-consume the probe, reducing the active live login to
+zero unknown observations. Legacy stream `116` retains server opcodes
+`35/3/390/6/7` and client opcodes `255/9/10/16` as its nine remaining unknowns.
+
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
 prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
@@ -2068,3 +2077,6 @@ preserve distinct Unity scan codes in this setup.
 83. Replace the final stream-`83` login unknown, client opcode `274`, with its
     exact single captured 1,698-byte redacted text variant and leave only the
     live transcript's shortened server opcode-`0` account record unknown.
+84. Classify the final active-live unknown as the exact documented 36-byte
+    local opcode-`0` account-bootstrap probe, keep it distinct from complete
+    account authentication, and reach zero unknown observations live.

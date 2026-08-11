@@ -16,9 +16,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 118);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 119);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
-    assert_eq!(shapes.len(), 185);
+    assert_eq!(shapes.len(), 186);
 
     let shape = shapes
         .iter()
@@ -144,6 +144,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_22.opcode, 22);
     assert_eq!(opcode_22.length, None);
     assert_eq!(opcode_22.operations.len(), 3);
+
+    let opcode_0_probe = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_0_local_account_bootstrap_probe")
+        .unwrap();
+    assert_eq!(opcode_0_probe.opcode, 0);
+    assert_eq!(opcode_0_probe.length, Some(36));
+    assert_eq!(opcode_0_probe.operations.len(), 9);
 
     let opcode_274 = shapes
         .iter()
@@ -273,7 +281,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 185);
+    assert_eq!(dump.packet_shapes.len(), 186);
     assert_eq!(
         dump.handlers
             .iter()

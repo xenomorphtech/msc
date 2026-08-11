@@ -223,6 +223,98 @@ class AccountLoginResponse:
 
 
 @dataclass(frozen=True)
+class ServerOpcode0AccountBootstrapProbe:
+    """Exact local diagnostic account-prefix probe, not a full account result."""
+
+    account_id: int = field(repr=False)
+    account_name: str = field(repr=False)
+    result: int = 0
+    account_flags: tuple[int, int, int] = (0, 0, 0)
+    reserved_suffix: bytes = field(default=b"\x00" * 16, repr=False)
+    opcode: int = 0
+
+    @property
+    def account_name_code_units(self) -> int:
+        return len(self.account_name.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode0AccountBootstrapProbe":
+        reader = PacketReader(
+            payload, packet_name="server_opcode_0_account_bootstrap_probe"
+        )
+        _expect_opcode(reader, 0)
+        record = cls(
+            result=reader.u8("result"),
+            account_id=reader.u32("account_id"),
+            account_flags=(
+                reader.u8("gender"),
+                reader.u8("administrator"),
+                reader.u8("restricted"),
+            ),
+            account_name=reader.utf16_string(
+                "account_name", trailing_byte=False
+            ),
+            reserved_suffix=reader.bytes(16, "reserved_suffix"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 0:
+            raise PacketShapeError(
+                "local account bootstrap probe opcode must be 0"
+            )
+        if self.result != 0:
+            raise PacketShapeError(
+                "local account bootstrap probe result must be zero"
+            )
+        if not 0 <= self.account_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "local account bootstrap probe account id must fit in u32"
+            )
+        if self.account_flags != (0, 0, 0):
+            raise PacketShapeError(
+                "local account bootstrap probe flags must all be zero"
+            )
+        if self.account_name_code_units != 4:
+            raise PacketShapeError(
+                "local account bootstrap probe name must contain four code units"
+            )
+        if self.reserved_suffix != b"\x00" * 16:
+            raise PacketShapeError(
+                "local account bootstrap probe suffix must contain 16 zero bytes"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "diagnostic_probe": True,
+            "result": self.result,
+            "account_id_present": True,
+            "account_name_code_units": self.account_name_code_units,
+            "account_name_redacted": True,
+            "account_flags_zero": True,
+            "reserved_suffix_bytes": len(self.reserved_suffix),
+            "reserved_suffix_zero": True,
+            "account_authenticated": False,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return (
+            struct.pack(
+                "<HBI3B",
+                self.opcode,
+                self.result,
+                self.account_id,
+                *self.account_flags,
+            )
+            + encode_utf16_string(self.account_name, trailing_byte=False)
+            + self.reserved_suffix
+        )
+
+
+@dataclass(frozen=True)
 class ChannelRecord:
     name: str
     population: int

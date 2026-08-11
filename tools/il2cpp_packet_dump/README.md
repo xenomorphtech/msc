@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 118 semantic/manual shapes and 88 explicitly
+manifest currently declares 119 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -94,10 +94,10 @@ fourteenth overlaps; opcode `135` adds the fifteenth. Opcode `169` adds a
 non-overlapping shape found only in `1-10FS`; server opcode `394` and client
 opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 `75`, and `241` add overlaps 18 through 20; opcode `115` adds the twenty-first.
-The live-only, non-overlapping
-opcode-`310` width and capture-backed client
-opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add nine active shapes.
-This leaves 185 active shapes and 67 active
+The live-only, non-overlapping opcode-`310` width, local opcode-`0` probe, and
+capture-backed client
+opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add ten active shapes.
+This leaves 186 active shapes and 67 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -188,6 +188,11 @@ sole captured fixed variant: redacted 768/74-code-unit text regions around
 captured constants `u32 2, u8 1, u8 1`, with both counted-text trailing bytes
 fixed to zero. The isolated stream-`83` record exact-consumes natively; its text
 contents and higher-level role remain neutral.
+The live-only 36-byte server opcode-`0` shape records the documented local
+account-bootstrap frame patch: result zero, one redacted `u32` id, three zero
+flags, a redacted four-code-unit UTF-16 region, and a 16-byte zero suffix. It is
+kept distinct from a complete account result and exact-consumes in isolated
+native validation.
 Login server opcodes `20`, `21`, `23`, and `161` replace four observed-opaque
 pins with exact fixed-record shapes. Both reference login streams contain all
 four: opcode `20` carries one neutral `uint32`, opcodes `21` and `161` carry a

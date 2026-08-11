@@ -36,6 +36,7 @@ from maple_server.packets import (  # noqa: E402
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    ServerOpcode0AccountBootstrapProbe,
     ServerOpcode22IndexedTextLedger,
     ServerOpcode27IntegerLedger,
     ServerOpcode27IntegerLedgerEntry,
@@ -173,6 +174,9 @@ def fixture_login_transcript(
     opcode_22_ledger: ServerOpcode22IndexedTextLedger | None = None,
     login_server_fixed_records: tuple[LoginServerFixedRecord, ...] = (),
     opcode_274_record: ClientOpcode274OpaqueTextRecord | None = None,
+    local_account_bootstrap_probe: (
+        ServerOpcode0AccountBootstrapProbe | None
+    ) = None,
     opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
 ) -> Transcript:
@@ -222,6 +226,8 @@ def fixture_login_transcript(
         append("server_to_client", HeartbeatProbe().to_bytes())
     if opcode_274_record is not None:
         append("client_to_server", opcode_274_record.to_bytes())
+    if local_account_bootstrap_probe is not None:
+        append("server_to_client", local_account_bootstrap_probe.to_bytes())
     if opcode_27_ledger is not None:
         append("server_to_client", opcode_27_ledger.to_bytes())
     if opcode_28_ledger is not None:
@@ -282,6 +288,33 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_local_account_bootstrap_probe_round_trip_and_redact(self) -> None:
+        probe = ServerOpcode0AccountBootstrapProbe(
+            account_id=0xDEAD_BEEF,
+            account_name="test",
+        )
+
+        parsed = ServerOpcode0AccountBootstrapProbe.parse(probe.to_bytes())
+
+        self.assertEqual(parsed, probe)
+        self.assertEqual(len(parsed.to_bytes()), 36)
+        self.assertEqual(parsed.safe_dict()["account_name_code_units"], 4)
+        self.assertFalse(parsed.safe_dict()["account_authenticated"])
+        self.assertNotIn(str(0xDEAD_BEEF), str(parsed.safe_dict()))
+        self.assertNotIn("test", str(parsed.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "four code units"):
+            ServerOpcode0AccountBootstrapProbe(
+                account_id=1,
+                account_name="short",
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "16 zero bytes"):
+            ServerOpcode0AccountBootstrapProbe(
+                account_id=1,
+                account_name="test",
+                reserved_suffix=b"\x00" * 15 + b"\x01",
+            ).to_bytes()
+
     def test_client_opcode_274_opaque_text_record_round_trip_and_redact(
         self,
     ) -> None:
@@ -559,6 +592,32 @@ class GameStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.character_list.records[0].snapshot.character_id,
             300_001,
+        )
+
+    def test_folds_local_account_bootstrap_probe_without_authentication(self) -> None:
+        probe = ServerOpcode0AccountBootstrapProbe(
+            account_id=0xDEAD_BEEF,
+            account_name="test",
+        )
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(local_account_bootstrap_probe=probe)
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.local_account_bootstrap_probes, 1)
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "local_account_bootstrap_probe"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
+        self.assertTrue(observation.details["diagnostic_probe"])
+        self.assertFalse(observation.details["account_authenticated"])
+        self.assertNotIn(str(0xDEAD_BEEF), str(analysis.safe_dict()))
+        self.assertNotIn("test", str(observation.details))
+        self.assertIn(
+            "local_account_bootstrap_probes=1",
+            render_login_analysis(analysis),
         )
 
     def test_correlates_login_heartbeat_probe_response_pairs(self) -> None:

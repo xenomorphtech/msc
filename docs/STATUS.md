@@ -1136,6 +1136,16 @@ validation consumes it exactly. Successful reference stream `83` therefore
 has zero unknown login packets; the live login's shortened server opcode `0`
 account record is the only remaining unknown in the active transcript.
 
+The active live transcript's final unknown is now classified as the exact
+documented local opcode-`0` account-bootstrap probe, not as a production account
+result. Its 36 bytes contain a result/account prefix, a redacted four-code-unit
+name, and a 16-byte zero suffix. The fold keeps it partial and explicitly does
+not authenticate from it; the later full opcode-`1` record still does. Python
+round-trips the probe and isolated native validation exact-consumes it. The
+successful stream-`83` reference and active live login now both have zero
+unknown packet observations. Legacy stream `116` still has nine unrelated
+unknowns: server `35/3/390/6/7` and client `255/9/10/16`.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.

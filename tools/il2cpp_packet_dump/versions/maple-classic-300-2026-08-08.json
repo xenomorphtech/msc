@@ -258,6 +258,21 @@
       ]
     },
     {
+      "name":"server_opcode_0_local_account_bootstrap_probe","direction":"server_to_client","opcode":0,"length":36,
+      "source":"packets.py:ServerOpcode0AccountBootstrapProbe; documented local --server-frame-patch and live login transcript 1786463759633587464",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":0},
+        {"op":"read","name":"result","kind":"u8","equals":0},
+        {"op":"read","name":"account_id","kind":"u32"},
+        {"op":"read","name":"gender","kind":"u8","equals":0},
+        {"op":"read","name":"administrator","kind":"u8","equals":0},
+        {"op":"read","name":"restricted","kind":"u8","equals":0},
+        {"op":"read","name":"account_name_code_units","kind":"u16","equals":4},
+        {"op":"bytes","name":"account_name_utf16le","length":8},
+        {"op":"bytes","name":"reserved_suffix","length":16,"equals_hex":"00000000000000000000000000000000"}
+      ]
+    },
+    {
       "name":"heartbeat_response","direction":"client_to_server","opcode":23,"length":10,
       "source":"packets.py:HeartbeatResponse; capture 111 stream 92",
       "operations":[

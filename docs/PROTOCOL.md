@@ -65,6 +65,7 @@ the main blocker is obsolete.
 
 ```text
 server 0   bootstrap/login prelude
+server 0   local 36-byte diagnostic account-prefix probe
 server 10  empty heartbeat probe
 client 6   redacted indexed record set
 client 274 fixed 768/74-code-unit redacted text record
@@ -93,6 +94,14 @@ The custom replay acknowledges the client's type-`15` opcode-`13` status with
 plaintext `0d0000`. That is enough for the client to continue into the login
 controller. It is a local-server behavior, not a claim that the official NGS
 proof has been reproduced.
+
+The current local replay also begins with an explicitly patched 36-byte server
+opcode-`0` diagnostic. It is not a complete `AccountLoginResponse`: it contains
+result `0`, a redacted `uint32` account id, three zero account flags, one
+redacted four-code-unit UTF-16 name, and a 16-byte zero suffix. The fold records
+it as a partial local bootstrap probe and does not authenticate the account from
+it; the later full opcode-`1` account result performs that transition. This
+exact live-only shape consumes natively without publishing the id or name.
 
 The login fold now reuses the world transport heartbeat shapes: server opcode
 `10` is exactly two bytes and client opcode `23` is exactly ten bytes, carrying

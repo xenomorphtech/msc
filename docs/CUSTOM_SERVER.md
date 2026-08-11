@@ -2395,6 +2395,12 @@ project's own `README.md` for all options.
   around constants `2/1/1`. Python and the native manifest exact-consume it,
   while safe state reports only widths/constants. Successful stream `83` now
   has zero unknown packets; live retains only its shortened account opcode `0`.
+- The live-only 36-byte opcode-`0` record is now explicitly modeled as the
+  documented local account-bootstrap probe, not a complete account result. Its
+  id/name remain redacted, its 16-byte suffix is fixed to zero, and it does not
+  authenticate state before the later full opcode-`1` response. The active live
+  login now also has zero unknown observations. Legacy stream `116` still has
+  nine unrelated unknown packets across five server and four client opcodes.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.
