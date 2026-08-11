@@ -73,6 +73,10 @@ client 13  typed opcode-13 envelope or status message
 server 13  typed opcode-13 envelope or three-byte acknowledgment
 server 27  counted redacted integer/text ledger
 server 28  counted redacted paired-text ledger
+server 20  redacted neutral uint32 record
+server 21  zero uint8 record
+server 23  zero uint32 record
+server 161 zero uint8 record
 server 1   account/login result
 server 2   one world record, or a signed world-id -1 sentinel
 client 4   select world (`uint32 world_id`)
@@ -128,6 +132,15 @@ replays the same four-entry, 164-byte opcode-`28` variant. Every record consumes
 and round-trips exactly at full shape coverage. Safe login state exposes only
 packet/entry counts and text code-unit totals; all text and numeric values stay
 redacted and their higher-level roles remain neutral.
+
+Four small login-server records also share exact boundaries across stream `83`
+and stream `116`. Opcodes `21` and `161` are each a two-byte opcode followed by
+a zero `uint8`; opcode `23` is followed by a zero `uint32`; opcode `20` is
+followed by a varying neutral `uint32`. The live login independently contains
+the same zero-valued opcode-`23` record. Login-specific codecs keep this family
+separate from gameplay's fixed-record path, redact the opcode-`20` value, and
+expose only opcode counts, widths, and zero/nonzero status. All eight reference
+records exact-consume natively and round-trip in Python.
 
 Client opcode `31` is a capture-bounded variable record rather than an opaque
 width pin. Stream `83`, stream `116`, and the current live login independently

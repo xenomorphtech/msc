@@ -602,6 +602,61 @@ class ServerTime:
 
 
 @dataclass(frozen=True)
+class LoginServerFixedRecord:
+    """Capture-bounded, value-redacted fixed login-server record."""
+
+    opcode: int
+    value: int = field(repr=False)
+
+    VALUE_WIDTHS = {20: 4, 21: 1, 23: 4, 161: 1}
+    ZERO_VALUE_OPCODES = {21, 23, 161}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LoginServerFixedRecord":
+        reader = PacketReader(payload, packet_name="login_server_fixed_record")
+        opcode = reader.u16("opcode")
+        width = cls.VALUE_WIDTHS.get(opcode)
+        if width is None:
+            raise PacketShapeError(
+                f"unsupported fixed login-server opcode {opcode}"
+            )
+        value = reader.u8("value") if width == 1 else reader.u32("value")
+        reader.finish()
+        record = cls(opcode=opcode, value=value)
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        width = self.VALUE_WIDTHS.get(self.opcode)
+        if width is None:
+            raise PacketShapeError(
+                f"unsupported fixed login-server opcode {self.opcode}"
+            )
+        maximum = 0xFF if width == 1 else 0xFFFF_FFFF
+        if not 0 <= self.value <= maximum:
+            raise PacketShapeError(
+                "fixed login-server value does not fit its captured width"
+            )
+        if self.opcode in self.ZERO_VALUE_OPCODES and self.value != 0:
+            raise PacketShapeError(
+                f"fixed login-server opcode {self.opcode} value must be zero"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "value_width_bits": self.VALUE_WIDTHS[self.opcode] * 8,
+            "value_zero": self.value == 0,
+            "value_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        if self.VALUE_WIDTHS[self.opcode] == 1:
+            return struct.pack("<HB", self.opcode, self.value)
+        return struct.pack("<HI", self.opcode, self.value)
+
+
+@dataclass(frozen=True)
 class ClientOpcode6RecordSet:
     """Capture-bounded, value-redacted indexed record set for client opcode 6."""
 

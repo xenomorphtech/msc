@@ -571,6 +571,15 @@ bytes, and the live login repeats the four-entry opcode-`28` form. All five
 records round-trip exactly at full coverage while safe login output retains
 only entry-count patterns and text-length totals.
 
+Server opcodes `20`, `21`, `23`, and `161` form a login-specific fixed-record
+family present once each in both reference sessions. Opcode `20` contains one
+varying, redacted `uint32`; opcodes `21` and `161` contain zero `uint8` values;
+opcode `23` contains a zero `uint32` and is independently present live. The
+codecs, fold, and native manifest validate exact widths/constants while safe
+output exposes only opcode counts, widths, and zero/nonzero status. Stream `83`
+is reduced to two unknown packets and the live login to server opcodes `0` and
+`22` only.
+
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
 prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
@@ -2030,3 +2039,8 @@ preserve distinct Unity scan codes in this setup.
     paired-text ledger codecs in login analysis, promote all four reference
     records plus the live opcode-`28` record to full coverage, and publish only
     entry-count/text-length aggregates without exposing retained values.
+81. Promote login server opcodes `20`, `21`, `23`, and `161` from opaque width
+    pins to login-specific fixed records, validate both reference sets and the
+    live opcode-`23` sample without exposing the varying opcode-`20` value, and
+    reduce stream `83` to two unknown packets and live to server opcodes `0` and
+    `22`.

@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 112 semantic/manual shapes and 94 explicitly
+manifest currently declares 116 semantic/manual shapes and 90 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -97,7 +97,7 @@ opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 The live-only, non-overlapping
 opcode-`310` width and capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add nine active shapes.
-This leaves 185 active shapes and 73 active
+This leaves 185 active shapes and 69 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -183,6 +183,13 @@ the opaque blob, and a three-byte zero suffix. Their distinct total lengths
 `183/275/201` and text code-unit patterns `10/0/38`, `7/51/36`, and `1/51/5`
 exact-consume under the same grammar without assigning semantics or publishing
 the retained contents.
+Login server opcodes `20`, `21`, `23`, and `161` replace four observed-opaque
+pins with exact fixed-record shapes. Both reference login streams contain all
+four: opcode `20` carries one neutral `uint32`, opcodes `21` and `161` carry a
+zero `uint8`, and opcode `23` carries a zero `uint32`. The live login supplies
+an independent opcode-`23` observation. Isolated native validation consumes
+all eight reference packets; safe Python state reports only widths, opcode
+counts, and zero status while the varying opcode-`20` value remains redacted.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short

@@ -2379,6 +2379,11 @@ project's own `README.md` for all options.
   `1/4` entries respectively, and live repeats the four-entry opcode-`28`
   branch. All five packets round-trip at full coverage; safe login state adds
   only entry-count patterns and text-length totals.
+- Login server opcodes `20`, `21`, `23`, and `161` now use a separate redacted
+  fixed-record codec instead of gameplay's value-reporting path. Both references
+  contain all four and live contains opcode `23`; the manifest exact-consumes
+  all eight reference packets. Safe state reports only widths, opcode counts,
+  and zero status, leaving opcode `20`'s varying `uint32` neutral and private.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

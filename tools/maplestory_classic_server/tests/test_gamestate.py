@@ -31,6 +31,7 @@ from maple_server.packets import (  # noqa: E402
     HeartbeatProbe,
     HeartbeatResponse,
     InitialCharacterSnapshot,
+    LoginServerFixedRecord,
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
@@ -167,6 +168,7 @@ def fixture_login_transcript(
     pending_heartbeat_probe: bool = False,
     opcode_27_ledger: ServerOpcode27IntegerLedger | None = None,
     opcode_28_ledger: ServerOpcode28TextLedger | None = None,
+    login_server_fixed_records: tuple[LoginServerFixedRecord, ...] = (),
     opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
 ) -> Transcript:
@@ -218,6 +220,8 @@ def fixture_login_transcript(
         append("server_to_client", opcode_27_ledger.to_bytes())
     if opcode_28_ledger is not None:
         append("server_to_client", opcode_28_ledger.to_bytes())
+    for fixed_record in login_server_fixed_records:
+        append("server_to_client", fixed_record.to_bytes())
     if opcode_6_record_set is not None:
         append("client_to_server", opcode_6_record_set.to_bytes())
     if opcode_31_record is not None:
@@ -270,6 +274,23 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_login_server_fixed_records_round_trip_and_redact(self) -> None:
+        records = (
+            LoginServerFixedRecord(opcode=20, value=0xDEAD_BEEF),
+            LoginServerFixedRecord(opcode=21, value=0),
+            LoginServerFixedRecord(opcode=23, value=0),
+            LoginServerFixedRecord(opcode=161, value=0),
+        )
+
+        for record in records:
+            parsed = LoginServerFixedRecord.parse(record.to_bytes())
+            self.assertEqual(parsed, record)
+            self.assertTrue(parsed.safe_dict()["value_redacted"])
+            self.assertNotIn(str(record.value), str(parsed.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "value must be zero"):
+            LoginServerFixedRecord(opcode=23, value=1).to_bytes()
+
     def test_client_opcode_6_indexed_record_set_round_trip_and_redact(
         self,
     ) -> None:
@@ -625,6 +646,45 @@ class GameStateFoldTest(unittest.TestCase):
             "server_opcode_28=ledgers:1 entry_counts:{'1': 1} "
             "text_1_code_units:12 text_2_code_units:12",
             report,
+        )
+
+    def test_folds_redacted_login_server_fixed_records(self) -> None:
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(
+                login_server_fixed_records=(
+                    LoginServerFixedRecord(opcode=20, value=0xDEAD_BEEF),
+                    LoginServerFixedRecord(opcode=21, value=0),
+                    LoginServerFixedRecord(opcode=23, value=0),
+                    LoginServerFixedRecord(opcode=161, value=0),
+                )
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.login_server_fixed_records, 4)
+        self.assertEqual(
+            analysis.state.login_server_fixed_records_by_opcode,
+            {"20": 1, "21": 1, "23": 1, "161": 1},
+        )
+        self.assertEqual(analysis.state.login_server_fixed_zero_values, 3)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "login_server_fixed_record"
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.PARTIAL
+                for observation in observations
+            )
+        )
+        self.assertNotIn(str(0xDEAD_BEEF), str(analysis.safe_dict()))
+        self.assertIn(
+            "login_server_fixed_records=total:4 "
+            "by_opcode:{'20': 1, '21': 1, '23': 1, '161': 1} "
+            "zero_values:3",
+            render_login_analysis(analysis),
         )
 
     def test_folds_client_opcode_31_variable_record_without_content(self) -> None:

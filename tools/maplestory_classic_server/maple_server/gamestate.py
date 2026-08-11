@@ -16,6 +16,7 @@ from .packets import (
     ClientStatusMessage,
     HeartbeatProbe,
     HeartbeatResponse,
+    LoginServerFixedRecord,
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
@@ -121,6 +122,11 @@ class LoginGameState:
     pending_heartbeat_probes: int = 0
     last_heartbeat_round_trip_ms: float | None = None
     max_heartbeat_round_trip_ms: float | None = None
+    login_server_fixed_records: int = 0
+    login_server_fixed_records_by_opcode: dict[str, int] = field(
+        default_factory=dict
+    )
+    login_server_fixed_zero_values: int = 0
     server_opcode_27_ledgers: int = 0
     server_opcode_27_entry_count_patterns: dict[str, int] = field(
         default_factory=dict
@@ -279,6 +285,15 @@ class LoginAnalysis:
                 ),
                 "max_heartbeat_round_trip_ms": (
                     self.state.max_heartbeat_round_trip_ms
+                ),
+                "login_server_fixed_records": (
+                    self.state.login_server_fixed_records
+                ),
+                "login_server_fixed_records_by_opcode": (
+                    self.state.login_server_fixed_records_by_opcode
+                ),
+                "login_server_fixed_zero_values": (
+                    self.state.login_server_fixed_zero_values
                 ),
                 "server_opcode_27_ledgers": (
                     self.state.server_opcode_27_ledgers
@@ -623,6 +638,28 @@ class LoginStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=server_time,
                 details={"ticks": server_time.ticks},
+            )
+        if opcode in LoginServerFixedRecord.VALUE_WIDTHS:
+            record = LoginServerFixedRecord.parse(payload)
+            opcode_key = str(opcode)
+            self.state.login_server_fixed_records += 1
+            self.state.login_server_fixed_records_by_opcode[opcode_key] = (
+                self.state.login_server_fixed_records_by_opcode.get(
+                    opcode_key, 0
+                )
+                + 1
+            )
+            if record.value == 0:
+                self.state.login_server_fixed_zero_values += 1
+            return self._observation(
+                frame,
+                kind="login_server_fixed_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "fixed login-server record value and role remain neutral",
+                ),
             )
         if opcode == 27:
             ledger = ServerOpcode27IntegerLedger.parse(payload)
@@ -1109,6 +1146,12 @@ def render_login_analysis(
             f"matched:{state['matched_heartbeat_responses']} "
             f"unmatched:{state['unmatched_heartbeat_responses']} "
             f"pending:{state['pending_heartbeat_probes']}"
+        ),
+        (
+            "login_server_fixed_records="
+            f"total:{state['login_server_fixed_records']} "
+            f"by_opcode:{state['login_server_fixed_records_by_opcode']} "
+            f"zero_values:{state['login_server_fixed_zero_values']}"
         ),
         (
             "server_opcode_27="

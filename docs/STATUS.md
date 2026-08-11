@@ -1110,6 +1110,16 @@ opcode-`28` variant. All five observations round-trip exactly at full coverage.
 Login JSON/text state publishes only entry-count patterns and text code-unit
 totals, retaining the established numeric/text redaction and neutral roles.
 
+Login server opcodes `20`, `21`, `23`, and `161` are promoted from exact-width
+opaque pins to typed fixed records. Both reference sessions contain all four:
+opcode `20` carries a varying redacted `uint32`, opcodes `21`/`161` carry zero
+`uint8` values, and opcode `23` carries a zero `uint32`. The live login adds an
+independent opcode-`23` sample. All eight reference packets exact-consume under
+the native manifest and all nine samples round-trip in Python; safe output
+reports only opcode/width and zero-value aggregates. Stream `83` now has only
+client opcode `274` and server opcode `22` unknown; live has only server
+opcodes `0` and `22` unknown.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
