@@ -48,6 +48,7 @@ from maple_server.gameplay import (  # noqa: E402
     ClientRecoveryResponsePolicy,
     FieldDropEntity,
     InventoryItemEntity,
+    InventoryMoveResponsePolicy,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
@@ -77,6 +78,7 @@ from maple_server.packets import (  # noqa: E402
     HeartbeatResponse,
     InventoryChangeSet,
     InventoryModification,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     MobControllerChange,
@@ -627,6 +629,22 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertTrue(arguments.reactive_client_recovery_responses)
+
+    def test_replay_parser_accepts_reactive_inventory_move_responses(
+        self,
+    ) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-inventory-move-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_inventory_move_responses)
 
     def test_replay_parser_accepts_typed_item_pickup_options(self) -> None:
         arguments = build_parser().parse_args(
@@ -2246,6 +2264,131 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 recovery_events[-1].details["server_opcodes"], [41]
             )
+
+    async def test_replay_responds_to_inventory_move_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"\x18\x00"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-inventory-move", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = InventoryMoveResponsePolicy(
+                equip_items={
+                    2: InventoryItemEntity(
+                        slot=2,
+                        record_type=1,
+                        item_id=1_332_066,
+                        cash_item=False,
+                        expires_at_ticks=150_842_304_000_000_000,
+                        quantity=None,
+                    )
+                },
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "inventory_move_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            inventory_move_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = InventoryMoveRequest(
+                client_tick=1_640_184,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=-11,
+                trailing_count=-1,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+            response_wire = await reader.readexactly(15)
+            response = InventoryChangeSet.parse(
+                crypt_payload(response_wire[4:], shuffle_iv(server_iv))
+            )
+            self.assertEqual(response.update_flag, 1)
+            self.assertEqual(response.modifications[0].move_flag, 2)
+            self.assertEqual(response.modifications[0].slot, 2)
+            self.assertEqual(response.modifications[0].destination_slot, -11)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            metrics = runtime_protocol["inventory_move_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["item_id"], 1_332_066)
+            self.assertNotIn(2, policy.equip_items)
+            self.assertEqual(policy.equip_items[-11].item_id, 1_332_066)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.inventory_move_request_matches, 1)
+            self.assertEqual(analysis.state.pending_inventory_move_requests, 0)
+            move_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("inventory_move_")
+            ]
+            self.assertEqual(
+                [event.kind for event in move_events],
+                [
+                    "inventory_move_request_observed",
+                    "inventory_move_response_completed",
+                ],
+            )
+            self.assertEqual(move_events[-1].details["server_opcodes"], [39])
 
     async def test_replay_responds_to_modeled_item_pickup_during_hold_open(
         self,

@@ -2370,6 +2370,27 @@ never copied into those fields. Both native-manifest records and Python codecs
 consume/re-emit exactly. The two observations move stream `126` from 39 to 37
 unknown packets, yielding `26,661/44,402/37/0`.
 
+The opt-in `--reactive-inventory-move-responses` policy turns this correlated
+pair into a bounded hold-open handler. It projects initial equipment group `1`
+onto negative equipped slots, group `3` onto positive Equip-inventory slots,
+and overlays later authoritative opcode-`39` changes. It admits only opcode
+`79` inventory type `1`, captured trailing count `-1`, and a source slot that
+exists in that mutable model. The reply is one exact opcode-`39` operation-`2`
+record with captured `update_flag=1`, request source/destination slots, and
+captured `move_flag=2`; occupied destinations are swapped in policy state.
+The handler requires `--keep-world-open`, cannot share opcode `79` with a
+configured captured reply, and publishes observed/served/rejected counts plus
+identifier-free item/slot state under `protocol.inventory_move_responses`.
+
+A fresh local-Wine control supplied an independent destination variant. A UI
+move from occupied Equip slot `3` to occupied slot `1` emitted one exact
+opcode-`79` request with trailing count `-1`; the handler returned one opcode
+`39` and swapped item templates `1302000`/`1002053`. The live transcript folds
+warning-free at `342/323/0/0`, matches the request and response with none
+pending, remains `active` on map `101000000`, and had `222/222` matched
+heartbeat probes at the proof sample. This validates general same-inventory
+move/swap handling beyond the two captured moves to equipped slot `-11`.
+
 ## Inventory change sets (`server 39`)
 
 The capture-validated packet grammar is:

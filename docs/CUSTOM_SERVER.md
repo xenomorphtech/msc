@@ -1455,6 +1455,31 @@ folded validly and warning-free with `38` exact increments, one capped HP
 the client remained active, and runtime status had `42/42` heartbeat responses
 with no failed connection.
 
+## Reactive inventory-move validation
+
+`--reactive-inventory-move-responses` turns the opcode-`79`/opcode-`39`
+transaction into an opt-in hold-open behavior. The policy projects initial
+equipment group `1` to negative equipped slots and group `3` to positive Equip
+inventory slots, then applies later opcode-`39` changes. It admits only Equip
+requests with captured trailing count `-1` and a modeled source. One response
+packet preserves the request slots and uses the repeated capture constants
+`update_flag=1`, operation `2`, and `move_flag=2`; an occupied destination is
+tracked as a swap. The option requires `--keep-world-open` and cannot share
+client opcode `79` with a configured captured reply.
+
+The fresh browser-free world replay composed this responder with the generated
+initial snapshot, NPC spawns, fixed/variable records, heartbeat service, and
+natural recovery. Direct nested-Wayland inventory input produced a new exact
+13-byte request from occupied Equip slot `3` to occupied slot `1`. Runtime
+status recorded one observed/served request, zero rejections, and one response
+packet, with item templates `1302000` and `1002053` swapped in mutable state.
+The independent transcript
+`downloads/maple_custom_server_observed/inventory_move_live_20260811/world/1786488995791294097_replay_12857.jsonl`
+folds warning-free at `342/323/0/0`, matches the request/response with none
+pending, and remains active on map `101000000`. At the proof sample the same
+connection had `67/67` natural-recovery replies and `222/222` matched heartbeat
+probes with zero failed connections.
+
 ## Pickup request/effect validation
 
 The gameplay analyzer now decodes the complete capture-observed pickup chain:

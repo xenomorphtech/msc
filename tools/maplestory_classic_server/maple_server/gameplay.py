@@ -283,6 +283,29 @@ class InventoryItemEntity:
         )
 
 
+def logical_equip_inventory(
+    inventory_items: dict[str, tuple[InventoryItemEntity, ...]],
+) -> dict[int, InventoryItemEntity]:
+    """Project raw initial equipment groups into signed Equip slots."""
+
+    equip_items: dict[int, InventoryItemEntity] = {}
+    for item in inventory_items.get("equipment_group_3", ()):
+        equip_items[item.slot] = item
+    for item in inventory_items.get("equipment_group_1", ()):
+        signed_item = replace(item, slot=-item.slot)
+        equip_items[signed_item.slot] = signed_item
+    for item in inventory_items.get("equip", ()):
+        duplicate_slots = tuple(
+            slot
+            for slot, candidate in equip_items.items()
+            if candidate.item_id == item.item_id
+        )
+        for slot in duplicate_slots:
+            equip_items.pop(slot)
+        equip_items[item.slot] = item
+    return equip_items
+
+
 CAPTURED_ITEM_USE_EFFECTS: dict[int, tuple[str, str, int]] = {
     2_000_000: ("current_hp", "max_hp", 50),
     2_000_014: ("current_mp", "max_mp", 80),
@@ -1950,6 +1973,142 @@ class ClientRecoveryResponsePolicy:
             maximum_value=maximum_value,
         )
         self.apply_server_packet(stat_update.to_bytes())
+        return plan
+
+
+@dataclass(frozen=True)
+class InventoryMoveResponsePlan:
+    request: InventoryMoveRequest
+    inventory_update: InventoryChangeSet = field(repr=False)
+    item_id: int
+    destination_item_id: int | None
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.inventory_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        modification = self.inventory_update.modifications[0]
+        return {
+            **self.request.safe_dict(),
+            "item_id": self.item_id,
+            "destination_item_id": self.destination_item_id,
+            "destination_occupied": self.destination_item_id is not None,
+            "update_flag": self.inventory_update.update_flag,
+            "move_flag": modification.move_flag,
+            "server_opcodes": [self.inventory_update.opcode],
+        }
+
+
+@dataclass
+class InventoryMoveResponsePolicy:
+    equip_items: dict[int, InventoryItemEntity] = field(repr=False)
+    field_epoch: int
+    source_requests: int = 0
+    source_matches: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "modeled_item_count": len(self.equip_items),
+            "modeled_items": [
+                {"slot": item.slot, "item_id": item.item_id}
+                for item in sorted(
+                    self.equip_items.values(),
+                    key=lambda candidate: candidate.slot,
+                )
+            ],
+            "source_evidence": {
+                "requests": self.source_requests,
+                "matches": self.source_matches,
+            },
+            "admission": {
+                "inventory": "equip",
+                "trailing_count": -1,
+                "source_slot": "modeled",
+            },
+            "prediction": {
+                "server_opcodes": [39],
+                "update_flag": 1,
+                "move_flag": 2,
+                "inventory_effect": "move_or_swap",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 39:
+            return
+        change_set = InventoryChangeSet.parse(plaintext)
+        for modification in change_set.modifications:
+            if modification.inventory_type != 1:
+                continue
+            if modification.operation == InventoryModification.ADD:
+                if modification.item is None:
+                    raise PacketShapeError(
+                        "inventory-move policy saw add without an item"
+                    )
+                self.equip_items[modification.slot] = (
+                    InventoryItemEntity.from_initial(modification.item)
+                )
+            elif modification.operation == InventoryModification.MOVE:
+                destination_slot = modification.destination_slot
+                item = self.equip_items.pop(modification.slot, None)
+                if item is None or destination_slot is None:
+                    continue
+                destination_item = self.equip_items.pop(destination_slot, None)
+                self.equip_items[destination_slot] = replace(
+                    item, slot=destination_slot
+                )
+                if destination_item is not None:
+                    self.equip_items[modification.slot] = replace(
+                        destination_item, slot=modification.slot
+                    )
+            else:
+                self.equip_items.pop(modification.slot, None)
+
+    def respond(
+        self, request: InventoryMoveRequest
+    ) -> InventoryMoveResponsePlan:
+        if request.inventory_type != 1:
+            raise ValueError(
+                "inventory-move responder admits only captured Equip requests"
+            )
+        if request.trailing_count != -1:
+            raise ValueError(
+                "inventory-move responder requires captured trailing count -1"
+            )
+        item = self.equip_items.get(request.source_slot)
+        if item is None:
+            raise ValueError(
+                f"inventory-move request references unknown Equip slot "
+                f"{request.source_slot}"
+            )
+        destination_item = self.equip_items.get(request.destination_slot)
+        inventory_update = InventoryChangeSet(
+            update_flag=1,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.MOVE,
+                    inventory_type=1,
+                    slot=request.source_slot,
+                    destination_slot=request.destination_slot,
+                    move_flag=2,
+                ),
+            ),
+        )
+        plan = InventoryMoveResponsePlan(
+            request=request,
+            inventory_update=inventory_update,
+            item_id=item.item_id,
+            destination_item_id=(
+                destination_item.item_id
+                if destination_item is not None
+                else None
+            ),
+        )
+        self.apply_server_packet(inventory_update.to_bytes())
         return plan
 
 
@@ -8839,6 +8998,16 @@ class GameplayStateFold:
                     )
                     for group in inventory.groups
                 }
+                logical_equip_items = logical_equip_inventory(
+                    self.state.inventory_items
+                )
+                if logical_equip_items:
+                    self.state.inventory_items["equip"] = tuple(
+                        sorted(
+                            logical_equip_items.values(),
+                            key=lambda item: item.slot,
+                        )
+                    )
                 self.state.skill_levels = dict(progression.skill_levels)
                 self.state.string_property_code_units = {
                     key: len(value.encode("utf-16-le")) // 2
@@ -11727,6 +11896,36 @@ def derive_client_recovery_response_policy(
         source_unverified_amount_matches=(
             state.client_recovery_unverified_amount_matches
         ),
+    )
+
+
+def derive_inventory_move_response_policy(
+    transcript: Transcript,
+) -> InventoryMoveResponsePolicy:
+    """Build mutable Equip-move state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_inventory_move_requests:
+        raise ValueError(
+            "world transcript has unresolved inventory-move correlations"
+        )
+    if state.inventory_move_request_matches != state.inventory_move_requests:
+        raise ValueError(
+            "world transcript has unmatched inventory-move requests"
+        )
+
+    equip_items = logical_equip_inventory(state.inventory_items)
+    if not equip_items:
+        raise ValueError("world transcript has no modeled Equip items")
+
+    return InventoryMoveResponsePolicy(
+        equip_items=equip_items,
+        field_epoch=state.field_epoch,
+        source_requests=state.inventory_move_requests,
+        source_matches=state.inventory_move_request_matches,
     )
 
 

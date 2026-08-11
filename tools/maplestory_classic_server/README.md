@@ -466,6 +466,28 @@ and stayed warning-free and active with `42/42` heartbeats. HTTP status exposes
 the source evidence, observed/served/packet counts, last response, and mutable
 identifier-free HP/MP state under `protocol.client_recovery_responses`.
 
+`--reactive-inventory-move-responses` answers modeled opcode-`79` Equip moves
+during hold-open. The policy reconstructs signed Equip slots from the initial
+snapshot, admits only inventory type `1`, captured trailing count `-1`, and a
+known source slot, then emits one opcode-`39` move using captured
+`update_flag=1` and `move_flag=2`. It supports empty destinations and occupied
+slot swaps, requires `--keep-world-open` with a positive hold duration, and
+cannot be combined with a captured opcode-`79` reply. Add it to the replay
+command above as:
+
+```sh
+--reactive-inventory-move-responses
+```
+
+A fresh browser-free UI control moved occupied Equip slot `3` to occupied slot
+`1`. The responder served `1/1` requests with one opcode-`39` packet, swapped
+item templates `1302000` and `1002053`, and recorded no rejection. The
+independent transcript fold is warning-free at `342/323/0/0`, has one matched
+move and none pending, remains active on map `101000000`, and had `222/222`
+heartbeat pairs at the proof sample. HTTP status exposes the admission rule,
+source evidence, request counters, last response, and current modeled slots at
+`protocol.inventory_move_responses`.
+
 `--rewrite-final-field-drop-position X:Y` changes only the typed position in
 the final field's sole active mode-`2` item-drop packet.
 `--rewrite-final-field-drop-owner-to-player` independently rewrites only its
@@ -1765,6 +1787,10 @@ When reactive client-recovery responses are enabled,
 `protocol.client_recovery_responses` reports the capture evidence, modeled
 HP/MP bounds, observed/served request counts, response packet count, last
 response, and current maximum-capped stat state.
+When reactive inventory-move responses are enabled,
+`protocol.inventory_move_responses` reports the captured admission constants,
+modeled Equip slots, observed/served/rejected request counts, response packet
+count, last response or rejection, and the current move-or-swap state.
 When the final drop position is rewritten,
 `protocol.final_field_drop_position_rewrite` reports its alias/template,
 original and rewritten coordinates, field epoch, server-frame index, patch

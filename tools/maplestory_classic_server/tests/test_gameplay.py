@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     GameplayStateFold,
+    InventoryItemEntity,
     MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     MobHealthResponsePolicy,
     MobMovementBroadcastDecisionQueue,
@@ -23,9 +24,11 @@ from maple_server.gameplay import (  # noqa: E402
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
     derive_client_recovery_response_policy,
+    derive_inventory_move_response_policy,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    logical_equip_inventory,
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
@@ -8289,6 +8292,94 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             report["state"]["pending_inventory_move_requests"], 0
         )
+
+    def test_derives_captured_inventory_move_response(self) -> None:
+        source = fixture_gameplay_transcript(
+            extra_server_plaintexts=(
+                InventoryChangeSet(
+                    update_flag=0,
+                    modifications=(
+                        InventoryModification(
+                            operation=InventoryModification.ADD,
+                            inventory_type=1,
+                            slot=2,
+                            item=fixture_equipment_inventory_item(
+                                slot=2,
+                                item_id=1_332_066,
+                            ),
+                        ),
+                    ),
+                ).to_bytes(),
+            )
+        )
+        policy = derive_inventory_move_response_policy(source)
+        request = InventoryMoveRequest(
+            client_tick=1_640_184,
+            inventory_type=1,
+            source_slot=2,
+            destination_slot=-11,
+            trailing_count=-1,
+        )
+
+        plan = policy.respond(request)
+
+        self.assertEqual(plan.item_id, 1_332_066)
+        self.assertIsNone(plan.destination_item_id)
+        response = InventoryChangeSet.parse(plan.plaintexts[0])
+        self.assertEqual(response.update_flag, 1)
+        self.assertEqual(len(response.modifications), 1)
+        modification = response.modifications[0]
+        self.assertEqual(modification.operation, InventoryModification.MOVE)
+        self.assertEqual(modification.inventory_type, 1)
+        self.assertEqual(modification.slot, 2)
+        self.assertEqual(modification.destination_slot, -11)
+        self.assertEqual(modification.move_flag, 2)
+        self.assertNotIn(2, policy.equip_items)
+        self.assertEqual(policy.equip_items[-11].item_id, 1_332_066)
+        self.assertEqual(
+            policy.safe_dict()["prediction"]["inventory_effect"],
+            "move_or_swap",
+        )
+        with self.assertRaisesRegex(ValueError, "trailing count -1"):
+            policy.respond(
+                InventoryMoveRequest(
+                    client_tick=1_640_185,
+                    inventory_type=1,
+                    source_slot=-11,
+                    destination_slot=2,
+                    trailing_count=0,
+                )
+            )
+
+    def test_projects_initial_equipment_groups_into_signed_slots(self) -> None:
+        equipped = InventoryItemEntity(
+            slot=11,
+            record_type=1,
+            item_id=1_372_043,
+            cash_item=False,
+            expires_at_ticks=150_842_304_000_000_000,
+            quantity=None,
+        )
+        inventory_item = InventoryItemEntity(
+            slot=3,
+            record_type=1,
+            item_id=1_302_000,
+            cash_item=False,
+            expires_at_ticks=150_842_304_000_000_000,
+            quantity=None,
+        )
+
+        projected = logical_equip_inventory(
+            {
+                "equipment_group_1": (equipped,),
+                "equipment_group_3": (inventory_item,),
+            }
+        )
+
+        self.assertEqual(sorted(projected), [-11, 3])
+        self.assertEqual(projected[-11].item_id, 1_372_043)
+        self.assertEqual(projected[-11].slot, -11)
+        self.assertEqual(projected[3], inventory_item)
 
     def test_correlates_item_acquisition_request_with_inventory_adds(
         self,

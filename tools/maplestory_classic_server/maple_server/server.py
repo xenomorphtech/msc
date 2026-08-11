@@ -24,6 +24,7 @@ from .gameplay import (
     MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     MAX_PLAYER_MOB_PROXIMITY_RADIUS,
     ClientRecoveryResponsePolicy,
+    InventoryMoveResponsePolicy,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
@@ -37,6 +38,7 @@ from .gameplay import (
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
     derive_client_recovery_response_policy,
+    derive_inventory_move_response_policy,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_health_response_policy,
@@ -79,6 +81,7 @@ from .packets import (
     ClientAttackAction,
     FieldDropSpawn,
     HeartbeatProbe,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     MobControllerChange,
@@ -435,6 +438,7 @@ async def replay_connection(
     client_recovery_response_policy: (
         ClientRecoveryResponsePolicy | None
     ) = None,
+    inventory_move_response_policy: InventoryMoveResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
     ) = None,
@@ -473,6 +477,11 @@ async def replay_connection(
     if client_recovery_response_policy is not None and hold_open_seconds <= 0:
         raise ValueError(
             "reactive client-recovery responses require a positive "
+            "hold_open_seconds"
+        )
+    if inventory_move_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive inventory-move responses require a positive "
             "hold_open_seconds"
         )
     if item_pickup_response_policy is not None and hold_open_seconds <= 0:
@@ -643,6 +652,13 @@ async def replay_connection(
             "client opcode 101 cannot use both captured and modeled replies"
         )
     if (
+        inventory_move_response_policy is not None
+        and 79 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 79 cannot use both captured and modeled replies"
+        )
+    if (
         item_pickup_response_policy is not None
         and any(
             opcode in (client_opcode_replies or {}) for opcode in (185, 222)
@@ -800,6 +816,17 @@ async def replay_connection(
         raise TypeError(
             "runtime client_recovery_responses telemetry must be a dictionary"
         )
+    inventory_move_metrics = (
+        runtime_protocol.get("inventory_move_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if inventory_move_metrics is not None and not isinstance(
+        inventory_move_metrics, dict
+    ):
+        raise TypeError(
+            "runtime inventory_move_responses telemetry must be a dictionary"
+        )
     item_pickup_metrics = (
         runtime_protocol.get("item_pickup_responses")
         if runtime_protocol is not None
@@ -895,6 +922,7 @@ async def replay_connection(
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
             or client_recovery_response_policy is not None
+            or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
             or player_proximity_predicate is not None
@@ -991,6 +1019,9 @@ async def replay_connection(
                 ),
                 "reactive_client_recovery_responses": (
                     client_recovery_response_policy is not None
+                ),
+                "reactive_inventory_move_responses": (
+                    inventory_move_response_policy is not None
                 ),
                 "reactive_mob_movement_acknowledgements": (
                     mob_movement_acknowledgement_policy is not None
@@ -1108,6 +1139,7 @@ async def replay_connection(
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
             or client_recovery_response_policy is not None
+            or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
             or (
@@ -1155,6 +1187,12 @@ async def replay_connection(
                 if client_recovery_metrics is not None:
                     client_recovery_metrics["state"] = (
                         client_recovery_response_policy.safe_dict()
+                    )
+            if inventory_move_response_policy is not None:
+                inventory_move_response_policy.apply_server_packet(plaintext)
+                if inventory_move_metrics is not None:
+                    inventory_move_metrics["state"] = (
+                        inventory_move_response_policy.safe_dict()
                     )
             if mob_health_response_policy is not None:
                 mob_health_response_policy.apply_server_packet(plaintext)
@@ -1682,6 +1720,90 @@ async def replay_connection(
                         )
                     if qualifies:
                         await observe_movement_policy_trigger_event()
+                if opcode == 79 and inventory_move_response_policy is not None:
+                    request = InventoryMoveRequest.parse(client_plaintext)
+                    if inventory_move_metrics is not None:
+                        inventory_move_metrics["requests_observed"] = (
+                            int(
+                                inventory_move_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "inventory_move_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "source_modeled": (
+                                request.source_slot
+                                in inventory_move_response_policy.equip_items
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = inventory_move_response_policy.respond(
+                            request
+                        )
+                    except ValueError as error:
+                        if inventory_move_metrics is not None:
+                            inventory_move_metrics["requests_rejected"] = (
+                                int(
+                                    inventory_move_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            inventory_move_metrics["last_rejection"] = str(error)
+                            inventory_move_metrics["state"] = (
+                                inventory_move_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "inventory_move_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_pickup_response_policy is not None:
+                            item_pickup_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if inventory_move_metrics is not None:
+                        inventory_move_metrics["requests_served"] = (
+                            int(
+                                inventory_move_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        inventory_move_metrics["response_packets_sent"] = (
+                            int(
+                                inventory_move_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        inventory_move_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        inventory_move_metrics["state"] = (
+                            inventory_move_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "inventory_move_response_completed",
+                        response_plan.safe_dict(),
+                    )
                 if (
                     opcode in {185, 222}
                     and item_pickup_response_policy is not None
@@ -1740,6 +1862,10 @@ async def replay_connection(
                             )
                         if client_recovery_response_policy is not None:
                             client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if inventory_move_response_policy is not None:
+                            inventory_move_response_policy.apply_server_packet(
                                 plaintext
                             )
                     if item_pickup_metrics is not None:
@@ -1812,6 +1938,10 @@ async def replay_connection(
                             )
                         if client_recovery_response_policy is not None:
                             client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if inventory_move_response_policy is not None:
+                            inventory_move_response_policy.apply_server_packet(
                                 plaintext
                             )
                     if item_use_metrics is not None:
@@ -3426,6 +3556,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reactive-inventory-move-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer modeled opcode-79 Equip moves with the "
+            "captured opcode-39 move shape; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--reactive-item-pickup-responses",
         action="store_true",
         help=(
@@ -4317,6 +4455,25 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "response_packets_sent": 0,
                 "last_response": None,
             }
+        inventory_move_response_policy = None
+        if arguments.reactive_inventory_move_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-inventory-move-responses requires "
+                    "--keep-world-open"
+                )
+            inventory_move_response_policy = (
+                derive_inventory_move_response_policy(transcript)
+            )
+            runtime_protocol["inventory_move_responses"] = {
+                **inventory_move_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
         if (
             arguments.item_pickup_evidence_transcript is not None
             or arguments.item_pickup_evidence_tcp_stream is not None
@@ -5098,6 +5255,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             client_recovery_response_policy=(
                 client_recovery_response_policy
             ),
+            inventory_move_response_policy=inventory_move_response_policy,
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
             ),
@@ -5146,6 +5304,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "reactive_client_recovery_responses": (
                 arguments.reactive_client_recovery_responses
+            ),
+            "reactive_inventory_move_responses": (
+                arguments.reactive_inventory_move_responses
             ),
             "reactive_item_pickup_responses": (
                 arguments.reactive_item_pickup_responses

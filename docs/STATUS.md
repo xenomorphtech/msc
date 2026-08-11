@@ -261,6 +261,17 @@
   validation consumes both packets exactly. This checkpoint brings long-corpus
   coverage to
   `26,661/44,402/37/0`; streams `92` and `114` are unchanged.
+- `--reactive-inventory-move-responses` now serves that correlated family
+  during hold-open. It reconstructs signed Equip state from initial equipment
+  groups, admits only inventory type `1`, trailing count `-1`, and a modeled
+  source slot, then emits one opcode-`39` move with capture constants
+  `update_flag=1` and `move_flag=2`. Occupied destinations swap in policy
+  state; configured opcode-`79` replies are mutually exclusive. A fresh live
+  UI control independently moved occupied slot `3` to occupied slot `1`,
+  served `1/1` requests with zero rejection, and swapped templates
+  `1302000`/`1002053`. Its transcript folds warning-free at `342/323/0/0`,
+  with one matched move, none pending, active map `101000000`, `67/67`
+  recovery replies, and `222/222` heartbeat pairs at the proof sample.
 - Client opcode `225` now models all 15 fixed 16-byte positioned-effect
   actions. Each redacted signed primary key resolves to an active effect alias
   in the same field epoch, and each packet immediately follows targetless
