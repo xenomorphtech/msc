@@ -5439,6 +5439,100 @@ class ServerOpcode43Envelope:
 
 
 @dataclass(frozen=True)
+class ClientOpcode64PositionAction:
+    """Capture-bounded client position action with one neutral value."""
+
+    neutral_value: int
+    position_x: int
+    position_y: int
+    opcode: int = 64
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode64PositionAction":
+        reader = PacketReader(
+            payload, packet_name="client_opcode_64_position_action"
+        )
+        _expect_opcode(reader, 64)
+        action = cls(
+            neutral_value=reader.u32("neutral_value"),
+            position_x=reader.i16("position_x"),
+            position_y=reader.i16("position_y"),
+        )
+        reader.finish()
+        return action
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "neutral_value": self.neutral_value,
+            "position_x": self.position_x,
+            "position_y": self.position_y,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 64:
+            raise PacketShapeError("client position-action opcode must be 64")
+        if not 0 <= self.neutral_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-64 neutral value must fit in u32"
+            )
+        for name, value in (
+            ("position x", self.position_x),
+            ("position y", self.position_y),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(
+                    f"client opcode-64 {name} must fit in i16"
+                )
+        return struct.pack(
+            "<HIhh",
+            self.opcode,
+            self.neutral_value,
+            self.position_x,
+            self.position_y,
+        )
+
+
+@dataclass(frozen=True)
+class ClientOpcode111CashSlotAction:
+    """Capture-bounded client action correlated with a Cash-slot update."""
+
+    neutral_value: int
+    slot: int
+    opcode: int = 111
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode111CashSlotAction":
+        reader = PacketReader(
+            payload, packet_name="client_opcode_111_cash_slot_action"
+        )
+        _expect_opcode(reader, 111)
+        action = cls(
+            neutral_value=reader.u32("neutral_value"),
+            slot=reader.i16("slot"),
+        )
+        reader.finish()
+        return action
+
+    def safe_dict(self) -> dict[str, int | str]:
+        return {
+            "neutral_value": self.neutral_value,
+            "inventory": "cash",
+            "slot": self.slot,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 111:
+            raise PacketShapeError("client Cash-slot action opcode must be 111")
+        if not 0 <= self.neutral_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "client opcode-111 neutral value must fit in u32"
+            )
+        if not -0x8000 <= self.slot <= 0x7FFF:
+            raise PacketShapeError("client opcode-111 slot must fit in i16")
+        return struct.pack("<HIh", self.opcode, self.neutral_value, self.slot)
+
+
+@dataclass(frozen=True)
 class ClientOpcode66Acknowledgement:
     """Capture-bounded acknowledgement for server opcode 348."""
 

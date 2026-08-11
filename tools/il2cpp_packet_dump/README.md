@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 107 semantic/manual shapes and 96 explicitly
+manifest currently declares 109 semantic/manual shapes and 96 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -94,8 +94,9 @@ fourteenth overlaps; opcode `135` adds the fifteenth. Opcode `169` adds a
 non-overlapping shape found only in `1-10FS`; server opcode `394` and client
 opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 `75`, and `241` add overlaps 18 through 20. The live-only, non-overlapping
-opcode-`310` width and capture-backed client opcode-`79`/`222`/`225`/`276`/`298`
-layouts add seven active shapes. This leaves 183 active shapes and 76 active
+opcode-`310` width and capture-backed client
+opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add nine active shapes.
+This leaves 185 active shapes and 76 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -150,6 +151,15 @@ without opcode `185`'s control word or optional proof. All six stream-`126`
 records resolve to known same-epoch drops and complete the matching inventory
 or mesos effect, gain notice, and removal chain. Isolated native validation
 consumes all six packets with zero failures.
+Client opcode `64` adds an exact 10-byte capture-backed record containing a
+neutral u32 and signed i16 position. Both stream-`126` positions equal the last
+same-epoch client opcode-`47` life-movement endpoint, and the next same-epoch
+server opcode `348` follows after `396.405..439.289` ms. Client opcode `111`
+adds an exact eight-byte record containing a neutral u32 and signed slot; its
+sole slot `3` matches the next opcode-`39` Cash remove/add after `486.349` ms.
+The manifest claims exact boundaries only: the u32 values, higher-level action
+roles, and causality remain neutral. Isolated native validation consumes all
+three packets with zero failures.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short

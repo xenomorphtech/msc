@@ -17,7 +17,9 @@ from .packets import (
     CharacterStatUpdate,
     ClientAttackAction,
     ClientFixedOpaqueRecord,
+    ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
+    ClientOpcode64PositionAction,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
     ClientOpcode101Record,
@@ -1045,6 +1047,25 @@ class GameplayGameState:
     server_opcode_348_control_pairs: Counter[str] = field(
         default_factory=Counter
     )
+    client_opcode_64_packets: int = 0
+    client_opcode_64_neutral_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_64_position_matches: int = 0
+    client_opcode_64_position_mismatches: int = 0
+    client_opcode_64_server_348_matches: int = 0
+    pending_client_opcode_64_actions: int = 0
+    last_opcode_64_server_348_ms: float | None = None
+    max_opcode_64_server_348_ms: float | None = None
+    client_opcode_111_packets: int = 0
+    client_opcode_111_neutral_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_111_slots: Counter[int] = field(default_factory=Counter)
+    client_opcode_111_cash_slot_matches: int = 0
+    pending_client_opcode_111_actions: int = 0
+    last_opcode_111_cash_slot_response_ms: float | None = None
+    max_opcode_111_cash_slot_response_ms: float | None = None
     server_opcode_394_packets: int = 0
     server_opcode_394_text_code_units: Counter[int] = field(
         default_factory=Counter
@@ -4422,6 +4443,49 @@ class GameplayAnalysis:
                         self.state.server_opcode_348_control_pairs
                     ),
                 },
+                "client_opcode_64": {
+                    "packet_count": self.state.client_opcode_64_packets,
+                    "neutral_values": dict(
+                        self.state.client_opcode_64_neutral_values
+                    ),
+                    "life_movement_position_matches": (
+                        self.state.client_opcode_64_position_matches
+                    ),
+                    "life_movement_position_mismatches": (
+                        self.state.client_opcode_64_position_mismatches
+                    ),
+                    "server_opcode_348_matches": (
+                        self.state.client_opcode_64_server_348_matches
+                    ),
+                    "pending_actions": (
+                        self.state.pending_client_opcode_64_actions
+                    ),
+                    "last_server_opcode_348_ms": (
+                        self.state.last_opcode_64_server_348_ms
+                    ),
+                    "max_server_opcode_348_ms": (
+                        self.state.max_opcode_64_server_348_ms
+                    ),
+                },
+                "client_opcode_111": {
+                    "packet_count": self.state.client_opcode_111_packets,
+                    "neutral_values": dict(
+                        self.state.client_opcode_111_neutral_values
+                    ),
+                    "slots": dict(self.state.client_opcode_111_slots),
+                    "cash_slot_matches": (
+                        self.state.client_opcode_111_cash_slot_matches
+                    ),
+                    "pending_actions": (
+                        self.state.pending_client_opcode_111_actions
+                    ),
+                    "last_cash_slot_response_ms": (
+                        self.state.last_opcode_111_cash_slot_response_ms
+                    ),
+                    "max_cash_slot_response_ms": (
+                        self.state.max_opcode_111_cash_slot_response_ms
+                    ),
+                },
                 "client_opcode_276": {
                     "packet_count": self.state.client_opcode_276_packets,
                     "selectors": dict(self.state.client_opcode_276_selectors),
@@ -4676,6 +4740,15 @@ class GameplayStateFold:
         self._pending_heartbeat_probes: deque[int] = deque()
         self._pending_opcode_426_notifications: deque[int] = deque()
         self._pending_server_opcode_348: dict[int, deque[int]] = {}
+        self._last_client_life_movement_position: (
+            tuple[int, int, int] | None
+        ) = None
+        self._pending_client_opcode_64: deque[
+            tuple[int, int, int, ClientOpcode64PositionAction]
+        ] = deque()
+        self._pending_client_opcode_111: deque[
+            tuple[int, int, int, ClientOpcode111CashSlotAction]
+        ] = deque()
         self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
         self._pending_world_exit_requests: deque[int] = deque()
         self._last_client_periodic_report_timestamp_ns: dict[int, int] = {}
@@ -5502,6 +5575,11 @@ class GameplayStateFold:
         if opcode == 47:
             submission = LifeMovementSubmission.parse(payload)
             path = submission.movement
+            self._last_client_life_movement_position = (
+                self.state.field_epoch,
+                submission.path_end_x,
+                submission.path_end_y,
+            )
             self.state.life_movement_submissions += 1
             self.state.life_movement_submission_commands += len(path.commands)
             self.state.life_movement_submission_commands_by_type.update(
@@ -6166,6 +6244,84 @@ class GameplayStateFold:
                     "higher-level purpose remain semantically unresolved",
                 ),
             )
+        if opcode == 64:
+            action = ClientOpcode64PositionAction.parse(payload)
+            life_position = self._last_client_life_movement_position
+            position_known = (
+                life_position is not None
+                and life_position[0] == self.state.field_epoch
+            )
+            position_matches = (
+                position_known
+                and life_position is not None
+                and action.position_x == life_position[1]
+                and action.position_y == life_position[2]
+            )
+            self.state.client_opcode_64_packets += 1
+            self.state.client_opcode_64_neutral_values[
+                action.neutral_value
+            ] += 1
+            if position_matches:
+                self.state.client_opcode_64_position_matches += 1
+            else:
+                self.state.client_opcode_64_position_mismatches += 1
+            self._pending_client_opcode_64.append(
+                (frame.index, frame.timestamp_ns, self.state.field_epoch, action)
+            )
+            self.state.pending_client_opcode_64_actions += 1
+            details = {
+                **action.safe_dict(),
+                "life_movement_position_known": position_known,
+                "position_matches_last_life_movement": position_matches,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_64_position_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_64_position_action",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=action,
+                details=details,
+                issues=(
+                    "client opcode-64 neutral value and higher-level action "
+                    "purpose remain unresolved",
+                ),
+            )
+        if opcode == 111:
+            action = ClientOpcode111CashSlotAction.parse(payload)
+            self.state.client_opcode_111_packets += 1
+            self.state.client_opcode_111_neutral_values[
+                action.neutral_value
+            ] += 1
+            self.state.client_opcode_111_slots[action.slot] += 1
+            self._pending_client_opcode_111.append(
+                (frame.index, frame.timestamp_ns, self.state.field_epoch, action)
+            )
+            self.state.pending_client_opcode_111_actions += 1
+            details = {
+                **action.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_111_cash_slot_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_111_cash_slot_action",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=action,
+                details=details,
+                issues=(
+                    "client opcode-111 neutral value and higher-level Cash-"
+                    "slot action remain unresolved",
+                ),
+            )
         if opcode == 66:
             acknowledgement = ClientOpcode66Acknowledgement.parse(payload)
             pending = self._pending_server_opcode_348.get(
@@ -6661,6 +6817,49 @@ class GameplayStateFold:
                     sorted(items, key=lambda item: item.slot)
                 )
                 modification_details.append(details)
+            opcode_111_response: dict[str, object] | None = None
+            if self._pending_client_opcode_111:
+                (
+                    request_frame_index,
+                    request_timestamp_ns,
+                    request_field_epoch,
+                    request_action,
+                ) = self._pending_client_opcode_111[0]
+                matching_modifications = tuple(
+                    details
+                    for details in modification_details
+                    if details.get("inventory") == "cash"
+                    and details.get("slot") == request_action.slot
+                )
+                if (
+                    request_field_epoch == self.state.field_epoch
+                    and matching_modifications
+                ):
+                    self._pending_client_opcode_111.popleft()
+                    self.state.pending_client_opcode_111_actions -= 1
+                    self.state.client_opcode_111_cash_slot_matches += 1
+                    response_ms = round(
+                        (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                        3,
+                    )
+                    self.state.last_opcode_111_cash_slot_response_ms = (
+                        response_ms
+                    )
+                    self.state.max_opcode_111_cash_slot_response_ms = max(
+                        self.state.max_opcode_111_cash_slot_response_ms or 0.0,
+                        response_ms,
+                    )
+                    opcode_111_response = {
+                        "request_frame": request_frame_index,
+                        "response_ms": response_ms,
+                        "inventory": "cash",
+                        "slot": request_action.slot,
+                        "operations": [
+                            details["operation"]
+                            for details in matching_modifications
+                        ],
+                        "field_epoch": self.state.field_epoch,
+                    }
             acquisition_response: dict[str, object] | None = None
             if self._pending_item_acquisitions and acquisition_additions:
                 pending_acquisition = self._pending_item_acquisitions[0]
@@ -6765,6 +6964,8 @@ class GameplayStateFold:
                 details["item_pickup_effect"] = item_pickup_effect
             if acquisition_response is not None:
                 details["item_acquisition_response"] = acquisition_response
+            if opcode_111_response is not None:
+                details["client_opcode_111_response"] = opcode_111_response
             self._event(frame, "inventory_change_set_received", details=details)
             return self._observation(
                 frame,
@@ -8446,6 +8647,34 @@ class GameplayStateFold:
             }
         ):
             envelope = ServerOpcode348TextEnvelope.parse(payload)
+            opcode_64_response: dict[str, object] | None = None
+            if self._pending_client_opcode_64:
+                (
+                    request_frame_index,
+                    request_timestamp_ns,
+                    request_field_epoch,
+                    request_action,
+                ) = self._pending_client_opcode_64[0]
+                if request_field_epoch == self.state.field_epoch:
+                    self._pending_client_opcode_64.popleft()
+                    self.state.pending_client_opcode_64_actions -= 1
+                    self.state.client_opcode_64_server_348_matches += 1
+                    response_ms = round(
+                        (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                        3,
+                    )
+                    self.state.last_opcode_64_server_348_ms = response_ms
+                    self.state.max_opcode_64_server_348_ms = max(
+                        self.state.max_opcode_64_server_348_ms or 0.0,
+                        response_ms,
+                    )
+                    opcode_64_response = {
+                        "request_frame": request_frame_index,
+                        "response_ms": response_ms,
+                        "position_x": request_action.position_x,
+                        "position_y": request_action.position_y,
+                        "field_epoch": self.state.field_epoch,
+                    }
             pending = self._pending_server_opcode_348.setdefault(
                 envelope.selector, deque()
             )
@@ -8468,6 +8697,8 @@ class GameplayStateFold:
                 ),
                 "field_epoch": self.state.field_epoch,
             }
+            if opcode_64_response is not None:
+                details["client_opcode_64_response"] = opcode_64_response
             self._event(
                 frame,
                 "server_opcode_348_received",
@@ -10105,6 +10336,23 @@ class GameplayStateFold:
                 f"{self.state.pending_opcode_426_notifications} server "
                 "opcode-426 notifications had no captured client "
                 "opcode-309 acknowledgement"
+            )
+        if self.state.client_opcode_64_position_mismatches:
+            self.warnings.append(
+                f"{self.state.client_opcode_64_position_mismatches} client "
+                "opcode-64 positions did not match the last same-epoch "
+                "client life-movement path"
+            )
+        if self.state.pending_client_opcode_64_actions:
+            self.warnings.append(
+                f"{self.state.pending_client_opcode_64_actions} client "
+                "opcode-64 actions had no following same-epoch server "
+                "opcode-348 envelope"
+            )
+        if self.state.pending_client_opcode_111_actions:
+            self.warnings.append(
+                f"{self.state.pending_client_opcode_111_actions} client "
+                "opcode-111 actions had no following same-slot Cash update"
             )
         if self.state.unmatched_client_opcode_66_acknowledgements:
             self.warnings.append(
@@ -12779,6 +13027,32 @@ def render_gameplay_analysis(
             f"pending:{state.pending_server_opcode_394_envelopes} "
             f"last_gap_ms:{state.last_opcode_394_279_gap_ms} "
             f"max_gap_ms:{state.max_opcode_394_279_gap_ms}"
+        ),
+        (
+            "client_opcode_64="
+            f"packets:{state.client_opcode_64_packets} "
+            "neutral_values:"
+            f"{dict(sorted(state.client_opcode_64_neutral_values.items()))} "
+            "life_position_matches:"
+            f"{state.client_opcode_64_position_matches} "
+            "life_position_mismatches:"
+            f"{state.client_opcode_64_position_mismatches} "
+            "server_348_matches:"
+            f"{state.client_opcode_64_server_348_matches} "
+            f"pending:{state.pending_client_opcode_64_actions} "
+            f"last_ms:{state.last_opcode_64_server_348_ms} "
+            f"max_ms:{state.max_opcode_64_server_348_ms}"
+        ),
+        (
+            "client_opcode_111="
+            f"packets:{state.client_opcode_111_packets} "
+            "neutral_values:"
+            f"{dict(sorted(state.client_opcode_111_neutral_values.items()))} "
+            f"slots:{dict(sorted(state.client_opcode_111_slots.items()))} "
+            f"cash_slot_matches:{state.client_opcode_111_cash_slot_matches} "
+            f"pending:{state.pending_client_opcode_111_actions} "
+            f"last_ms:{state.last_opcode_111_cash_slot_response_ms} "
+            f"max_ms:{state.max_opcode_111_cash_slot_response_ms}"
         ),
         (
             "client_opcode_66="

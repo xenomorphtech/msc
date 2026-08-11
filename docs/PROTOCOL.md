@@ -1045,6 +1045,32 @@ and direct nested-Wayland seat restored the same client to an active field with
 719/719 heartbeats. This is negative state/build-gating evidence, not a
 contradiction of the capture-local one-to-one transaction correlation.
 
+## Client opcode `64` position action
+
+Stream `126` contains two exact 10-byte records with this capture-bounded
+grammar:
+
+```text
+uint16 opcode = 64
+uint32 neutral_value                 # observed 170389 and 11827
+int16  position_x
+int16  position_y
+```
+
+The positions are `(198,275)` and `(3331,-219)`. Each exactly matches the
+endpoint of the last same-epoch client opcode-`47` life-movement path. The next
+same-epoch server opcode `348` follows after `439.289` and `396.405` ms,
+respectively. The fold queues the action, reports life-movement endpoint
+matches and FIFO opcode-`348` timing, and warns on a position mismatch or
+unfinished action. Both records match, both receive a correlated opcode `348`,
+and no action remains pending.
+
+The Python codec and native manifest consume and re-emit both records exactly.
+The automatic dump establishes the opcode enum but does not prove this outgoing
+client layout or its semantics, so the u32 field, action purpose, and causal
+relationship to opcode `348` remain neutral. Coverage advances from
+`26,661/44,436/3/0` to `26,661/44,438/1/0`.
+
 ## Fixed-width neutral server records
 
 Three independent gameplay streams share a small fixed-width server-record
@@ -2083,6 +2109,27 @@ plaintext `2700000101020f000100`, changing Use slot `15`, item template
 recorded transcript emitted the same previous/current event, preserved all
 item counts and player state, remained active, and matched all 18 generated
 heartbeats. The neutral update flag is deliberately not assigned a role.
+
+## Client opcode `111` Cash-slot action
+
+Stream `126` contains one exact eight-byte record with this capture-bounded
+grammar:
+
+```text
+uint16 opcode = 111
+uint32 neutral_value                 # observed 425341
+int16  slot                          # observed 3
+```
+
+The next same-epoch server opcode-`39` change set arrives after `486.349` ms
+and removes then re-adds Cash inventory slot `3`. The fold queues the action
+and correlates only an opcode-`39` modification with inventory type Cash and
+the exact signed slot. It reports one match, no pending action, and no warning.
+The Python codec and native manifest consume and re-emit the record exactly.
+The automatic dump proves only that the opcode enum exists; it supplies no
+outgoing client handler or shape. The u32 value, action purpose, and causal
+relationship to the authoritative inventory change therefore remain neutral.
+Coverage advances to `26,661/44,439/0/0`.
 
 ## Consumable use (`client 80` -> `server 39`, `server 41`)
 
@@ -3416,7 +3463,7 @@ shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,661
-full, 44,436 partial, 3 unknown-but-lossless, and zero invalid packet
+full, 44,439 partial, zero unknown, and zero invalid packet
 observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
 2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
@@ -3456,10 +3503,9 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 
 ## Current unknowns
 
-- Gameplay framing is complete for short stream `114`. Stream `92` retains two
-  22-byte client opcode-`115` packets. Long stream `126` retains three client
-  packets across opcode/length/count tuples `64/10/2` and `111/8/1`; all
-  remain losslessly framed but semantically unmodeled.
+- Gameplay framing is complete for short stream `114` and long stream `126`.
+  Stream `92` retains two 22-byte client opcode-`115` packets as its only
+  unknown packet family.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.

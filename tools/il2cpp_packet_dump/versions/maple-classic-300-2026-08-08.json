@@ -916,6 +916,16 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":43},{"op":"read","name":"message_type","kind":"u8"},{"op":"bytes","name":"body","length":16}]
     },
     {
+      "name":"client_opcode_64_position_action","direction":"client_to_server","opcode":64,"length":10,
+      "source":"ClientOpcode64PositionAction; both 1-10FS stream-126 records exactly match the last same-epoch client opcode-47 life-movement end and precede the next server opcode-348 envelope",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":64},{"op":"read","name":"neutral_value","kind":"u32"},{"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"}]
+    },
+    {
+      "name":"client_opcode_111_cash_slot_action","direction":"client_to_server","opcode":111,"length":8,
+      "source":"ClientOpcode111CashSlotAction; sole 1-10FS stream-126 record precedes a same-epoch server opcode-39 Cash remove/add at the exact signed slot",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":111},{"op":"read","name":"neutral_value","kind":"u32"},{"op":"read","name":"slot","kind":"i16"}]
+    },
+    {
       "name":"client_opcode_66_server_348_acknowledgement","direction":"client_to_server","opcode":66,
       "source":"1-10FS stream-126 selector/status branches; all 31 packets FIFO-match one same-selector server opcode-348 packet",
       "operations":[

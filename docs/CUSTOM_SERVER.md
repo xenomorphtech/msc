@@ -79,8 +79,8 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 203 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,661 observations are full, 44,436 partial, 3
-unknown-but-lossless, and none invalid. One state-correlation warning remains,
+`--fail-on-invalid`: 26,661 observations are full, 44,439 partial, none are
+unknown or invalid. One state-correlation warning remains,
 not a shape failure: the aggregate warning for six delayed combat predictions
 that differ by one HP.
 The opcode-`158` stage-`0` variant keeps its
@@ -187,6 +187,25 @@ codecs exact-consume all six records. The long fold now validates 203/203
 pickup chains with no epoch, drop, effect, result, removal, or pending mismatch,
 reduces its warning set from seven to the single unrelated one-HP combat
 aggregate, and advances to `26,661/44,436/3/0`.
+
+Client opcode `64` is now a capture-bounded position action. Its two exact
+10-byte stream-`126` records contain a neutral u32 followed by signed i16
+coordinates. Both coordinates equal the endpoint of the last same-epoch
+client opcode-`47` life-movement path: `(198,275)` and `(3331,-219)`. The next
+same-epoch server opcode `348` arrives after `439.289` and `396.405` ms,
+respectively. The fold reports endpoint matches, FIFO opcode-`348` correlation,
+pending counts, neutral-value distributions, and latency without claiming the
+u32 role or a causal request/response relationship. Python and native codecs
+consume both records exactly, advancing the corpus to `26,661/44,438/1/0`.
+
+Client opcode `111` is now a capture-bounded Cash-slot action. Its sole exact
+eight-byte stream-`126` record contains a neutral u32 and signed slot `3`. The
+next same-epoch server opcode-`39` change set removes and re-adds Cash slot `3`
+after `486.349` ms. The fold correlates only an exact Cash-slot modification,
+keeps the u32 and higher-level action purpose neutral, and exposes bounded
+match/pending/latency telemetry. Python and native codecs consume the record
+exactly. Stream `126` therefore reaches `26,661/44,439/0/0` with only the
+unrelated one-HP combat aggregate warning.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
@@ -571,7 +590,7 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,661 full, 44,436 partial, 3 unknown-but-lossless, and zero invalid. Stream
+26,661 full, 44,439 partial, zero unknown, and zero invalid. Stream
 `92` now reaches 13,417 full, 21,788 partial, 2 unknown, and zero invalid;
 stream `114` reaches 54/22/0/0.
 

@@ -47,7 +47,9 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAttackAction,
     ClientFixedOpaqueRecord,
+    ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
+    ClientOpcode64PositionAction,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
     ClientOpcode101Record,
@@ -694,6 +696,8 @@ def fixture_gameplay_transcript(
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
     opcode_426_acknowledgement: bool = False,
+    opcode_64_position_action: bool = False,
+    opcode_111_cash_slot_action: bool = False,
     skill_record_lifecycle: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
@@ -1473,6 +1477,54 @@ def fixture_gameplay_transcript(
                 object_id=NPC_OBJECT_ID,
                 action=3,
                 parameter=1,
+            ).to_bytes(),
+        )
+    if opcode_64_position_action:
+        append(
+            "client_to_server",
+            ClientOpcode64PositionAction(
+                neutral_value=123_456,
+                position_x=132,
+                position_y=-168,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_456_789,
+                selector=3,
+                value=0,
+                text="redacted-position-response",
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientOpcode66Acknowledgement(
+                selector=3,
+                status_value=1,
+            ).to_bytes(),
+        )
+    if opcode_111_cash_slot_action:
+        append(
+            "client_to_server",
+            ClientOpcode111CashSlotAction(
+                neutral_value=425_341,
+                slot=3,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=5,
+                        slot=3,
+                        item=fixture_cash_inventory_item(slot=3),
+                    ),
+                ),
             ).to_bytes(),
         )
     for plaintext in extra_server_plaintexts:
@@ -2583,6 +2635,39 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ClientOpcode43Envelope.parse(bytes.fromhex("2b00010000000000"))
         with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
             replace(server, opaque_body=b"short").to_bytes()
+
+    def test_client_opcode_64_and_111_actions_round_trip(self) -> None:
+        position_payloads = (
+            bytes.fromhex("400095990200c6001301"),
+            bytes.fromhex("4000332e0000030d25ff"),
+        )
+        positions = tuple(
+            ClientOpcode64PositionAction.parse(payload)
+            for payload in position_payloads
+        )
+        cash_payload = bytes.fromhex("6f007d7d06000300")
+        cash_action = ClientOpcode111CashSlotAction.parse(cash_payload)
+
+        self.assertEqual(
+            tuple(position.to_bytes() for position in positions),
+            position_payloads,
+        )
+        self.assertEqual(
+            (positions[0].position_x, positions[0].position_y),
+            (198, 275),
+        )
+        self.assertEqual(
+            (positions[1].position_x, positions[1].position_y),
+            (3_331, -219),
+        )
+        self.assertEqual(cash_action.to_bytes(), cash_payload)
+        self.assertEqual(cash_action.neutral_value, 425_341)
+        self.assertEqual(cash_action.slot, 3)
+        self.assertEqual(cash_action.safe_dict()["inventory"], "cash")
+        with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
+            replace(positions[0], position_x=0x8000).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
+            replace(cash_action, slot=0x8000).to_bytes()
 
     def test_client_opcode_66_acknowledgement_variants_round_trip(self) -> None:
         acknowledgements = tuple(
@@ -5759,6 +5844,83 @@ class GameplayStateFoldTest(unittest.TestCase):
             "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:16",
             render_gameplay_analysis(analysis),
         )
+
+    def test_correlates_opcode_64_position_and_opcode_111_cash_slot(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                player_movement=True,
+                opcode_64_position_action=True,
+                opcode_111_cash_slot_action=True,
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_opcode_64_packets, 1)
+        self.assertEqual(
+            analysis.state.client_opcode_64_neutral_values,
+            {123_456: 1},
+        )
+        self.assertEqual(analysis.state.client_opcode_64_position_matches, 1)
+        self.assertEqual(analysis.state.client_opcode_64_position_mismatches, 0)
+        self.assertEqual(
+            analysis.state.client_opcode_64_server_348_matches,
+            1,
+        )
+        self.assertEqual(analysis.state.pending_client_opcode_64_actions, 0)
+        self.assertEqual(analysis.state.client_opcode_111_packets, 1)
+        self.assertEqual(analysis.state.client_opcode_111_slots, {3: 1})
+        self.assertEqual(
+            analysis.state.client_opcode_111_cash_slot_matches,
+            1,
+        )
+        self.assertEqual(analysis.state.pending_client_opcode_111_actions, 0)
+        opcode_64 = next(
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 64
+        )
+        opcode_111 = next(
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 111
+        )
+        self.assertEqual(opcode_64.coverage.value, "partial")
+        self.assertTrue(
+            opcode_64.details["position_matches_last_life_movement"]
+        )
+        self.assertEqual(opcode_111.coverage.value, "partial")
+        server_response = next(
+            event
+            for event in analysis.events
+            if event.kind == "server_opcode_348_received"
+        )
+        self.assertEqual(
+            server_response.details["client_opcode_64_response"][
+                "request_frame"
+            ],
+            opcode_64.frame_index,
+        )
+        inventory_response = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_change_set_received"
+            and "client_opcode_111_response" in event.details
+        )
+        self.assertEqual(
+            inventory_response.details["client_opcode_111_response"]["slot"],
+            3,
+        )
+        report = analysis.safe_dict()["state"]
+        self.assertEqual(
+            report["client_opcode_64"]["life_movement_position_matches"],
+            1,
+        )
+        self.assertEqual(report["client_opcode_111"]["cash_slot_matches"], 1)
+        rendered = render_gameplay_analysis(analysis)
+        self.assertIn("client_opcode_64=packets:1", rendered)
+        self.assertIn("client_opcode_111=packets:1", rendered)
 
     def test_correlates_client_opcode_66_with_server_opcode_348(self) -> None:
         requests = tuple(

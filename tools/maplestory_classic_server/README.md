@@ -438,7 +438,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
-44,436 partial, 3 unknown, and zero invalid packet observations. PCAP
+44,439 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
@@ -1807,3 +1807,11 @@ preserve distinct Unity scan codes in this setup.
     validate Python/Rust exact consumption, eliminate the six pickup-chain
     warnings, and reduce stream `126` to three unknown packets without naming
     the compact/full source distinction.
+71. Decode both 10-byte client opcode-`64` position actions, prove their signed
+    coordinates against the last same-epoch opcode-`47` life-movement endpoint,
+    correlate the next opcode `348`, and validate exact Python/Rust consumption
+    without assigning the neutral u32 or a causal request role.
+72. Decode the sole eight-byte client opcode-`111` Cash-slot action, correlate
+    signed slot `3` with the next opcode-`39` Cash remove/add, preserve the u32
+    and higher-level purpose as neutral, validate exact Python/Rust consumption,
+    and reduce stream `126` to zero unknown packets.

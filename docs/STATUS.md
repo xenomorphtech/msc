@@ -52,7 +52,7 @@
   drop spawns, and all 203 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,661 full, 44,436 partial, 3 unknown-but-lossless, and zero invalid
+  26,661 full, 44,439 partial, zero unknown, and zero invalid
   packet observations. Stream `92` now reports 13,417 full, 21,788 partial,
   2 unknown, and zero invalid; stream `114` reports 54/22/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
@@ -267,6 +267,15 @@
   codecs consume all six exactly, the fold validates 203/203 pickup chains and
   removes all six pickup warnings, and stream `126` advances to
   `26,661/44,436/3/0` with only the unrelated one-HP combat aggregate warning.
+- Client opcode `64` now consumes both exact 10-byte position actions. Their
+  signed coordinates match the last same-epoch client opcode-`47` life-
+  movement endpoints, and the next same-epoch server opcode `348` follows in
+  `396.405..439.289` ms. The neutral u32 and higher-level causal role remain
+  unassigned. Client opcode `111` consumes its sole exact eight-byte record;
+  signed slot `3` matches the next opcode-`39` Cash remove/add after `486.349`
+  ms, while its u32 and action purpose remain neutral. Python/native validation
+  consumes all three records, pending/mismatch counters are zero, and stream
+  `126` reaches `26,661/44,439/0/0`.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`
