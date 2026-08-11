@@ -2374,6 +2374,11 @@ project's own `README.md` for all options.
   complete `0..count-1` set plus a redacted `uint32` value, following nine
   redacted header words and the count. Safe state publishes only counts and
   boundary checks; all values and the higher-level record-set role stay neutral.
+- Login server opcodes `27` and `28` now reuse the existing exact redacted
+  gameplay ledger codecs. The two reference sessions contribute `18/5` and
+  `1/4` entries respectively, and live repeats the four-entry opcode-`28`
+  branch. All five packets round-trip at full coverage; safe login state adds
+  only entry-count patterns and text-length totals.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

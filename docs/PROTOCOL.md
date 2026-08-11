@@ -71,6 +71,8 @@ client 23  8-byte opaque-token heartbeat response
 client 31  three redacted UTF-16 fields and a 48-byte opaque blob
 client 13  typed opcode-13 envelope or status message
 server 13  typed opcode-13 envelope or three-byte acknowledgment
+server 27  counted redacted integer/text ledger
+server 28  counted redacted paired-text ledger
 server 1   account/login result
 server 2   one world record, or a signed world-id -1 sentinel
 client 4   select world (`uint32 world_id`)
@@ -115,6 +117,17 @@ their wire order is not sequential. Safe output exposes only the fixed header
 width, common zero-field indices, record count, complete-index check, and
 aggregate counts. Header and record values—and the higher-level role of the
 set—remain neutral.
+
+Login also reuses the exact server opcode-`27` and opcode-`28` ledger codecs
+already validated in gameplay. Opcode `27` is an `i32` count followed by three
+redacted `i32` values and one trailing-zero UTF-16 field per entry. Opcode `28`
+is an `i32` count followed by two redacted `i32` values and two trailing-zero
+UTF-16 fields per entry. Stream `83` carries `18/5` entries at `1,056/260`
+bytes; stream `116` carries `1/4` at `27/164` bytes. The live login independently
+replays the same four-entry, 164-byte opcode-`28` variant. Every record consumes
+and round-trips exactly at full shape coverage. Safe login state exposes only
+packet/entry counts and text code-unit totals; all text and numeric values stay
+redacted and their higher-level roles remain neutral.
 
 Client opcode `31` is a capture-bounded variable record rather than an opaque
 width pin. Stream `83`, stream `116`, and the current live login independently

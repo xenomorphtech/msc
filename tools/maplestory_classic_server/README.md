@@ -562,6 +562,15 @@ The codec and manifest consume/re-emit the records exactly while safe output
 retains only structural checks and counts. The header/entry values and packet
 role remain neutral.
 
+Server opcodes `27` and `28` reuse the already exact, redacted gameplay ledger
+codecs in login analysis. Opcode `27` contains a signed entry count and three
+neutral signed values plus one terminated UTF-16 field per entry; opcode `28`
+uses two neutral signed values and two terminated UTF-16 fields. Stream `83`
+has `18/5` entries at `1,056/260` bytes, stream `116` has `1/4` at `27/164`
+bytes, and the live login repeats the four-entry opcode-`28` form. All five
+records round-trip exactly at full coverage while safe login output retains
+only entry-count patterns and text-length totals.
+
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
 prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
@@ -2017,3 +2026,7 @@ preserve distinct Unity scan codes in this setup.
     152 entries in both stream `116` and the live transcript as complete unique
     index sets, redact all header/record values, and reduce the live login to
     zero unknown client packets without naming the record-set role.
+80. Reuse the exact redacted server opcode-`27` integer/text and opcode-`28`
+    paired-text ledger codecs in login analysis, promote all four reference
+    records plus the live opcode-`28` record to full coverage, and publish only
+    entry-count/text-length aggregates without exposing retained values.

@@ -19,6 +19,8 @@ from .packets import (
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    ServerOpcode27IntegerLedger,
+    ServerOpcode28TextLedger,
     ServerTime,
     WorldHandoff,
     WorldListEnd,
@@ -119,6 +121,17 @@ class LoginGameState:
     pending_heartbeat_probes: int = 0
     last_heartbeat_round_trip_ms: float | None = None
     max_heartbeat_round_trip_ms: float | None = None
+    server_opcode_27_ledgers: int = 0
+    server_opcode_27_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    server_opcode_27_text_code_units: int = 0
+    server_opcode_28_ledgers: int = 0
+    server_opcode_28_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    server_opcode_28_text_1_code_units: int = 0
+    server_opcode_28_text_2_code_units: int = 0
     client_opcode_6_record_sets: int = 0
     client_opcode_6_entry_count_patterns: dict[str, int] = field(
         default_factory=dict
@@ -266,6 +279,27 @@ class LoginAnalysis:
                 ),
                 "max_heartbeat_round_trip_ms": (
                     self.state.max_heartbeat_round_trip_ms
+                ),
+                "server_opcode_27_ledgers": (
+                    self.state.server_opcode_27_ledgers
+                ),
+                "server_opcode_27_entry_count_patterns": (
+                    self.state.server_opcode_27_entry_count_patterns
+                ),
+                "server_opcode_27_text_code_units": (
+                    self.state.server_opcode_27_text_code_units
+                ),
+                "server_opcode_28_ledgers": (
+                    self.state.server_opcode_28_ledgers
+                ),
+                "server_opcode_28_entry_count_patterns": (
+                    self.state.server_opcode_28_entry_count_patterns
+                ),
+                "server_opcode_28_text_1_code_units": (
+                    self.state.server_opcode_28_text_1_code_units
+                ),
+                "server_opcode_28_text_2_code_units": (
+                    self.state.server_opcode_28_text_2_code_units
                 ),
                 "client_opcode_6_record_sets": (
                     self.state.client_opcode_6_record_sets
@@ -589,6 +623,49 @@ class LoginStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=server_time,
                 details={"ticks": server_time.ticks},
+            )
+        if opcode == 27:
+            ledger = ServerOpcode27IntegerLedger.parse(payload)
+            entry_count = str(len(ledger.entries))
+            self.state.server_opcode_27_ledgers += 1
+            self.state.server_opcode_27_entry_count_patterns[entry_count] = (
+                self.state.server_opcode_27_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.server_opcode_27_text_code_units += (
+                ledger.text_code_units
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_27_integer_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger,
+                details=ledger.safe_dict(),
+            )
+        if opcode == 28:
+            ledger = ServerOpcode28TextLedger.parse(payload)
+            entry_count = str(len(ledger.entries))
+            self.state.server_opcode_28_ledgers += 1
+            self.state.server_opcode_28_entry_count_patterns[entry_count] = (
+                self.state.server_opcode_28_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.server_opcode_28_text_1_code_units += (
+                ledger.text_1_code_units
+            )
+            self.state.server_opcode_28_text_2_code_units += (
+                ledger.text_2_code_units
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_28_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger,
+                details=ledger.safe_dict(),
             )
         account_shape_candidate = opcode == 1 or (
             opcode == 0 and len(payload) >= 31 and len(payload) % 2 == 1
@@ -1032,6 +1109,21 @@ def render_login_analysis(
             f"matched:{state['matched_heartbeat_responses']} "
             f"unmatched:{state['unmatched_heartbeat_responses']} "
             f"pending:{state['pending_heartbeat_probes']}"
+        ),
+        (
+            "server_opcode_27="
+            f"ledgers:{state['server_opcode_27_ledgers']} "
+            "entry_counts:"
+            f"{state['server_opcode_27_entry_count_patterns']} "
+            f"text_code_units:{state['server_opcode_27_text_code_units']}"
+        ),
+        (
+            "server_opcode_28="
+            f"ledgers:{state['server_opcode_28_ledgers']} "
+            "entry_counts:"
+            f"{state['server_opcode_28_entry_count_patterns']} "
+            f"text_1_code_units:{state['server_opcode_28_text_1_code_units']} "
+            f"text_2_code_units:{state['server_opcode_28_text_2_code_units']}"
         ),
         (
             "client_opcode_6="

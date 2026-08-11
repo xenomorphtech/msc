@@ -1102,6 +1102,14 @@ round-trips exactly. Safe analysis retains only structural counts/checks, so
 the current live login now has zero unknown client packets without exposing header or
 record values or assigning a higher-level role.
 
+The login fold now also reuses the existing exact server opcode-`27` integer/
+text-ledger and opcode-`28` paired-text-ledger codecs. Stream `83` contributes
+18 and 5 entries (`1,056/260` bytes); stream `116` contributes 1 and 4
+(`27/164` bytes), and the live login independently contains the same four-entry
+opcode-`28` variant. All five observations round-trip exactly at full coverage.
+Login JSON/text state publishes only entry-count patterns and text code-unit
+totals, retaining the established numeric/text redaction and neutral roles.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.

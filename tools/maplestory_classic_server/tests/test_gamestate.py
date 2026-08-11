@@ -34,6 +34,10 @@ from maple_server.packets import (  # noqa: E402
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    ServerOpcode27IntegerLedger,
+    ServerOpcode27IntegerLedgerEntry,
+    ServerOpcode28TextLedger,
+    ServerOpcode28TextLedgerEntry,
     ServerTime,
     WorldHandoff,
     WorldListEnd,
@@ -161,6 +165,8 @@ def fixture_login_transcript(
     selected_character: int = 300_001,
     heartbeat_rounds: int = 0,
     pending_heartbeat_probe: bool = False,
+    opcode_27_ledger: ServerOpcode27IntegerLedger | None = None,
+    opcode_28_ledger: ServerOpcode28TextLedger | None = None,
     opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
 ) -> Transcript:
@@ -208,6 +214,10 @@ def fixture_login_transcript(
         )
     if pending_heartbeat_probe:
         append("server_to_client", HeartbeatProbe().to_bytes())
+    if opcode_27_ledger is not None:
+        append("server_to_client", opcode_27_ledger.to_bytes())
+    if opcode_28_ledger is not None:
+        append("server_to_client", opcode_28_ledger.to_bytes())
     if opcode_6_record_set is not None:
         append("client_to_server", opcode_6_record_set.to_bytes())
     if opcode_31_record is not None:
@@ -546,6 +556,75 @@ class GameStateFoldTest(unittest.TestCase):
             "client_opcode_6=record_sets:1 entry_counts:{'3': 1} "
             "opaque_values:3",
             render_login_analysis(analysis),
+        )
+
+    def test_reuses_redacted_server_opcode_27_28_ledgers(self) -> None:
+        ledger_27 = ServerOpcode27IntegerLedger(
+            entries=(
+                ServerOpcode27IntegerLedgerEntry(
+                    key=0x1234,
+                    value=0x2345,
+                    control=0x3456,
+                    text="private-27",
+                ),
+            )
+        )
+        ledger_28 = ServerOpcode28TextLedger(
+            entries=(
+                ServerOpcode28TextLedgerEntry(
+                    key=0x4567,
+                    value=0x5678,
+                    text_1="private-28-a",
+                    text_2="private-28-b",
+                ),
+            )
+        )
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(
+                opcode_27_ledger=ledger_27,
+                opcode_28_ledger=ledger_28,
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_27_ledgers, 1)
+        self.assertEqual(
+            analysis.state.server_opcode_27_entry_count_patterns, {"1": 1}
+        )
+        self.assertEqual(analysis.state.server_opcode_27_text_code_units, 10)
+        self.assertEqual(analysis.state.server_opcode_28_ledgers, 1)
+        self.assertEqual(
+            analysis.state.server_opcode_28_entry_count_patterns, {"1": 1}
+        )
+        self.assertEqual(analysis.state.server_opcode_28_text_1_code_units, 12)
+        self.assertEqual(analysis.state.server_opcode_28_text_2_code_units, 12)
+        observations = {
+            observation.kind: observation
+            for observation in analysis.observations
+            if observation.kind.startswith("server_opcode_2")
+        }
+        self.assertEqual(
+            observations["server_opcode_27_integer_ledger"].coverage,
+            ShapeCoverage.FULL,
+        )
+        self.assertEqual(
+            observations["server_opcode_28_text_ledger"].coverage,
+            ShapeCoverage.FULL,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("private-27", safe)
+        self.assertNotIn("private-28-a", safe)
+        self.assertNotIn("private-28-b", safe)
+        report = render_login_analysis(analysis)
+        self.assertIn(
+            "server_opcode_27=ledgers:1 entry_counts:{'1': 1} "
+            "text_code_units:10",
+            report,
+        )
+        self.assertIn(
+            "server_opcode_28=ledgers:1 entry_counts:{'1': 1} "
+            "text_1_code_units:12 text_2_code_units:12",
+            report,
         )
 
     def test_folds_client_opcode_31_variable_record_without_content(self) -> None:
