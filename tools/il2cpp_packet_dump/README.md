@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 124 semantic/manual shapes and 88 explicitly
+manifest currently declares 128 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -98,7 +98,8 @@ The live-only, non-overlapping opcode-`310` width, local opcode-`0` probe, and
 capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add ten active shapes.
 Five non-overlapping legacy-login layouts add the next five active shapes.
-This leaves 191 active shapes and 67 active
+The final four stream-`116` login layouts add four more. This leaves 195 active
+shapes and 67 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -201,6 +202,15 @@ trailing-zero counted UTF-16 layouts. All five stream-`116` packets
 exact-consume in isolated native validation. The opcode-`6` text exactly echoes
 the preceding opcode-`9` text after 235.214 ms; the opcode-`255`/`390` adjacency
 at 238.384 ms remains evidence only, not a causal or semantic claim.
+The remaining stream-`116` shapes exact-consume server opcode `35`, client
+opcode `10`, server opcode `7`, and client opcode `16`. Opcode `35` is a neutral
+redacted counted-text prelude. Opcode `10` is counted name plus eight redacted
+`u32` values. Generated opcode-`7` handler `f2861e8a...` supplies the result
+byte; the captured success body exact-consumes as the existing character
+snapshot fields plus a fixed 49-byte compact-appearance variant. Its name and
+seven-field appearance fingerprint match opcode `10`. Opcode `16` repeats the
+created id and the next handoff repeats it again. All four isolated packets
+validate natively, leaving zero unknown observations in both login references.
 Login server opcodes `20`, `21`, `23`, and `161` replace four observed-opaque
 pins with exact fixed-record shapes. Both reference login streams contain all
 four: opcode `20` carries one neutral `uint32`, opcodes `21` and `161` carry a

@@ -11,6 +11,8 @@ from .packets import (
     ChannelSelection,
     CharacterListEnvelope,
     CharacterSelection,
+    ClientOpcode10CharacterCreationRequest,
+    ClientOpcode16CreatedCharacterSelection,
     ClientOpcode274OpaqueTextRecord,
     ClientOpcode6RecordSet,
     ClientOpcode31Record,
@@ -21,6 +23,7 @@ from .packets import (
     LoginClientOpcode9TextRecord,
     LoginServerFixedRecord,
     LoginServerOpcode3Record,
+    LoginServerOpcode35Record,
     LoginServerOpcode390Record,
     LoginServerOpcode6TextRecord,
     PacketShapeError,
@@ -30,6 +33,7 @@ from .packets import (
     ServerOpcode22IndexedTextLedger,
     ServerOpcode27IntegerLedger,
     ServerOpcode28TextLedger,
+    ServerOpcode7CharacterCreationResponse,
     ServerTime,
     WorldHandoff,
     WorldListEnd,
@@ -176,6 +180,16 @@ class LoginGameState:
     login_server_opcode_6_text_records: int = 0
     login_opcode_9_6_text_matches: int = 0
     login_opcode_9_6_text_mismatches: int = 0
+    login_server_opcode_35_records: int = 0
+    character_creation_requests: int = 0
+    character_creation_responses: int = 0
+    character_creation_name_matches: int = 0
+    character_creation_name_mismatches: int = 0
+    character_creation_appearance_matches: int = 0
+    character_creation_appearance_mismatches: int = 0
+    created_character_selections: int = 0
+    created_character_selection_matches: int = 0
+    created_character_selection_mismatches: int = 0
 
 
 @dataclass(frozen=True)
@@ -406,6 +420,36 @@ class LoginAnalysis:
                 "login_opcode_9_6_text_mismatches": (
                     self.state.login_opcode_9_6_text_mismatches
                 ),
+                "login_server_opcode_35_records": (
+                    self.state.login_server_opcode_35_records
+                ),
+                "character_creation_requests": (
+                    self.state.character_creation_requests
+                ),
+                "character_creation_responses": (
+                    self.state.character_creation_responses
+                ),
+                "character_creation_name_matches": (
+                    self.state.character_creation_name_matches
+                ),
+                "character_creation_name_mismatches": (
+                    self.state.character_creation_name_mismatches
+                ),
+                "character_creation_appearance_matches": (
+                    self.state.character_creation_appearance_matches
+                ),
+                "character_creation_appearance_mismatches": (
+                    self.state.character_creation_appearance_mismatches
+                ),
+                "created_character_selections": (
+                    self.state.created_character_selections
+                ),
+                "created_character_selection_matches": (
+                    self.state.created_character_selection_matches
+                ),
+                "created_character_selection_mismatches": (
+                    self.state.created_character_selection_mismatches
+                ),
             },
             "packets": [
                 {
@@ -606,6 +650,10 @@ class LoginStateFold:
             deque()
         )
         self._pending_client_opcode_9_texts: deque[tuple[int, str]] = deque()
+        self._pending_character_creation_requests: deque[
+            tuple[int, ClientOpcode10CharacterCreationRequest]
+        ] = deque()
+        self._created_character_ids: dict[int, int] = {}
 
     def _invalid(
         self, frame: PlainFrame, kind: str, error: PacketShapeError
@@ -865,6 +913,77 @@ class LoginStateFold:
                     "opcode-6 text, value, and higher-level role remain neutral",
                 ),
             )
+        if opcode == 35:
+            record = LoginServerOpcode35Record.parse(payload)
+            self.state.login_server_opcode_35_records += 1
+            return self._observation(
+                frame,
+                kind="login_server_opcode_35_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-35 text and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 7:
+            response = ServerOpcode7CharacterCreationResponse.parse(payload)
+            self.state.character_creation_responses += 1
+            details = response.safe_dict()
+            issues: tuple[str, ...] = (
+                "creation request first u32 and response style values remain "
+                "neutral",
+            )
+            if response.result != 0:
+                issues = (
+                    "non-success character-creation payload remains opaque",
+                )
+            elif response.snapshot is not None and response.appearance is not None:
+                self._created_character_ids[response.snapshot.character_id] = (
+                    frame.timestamp_ns
+                )
+                if self._pending_character_creation_requests:
+                    request_timestamp_ns, request = (
+                        self._pending_character_creation_requests.popleft()
+                    )
+                    name_match = request.name == response.snapshot.name
+                    appearance_match = (
+                        request.appearance_fingerprint()
+                        == response.appearance.request_fingerprint()
+                    )
+                    details["request_name_match"] = name_match
+                    details["request_appearance_match"] = appearance_match
+                    details["response_latency_ms"] = round(
+                        (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                        3,
+                    )
+                    if name_match:
+                        self.state.character_creation_name_matches += 1
+                    else:
+                        self.state.character_creation_name_mismatches += 1
+                        self.warnings.append(
+                            "character creation response name does not match "
+                            "the request"
+                        )
+                    if appearance_match:
+                        self.state.character_creation_appearance_matches += 1
+                    else:
+                        self.state.character_creation_appearance_mismatches += 1
+                        self.warnings.append(
+                            "character creation response appearance does not "
+                            "match the request"
+                        )
+                else:
+                    details["request_name_match"] = None
+                    details["request_appearance_match"] = None
+            return self._observation(
+                frame,
+                kind="character_creation_response",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=response,
+                details=details,
+                issues=issues,
+            )
         if opcode == 0 and len(payload) == 36:
             probe = ServerOpcode0AccountBootstrapProbe.parse(payload)
             self.state.local_account_bootstrap_probes += 1
@@ -1071,6 +1190,55 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 10:
+            request = ClientOpcode10CharacterCreationRequest.parse(payload)
+            self.state.character_creation_requests += 1
+            self._pending_character_creation_requests.append(
+                (frame.timestamp_ns, request)
+            )
+            return self._observation(
+                frame,
+                kind="character_creation_request",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=request,
+                details=request.safe_dict(),
+                issues=(
+                    "creation request u32 values remain neutral and redacted",
+                ),
+            )
+        if opcode == 16:
+            selection = ClientOpcode16CreatedCharacterSelection.parse(payload)
+            self.state.created_character_selections += 1
+            details = selection.safe_dict()
+            created_timestamp_ns = self._created_character_ids.get(
+                selection.character_id
+            )
+            created_character_match = created_timestamp_ns is not None
+            details["created_character_match"] = created_character_match
+            if created_timestamp_ns is not None:
+                details["selection_latency_ms"] = round(
+                    (frame.timestamp_ns - created_timestamp_ns) / 1e6,
+                    3,
+                )
+                self.state.created_character_selection_matches += 1
+            else:
+                self.state.created_character_selection_mismatches += 1
+                self.warnings.append(
+                    "client opcode-16 character id was not introduced by a "
+                    "creation response"
+                )
+            self.state.selected_character_id = selection.character_id
+            self.state.phase = LoginPhase.CHARACTER_SELECTED
+            return self._observation(
+                frame,
+                kind="created_character_selection",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=selection,
+                details=details,
+                issues=(
+                    "opcode-16 reserved byte role remains neutral",
+                ),
+            )
         if opcode == 255:
             record = LoginClientOpcode255Record.parse(payload)
             self.state.login_client_opcode_255_records += 1
@@ -1465,6 +1633,18 @@ def render_login_analysis(
             f"server6:{state['login_server_opcode_6_text_records']} "
             f"text_matches:{state['login_opcode_9_6_text_matches']} "
             f"text_mismatches:{state['login_opcode_9_6_text_mismatches']}"
+        ),
+        (
+            "legacy_character_creation="
+            f"server35:{state['login_server_opcode_35_records']} "
+            f"requests:{state['character_creation_requests']} "
+            f"responses:{state['character_creation_responses']} "
+            f"name_matches:{state['character_creation_name_matches']} "
+            "appearance_matches:"
+            f"{state['character_creation_appearance_matches']} "
+            f"selections:{state['created_character_selections']} "
+            "selection_matches:"
+            f"{state['created_character_selection_matches']}"
         ),
         f"packet_shapes={json.dumps(packet_counts, sort_keys=True)}",
     ]

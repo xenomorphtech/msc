@@ -616,6 +616,20 @@ does not claim causality. Python remains warning-free and isolated native
 validation consumes all five records. Legacy stream `116` now retains only
 server opcodes `35/7` and client opcodes `10/16` as unknowns.
 
+The final four stream-`116` records form a capture-complete empty-list
+character-creation path plus one independent login prelude. Client opcode `10`
+contains a redacted counted name and eight redacted `uint32` values. Generated
+server opcode `7` reads result zero and its success body reuses the existing
+`InitialCharacterSnapshot` codec plus a compact appearance. The returned name
+and gender/face/hair/equipment fingerprint match the request at 271.948 ms.
+Client opcode `16` selects the returned id 3,994.739 ms later; the existing
+world handoff repeats that id after another 597.284 ms. Server opcode `35` is
+bounded separately as constants `0/1`, redacted seven-code-unit text, and a
+three-zero-byte suffix. The request's first value, response style values, and
+opcode-`35` role remain neutral. Python is warning-free and isolated native
+validation consumes all four, reducing both references and the active live
+login to zero unknown observations.
+
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
 prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
@@ -2093,3 +2107,7 @@ preserve distinct Unity scan codes in this setup.
 85. Replace five legacy stream-`116` unknowns with exact neutral codecs backed
     by generated server reads and capture-bounded client layouts, correlate the
     redacted opcode-`9`/`6` text echo, and reduce that stream to four unknowns.
+86. Decode the remaining stream-`116` quartet as one neutral prelude plus the
+    empty-list character-creation path, prove request/response appearance and
+    response/selection/handoff id continuity, and reach zero unknowns across
+    both references and the active live login.

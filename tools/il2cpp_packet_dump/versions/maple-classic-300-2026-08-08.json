@@ -274,7 +274,7 @@
     },
     {
       "name":"login_server_opcode_3_generated_record","direction":"server_to_client","opcode":3,"length":8,
-      "source":"packets.py:LoginServerOpcode3Record; generated handler baf480... direct u8/i32/bool reads plus 1-10FS stream 116",
+      "source":"packets.py:LoginServerOpcode3Record; generated handler baf4804a... direct u8/i32/bool reads plus 1-10FS stream 116",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":3},
         {"op":"read","name":"leading_value","kind":"u8"},
@@ -292,7 +292,7 @@
     },
     {
       "name":"login_server_opcode_390_u8","direction":"server_to_client","opcode":390,"length":3,
-      "source":"packets.py:LoginServerOpcode390Record; generated handler direct u8 read plus 1-10FS stream 116",
+      "source":"packets.py:LoginServerOpcode390Record; generated handler a728fad3... direct u8 read plus 1-10FS stream 116",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":390},
         {"op":"read","name":"neutral_value","kind":"u8"}
@@ -308,11 +308,82 @@
     },
     {
       "name":"login_server_opcode_6_text_record","direction":"server_to_client","opcode":6,
-      "source":"packets.py:LoginServerOpcode6TextRecord; generated handler direct UTF-16/u8 reads plus 1-10FS stream 116",
+      "source":"packets.py:LoginServerOpcode6TextRecord; generated handler ed3b67a8... direct UTF-16/u8 reads plus 1-10FS stream 116",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":6},
         {"op":"utf16","name":"opaque_text","trailing_zero":true},
         {"op":"read","name":"neutral_value","kind":"u8"}
+      ]
+    },
+    {
+      "name":"login_server_opcode_35_text_record","direction":"server_to_client","opcode":35,"length":24,
+      "source":"packets.py:LoginServerOpcode35Record; single capture-bounded login-prelude record from 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":35},
+        {"op":"read","name":"reserved_prefix_0","kind":"u8","equals":0},
+        {"op":"read","name":"prefix_marker","kind":"u8","equals":1},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"bytes","name":"reserved_suffix","length":3,"equals_hex":"000000"}
+      ]
+    },
+    {
+      "name":"client_opcode_10_character_creation_request","direction":"client_to_server","opcode":10,
+      "source":"packets.py:ClientOpcode10CharacterCreationRequest; single 1-10FS stream-116 request correlated with the opcode-7 returned name and appearance",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":10},
+        {"op":"utf16","name":"name","trailing_zero":true},
+        {"op":"read","name":"neutral_value_0","kind":"u32"},
+        {"op":"read","name":"neutral_value_1","kind":"u32"},
+        {"op":"read","name":"neutral_value_2","kind":"u32"},
+        {"op":"read","name":"neutral_value_3","kind":"u32"},
+        {"op":"read","name":"neutral_value_4","kind":"u32"},
+        {"op":"read","name":"neutral_value_5","kind":"u32"},
+        {"op":"read","name":"neutral_value_6","kind":"u32"},
+        {"op":"read","name":"neutral_value_7","kind":"u32"}
+      ]
+    },
+    {
+      "name":"server_opcode_7_character_creation_success","direction":"server_to_client","opcode":7,
+      "source":"packets.py:ServerOpcode7CharacterCreationResponse; generated handler f2861e8a... reads the result u8 and the sole 1-10FS stream-116 success body reuses InitialCharacterSnapshot plus a 49-byte compact appearance",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":7},
+        {"op":"read","name":"result","kind":"u8","equals":0},
+        {"op":"read","name":"character_id","kind":"u32"},
+        {"op":"read","name":"data_flags","kind":"u32"},
+        {"op":"utf16","name":"name","trailing_zero":true},
+        {"op":"read","name":"gender","kind":"u8"},
+        {"op":"read","name":"skin","kind":"u8"},
+        {"op":"read","name":"face_id","kind":"u32"},
+        {"op":"read","name":"hair_id","kind":"u32"},
+        {"op":"read","name":"companion_id","kind":"u64"},
+        {"op":"read","name":"level","kind":"u8"},
+        {"op":"read","name":"job_id","kind":"u16"},
+        {"op":"read","name":"strength","kind":"u16"},
+        {"op":"read","name":"dexterity","kind":"u16"},
+        {"op":"read","name":"intelligence","kind":"u16"},
+        {"op":"read","name":"luck","kind":"u16"},
+        {"op":"read","name":"current_hp","kind":"u16"},
+        {"op":"read","name":"max_hp","kind":"u16"},
+        {"op":"read","name":"current_mp","kind":"u16"},
+        {"op":"read","name":"max_mp","kind":"u16"},
+        {"op":"read","name":"ability_points","kind":"u16"},
+        {"op":"read","name":"skill_points","kind":"u16"},
+        {"op":"read","name":"experience","kind":"u32"},
+        {"op":"read","name":"fame","kind":"i16"},
+        {"op":"read","name":"map_id","kind":"u32"},
+        {"op":"read","name":"portal_index","kind":"u8"},
+        {"op":"read","name":"opaque_state_flag","kind":"u8"},
+        {"op":"read","name":"opaque_state_u64","kind":"u64"},
+        {"op":"bytes","name":"compact_appearance","length":49}
+      ]
+    },
+    {
+      "name":"client_opcode_16_created_character_selection","direction":"client_to_server","opcode":16,"length":7,
+      "source":"packets.py:ClientOpcode16CreatedCharacterSelection; single 1-10FS stream-116 record whose id matches opcode-7 creation and the next opcode-5 handoff",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":16},
+        {"op":"read","name":"reserved_zero","kind":"u8","equals":0},
+        {"op":"read","name":"character_id","kind":"u32"}
       ]
     },
     {

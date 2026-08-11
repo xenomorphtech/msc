@@ -524,6 +524,67 @@ class LoginServerOpcode6TextRecord:
 
 
 @dataclass(frozen=True)
+class LoginServerOpcode35Record:
+    """Single capture-bounded redacted login-prelude record."""
+
+    opaque_text: str = field(repr=False)
+    opcode: int = 35
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.opaque_text.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LoginServerOpcode35Record":
+        reader = PacketReader(payload, packet_name="login_server_opcode_35")
+        _expect_opcode(reader, 35)
+        if reader.u8("reserved_prefix_0") != 0:
+            raise PacketShapeError(
+                "login server opcode-35 prefix[0] must be zero"
+            )
+        if reader.u8("prefix_marker") != 1:
+            raise PacketShapeError(
+                "login server opcode-35 prefix marker must be one"
+            )
+        opaque_text = reader.utf16_string("opaque_text", trailing_byte=True)
+        if reader.bytes(3, "reserved_suffix") != b"\x00" * 3:
+            raise PacketShapeError(
+                "login server opcode-35 suffix must be three zero bytes"
+            )
+        reader.finish()
+        record = cls(opaque_text=opaque_text)
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.text_code_units != 7:
+            raise PacketShapeError(
+                "login server opcode-35 text must contain seven code units"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "prefix_constants": [0, 1],
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+            "reserved_suffix_zero": True,
+            "higher_level_role": "neutral",
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        if self.opcode != 35:
+            raise PacketShapeError(
+                "login server opcode-35 record opcode must be 35"
+            )
+        return (
+            struct.pack("<HBB", self.opcode, 0, 1)
+            + encode_utf16_string(self.opaque_text, trailing_byte=True)
+            + b"\x00" * 3
+        )
+
+
+@dataclass(frozen=True)
 class ChannelRecord:
     name: str
     population: int
@@ -1906,6 +1967,306 @@ class InitialCharacterSnapshot:
             raise PacketShapeError(
                 f"initial character snapshot field is out of range: {error}"
             ) from error
+
+
+@dataclass(frozen=True)
+class ClientOpcode10CharacterCreationRequest:
+    """Capture-correlated character-creation request with redacted values."""
+
+    name: str = field(repr=False)
+    neutral_values: tuple[int, ...] = field(repr=False)
+    opcode: int = 10
+
+    @property
+    def name_code_units(self) -> int:
+        return len(self.name.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode10CharacterCreationRequest":
+        reader = PacketReader(payload, packet_name="character_creation_request")
+        _expect_opcode(reader, 10)
+        request = cls(
+            name=reader.utf16_string("name", trailing_byte=True),
+            neutral_values=tuple(
+                reader.u32(f"neutral_values[{index}]") for index in range(8)
+            ),
+        )
+        reader.finish()
+        request._validate()
+        return request
+
+    def _validate(self) -> None:
+        if not self.name:
+            raise PacketShapeError("character creation request name cannot be empty")
+        if len(self.neutral_values) != 8:
+            raise PacketShapeError(
+                "character creation request must contain eight u32 values"
+            )
+        if any(not 0 <= value <= 0xFFFF_FFFF for value in self.neutral_values):
+            raise PacketShapeError(
+                "character creation request neutral value must fit u32"
+            )
+
+    def appearance_fingerprint(self) -> tuple[int, ...]:
+        return self.neutral_values[1:]
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "name_code_units": self.name_code_units,
+            "name_redacted": True,
+            "neutral_u32_values": len(self.neutral_values),
+            "neutral_values_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        if self.opcode != 10:
+            raise PacketShapeError(
+                "character creation request opcode must be 10"
+            )
+        return (
+            struct.pack("<H", self.opcode)
+            + encode_utf16_string(self.name, trailing_byte=True)
+            + struct.pack("<8I", *self.neutral_values)
+        )
+
+
+@dataclass(frozen=True)
+class CharacterCreationAppearance:
+    """Compact appearance suffix in the captured creation response."""
+
+    gender: int
+    skin: int
+    face_id: int
+    visible_entries: tuple[CharacterLookEntry, ...]
+    masked_entries: tuple[CharacterLookEntry, ...]
+    cash_weapon_id: int
+    opaque_style_values: tuple[int, int, int] = field(repr=False)
+
+    @classmethod
+    def parse_from(cls, reader: PacketReader) -> "CharacterCreationAppearance":
+        appearance = cls(
+            gender=reader.u8("creation_appearance.gender"),
+            skin=reader.u8("creation_appearance.skin"),
+            face_id=reader.u32("creation_appearance.face_id"),
+            visible_entries=CharacterListAppearance._parse_entries(
+                reader, field="creation_appearance.visible_entries"
+            ),
+            masked_entries=CharacterListAppearance._parse_entries(
+                reader, field="creation_appearance.masked_entries"
+            ),
+            cash_weapon_id=reader.u32("creation_appearance.cash_weapon_id"),
+            opaque_style_values=tuple(
+                reader.u32(f"creation_appearance.opaque_style_values[{index}]")
+                for index in range(3)
+            ),
+        )
+        appearance._validate()
+        return appearance
+
+    @property
+    def hair_id(self) -> int | None:
+        return next(
+            (entry.item_id for entry in self.visible_entries if entry.slot == 0),
+            None,
+        )
+
+    def request_fingerprint(self) -> tuple[int, ...]:
+        equipment_ids = tuple(
+            entry.item_id for entry in self.visible_entries if entry.slot != 0
+        )
+        return (self.gender, self.face_id, self.hair_id or 0, *equipment_ids)
+
+    def _validate(self) -> None:
+        if self.gender not in (0, 1):
+            raise PacketShapeError(
+                "character creation appearance gender must be zero or one"
+            )
+        if not 0 <= self.skin <= 0xFF:
+            raise PacketShapeError(
+                "character creation appearance skin must fit u8"
+            )
+        if not 1 <= self.face_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "character creation appearance face id must be nonzero u32"
+            )
+        if len(self.opaque_style_values) != 3:
+            raise PacketShapeError(
+                "character creation appearance must contain three style values"
+            )
+        for entries in (self.visible_entries, self.masked_entries):
+            slots = [entry.slot for entry in entries]
+            if len(slots) != len(set(slots)):
+                raise PacketShapeError(
+                    "character creation appearance slots repeat"
+                )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return b"".join(
+                (
+                    struct.pack("<BBI", self.gender, self.skin, self.face_id),
+                    *(entry.to_bytes() for entry in self.visible_entries),
+                    b"\xff",
+                    *(entry.to_bytes() for entry in self.masked_entries),
+                    b"\xff",
+                    struct.pack("<I", self.cash_weapon_id),
+                    struct.pack("<3I", *self.opaque_style_values),
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"character creation appearance field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ServerOpcode7CharacterCreationResponse:
+    """Generated-branch-backed character-creation response."""
+
+    result: int
+    snapshot: InitialCharacterSnapshot | None = None
+    appearance: CharacterCreationAppearance | None = None
+    failure_payload: bytes = field(default=b"", repr=False)
+    opcode: int = 7
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ServerOpcode7CharacterCreationResponse":
+        reader = PacketReader(payload, packet_name="character_creation_response")
+        _expect_opcode(reader, 7)
+        result = reader.u8("result")
+        if result != 0:
+            response = cls(
+                result=result,
+                failure_payload=reader.bytes(reader.remaining, "failure_payload"),
+            )
+            reader.finish()
+            return response
+        response = cls(
+            result=result,
+            snapshot=InitialCharacterSnapshot.parse_from(reader),
+            appearance=CharacterCreationAppearance.parse_from(reader),
+        )
+        reader.finish()
+        response._validate()
+        return response
+
+    def _validate(self) -> None:
+        if not 0 <= self.result <= 0xFF:
+            raise PacketShapeError("character creation response result must fit u8")
+        if self.result != 0:
+            if self.snapshot is not None or self.appearance is not None:
+                raise PacketShapeError(
+                    "failed character creation response cannot carry a record"
+                )
+            return
+        if self.failure_payload:
+            raise PacketShapeError(
+                "successful character creation response cannot carry failure bytes"
+            )
+        if self.snapshot is None or self.appearance is None:
+            raise PacketShapeError(
+                "successful character creation response requires a record"
+            )
+        expected = (
+            self.snapshot.gender,
+            self.snapshot.skin,
+            self.snapshot.face_id,
+            self.snapshot.hair_id,
+        )
+        actual = (
+            self.appearance.gender,
+            self.appearance.skin,
+            self.appearance.face_id,
+            self.appearance.hair_id,
+        )
+        if actual != expected:
+            raise PacketShapeError(
+                "character creation appearance does not match its snapshot"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        details: dict[str, object] = {
+            "result": self.result,
+            "success": self.result == 0,
+        }
+        if self.result != 0:
+            details["failure_payload_bytes"] = len(self.failure_payload)
+            return details
+        assert self.snapshot is not None
+        assert self.appearance is not None
+        details.update(
+            {
+                "character_id_present": True,
+                "name_code_units": len(self.snapshot.name.encode("utf-16-le")) // 2,
+                "name_redacted": True,
+                "level": self.snapshot.level,
+                "job_id": self.snapshot.job_id,
+                "visible_equipment_count": len(
+                    self.appearance.visible_entries
+                ),
+                "masked_equipment_count": len(
+                    self.appearance.masked_entries
+                ),
+                "style_values_redacted": True,
+            }
+        )
+        return details
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        if self.opcode != 7:
+            raise PacketShapeError(
+                "character creation response opcode must be 7"
+            )
+        prefix = struct.pack("<HB", self.opcode, self.result)
+        if self.result != 0:
+            return prefix + self.failure_payload
+        assert self.snapshot is not None
+        assert self.appearance is not None
+        return prefix + self.snapshot.to_bytes() + self.appearance.to_bytes()
+
+
+@dataclass(frozen=True)
+class ClientOpcode16CreatedCharacterSelection:
+    """Capture-correlated selection of the newly created character."""
+
+    character_id: int = field(repr=False)
+    opcode: int = 16
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode16CreatedCharacterSelection":
+        reader = PacketReader(payload, packet_name="created_character_selection")
+        _expect_opcode(reader, 16)
+        if reader.u8("reserved_zero") != 0:
+            raise PacketShapeError(
+                "created character selection reserved byte must be zero"
+            )
+        selection = cls(character_id=reader.u32("character_id"))
+        reader.finish()
+        if selection.character_id == 0:
+            raise PacketShapeError(
+                "created character selection id cannot be zero"
+            )
+        return selection
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "reserved_zero": True,
+            "character_id_present": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 16:
+            raise PacketShapeError(
+                "created character selection opcode must be 16"
+            )
+        if not 1 <= self.character_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "created character selection id must be nonzero u32"
+            )
+        return struct.pack("<HBI", self.opcode, 0, self.character_id)
 
 
 INITIAL_ITEM_SENTINEL_TICKS = 94_354_848_000_000_000

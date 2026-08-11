@@ -2406,6 +2406,13 @@ project's own `README.md` for all options.
   preceding client opcode-`9` text after 235.214 ms; the opcode-`255`/`390`
   adjacency remains non-causal. All retained values/text stay redacted. Four
   unknowns remain: server `35/7` and client `10/16`.
+- The final stream-`116` quartet is now exact. An empty character list leads to
+  client opcode `10`; server opcode `7` returns an existing typed character
+  snapshot whose redacted name and appearance fingerprint match the request.
+  Client opcode `16` and the next world handoff repeat the returned id. Server
+  opcode `35` is kept as a neutral redacted prelude record. Native validation
+  consumes all four, so both references and the active live login now have zero
+  unknown observations.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

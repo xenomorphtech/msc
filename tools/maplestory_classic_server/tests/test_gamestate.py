@@ -20,11 +20,14 @@ from maple_server.packets import (  # noqa: E402
     ChannelRecord,
     ChannelSelection,
     ChannelTransitionResponse,
+    CharacterCreationAppearance,
     CharacterListAppearance,
     CharacterListEnvelope,
     CharacterListRecord,
     CharacterLookEntry,
     CharacterSelection,
+    ClientOpcode10CharacterCreationRequest,
+    ClientOpcode16CreatedCharacterSelection,
     ClientOpcode274OpaqueTextRecord,
     ClientOpcode6RecordSet,
     ClientOpcode31Record,
@@ -36,6 +39,7 @@ from maple_server.packets import (  # noqa: E402
     LoginClientOpcode9TextRecord,
     LoginServerFixedRecord,
     LoginServerOpcode3Record,
+    LoginServerOpcode35Record,
     LoginServerOpcode390Record,
     LoginServerOpcode6TextRecord,
     PacketShapeError,
@@ -47,6 +51,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode27IntegerLedgerEntry,
     ServerOpcode28TextLedger,
     ServerOpcode28TextLedgerEntry,
+    ServerOpcode7CharacterCreationResponse,
     ServerTime,
     WorldHandoff,
     WorldListEnd,
@@ -165,6 +170,50 @@ def fixture_character_list() -> CharacterListEnvelope:
         trailer_u8_2=1,
         trailer_u32=3,
     )
+
+
+def fixture_character_creation_records() -> tuple[
+    ClientOpcode10CharacterCreationRequest,
+    ServerOpcode7CharacterCreationResponse,
+    ClientOpcode16CreatedCharacterSelection,
+]:
+    snapshot = fixture_character_list().records[0].snapshot
+    equipment = (
+        CharacterLookEntry(slot=5, item_id=1_041_006),
+        CharacterLookEntry(slot=6, item_id=1_061_002),
+        CharacterLookEntry(slot=7, item_id=1_072_037),
+        CharacterLookEntry(slot=11, item_id=1_302_000),
+    )
+    request = ClientOpcode10CharacterCreationRequest(
+        name=snapshot.name,
+        neutral_values=(
+            1,
+            snapshot.gender,
+            snapshot.face_id,
+            snapshot.hair_id,
+            *(entry.item_id for entry in equipment),
+        ),
+    )
+    response = ServerOpcode7CharacterCreationResponse(
+        result=0,
+        snapshot=snapshot,
+        appearance=CharacterCreationAppearance(
+            gender=snapshot.gender,
+            skin=snapshot.skin,
+            face_id=snapshot.face_id,
+            visible_entries=(
+                CharacterLookEntry(slot=0, item_id=snapshot.hair_id),
+                *equipment,
+            ),
+            masked_entries=(),
+            cash_weapon_id=0,
+            opaque_style_values=(5_000_046, 0, 0),
+        ),
+    )
+    selection = ClientOpcode16CreatedCharacterSelection(
+        character_id=snapshot.character_id
+    )
+    return request, response, selection
 
 
 def fixture_login_transcript(
@@ -296,6 +345,40 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_legacy_character_creation_cluster_round_trip_and_redact(self) -> None:
+        request, response, selection = fixture_character_creation_records()
+        opcode_35 = LoginServerOpcode35Record(opaque_text="private")
+
+        self.assertEqual(
+            LoginServerOpcode35Record.parse(opcode_35.to_bytes()), opcode_35
+        )
+        self.assertEqual(
+            ClientOpcode10CharacterCreationRequest.parse(request.to_bytes()),
+            request,
+        )
+        self.assertEqual(
+            ServerOpcode7CharacterCreationResponse.parse(response.to_bytes()),
+            response,
+        )
+        self.assertEqual(
+            ClientOpcode16CreatedCharacterSelection.parse(selection.to_bytes()),
+            selection,
+        )
+        assert response.appearance is not None
+        self.assertEqual(
+            request.appearance_fingerprint(),
+            response.appearance.request_fingerprint(),
+        )
+        safe = [
+            opcode_35.safe_dict(),
+            request.safe_dict(),
+            response.safe_dict(),
+            selection.safe_dict(),
+        ]
+        self.assertNotIn("private", str(safe))
+        self.assertNotIn(request.name, str(safe))
+        self.assertNotIn(str(selection.character_id), str(safe))
+
     def test_legacy_login_record_cluster_round_trip_and_redact(self) -> None:
         server_3 = LoginServerOpcode3Record(
             leading_value=0,
@@ -664,6 +747,54 @@ class GameStateFoldTest(unittest.TestCase):
         self.assertNotIn("test", str(observation.details))
         self.assertIn(
             "local_account_bootstrap_probes=1",
+            render_login_analysis(analysis),
+        )
+
+    def test_folds_legacy_character_creation_cluster(self) -> None:
+        request, response, selection = fixture_character_creation_records()
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(
+                legacy_login_records=(
+                    (
+                        "server_to_client",
+                        LoginServerOpcode35Record(
+                            opaque_text="private"
+                        ).to_bytes(),
+                    ),
+                    ("client_to_server", request.to_bytes()),
+                    ("server_to_client", response.to_bytes()),
+                    ("client_to_server", selection.to_bytes()),
+                )
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertFalse(analysis.warnings)
+        self.assertEqual(analysis.state.login_server_opcode_35_records, 1)
+        self.assertEqual(analysis.state.character_creation_requests, 1)
+        self.assertEqual(analysis.state.character_creation_responses, 1)
+        self.assertEqual(analysis.state.character_creation_name_matches, 1)
+        self.assertEqual(
+            analysis.state.character_creation_appearance_matches, 1
+        )
+        self.assertEqual(analysis.state.created_character_selections, 1)
+        self.assertEqual(
+            analysis.state.created_character_selection_matches, 1
+        )
+        creation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "character_creation_response"
+        )
+        self.assertTrue(creation.details["request_name_match"])
+        self.assertTrue(creation.details["request_appearance_match"])
+        self.assertNotIn("private", str(analysis.safe_dict()))
+        self.assertNotIn(request.name, str(analysis.safe_dict()))
+        self.assertNotIn(str(selection.character_id), str(analysis.safe_dict()))
+        self.assertIn(
+            "legacy_character_creation=server35:1 requests:1 responses:1 "
+            "name_matches:1 appearance_matches:1 selections:1 "
+            "selection_matches:1",
             render_login_analysis(analysis),
         )
 

@@ -1156,6 +1156,20 @@ ms, with no causal claim. Python is warning-free and isolated native validation
 consumes all five records. Four legacy unknowns remain: server `35/7` and client
 `10/16`.
 
+Those last four legacy records are now exact as well. Stream `116` advertises
+an empty character list, then client opcode `10` submits a redacted counted name
+and eight redacted `uint32` values. Generated server opcode `7` reads a result
+byte and the successful capture reuses the existing `InitialCharacterSnapshot`
+codec plus a compact appearance. Its name and seven-field
+gender/face/hair/equipment fingerprint match the request after 271.948 ms.
+Client opcode `16` repeats the created character id after 3,994.739 ms, and the
+existing world handoff repeats it after another 597.284 ms. Server opcode `35`
+is independently bounded to constants `0/1`, redacted seven-code-unit text, and
+a three-zero-byte suffix; its higher-level pre-account role remains neutral.
+Python is warning-free and isolated native validation consumes all four. Both
+reference login streams and the active live transcript now have zero unknown
+packet observations.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.

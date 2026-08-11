@@ -68,8 +68,12 @@ server 0   bootstrap/login prelude
 server 0   local 36-byte diagnostic account-prefix probe
 server 3   redacted u8/i32/bool record
 server 6   redacted trailing-zero UTF-16 plus uint8 record
+server 7   successful character-creation snapshot and compact appearance
+server 35  redacted login-prelude text record
 server 390 redacted uint8 record
 client 9   redacted trailing-zero UTF-16 record
+client 10  character-creation name plus eight redacted uint32 values
+client 16  select the newly created character
 client 255 redacted uint32 record
 server 10  empty heartbeat probe
 client 6   redacted indexed record set
@@ -117,6 +121,19 @@ trailing-zero counted UTF-16 field. The opcode-`6` text exactly echoes the
 preceding opcode-`9` text after 235.214 ms. Opcode `390` follows client opcode
 `255` after 238.384 ms, but that adjacency is not treated as causal. Safe output
 publishes only widths, text length, boolean state, and echo/timing evidence.
+
+Legacy stream `116` then exercises a complete empty-list character-creation
+path. Client opcode `10` contains one redacted counted name and eight redacted
+`uint32` values. After 271.948 ms, generated server opcode `7` reads result zero
+and delegates to a body that exactly reuses `InitialCharacterSnapshot` followed
+by the captured compact appearance. The response name and its
+gender/face/hair/equipment fingerprint exactly match the request. Client opcode
+`16` repeats the new character id 3,994.739 ms later, and the existing opcode-`5`
+world handoff repeats it again after 597.284 ms. The request's first `uint32`,
+the response's three style values, and opcode-`16`'s zero-byte role remain
+neutral. The separate server opcode-`35` prelude is capture-bounded as constants
+`0/1`, one redacted seven-code-unit text field, and a three-byte zero suffix.
+Together these records reduce successful stream `116` to zero unknown packets.
 
 The login fold now reuses the world transport heartbeat shapes: server opcode
 `10` is exactly two bytes and client opcode `23` is exactly ten bytes, carrying
