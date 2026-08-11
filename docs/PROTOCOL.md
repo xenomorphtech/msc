@@ -2206,7 +2206,7 @@ emitted opcode `185`. Runtime status therefore reports only that the owner
 fields match the initial player and predicts that additional client conditions
 are required; it does not claim that the rewritten drop is pickup-eligible.
 
-## Item pickup (`client 185` -> `server 39/41`, `server 49`, `server 312`)
+## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 
 The capture-validated client request has a 23-byte base form and a 35-byte
 extended form:
@@ -2228,6 +2228,31 @@ equals the fold's current field epoch, the ticks preserve request ordering, and
 all 54 packets round-trip. Normal reports replace `drop_object_id` with a
 field-local `drop:N` alias, expose only token presence, and report the optional
 proof length rather than its bytes.
+
+Stream `126` adds six exact 19-byte opcode-`222` requests that omit only the
+opcode-`185` control word and optional-proof branch:
+
+```text
+uint16 opcode = 222
+uint8  field_epoch
+uint32 client_tick
+int16  position_x
+int16  position_y
+uint32 drop_object_id
+uint32 item_validation_token = 0       # role remains neutral
+```
+
+One request carries field epoch `8`; the five-request burst carries epoch `9`.
+Every epoch equals folded state, the ticks and signed positions track the local
+player, and all six object ids resolve to active same-epoch drops. Each request
+matches its opcode-`39` inventory or opcode-`41` mesos effect, opcode-`49` gain
+notice, and exact-id opcode-`312` removal. All six removals use captured reason
+`2`, while the opcode-`185` local chains use reason `5`; the source and
+behavioral meaning of that shape/reason distinction remain neutral. The fold
+therefore validates all 203 long-corpus pickup chains with zero unknown drops,
+epoch/effect/result/removal mismatches, or pending requests. Safe output adds a
+`compact` shape/counter while continuing to alias runtime drop ids and omit the
+validation token itself.
 
 The corresponding short server opcode-`49` records have three exact variants:
 
@@ -2283,8 +2308,11 @@ an Etc quantity delta of one and an item gain notice quantity of one. The
 reactive policy therefore accepts only a known active item drop, the current
 field epoch, a deterministic captured template effect, and exactly one
 existing stack with capacity. It emits opcodes `39`, `49`, and `312` in that
-order and removes the drop from mutable state. Mesos pickups, special results,
-new-slot insertion, ambiguous stacks, and unknown templates remain rejected.
+order and removes the drop from mutable state. The response mirrors the
+request form: opcode `185` receives the captured 15-byte reason-`5` removal,
+while opcode `222` receives the captured 11-byte reason-`2` removal. Mesos
+pickups, special results, new-slot insertion, ambiguous stacks, and unknown
+templates remain rejected.
 Runtime annotations record pickup request, completed response, or rejection;
 an exact rejection consumes its matching pending request without disconnecting
 the client. An annotation without a matching observed request is invalid.
@@ -3377,23 +3405,24 @@ transcript metadata. The resulting session contains 71,100 decrypted frames
 (31,345 client and 39,755 server), one marker-`26` initial snapshot, 35 later
 field snapshots, 841 stat updates, 256 inventory change sets, 78 direct NPC
 spawns, 36 NPC lifecycle spawns,
-436 drop-spawn packets, 197 pickup requests, eight skill-level requests, nine
+436 drop-spawn packets, 203 pickup requests, eight skill-level requests, nine
 skill-record updates, and nine skill-record acknowledgements.
 
-All 197 pickup requests resolve to a known active drop, match their field
-epoch after the marker-`26` initial snapshot is folded, and target a final
-mode-`0` spawn whose two owner words equal the initial player id. The four
-mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
+All 203 pickup requests resolve to a known active drop and match their field
+epoch after the marker-`26` initial snapshot is folded. The 197 opcode-`185`
+requests also target a final mode-`0` spawn whose two owner words equal the
+initial player id. The four mode-`2` field-load mesos records are exact 30-byte
+shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,661
-full, 44,430 partial, 9 unknown-but-lossless, and zero invalid packet
+full, 44,436 partial, 3 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
 2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
-modifications; its seven remaining warnings are cross-packet state
-correlations: six pickup-effect mismatches plus one aggregate warning for six
-delayed combat predictions that differ by one HP. That warning also records the
+modifications; its one remaining warning is a cross-packet state correlation:
+an aggregate warning for six delayed combat predictions that differ by one
+HP. That warning also records the
 `{-1: 1, +1: 5}` inferred damage-delta histogram and that all six lack an
 intervening modeled relay hit.
 
@@ -3428,9 +3457,9 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 ## Current unknowns
 
 - Gameplay framing is complete for short stream `114`. Stream `92` retains two
-  22-byte client opcode-`115` packets. Long stream `126` retains nine client
-  packets across opcode/length/count tuples `64/10/2`, `111/8/1`, and
-  `222/19/6`; all remain losslessly framed but semantically unmodeled.
+  22-byte client opcode-`115` packets. Long stream `126` retains three client
+  packets across opcode/length/count tuples `64/10/2` and `111/8/1`; all
+  remain losslessly framed but semantically unmodeled.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.

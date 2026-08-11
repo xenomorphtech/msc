@@ -3830,9 +3830,9 @@ class ItemUseRequest:
 
 @dataclass(frozen=True)
 class ItemPickupRequest:
-    """Client request to collect one field drop."""
+    """Client request to collect one field drop in full or compact form."""
 
-    control_value: int
+    control_value: int | None
     field_epoch: int
     client_tick: int
     position_x: int
@@ -3845,18 +3845,28 @@ class ItemPickupRequest:
     @classmethod
     def parse(cls, payload: bytes) -> "ItemPickupRequest":
         reader = PacketReader(payload, packet_name="item_pickup_request")
-        _expect_opcode(reader, 185)
-        control_value = reader.u32("control_value")
+        opcode = reader.u16("opcode")
+        if opcode not in {185, 222}:
+            raise PacketShapeError(
+                f"item-pickup opcode is {opcode}, expected 185 or 222"
+            )
+        control_value = (
+            reader.u32("control_value") if opcode == 185 else None
+        )
         field_epoch = reader.u8("field_epoch")
         client_tick = reader.u32("client_tick")
         position_x = reader.i16("position_x")
         position_y = reader.i16("position_y")
         drop_object_id = reader.u32("drop_object_id")
         item_validation_token = reader.u32("item_validation_token")
-        if reader.remaining not in {0, 12}:
-            raise PacketShapeError(
-                "item_pickup_request optional proof must be absent or 12 bytes"
+        allowed_proof_lengths = {0, 12} if opcode == 185 else {0}
+        if reader.remaining not in allowed_proof_lengths:
+            message = (
+                "item-pickup optional proof must be absent or 12 bytes"
+                if opcode == 185
+                else "compact item-pickup request cannot include optional proof"
             )
+            raise PacketShapeError(message)
         optional_proof = reader.bytes(reader.remaining, "optional_proof")
         reader.finish()
         return cls(
@@ -3868,9 +3878,16 @@ class ItemPickupRequest:
             drop_object_id=drop_object_id,
             item_validation_token=item_validation_token,
             optional_proof=optional_proof,
+            opcode=opcode,
         )
 
-    def safe_dict(self) -> dict[str, int | bool]:
+    @property
+    def shape_name(self) -> str:
+        if self.opcode == 222:
+            return "compact"
+        return "extended" if self.optional_proof else "base"
+
+    def safe_dict(self) -> dict[str, object]:
         return {
             "control_value": self.control_value,
             "field_epoch": self.field_epoch,
@@ -3882,8 +3899,19 @@ class ItemPickupRequest:
         }
 
     def to_bytes(self) -> bytes:
-        if not 0 <= self.control_value <= 0xFFFF_FFFF:
-            raise PacketShapeError("item-pickup control value must fit in u32")
+        if self.opcode not in {185, 222}:
+            raise PacketShapeError("item-pickup opcode must be 185 or 222")
+        if self.opcode == 185:
+            if self.control_value is None or not (
+                0 <= self.control_value <= 0xFFFF_FFFF
+            ):
+                raise PacketShapeError(
+                    "full item-pickup control value must fit in u32"
+                )
+        elif self.control_value is not None:
+            raise PacketShapeError(
+                "compact item-pickup request cannot include a control value"
+            )
         if not 0 <= self.field_epoch <= 0xFF:
             raise PacketShapeError("item-pickup field epoch must fit in u8")
         if not 0 <= self.client_tick <= 0xFFFF_FFFF:
@@ -3900,14 +3928,19 @@ class ItemPickupRequest:
         ):
             if not 0 <= value <= 0xFFFF_FFFF:
                 raise PacketShapeError(f"item-pickup {name} must fit in u32")
-        if len(self.optional_proof) not in {0, 12}:
-            raise PacketShapeError(
+        allowed_proof_lengths = {0, 12} if self.opcode == 185 else {0}
+        if len(self.optional_proof) not in allowed_proof_lengths:
+            message = (
                 "item-pickup optional proof must be absent or 12 bytes"
+                if self.opcode == 185
+                else "compact item-pickup request cannot include optional proof"
             )
-        return struct.pack(
-            "<HIBIhhII",
-            self.opcode,
-            self.control_value,
+            raise PacketShapeError(message)
+        prefix = struct.pack("<H", self.opcode)
+        if self.control_value is not None:
+            prefix += struct.pack("<I", self.control_value)
+        return prefix + struct.pack(
+            "<BIhhII",
             self.field_epoch,
             self.client_tick,
             self.position_x,

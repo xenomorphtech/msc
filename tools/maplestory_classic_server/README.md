@@ -358,8 +358,9 @@ the initial snapshot. The two rewrites may be composed on the same frame. The
 owner rewrite does not assert pickup eligibility: live owner-only and
 captured-shaped animated-drop probes both produced zero opcode-`185` requests.
 Pair the position rewrite with
-`--reactive-item-pickup-responses` to handle a real client opcode-`185`
-request from modeled state. Pickup quantities and inventory targets must come
+`--reactive-item-pickup-responses` to handle a real client opcode-`185` or
+compact opcode-`222` request from modeled state. Pickup quantities and
+inventory targets must come
 from validated evidence in the replay itself or from
 `--item-pickup-evidence-transcript`; when replaying a PCAP, another stream in
 that file can be selected with `--item-pickup-evidence-tcp-stream`. The policy
@@ -437,7 +438,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
-44,430 partial, 9 unknown, and zero invalid packet observations. PCAP
+44,436 partial, 3 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
@@ -467,9 +468,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `80`: a 12-byte Use-item request containing client tick, signed
   slot, and item template; the fold correlates it with the following opcode-`39`
   quantity change and captured opcode-`41` potion effect,
-- client opcode `185`: 23-byte and 35-byte item-pickup requests containing the
-  folded field epoch, client tick, position, aliased drop id, neutral validation
-  token, and optional 12-byte proof,
+- client opcodes `185`/`222`: 23-/35-byte full and 19-byte compact item-pickup
+  requests containing the folded field epoch, client tick, position, aliased
+  drop id, neutral validation token, and an opcode-`185` optional proof; all
+  203 long-corpus requests complete their effect/result/removal chain,
 - server opcode `311`: 44-byte animated item, 36-byte animated mesos, 38-byte
   field-load item, and 30-byte field-load mesos drop spawns; the fold tracks
   mode-`1`/mode-`0` refresh pairs, source mobs, ownership-neutral fields, and
@@ -892,6 +894,17 @@ effect/result checks and all 54 removals match, with no pending requests. The
 100 opcode-`312` packets divide into 25 drop-only, 10 actor-bearing, and 65
 actor-plus-tail records; 54 of the last group are the local correlated pickups
 and 11 belong to other actors. Actor and reason roles remain neutral.
+
+Long stream `126` adds six opcode-`222` compact pickup requests. Their exact
+19-byte form removes the opcode-`185` control word and proof branch but retains
+the field epoch, client tick, signed position, runtime drop id, and neutral
+validation token. All six epochs and drop ids match folded active state, and
+every request matches its opcode-`39` inventory or opcode-`41` mesos effect,
+opcode-`49` result, and exact-id opcode-`312` removal. Compact removals use
+captured reason `2` while opcode-`185` local removals use reason `5`; no source
+meaning is assigned from that distinction. Combined long-corpus pickup
+telemetry is 203 requests and 203 complete chains with zero mismatches or
+pending requests.
 
 Opcode `311` closes the previously missing boundary. Stream `92` contains 125
 spawn packets for 66 unique drops: 59 exact mode-`1`/mode-`0` pairs and seven
@@ -1788,3 +1801,9 @@ preserve distinct Unity scan codes in this setup.
     redact all header/group/pair values, validate both exact branches, remove
     the live transcript's final unknown, and reduce stream `126` to nine
     unknown packets without assigning a higher-level opcode role.
+70. Decode all six client opcode-`222` compact pickup requests, prove their
+    field epochs and drop ids against folded active state, correlate every
+    inventory/mesos effect, gain notice, and reason-`2` exact-id removal,
+    validate Python/Rust exact consumption, eliminate the six pickup-chain
+    warnings, and reduce stream `126` to three unknown packets without naming
+    the compact/full source distinction.

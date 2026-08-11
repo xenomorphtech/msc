@@ -586,6 +586,7 @@ class GameplayGameState:
     item_use_policy_rejections: int = 0
     pending_item_uses: int = 0
     item_pickup_requests: int = 0
+    item_pickup_compact_requests: int = 0
     item_pickup_base_requests: int = 0
     item_pickup_extended_requests: int = 0
     item_pickup_field_epoch_matches: int = 0
@@ -1934,10 +1935,10 @@ class ItemPickupResponsePolicy:
             quantity=quantity_delta,
         )
         removal = FieldDropRemoval(
-            reason=5,
+            reason=2 if request.opcode == 222 else 5,
             drop_object_id=request.drop_object_id,
             actor_id=drop.spawn.owner_value_1,
-            trailing_value=0,
+            trailing_value=None if request.opcode == 222 else 0,
         )
         plan = ItemPickupResponsePlan(
             request=request,
@@ -3598,6 +3599,9 @@ class GameplayAnalysis:
                 ),
                 "pending_item_uses": self.state.pending_item_uses,
                 "item_pickup_requests": self.state.item_pickup_requests,
+                "item_pickup_compact_requests": (
+                    self.state.item_pickup_compact_requests
+                ),
                 "item_pickup_base_requests": (
                     self.state.item_pickup_base_requests
                 ),
@@ -5421,7 +5425,7 @@ class GameplayStateFold:
                     "captured potion templates remain neutral",
                 ),
             )
-        if opcode == 185:
+        if opcode in {185, 222}:
             request = ItemPickupRequest.parse(payload)
             alias = self._alias(
                 self._drop_aliases, request.drop_object_id, "drop"
@@ -5433,7 +5437,9 @@ class GameplayStateFold:
                 self.state.item_pickup_known_drops += 1
             epoch_matches = request.field_epoch == self.state.field_epoch
             self.state.item_pickup_requests += 1
-            if request.optional_proof:
+            if request.opcode == 222:
+                self.state.item_pickup_compact_requests += 1
+            elif request.optional_proof:
                 self.state.item_pickup_extended_requests += 1
             else:
                 self.state.item_pickup_base_requests += 1
@@ -5460,6 +5466,7 @@ class GameplayStateFold:
             )
             self.state.pending_item_pickups += 1
             details: dict[str, object] = {
+                "shape": request.shape_name,
                 **request.safe_dict(),
                 "drop": alias,
                 "known_drop": drop is not None,
@@ -5484,8 +5491,12 @@ class GameplayStateFold:
                 parsed=request,
                 details=details,
                 issues=(
-                    "pickup control, validation token, and optional proof "
-                    "semantics remain neutral",
+                    (
+                        "pickup validation-token semantics remain neutral"
+                        if request.opcode == 222
+                        else "pickup control, validation token, and optional "
+                        "proof semantics remain neutral"
+                    ),
                 ),
             )
         if opcode == 47:
@@ -7439,14 +7450,18 @@ class GameplayStateFold:
             if removal.actor_id is not None:
                 identifiers["actor_id"] = removal.actor_id
             if pending is not None:
+                expected_removal_reason = (
+                    2 if pending.request.opcode == 222 else 5
+                )
                 removal_matches = (
                     pending.result_confirmed
-                    and removal.reason == 5
+                    and removal.reason == expected_removal_reason
                 )
                 details.update(
                     {
                         "request_frame": pending.request_frame_index,
                         "result_confirmed": pending.result_confirmed,
+                        "expected_removal_reason": expected_removal_reason,
                         "pickup_removal_matches": removal_matches,
                         "response_ms": round(
                             (
@@ -12152,6 +12167,7 @@ def render_gameplay_analysis(
         ),
         (
             f"item_pickup=requests:{state.item_pickup_requests} "
+            f"compact:{state.item_pickup_compact_requests} "
             f"base:{state.item_pickup_base_requests} "
             f"extended:{state.item_pickup_extended_requests} "
             f"epoch_matches:{state.item_pickup_field_epoch_matches} "

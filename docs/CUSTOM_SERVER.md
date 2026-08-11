@@ -78,11 +78,11 @@ python -m maple_server analyze-gameplay \
 Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
-all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,661 observations are full, 44,430 partial, 9
-unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
-not shape failures: six pickup-effect mismatches and one aggregate warning for
-six delayed combat predictions that differ by one HP.
+all 203 pickup requests against known drops and matching epochs. It now passes
+`--fail-on-invalid`: 26,661 observations are full, 44,436 partial, 3
+unknown-but-lossless, and none invalid. One state-correlation warning remains,
+not a shape failure: the aggregate warning for six delayed combat predictions
+that differ by one HP.
 The opcode-`158` stage-`0` variant keeps its
 neutral word `1` and nine-byte tail as partial semantic coverage.
 
@@ -172,6 +172,21 @@ compact/grouped shape, group count, pair count, and field epoch. Python and
 isolated native validation exact-consume both branches. Header, group-selector,
 pair, and higher-level opcode roles remain neutral. The long corpus advances to
 `26,661/44,430/9/0`.
+
+Client opcode `222` is now the compact branch of the existing item-pickup
+request. Its six exact 19-byte stream-`126` records omit the opcode-`185`
+control word and proof branch while retaining field epoch, client tick, signed
+position, runtime drop id, and neutral validation token. All six epochs match
+folded state, all drop ids resolve to active drops, and every request completes
+the authoritative opcode-`39` inventory or opcode-`41` mesos effect,
+opcode-`49` result, and exact-id opcode-`312` removal. Compact removals use
+captured reason `2`; full opcode-`185` local removals use reason `5`, but the
+behavioral source of that distinction remains neutral. Safe state exposes only
+the `compact` counter/shape and a field-local drop alias. Python and native
+codecs exact-consume all six records. The long fold now validates 203/203
+pickup chains with no epoch, drop, effect, result, removal, or pending mismatch,
+reduces its warning set from seven to the single unrelated one-HP combat
+aggregate, and advances to `26,661/44,436/3/0`.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
@@ -556,7 +571,7 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,661 full, 44,430 partial, 9 unknown-but-lossless, and zero invalid. Stream
+26,661 full, 44,436 partial, 3 unknown-but-lossless, and zero invalid. Stream
 `92` now reaches 13,417 full, 21,788 partial, 2 unknown, and zero invalid;
 stream `114` reaches 54/22/0/0.
 
@@ -1345,7 +1360,9 @@ one existing stack with capacity. It predicts and emits opcode `39` (`74 ->
 in that order, then removes the drop from mutable server state. Mesos, special,
 new-slot, ambiguous-stack, and unknown-template cases remain rejected. The
 client still supplies its own validation token; the server does not synthesize
-or assign semantics to it.
+or assign semantics to it. The same policy now accepts compact opcode `222`
+and mirrors its captured 11-byte reason-`2` removal instead of the full
+opcode-`185` 15-byte reason-`5` form.
 
 Observed pickup requests now receive the same causal transcript treatment as
 item use: request, completed `[39,49,312]` response, or safe rejection. Unit
@@ -2168,7 +2185,7 @@ Replace the remaining opaque replay portions with stateful handling:
 
 1. Isolate the additional client-side drop eligibility condition using the
    now-falsified owner/proximity baseline, then run the reactive pickup effect
-   only after the real client emits opcode `185`.
+   only after the real client emits opcode `185` or compact opcode `222`.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
    retain neutral roles for the opcode-`394`/`279` correlation.

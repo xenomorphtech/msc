@@ -49,14 +49,14 @@
   server and 28-byte client transport preludes before the ordinary Maple
   greeting, then decrypts 71,100 frames. The fold now recognizes its
   marker-`26` level-1 character/inventory snapshot, 36 total field epochs, 436
-  drop spawns, and all 197 pickup requests with known drops and matching
+  drop spawns, and all 203 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,661 full, 44,430 partial, 9 unknown-but-lossless, and zero invalid
+  26,661 full, 44,436 partial, 3 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,417 full, 21,788 partial,
-  2 unknown, and zero invalid; stream `114` reports 54/22/0/0. Seven
-  long-corpus state-correlation warnings remain: six pickup-effect mismatches
-  plus one aggregate warning for six one-HP combat prediction differences.
+  2 unknown, and zero invalid; stream `114` reports 54/22/0/0. One
+  long-corpus state-correlation warning remains: the aggregate warning for six
+  one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
   `379` are separated into neutral, capture-bounded records. All 181 reference
   packets consume and round-trip exactly; typed branches add 81 full
@@ -257,6 +257,16 @@
   exposes only selectors, shapes, group/pair counts, and epoch. Python and
   isolated native validation consume both forms exactly, and stream
   `126` advances to `26,661/44,430/9/0` without assigning higher-level roles.
+- Client opcode `222` now extends the typed item-pickup chain as a compact
+  19-byte request. All six stream-`126` records carry the folded field epoch,
+  ordered client tick, signed player position, known active drop id, and zero
+  neutral validation token. Every request matches its opcode-`39` inventory or
+  opcode-`41` mesos effect, opcode-`49` result, and exact-id opcode-`312`
+  removal. Compact removals use captured reason `2` instead of opcode-`185`
+  reason `5`; the source of that distinction remains neutral. Python/native
+  codecs consume all six exactly, the fold validates 203/203 pickup chains and
+  removes all six pickup warnings, and stream `126` advances to
+  `26,661/44,436/3/0` with only the unrelated one-HP combat aggregate warning.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`
@@ -989,7 +999,7 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 1. Use the owner/proximity negative controls to isolate the remaining
    client-side drop eligibility condition; serve a reactive pickup only after
-   observing an authentic opcode-`185` request.
+   observing an authentic opcode-`185` or compact opcode-`222` request.
 2. Determine whether client opcode `104` requires a modeled server response,
    then use one-field controls to test whether opcode-`385` selector `0` is an
    empty binding without assigning meanings to selectors `2/4/5/6`.

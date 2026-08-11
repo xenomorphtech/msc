@@ -602,10 +602,12 @@ async def replay_connection(
         )
     if (
         item_pickup_response_policy is not None
-        and 185 in (client_opcode_replies or {})
+        and any(
+            opcode in (client_opcode_replies or {}) for opcode in (185, 222)
+        )
     ):
         raise ValueError(
-            "client opcode 185 cannot use both captured and modeled replies"
+            "client opcode 185/222 cannot use both captured and modeled replies"
         )
     if mob_health_response_policy is not None and any(
         opcode in (client_opcode_replies or {}) for opcode in (50, 52)
@@ -1549,7 +1551,7 @@ async def replay_connection(
                     if qualifies:
                         await observe_movement_policy_trigger_event()
                 if (
-                    opcode == 185
+                    opcode in {185, 222}
                     and item_pickup_response_policy is not None
                 ):
                     request = ItemPickupRequest.parse(client_plaintext)
@@ -3127,7 +3129,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--reactive-item-pickup-responses",
         action="store_true",
         help=(
-            "during hold-open, validate opcode-185 requests against active "
+            "during hold-open, validate opcode-185/222 requests against active "
             "drops and captured item-effect evidence, then emit typed "
             "opcode-39/opcode-49/opcode-312 responses; requires "
             "--keep-world-open"
@@ -4245,11 +4247,11 @@ async def async_main(arguments: argparse.Namespace) -> None:
             )
         if (
             item_pickup_response_policy is not None
-            and 185 in client_opcode_replies
+            and any(opcode in client_opcode_replies for opcode in (185, 222))
         ):
             raise ValueError(
                 "--reactive-item-pickup-responses conflicts with a captured "
-                "client opcode 185 reply"
+                "client opcode 185/222 reply"
             )
         if mob_health_response_policy is not None and any(
             opcode in client_opcode_replies for opcode in (50, 52)

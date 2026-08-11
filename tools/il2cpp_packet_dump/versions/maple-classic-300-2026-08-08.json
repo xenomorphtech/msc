@@ -624,6 +624,11 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":185},{"op":"read","name":"control_value","kind":"u32"},{"op":"read","name":"field_epoch","kind":"u8"},{"op":"read","name":"client_tick","kind":"u32"},{"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},{"op":"read","name":"drop_object_id","kind":"u32"},{"op":"read","name":"validation_token","kind":"u32"},{"op":"bytes","name":"proof","length":12}]
     },
     {
+      "name":"compact_item_pickup_request","direction":"client_to_server","opcode":222,"length":19,
+      "source":"ItemPickupRequest compact branch; all six 1-10FS stream-126 records match known same-epoch drops and the following opcode-39/41/49/312 pickup chain",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":222},{"op":"read","name":"field_epoch","kind":"u8"},{"op":"read","name":"client_tick","kind":"u32"},{"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},{"op":"read","name":"drop_object_id","kind":"u32"},{"op":"read","name":"validation_token","kind":"u32"}]
+    },
+    {
       "name":"mob_enter_field_short_status","direction":"server_to_client","opcode":279,"length":48,
       "source":"IL2CPP opcode-279 handler e13fd581... reads object/marker/template then b3052290... parses status; MobSpawnData; capture 111",
       "operations":[

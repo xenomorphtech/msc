@@ -2102,10 +2102,20 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(removal.reason, 5)
             self.assertEqual(removal.actor_id, 300_001)
 
+            compact_request = ItemPickupRequest(
+                control_value=None,
+                field_epoch=1,
+                client_tick=502_041,
+                position_x=633,
+                position_y=-2677,
+                drop_object_id=drop_object_id,
+                item_validation_token=0,
+                opcode=222,
+            ).to_bytes()
             next_client_iv = shuffle_iv(client_iv)
             writer.write(
-                encode_frame_header(len(request), next_client_iv, 300)
-                + crypt_payload(request, next_client_iv)
+                encode_frame_header(len(compact_request), next_client_iv, 300)
+                + crypt_payload(compact_request, next_client_iv)
             )
             await writer.drain()
             with self.assertRaises(TimeoutError):
@@ -2140,6 +2150,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(analysis.state.pending_item_pickups, 0)
             self.assertEqual(analysis.state.item_pickup_policy_rejections, 1)
+            self.assertEqual(analysis.state.item_pickup_compact_requests, 1)
             pickup_events = [
                 event
                 for event in analysis.events
