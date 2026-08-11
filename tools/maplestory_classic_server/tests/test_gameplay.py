@@ -706,6 +706,7 @@ def fixture_gameplay_transcript(
     item_acquisition: bool = False,
     item_use: bool = False,
     item_pickup: bool = False,
+    item_pickup_retries: int = 0,
     compact_item_pickup: bool = False,
     active_item_drop: bool = False,
     active_item_drop_owner: int | None = None,
@@ -1015,6 +1016,20 @@ def fixture_gameplay_transcript(
                 opcode=222 if compact_item_pickup else 185,
             ).to_bytes(),
         )
+        for retry_index in range(item_pickup_retries):
+            append(
+                "client_to_server",
+                ItemPickupRequest(
+                    control_value=None if compact_item_pickup else 0,
+                    field_epoch=1,
+                    client_tick=105_040 + retry_index * 3_000,
+                    position_x=120,
+                    position_y=-210,
+                    drop_object_id=40_001,
+                    item_validation_token=1_352_639_939,
+                    opcode=222 if compact_item_pickup else 185,
+                ).to_bytes(),
+            )
         append(
             "server_to_client",
             InventoryChangeSet(
@@ -8083,6 +8098,79 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("drop_object_id", str(safe["packets"]))
         self.assertNotIn("actor_id", str(safe["events"]))
         self.assertNotIn("actor_id", str(safe["packets"]))
+
+    def test_coalesces_item_pickup_retries_for_one_active_drop(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                item_pickup=True,
+                item_pickup_retries=2,
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.item_pickup_requests, 5)
+        self.assertEqual(analysis.state.item_pickup_known_drops, 5)
+        self.assertEqual(analysis.state.item_pickup_request_chains, 3)
+        self.assertEqual(analysis.state.item_pickup_request_retries, 2)
+        self.assertEqual(analysis.state.item_pickup_admitted_drops, 3)
+        self.assertEqual(
+            dict(analysis.state.item_pickup_admitted_drops_by_kind),
+            {"item": 2, "mesos": 1},
+        )
+        self.assertEqual(
+            dict(analysis.state.item_pickup_admitted_item_templates),
+            {2_380_000: 1, 4_010_003: 1},
+        )
+        self.assertEqual(analysis.state.item_pickup_results, 3)
+        self.assertEqual(analysis.state.item_pickup_removal_matches, 3)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+
+        first_drop_requests = [
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_requested"
+            and event.details["drop"] == "drop:1"
+        ]
+        self.assertEqual(
+            [event.details["request_attempt"] for event in first_drop_requests],
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            [event.details["request_retry"] for event in first_drop_requests],
+            [False, True, True],
+        )
+        result = next(
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_result_received"
+            and event.details.get("drop") == "drop:1"
+        )
+        removal = next(
+            event
+            for event in analysis.events
+            if event.kind == "field_drop_removed"
+            and event.details.get("drop") == "drop:1"
+        )
+        self.assertEqual(result.details["request_attempts"], 3)
+        self.assertEqual(removal.details["request_attempts"], 3)
+        self.assertLess(
+            result.details["first_request_frame"], result.details["request_frame"]
+        )
+
+        safe_state = analysis.safe_dict()["state"]
+        self.assertEqual(safe_state["item_pickup_request_chains"], 3)
+        self.assertEqual(safe_state["item_pickup_request_retries"], 2)
+        self.assertEqual(safe_state["item_pickup_admitted_drops"], 3)
+        self.assertEqual(
+            safe_state["item_pickup_admitted_item_templates"],
+            {"2380000": 1, "4010003": 1},
+        )
+        self.assertIn(
+            "chains:3 retries:2 admitted_drops:3",
+            render_gameplay_analysis(analysis),
+        )
 
     def test_correlates_compact_item_pickup_requests(self) -> None:
         analysis = analyze_gameplay_transcript(

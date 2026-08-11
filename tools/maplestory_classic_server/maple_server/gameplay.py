@@ -310,11 +310,14 @@ class PendingItemAcquisition:
 
 @dataclass
 class PendingItemPickup:
-    request_frame_index: int
-    request_timestamp_ns: int
+    first_request_frame_index: int
+    first_request_timestamp_ns: int
+    last_request_frame_index: int
+    last_request_timestamp_ns: int
     request: ItemPickupRequest
     expected_drop_kind: str | None
     expected_value: int | None
+    attempts: int = 1
     effect: dict[str, object] | None = None
     result_confirmed: bool = False
 
@@ -603,8 +606,17 @@ class GameplayGameState:
     item_pickup_removal_mismatches: int = 0
     item_pickup_policy_rejections: int = 0
     pending_item_pickups: int = 0
+    item_pickup_request_chains: int = 0
+    item_pickup_request_retries: int = 0
     item_pickup_known_drops: int = 0
     item_pickup_unknown_drops: int = 0
+    item_pickup_admitted_drops: int = 0
+    item_pickup_admitted_drops_by_kind: Counter[str] = field(
+        default_factory=Counter
+    )
+    item_pickup_admitted_item_templates: Counter[int] = field(
+        default_factory=Counter
+    )
     item_pickup_spawn_result_matches: int = 0
     item_pickup_spawn_result_mismatches: int = 0
     item_pickup_item_effects_by_template: dict[
@@ -3673,10 +3685,28 @@ class GameplayAnalysis:
                     self.state.item_pickup_policy_rejections
                 ),
                 "pending_item_pickups": self.state.pending_item_pickups,
+                "item_pickup_request_chains": (
+                    self.state.item_pickup_request_chains
+                ),
+                "item_pickup_request_retries": (
+                    self.state.item_pickup_request_retries
+                ),
                 "item_pickup_known_drops": self.state.item_pickup_known_drops,
                 "item_pickup_unknown_drops": (
                     self.state.item_pickup_unknown_drops
                 ),
+                "item_pickup_admitted_drops": (
+                    self.state.item_pickup_admitted_drops
+                ),
+                "item_pickup_admitted_drops_by_kind": dict(
+                    self.state.item_pickup_admitted_drops_by_kind
+                ),
+                "item_pickup_admitted_item_templates": {
+                    str(item_id): count
+                    for item_id, count in sorted(
+                        self.state.item_pickup_admitted_item_templates.items()
+                    )
+                },
                 "item_pickup_spawn_result_matches": (
                     self.state.item_pickup_spawn_result_matches
                 ),
@@ -4851,9 +4881,11 @@ class GameplayStateFold:
             return None
         pending.effect = {
             **effect,
-            "request_frame": pending.request_frame_index,
+            "request_frame": pending.last_request_frame_index,
+            "first_request_frame": pending.first_request_frame_index,
+            "request_attempts": pending.attempts,
             "response_ms": round(
-                (frame.timestamp_ns - pending.request_timestamp_ns) / 1e6,
+                (frame.timestamp_ns - pending.last_request_timestamp_ns) / 1e6,
                 3,
             ),
         }
@@ -4924,7 +4956,8 @@ class GameplayStateFold:
                 (
                     candidate
                     for candidate in self._pending_item_pickups
-                    if event.timestamp_ns >= candidate.request_timestamp_ns
+                    if event.timestamp_ns
+                    >= candidate.last_request_timestamp_ns
                     and candidate.request.safe_dict() == request_fields
                 ),
                 None,
@@ -5576,10 +5609,23 @@ class GameplayStateFold:
                     f"item-pickup request field epoch {request.field_epoch} "
                     f"did not match folded epoch {self.state.field_epoch}"
                 )
-            self._pending_item_pickups.append(
-                PendingItemPickup(
-                    request_frame_index=frame.index,
-                    request_timestamp_ns=frame.timestamp_ns,
+            pending = next(
+                (
+                    candidate
+                    for candidate in self._pending_item_pickups
+                    if candidate.request.field_epoch == request.field_epoch
+                    and candidate.request.drop_object_id
+                    == request.drop_object_id
+                ),
+                None,
+            )
+            is_retry = pending is not None
+            if pending is None:
+                pending = PendingItemPickup(
+                    first_request_frame_index=frame.index,
+                    first_request_timestamp_ns=frame.timestamp_ns,
+                    last_request_frame_index=frame.index,
+                    last_request_timestamp_ns=frame.timestamp_ns,
                     request=request,
                     expected_drop_kind=(
                         drop.spawn.kind_name if drop is not None else None
@@ -5588,14 +5634,32 @@ class GameplayStateFold:
                         drop.spawn.value if drop is not None else None
                     ),
                 )
-            )
-            self.state.pending_item_pickups += 1
+                self._pending_item_pickups.append(pending)
+                self.state.pending_item_pickups += 1
+                self.state.item_pickup_request_chains += 1
+                if drop is not None:
+                    self.state.item_pickup_admitted_drops += 1
+                    self.state.item_pickup_admitted_drops_by_kind[
+                        drop.spawn.kind_name
+                    ] += 1
+                    if drop.spawn.drop_kind == FieldDropSpawn.ITEM:
+                        self.state.item_pickup_admitted_item_templates[
+                            drop.spawn.value
+                        ] += 1
+            else:
+                pending.last_request_frame_index = frame.index
+                pending.last_request_timestamp_ns = frame.timestamp_ns
+                pending.request = request
+                pending.attempts += 1
+                self.state.item_pickup_request_retries += 1
             details: dict[str, object] = {
                 "shape": request.shape_name,
                 **request.safe_dict(),
                 "drop": alias,
                 "known_drop": drop is not None,
                 "field_epoch_matches": epoch_matches,
+                "request_attempt": pending.attempts,
+                "request_retry": is_retry,
             }
             if drop is not None:
                 details["predicted_result_kind"] = drop.spawn.kind_name
@@ -7594,14 +7658,18 @@ class GameplayStateFold:
                 details.update(
                     {
                         "drop": alias,
-                        "request_frame": pending.request_frame_index,
+                        "request_frame": pending.last_request_frame_index,
+                        "first_request_frame": (
+                            pending.first_request_frame_index
+                        ),
+                        "request_attempts": pending.attempts,
                         "effect": effect,
                         "effect_matches_notice": result_matches,
                         "spawn_matches_notice": spawn_matches_notice,
                         "response_ms": round(
                             (
                                 frame.timestamp_ns
-                                - pending.request_timestamp_ns
+                                - pending.last_request_timestamp_ns
                             )
                             / 1e6,
                             3,
@@ -7810,14 +7878,18 @@ class GameplayStateFold:
                 )
                 details.update(
                     {
-                        "request_frame": pending.request_frame_index,
+                        "request_frame": pending.last_request_frame_index,
+                        "first_request_frame": (
+                            pending.first_request_frame_index
+                        ),
+                        "request_attempts": pending.attempts,
                         "result_confirmed": pending.result_confirmed,
                         "expected_removal_reason": expected_removal_reason,
                         "pickup_removal_matches": removal_matches,
                         "response_ms": round(
                             (
                                 frame.timestamp_ns
-                                - pending.request_timestamp_ns
+                                - pending.last_request_timestamp_ns
                             )
                             / 1e6,
                             3,
@@ -12600,6 +12672,9 @@ def render_gameplay_analysis(
             f"removal_mismatches:{state.item_pickup_removal_mismatches} "
             f"policy_rejections:{state.item_pickup_policy_rejections} "
             f"field_removals:{state.field_drop_removals} "
+            f"chains:{state.item_pickup_request_chains} "
+            f"retries:{state.item_pickup_request_retries} "
+            f"admitted_drops:{state.item_pickup_admitted_drops} "
             f"pending:{state.pending_item_pickups}"
         ),
         (

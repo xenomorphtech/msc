@@ -1447,18 +1447,30 @@ at the bounded control snapshot, with zero pickup requests and 141/141 matched
 heartbeats. Owner equality, proximity, source-mob presence/history, immediate
 lifecycle timing, and controller release are therefore not sufficient alone.
 
-The exact captured combat/reward family is now negative too. A typed
-stream-`92` mob was placed at `(633,-2677)`, received an authentic local
-opcode-`52` attack, and then received the capture-ordered current-MP update,
-mob-health `20 -> 0`, reason-`1` leave, opcode-`49` variant-`3` record,
-current EXP `+10`, redacted variant-`10` text, and source-matched `4000004`
-mode-`1`/mode-`0` pair. The strongest run delivered the first health packet
-92.526 ms after the attack, close to the reference's 102.326 ms, and preserved
-the captured owner/source object relations while rewriting only current stat
-values and signed positions. Two pickup-key inputs after the 450 ms animation
-still produced neither opcode `185` nor compact opcode `222`; no synthetic
-pickup response was sent. The bounded fold stayed active, valid, and
-warning-free with 700/700 heartbeats and no pending probe.
+The first capture-timed combat/reward control used a stream-`92` family that
+was authentic but whose exact drop was never requested in the reference. Its
+typed mob received an authentic local opcode-`52` attack followed by the
+capture-ordered MP, mob-health `20 -> 0`, leave, opcode-`49`, EXP `+10`, text,
+and source-matched `4000004` pair. The 92.526 ms first-health timing was close
+to that family's 102.326 ms reference timing, but pickup input remained
+negative. The later drop-object audit corrects the earlier interpretation:
+this bounded one unpicked family, not client admission in general.
+
+The positive control instead copied the first stream-`92` `4000004` object
+whose lifecycle is followed by an official request. The official sequence has
+a 58.892 ms attack-to-health response, `12 -> 0` health, controller release at
+450.451 ms, and pickup admission at 2,938.908 ms. The live sequence sampled the
+current player position only after loading the reference packets, preserved
+the source-position offset, and matched the live MP/EXP baselines. Its real
+opcode-`52` attack targeted the active injected mob, the first health response
+arrived in 53.681 ms, and control was released after approximately 450 ms.
+Physical input produced base opcode `185` for the exact known drop 1,517.335 ms
+after its live spawn. The client then retried every three seconds while the
+response was deliberately withheld. Once one evidence-derived `[39,49,312]`
+response was sent, Etc slot `7` changed `74 -> 75` and the drop disappeared.
+The snapshot is active, valid, and warning-free with 62 raw requests folded as
+one admitted chain plus 61 retries, one matching effect/result/removal, and
+900/900 heartbeats.
 
 Two reusable PCAP transforms encode those bounded rewrites.
 `?character-stat=FIELD:VALUE` accepts only an opcode-`41` packet whose sole
@@ -1466,9 +1478,10 @@ captured stat is `FIELD`, preserving its mask, request flag, and tail.
 `?field-drop-position=X:Y[:SOURCE_X:SOURCE_Y]` reparses opcode `311`, changes
 only the signed destination and optional animated source positions, and
 preserves the drop, owner, source-mob, item, timing, and flag fields. The
-negative result now excludes the captured payload order and capture-like
-attack-response timing as sufficient pickup switches; an unmodeled client-side
-admission condition remains.
+fold now coalesces same-epoch/same-drop retries without hiding packet counts.
+Safe state exposes logical chain/retry totals and admitted drop kinds/templates,
+and result/removal timing is correlated to the latest attempt while retaining
+the first request frame and attempt count.
 
 ## Reactive mob-health validation
 
@@ -2267,6 +2280,11 @@ project's own `README.md` for all options.
   negative across delayed leave, immediate enter/leave, and explicit
   controller-release variants, so owner/proximity/source history and lifecycle
   timing remain modeled relations rather than proof of pickup eligibility.
+- The exact first reference-admitted `4000004` combat/reward/drop family did
+  produce a real live opcode-`185` request. One guarded `[39,49,312]` response
+  changed Etc quantity `74 -> 75` and removed the drop. Sixty-one later
+  same-drop attempts coalesce as retries of that one completed chain, leaving
+  the active fold warning-free with 900/900 heartbeat pairs.
 - An opt-in reactive mob-health policy now adopts exact typed mob state and
   emits per-hit opcode-`293` updates plus opcode-`280` reason `1` on death. A
   real typed-snail injection received opcode-`52` damage `[27,32]`, produced
@@ -2288,11 +2306,9 @@ project's own `README.md` for all options.
 
 Replace the remaining opaque replay portions with stateful handling:
 
-1. Isolate the additional client-side drop eligibility condition using the
-   now-falsified owner/proximity/source-lifecycle and capture-timed
-   combat/reward controls; compare official and generated opcode-`311` client
-   admission without serving a pickup until the real client emits opcode `185`
-   or compact opcode `222`.
+1. Minimize the proven reference-admitted combat/reward/drop family one typed
+   component at a time, continuing to gate `[39,49,312]` on an authentic client
+   opcode `185` or compact opcode `222` request.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
    retain neutral roles for the opcode-`394`/`279` correlation.

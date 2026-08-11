@@ -2318,19 +2318,35 @@ status therefore reports only the modeled owner/source relations: owner
 equality, proximity, source-mob presence/history, immediate lifecycle timing,
 and controller release are not independently sufficient.
 
-A later control closes the captured pre-drop payload/timing candidate without
-naming its neutral fields. It placed the capture's typed template-`210100` mob
-at the player, observed a real opcode-`52` attack, and sent the corresponding
-single-stat current-MP update, health `20 -> 0`, reason-`1` leave, opcode-`49`
-variant-`3` record, current EXP `+10`, redacted variant-`10` text, and
-source-matched `4000004` mode-`1`/mode-`0` pair. The first health response was
-92.526 ms after the attack versus 102.326 ms in the reference. Two physical
-pickup inputs after the 450 ms drop animation still emitted no opcode `185` or
-`222`, so no pickup response was served. The active fold stayed valid and
-warning-free with 700/700 heartbeat pairs. Typed PCAP transforms rewrite only
-the sole captured opcode-`41` stat value and opcode-`311` destination/animated
-source positions; every other byte-bearing field is preserved. Thus the
-captured order and capture-like response timing are not sufficient either.
+The first capture-timed combat/reward control placed a typed template-`210100`
+mob at the player, observed a real opcode-`52` attack, and sent the matching
+current-MP update, health `20 -> 0`, reason-`1` leave, opcode-`49` variant-`3`
+record, EXP `+10`, redacted variant-`10` text, and source-matched `4000004`
+mode-`1`/mode-`0` pair. Its first health response was 92.526 ms after the
+attack versus 102.326 ms in that reference family, but pickup input emitted no
+request. The exact capture drop in that control was later audited and found to
+have no pickup request in its own field epoch. That run therefore bounds only
+one capture-authentic packet family; it is not evidence that an officially
+admitted drop family failed.
+
+The corrected control starts from the first stream-`92` `4000004` object with
+a proven request. Its official template-`210100` attack/death/reward chain has
+the first HP response at 58.892 ms, health `12 -> 0`, an exact
+mode-`1`/mode-`0` pair, a controller-level-`0` release 450.451 ms after spawn,
+and a pickup request 2,938.908 ms after spawn while the player is 24 horizontal
+and one vertical unit from the drop. The live replay retained that packet
+family and animated-source offset, rewrote only current MP/EXP and position,
+observed an active-target opcode-`52` attack, delivered its first HP response
+at 53.681 ms, and released control after approximately 450 ms. Physical input
+then produced a base opcode-`185` request 1,517.335 ms after the live spawn at
+Manhattan distance three. The client retried every 3,000 ms until one
+`[39,49,312]` response advanced Etc slot `7` from `74` to `75` and removed the
+drop. At the validation snapshot the fold is valid and warning-free: 62 raw
+requests form one admitted chain plus 61 retries, its effect/result/removal all
+match, and all 900 heartbeat probes have responses. Typed PCAP transforms
+rewrite only the sole captured opcode-`41` stat value and opcode-`311`
+destination/animated-source positions; every other byte-bearing field is
+preserved.
 
 ## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 
@@ -2379,6 +2395,18 @@ therefore validates all 203 long-corpus pickup chains with zero unknown drops,
 epoch/effect/result/removal mismatches, or pending requests. Safe output adds a
 `compact` shape/counter while continuing to alias runtime drop ids and omit the
 validation token itself.
+
+Requests repeating for the same `(field_epoch, drop_object_id)` before the
+effect/result/removal completes are retry attempts on one logical chain, not
+independent pickups. The fold preserves `item_pickup_requests` as the raw wire
+count and separately reports `item_pickup_request_chains`,
+`item_pickup_request_retries`, `item_pickup_admitted_drops`, admitted drop-kind
+counts, and admitted item-template counts. Each request event carries its
+one-based attempt number and retry flag. Effect/result/removal events correlate
+to the latest attempt for latency while retaining the first request frame and
+total attempt count. Stream `92` remains 54 chains/zero retries and proves four
+admitted `4000004` objects; stream `126` remains 203 chains/zero retries. The
+live admitted control is one chain/61 retries, not 62 incomplete pickups.
 
 The corresponding short server opcode-`49` records have three exact variants:
 

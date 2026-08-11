@@ -411,14 +411,27 @@ A later bounded control introduced a typed source mob, removed it immediately
 before a mode-`1`/mode-`0` item pair at the player, and repeated the sequence
 with an explicit controller release. All variants retained a known source-mob
 history but still produced neither opcode `185` nor compact opcode `222`.
-A stricter control then replayed the capture's complete `4000004` pre-drop
-family after an authentic local opcode-`52` attack: current-MP update, mob HP
+A stricter control then replayed a capture-authentic `4000004` pre-drop family
+after an authentic local opcode-`52` attack: current-MP update, mob HP
 `20 -> 0`, reason-`1` leave, opcode-`49` variant-`3` record, EXP `+10`, redacted
 variant-`10` text, and the source-matched mode-`1`/mode-`0` item pair. The
 health response arrived 92.526 ms after the attack versus 102.326 ms in the
-reference, but two pickup-key presses still emitted neither request opcode.
-The warning-free fold remained active with 700/700 heartbeats. PCAP references
-support `?character-stat=FIELD:VALUE` for a packet's sole captured stat and
+reference, but two pickup-key presses emitted no request. A later audit found
+that exact reference drop was never picked up either, so the run bounded only
+that packet family and timing; it did not test a reference-admitted object.
+
+The corrected control uses the first stream-`92` `4000004` drop whose exact
+object is followed by an official pickup request. It preserves the complete
+attack/death/reward/drop family, the one-unit animated-source Y offset, and the
+controller release 450.451 ms after spawn, then applies physical pickup input
+at the official 2.939-second admission delay. The client emitted a base
+opcode-`185` request for the known drop and retried it every three seconds
+until the server answered once with `[39,49,312]`. Etc slot `7` advanced
+`74 -> 75`, the exact drop was removed, and the live fold is valid and
+warning-free with one admitted chain, 61 coalesced retries, and 900/900
+heartbeats at the validation snapshot. No response was sent before an
+authentic request. PCAP references support `?character-stat=FIELD:VALUE` for a
+packet's sole captured stat and
 `?field-drop-position=X:Y[:SOURCE_X:SOURCE_Y]` for these typed controls; both
 preserve the packet's other fields exactly.
 Pair the position rewrite with
@@ -456,6 +469,12 @@ official client supplies its own token in the request.
 Reactive pickup also records request/completion/rejection runtime events. A
 rejected request for a missing or already removed drop stays nonfatal and is
 folded out of pending pickup accounting when it matches the observed request.
+Repeated requests for the same `(field epoch, drop)` before completion are one
+logical chain: raw request totals remain visible, while safe state separately
+reports `item_pickup_request_chains`, `item_pickup_request_retries`, admitted
+drop kinds, and admitted item-template counts. Response latency is measured
+from the latest retry and result/removal events also retain the first request
+frame plus total attempt count.
 
 Runtime prediction for the owner patch reports
 `drop_owner_fields: match_initial_player` and
@@ -535,7 +554,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcodes `185`/`222`: 23-/35-byte full and 19-byte compact item-pickup
   requests containing the folded field epoch, client tick, position, aliased
   drop id, neutral validation token, and an opcode-`185` optional proof; all
-  203 long-corpus requests complete their effect/result/removal chain,
+  203 long-corpus requests form 203 admitted chains and complete their
+  effect/result/removal chain, while live pre-response retries coalesce by
+  field epoch and drop without hiding their raw packet count,
 - server opcode `311`: 44-byte animated item, 36-byte animated mesos, 38-byte
   field-load item, and 30-byte field-load mesos drop spawns; the fold tracks
   mode-`1`/mode-`0` refresh pairs, source mobs, ownership-neutral fields, and
@@ -1505,7 +1526,9 @@ When reactive pickup responses are
 enabled, `protocol.item_pickup_responses` reports the eligible aliased drops,
 captured correlation evidence, observed/served/rejected request counts,
 response packet count, last identifier-free response, and current mutable
-inventory/drop state.
+inventory/drop state. Derived gameplay state separately reports raw pickup
+requests, logical chains, retries, admitted drop kinds/templates, and pending
+chains; all raw object identifiers remain aliased or omitted.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
 reports its session-local entity alias, field epoch, decoded action/parameter,
 planned/sent packet counts, and the predicted fold delta. When reactive mob
@@ -1891,3 +1914,11 @@ preserve distinct Unity scan codes in this setup.
     four-code-unit portal names, validate the active epoch and chained signed
     source/destination positions, preserve the native four-code-unit boundary,
     and reduce stream `92` to zero unknown packets.
+74. Audit capture admission at the exact drop-object boundary, replay the
+    first proven stream-`92` `4000004` attack/death/reward/drop lifecycle with
+    its 450 ms controller release and 2.939-second pickup delay, observe and
+    serve an authentic opcode-`185` request as `[39,49,312]`, and validate the
+    live `74 -> 75` Etc result. Coalesce 61 same-drop retries into one logical
+    chain while retaining raw request, retry, admitted-kind/template, and
+    first/latest-attempt telemetry; the live fold is warning-free with
+    900/900 heartbeats.
