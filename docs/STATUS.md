@@ -787,10 +787,19 @@
   valid, and warning-free with no pickup chains/pending work, one baseline
   field-load drop, and 180/180 heartbeats. The positive drop-only result
   therefore depended on already-active pickup-action state; pair/release and
-  near-reference combat-response timing do not initialize it alone. Request
-  events now report first-spawn and source-release ages, and release events
-  report aliased source-drop delays. Official `4000004` admission ages are
-  1,591.279-4,124.092 ms and the primed live ages are
+  near-reference combat-response timing do not initialize it alone. A new
+  `inject-item-pickup` workflow now derives the admitted pair and timing from
+  stream `92`, allocates safe runtime ids, samples the latest folded player
+  position, sends physical input, withholds `[39,49,312]` until a matching
+  authentic request, verifies all state invariants, and cleans up on timeout.
+  It exposed a stale-position confound in the primed session: using the actual
+  `(675,-2693)` position produced opcode `185` in 1,607.298 ms and completed
+  Etc slot `7` `75 -> 76`. A separate fresh client with no post-bootstrap
+  key-map action failed the same latest-position control twice at
+  `(633,-2677)` and cleaned up both drops, so the readiness boundary remains.
+  Request events now report first-spawn and source-release ages, and release
+  events report aliased source-drop delays. Official `4000004` admission ages
+  are 1,591.279-4,124.092 ms and the primed live ages are
   1,517.335-1,595.243 ms. Typed PCAP transforms support sole-field
   opcode-`41` stat replacement and opcode-`311` destination/source-position
   replacement.
@@ -1209,11 +1218,12 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Isolate the client-side transition that initializes pickup admission now
-   that a fresh exact-pair control and calibrated full-family control exclude
-   pair/release timing and near-reference attack-response timing alone. Serve
-   `[39,49,312]` only after an authentic opcode-`185` or compact opcode-`222`
-   request.
+1. Use the latest-position `inject-item-pickup` control to isolate the
+   client-side transition that initializes pickup admission. The fresh exact
+   pair, calibrated full family, and two fresh command attempts exclude stale
+   position, pair/release timing, and near-reference attack-response timing as
+   sufficient conditions. Continue serving `[39,49,312]` only after an
+   authentic opcode-`185` or compact opcode-`222` request.
 2. Keep opcode-`385` selectors `2/4/5/6` neutral until an independently
    identifiable input/action permits another one-field control; selector `0`
    is now the bounded empty binding and selector `1` the skill binding.

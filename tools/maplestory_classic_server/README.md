@@ -460,6 +460,39 @@ near-reference attack-response timing do not independently initialize pickup
 admission; the positive drop-only replay still depended on pickup-action state
 already active in that client session.
 
+`inject-item-pickup` makes that boundary repeatable without reusing stale
+coordinates. It selects a proven admitted chain from an evidence PCAP,
+retargets its typed mode-`1`/mode-`0` pair to the latest folded player
+position while preserving the animated-source offset and capture timing,
+allocates collision-free runtime ids, sends physical pickup input, and waits
+for an authentic opcode `185` or `222`. Only then does it emit `[39,49,312]`
+and verify the inventory, effect, result, removal, field, player, and
+progression invariants. A timeout sends a reason-`1` cleanup.
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-3 \
+  /usr/bin/python -m maple_server inject-item-pickup \
+  --transcript /path/to/live-world.jsonl \
+  --evidence-pcap /home/sdancer/ms/111.pcapng \
+  --evidence-tcp-stream 92 \
+  --wayland-display wayland-3 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+In the already-active session, earlier controls had placed drops at stale
+`(633,-2677)` after the player had moved to `(675,-2693)`. The command sampled
+`(675,-2693)`, reproduced the evidence release at 398.819 ms, received an
+authentic opcode-`185` request at 1,607.298 ms on its first attempt, and
+verified Etc slot `7` changing `75 -> 76` with no pending pickup. A separate
+fresh client, before any post-bootstrap key-map action, ran the same command
+at its latest position `(633,-2677)` twice and produced no request; both
+timeouts removed their injected drops. Latest-position placement therefore
+removes a real confound from the positive run, but does not replace the
+remaining pickup-readiness boundary.
+
 PCAP references support `?character-stat=FIELD:VALUE` for a packet's sole
 captured stat and
 `?field-drop-position=X:Y[:SOURCE_X:SOURCE_Y]` for these typed controls; both

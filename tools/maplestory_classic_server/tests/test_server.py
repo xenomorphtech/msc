@@ -638,6 +638,26 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(arguments.item_pickup_evidence_tcp_stream, 92)
         self.assertEqual(parse_i16_position("0x10:-0x20"), (16, -32))
 
+    def test_parser_accepts_latest_position_item_pickup_injection(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "inject-item-pickup",
+                "--transcript",
+                "world.jsonl",
+                "--evidence-pcap",
+                "111.pcapng",
+                "--wayland-display",
+                "wayland-3",
+            ]
+        )
+
+        self.assertEqual(arguments.evidence_tcp_stream, 92)
+        self.assertEqual(arguments.item_id, 4_000_004)
+        self.assertEqual(arguments.admission_index, 1)
+        self.assertEqual(arguments.pickup_key, "z")
+        self.assertEqual(arguments.pickup_key_hold_ms, 100)
+        self.assertEqual(arguments.verify_timeout_seconds, 10.0)
+
     def test_replay_parser_accepts_world_heartbeat_interval(self) -> None:
         arguments = build_parser().parse_args(
             [

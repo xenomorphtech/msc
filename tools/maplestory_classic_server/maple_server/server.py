@@ -61,9 +61,11 @@ from .http_api import (
 from .live_replay import (
     DEFAULT_PACKET_API_URL,
     inject_current_hp_live,
+    inject_item_pickup_live,
     inject_mob_temporary_stat_live,
     inject_skill_record_live,
     render_current_hp_live_replay,
+    render_item_pickup_live_replay,
     render_mob_temporary_stat_live_replay,
     render_skill_record_live_replay,
 )
@@ -3720,6 +3722,64 @@ def build_parser() -> argparse.ArgumentParser:
     )
     live_skill_record_parser.add_argument("--json", action="store_true")
 
+    live_item_pickup_parser = subparsers.add_parser(
+        "inject-item-pickup",
+        help=(
+            "retarget one capture-admitted item-drop pair to the latest folded "
+            "player position, send physical pickup input, serve the authentic "
+            "request, and verify the completed gameplay fold"
+        ),
+    )
+    live_item_pickup_parser.add_argument(
+        "--transcript", required=True, type=Path
+    )
+    live_item_pickup_parser.add_argument(
+        "--evidence-pcap", required=True, type=Path
+    )
+    live_item_pickup_parser.add_argument(
+        "--evidence-tcp-stream", type=int, default=92
+    )
+    live_item_pickup_parser.add_argument(
+        "--item-id", type=int, default=4_000_004
+    )
+    live_item_pickup_parser.add_argument(
+        "--admission-index",
+        type=int,
+        default=1,
+        help="zero-based admitted chain index for the selected item",
+    )
+    live_item_pickup_parser.add_argument("--pickup-key", default="z")
+    live_item_pickup_parser.add_argument(
+        "--pickup-key-hold-ms", type=int, default=100
+    )
+    live_item_pickup_parser.add_argument(
+        "--wayland-display",
+        required=True,
+        help="nested compositor socket name, for example wayland-3",
+    )
+    live_item_pickup_parser.add_argument(
+        "--wayland-runtime-directory",
+        type=Path,
+        default=Path(f"/run/user/{os.getuid()}"),
+    )
+    live_item_pickup_parser.add_argument(
+        "--pickup-input-delay-seconds",
+        type=float,
+        help="override the capture-derived spawn-to-input delay",
+    )
+    live_item_pickup_parser.add_argument(
+        "--http-api-url",
+        default=DEFAULT_PACKET_API_URL,
+        help="loopback POST /api/v1/server-packets endpoint",
+    )
+    live_item_pickup_parser.add_argument(
+        "--api-timeout-seconds", type=float, default=5.0
+    )
+    live_item_pickup_parser.add_argument(
+        "--verify-timeout-seconds", type=float, default=10.0
+    )
+    live_item_pickup_parser.add_argument("--json", action="store_true")
+
     live_mob_stat_parser = subparsers.add_parser(
         "inject-mob-temporary-stat",
         help=(
@@ -5090,6 +5150,36 @@ def main() -> None:
             )
         else:
             print(render_skill_record_live_replay(result))
+        return
+    if arguments.command == "inject-item-pickup":
+        result = inject_item_pickup_live(
+            arguments.transcript,
+            arguments.evidence_pcap,
+            evidence_tcp_stream=arguments.evidence_tcp_stream,
+            item_id=arguments.item_id,
+            admission_index=arguments.admission_index,
+            pickup_key=arguments.pickup_key,
+            pickup_key_hold_ms=arguments.pickup_key_hold_ms,
+            wayland_display=arguments.wayland_display,
+            wayland_runtime_directory=arguments.wayland_runtime_directory,
+            pickup_input_delay_seconds=(
+                arguments.pickup_input_delay_seconds
+            ),
+            api_url=arguments.http_api_url,
+            api_timeout_seconds=arguments.api_timeout_seconds,
+            verify_timeout_seconds=arguments.verify_timeout_seconds,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    result.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_item_pickup_live_replay(result))
         return
     if arguments.command == "inject-mob-temporary-stat":
         result = inject_mob_temporary_stat_live(

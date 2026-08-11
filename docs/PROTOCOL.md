@@ -2553,6 +2553,19 @@ one baseline field-load drop, and 180/180 heartbeats. Exact admitted bytes plus
 matching release timing and near-reference combat-response timing are not
 sufficient to initialize admission from a neutral client session.
 
+The typed live injector now prevents another experimental ambiguity: it reads
+`player_x/player_y` from the latest valid fold immediately before injection,
+retargets both opcode-`311` records and their animated source offset, allocates
+new drop/source ids, reproduces the 398.819-ms release and 1,591.279-ms input
+schedule, and waits for the matching aliased request before sending
+`[39,49,312]`. The primed live client had moved to `(675,-2693)` while earlier
+manual probes still used `(633,-2677)`; latest-position injection produced
+opcode `185` after 1,607.298 ms and completed `75 -> 76`. On a second fresh
+client with no post-bootstrap key-map action, two latest-position attempts at
+`(633,-2677)` still produced no request and were removed by reason-`1`
+cleanup. Thus stale placement weakened the earlier comparison, but it was not
+the missing neutral-to-admitted transition.
+
 ## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 
 The capture-validated client request has a 23-byte base form and a 35-byte

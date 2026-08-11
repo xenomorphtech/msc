@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 245 tests.
+The last run passed all 291 tests.
 
 ## Inspect and compare captures
 
@@ -1515,6 +1515,38 @@ field-load drop, and 180/180 heartbeat pairs. Pair/release timing and
 near-reference combat-response timing therefore do not initialize admission
 from neutral state by themselves; the earlier drop-only success relied on
 pickup-action state already active in that session.
+
+The reusable `inject-item-pickup` command now performs this experiment from
+the live fold instead of a hand-copied position. It derives the selected
+admitted chain from an evidence PCAP, places the pair at the latest player
+coordinates, preserves its source offset and release/input timing, sends a
+physical key through the nested Wayland seat, and refuses to serve
+`[39,49,312]` until the transcript contains a matching authentic opcode `185`
+or `222`. Success verifies the exact stack delta and unchanged field/player/
+progression state; failure removes the injected drop.
+
+```sh
+sudo ip netns exec mapleproxy sudo -u sdancer env \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-3 \
+  /usr/bin/python -m maple_server inject-item-pickup \
+  --transcript /path/to/live-world.jsonl \
+  --evidence-pcap /home/sdancer/ms/111.pcapng \
+  --evidence-tcp-stream 92 \
+  --wayland-display wayland-3 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --verify-timeout-seconds 10 --json
+```
+
+This exposed one genuine stale-position confound without closing the neutral
+state question. In the active transcript, the folded player had moved from
+`(633,-2677)` to `(675,-2693)`; the command used the latter position, observed
+opcode `185` after 1,607.298 ms, and completed Etc slot `7` `75 -> 76`. A
+newly connected client with no post-bootstrap key-map action then ran the same
+latest-position command twice at `(633,-2677)`. Neither attempt emitted
+opcode `185`/`222`, and both reason-`1` cleanups left the fold valid with no
+pending pickup. Position freshness is now enforced, while an additional
+client-side readiness transition remains unmodeled.
 
 Two reusable PCAP transforms encode those bounded rewrites.
 `?character-stat=FIELD:VALUE` accepts only an opcode-`41` packet whose sole
