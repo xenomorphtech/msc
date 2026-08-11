@@ -1996,7 +1996,7 @@ Restoring the exact `5/50` entry and presenting an admitted nearby drop
 produced authentic pickup opcode `185`. Folded snapshots show action-binding
 counts `6 -> 5 -> 6`, skill-binding counts `2 -> 3 -> 2`, and pickup keys
 `(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
-and value `50` as pickup; the fold exposes the numeric `51..54` action ids but
+and value `50` as pickup; the fold exposes the numeric `52..54` action ids but
 does not assign them roles.
 
 `--generate-variable-server-records` re-emits every bounded observation at its
@@ -2024,6 +2024,41 @@ valid and warning-free, ends active on map `101000000` at HP `50`, records the
 binding sequence `2001005 -> 2001004 -> 2001005`, and matches 91/91 heartbeats
 with no pending or unmatched response. This proves the key/value relationship
 without assigning meanings to the other selector families.
+
+## Chair action requests (`client 49`, `client 82`, `client 48`)
+
+Selector-`5` action `51`, bound to evdev X at key `45`, produced a complete
+live chair lifecycle boundary without a modeled server response:
+
+```text
+client opcode 49 (6 bytes):
+    uint16 opcode = 49
+    uint32 item_id
+
+client opcode 82 (2 bytes):
+    uint16 opcode = 82
+
+client opcode 48 (4 bytes):
+    uint16 opcode = 48
+    int16  marker = -1
+```
+
+Physical X rendered Setup-slot-`1` item `3010370`; the opcode-`49` body was the
+same `3010370` value. Empty opcode `82` followed 20,006 ms later while the sit
+intent remained open. Pressing X again sent opcode `48/-1`; a later Right
+attempt repeated that exact stand request because the custom server had not
+acknowledged the state. Neither reference PCAP contains opcodes `48`, `49`, or
+`82` in the client direction, so these shapes are live-bounded rather than
+capture-bounded.
+
+The fold exposes full typed observations/events, correlates the requested item
+with Setup inventory, and counts recovery/stand requests with or without an
+open sit intent. It clears only the modeled client intent on the first stand
+request or a field snapshot, and does not claim the server or client has
+completed a state change.
+Safe state therefore carries `server_acknowledgement_modeled: false`. The live
+transcript is valid, warning-free, and back to zero unknown packets after these
+three codecs.
 
 ## Skill-record change transaction (`client 103`, `server 46`, `client 293`)
 

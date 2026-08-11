@@ -457,7 +457,17 @@
   `2001002` produced authentic opcode `104`, while exact restoration plus an
   admitted nearby drop produced opcode `185`. Folded action/skill counts moved
   `6/2 -> 5/3 -> 6/2`, and pickup keys moved `(44,78) -> (78) -> (44,78)`.
-  Selector-`5` values `51..54` and selectors `2/4/6` remain neutral.
+  Selector-`5` values `52..54` and selectors `2/4/6` remain neutral.
+- Physical X at key `45` now identifies selector-`5` action `51` as chair sit.
+  The client rendered Setup-slot-`1` item `3010370` and sent opcode `49` with
+  that exact u32 item id, followed 20,006 ms later by empty recovery opcode
+  `82`. A second X and a later Right attempt sent the exact opcode-`48`,
+  signed-`-1` stand request twice because the custom server has no chair
+  acknowledgement. Typed codecs/fold events correlate the known Setup item,
+  open sit intent, recovery, and stand attempts while explicitly leaving the
+  server response unmodeled; a field snapshot clears stale open intent. The
+  active live transcript is valid,
+  warning-free, and again has zero unknown packets.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -1230,10 +1240,11 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
    additional item/request shapes only from independently admitted evidence,
    and continue serving `[39,49,312]` only after an authentic opcode-`185` or
    compact opcode-`222` request.
-2. Keep opcode-`385` selectors `2/4/6` and selector-`5` action ids `51..54`
+2. Keep opcode-`385` selectors `2/4/6` and selector-`5` action ids `52..54`
    neutral until an independently identifiable input/action permits another
    one-field control. Selector `0` is the bounded empty binding, selector `1`
-   the skill binding, selector `5` the action binding, and action `50` pickup.
+   the skill binding, selector `5` the action binding, action `50` pickup, and
+   action `51` chair sit.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Keep packet injection an explicit loopback-only opt-in while expanding

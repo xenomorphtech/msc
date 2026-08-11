@@ -4900,6 +4900,85 @@ class ItemUseRequest:
 
 
 @dataclass(frozen=True)
+class ChairSitRequest:
+    """Client request to sit on one Setup-inventory chair item."""
+
+    item_id: int
+    opcode: int = 49
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ChairSitRequest":
+        reader = PacketReader(payload, packet_name="chair_sit_request")
+        _expect_opcode(reader, 49)
+        item_id = reader.u32("item_id")
+        reader.finish()
+        return cls(item_id=item_id)
+
+    def safe_dict(self) -> dict[str, int]:
+        return {"item_id": self.item_id}
+
+    def _validate(self) -> None:
+        if self.opcode != 49:
+            raise PacketShapeError("chair-sit request opcode must be 49")
+        if not 0 <= self.item_id <= 0xFFFF_FFFF:
+            raise PacketShapeError("chair-sit item id must fit in u32")
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack("<HI", self.opcode, self.item_id)
+
+
+@dataclass(frozen=True)
+class ChairStandRequest:
+    """Captured client request to leave a chair, carrying marker -1."""
+
+    marker: int = -1
+    opcode: int = 48
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ChairStandRequest":
+        reader = PacketReader(payload, packet_name="chair_stand_request")
+        _expect_opcode(reader, 48)
+        marker = reader.i16("marker")
+        reader.finish()
+        request = cls(marker=marker)
+        request._validate()
+        return request
+
+    def _validate(self) -> None:
+        if self.opcode != 48:
+            raise PacketShapeError("chair-stand request opcode must be 48")
+        if self.marker != -1:
+            raise PacketShapeError("chair-stand marker must be captured -1")
+
+    def safe_dict(self) -> dict[str, int]:
+        return {"marker": self.marker}
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack("<Hh", self.opcode, self.marker)
+
+
+@dataclass(frozen=True)
+class ChairRecoveryRequest:
+    """Empty client request observed 20 seconds after sitting on a chair."""
+
+    opcode: int = 82
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ChairRecoveryRequest":
+        reader = PacketReader(payload, packet_name="chair_recovery_request")
+        _expect_opcode(reader, 82)
+        reader.finish()
+        return cls()
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 82:
+            raise PacketShapeError("chair-recovery request opcode must be 82")
+        return struct.pack("<H", self.opcode)
+
+
+@dataclass(frozen=True)
 class ItemPickupRequest:
     """Client request to collect one field drop in full or compact form."""
 

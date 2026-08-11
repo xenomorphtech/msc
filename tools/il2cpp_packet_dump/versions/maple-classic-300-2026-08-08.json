@@ -1638,6 +1638,29 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":379},{"op":"read","name":"variant","kind":"u8","equals":36},{"op":"read","name":"time_1","kind":"i64"},{"op":"read","name":"time_2","kind":"i64"},{"op":"read","name":"time_3","kind":"i64"},{"op":"read","name":"time_4","kind":"i64"}]
     },
     {
+      "name":"chair_stand_request","direction":"client_to_server","opcode":48,"length":4,
+      "source":"2026-08-11 live selector-5 action-51 control: physical X and a movement attempt while seated emitted two byte-identical signed -1 records",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":48},
+        {"op":"read","name":"marker","kind":"i16","equals":-1}
+      ]
+    },
+    {
+      "name":"chair_sit_request","direction":"client_to_server","opcode":49,"length":6,
+      "source":"2026-08-11 live selector-5 action-51 control: physical X rendered the setup-slot-1 chair and emitted its exact item template as u32",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":49},
+        {"op":"read","name":"item_id","kind":"u32"}
+      ]
+    },
+    {
+      "name":"chair_recovery_request","direction":"client_to_server","opcode":82,"length":2,
+      "source":"2026-08-11 live selector-5 action-51 control: one empty request arrived 20006 ms after the chair-sit request and before the first stand request",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":82}
+      ]
+    },
+    {
       "name":"npc_spawn","direction":"server_to_client","opcode":300,"length":22,
       "source":"packets.py:NpcSpawn; capture 111 stream 92",
       "operations":[

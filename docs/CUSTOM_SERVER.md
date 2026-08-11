@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 293 tests.
+The last run passed all 296 tests.
 
 ## Inspect and compare captures
 
@@ -950,7 +950,7 @@ opcode-`385` entry indices are keyboard key codes and selector `1` carries a
 skill id. Index `29` is the evdev Left Ctrl key. A later selector-only A/B/A
 establishes selector `0` as an empty binding. A subsequent one-entry Z-key
 control establishes selector `5` as an action binding and value `50` as
-pickup; selectors `2/4/6` and selector-`5` action ids `51..54` remain unnamed.
+pickup; selectors `2/4/6` and selector-`5` action ids `52..54` remain unnamed.
 
 The option performs the same valid-fold, exact-length, reparse, unique-index,
 and patch-conflict checks as the fixed emitter. Runtime status exposes only
@@ -997,7 +997,18 @@ restoring the exact `5/50` entry and presenting an admitted nearby drop
 produced authentic opcode `185`. The three folded snapshots report action
 counts `6 -> 5 -> 6`, skill counts `2 -> 3 -> 2`, and pickup key codes
 `(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
-and action `50` as pickup without assigning roles to `51..54`.
+and action `50` as pickup without assigning roles to `52..54`.
+
+The same unchanged map identifies action `51` through physical evdev X at key
+`45`. The client rendered its Setup-slot-`1` chair item `3010370` and sent
+opcode `49` with that exact u32 item id. After 20,006 ms it sent one empty
+opcode `82`. Pressing X again sent opcode `48` with signed marker `-1`; a later
+Right attempt repeated opcode `48` because no chair acknowledgement was served.
+The gameplay fold models these as `chair_sit_request`,
+`chair_recovery_request`, and `chair_stand_request`, matches the sit item to
+Setup inventory, and tracks whether recovery/stand follows an open sit intent.
+Safe state explicitly reports `server_acknowledgement_modeled: false`; no chair
+response is guessed, and a field snapshot clears any still-open chair intent.
 
 ## Opt-in live server-packet injection
 

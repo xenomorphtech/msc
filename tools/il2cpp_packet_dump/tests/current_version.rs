@@ -16,9 +16,33 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 132);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 135);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
-    assert_eq!(shapes.len(), 195);
+    assert_eq!(shapes.len(), 198);
+
+    let chair_sit = shapes
+        .iter()
+        .find(|shape| shape.name == "chair_sit_request")
+        .unwrap();
+    assert_eq!(chair_sit.opcode, 49);
+    assert_eq!(chair_sit.length, Some(6));
+    assert_eq!(chair_sit.operations.len(), 2);
+
+    let chair_stand = shapes
+        .iter()
+        .find(|shape| shape.name == "chair_stand_request")
+        .unwrap();
+    assert_eq!(chair_stand.opcode, 48);
+    assert_eq!(chair_stand.length, Some(4));
+    assert_eq!(chair_stand.operations.len(), 2);
+
+    let chair_recovery = shapes
+        .iter()
+        .find(|shape| shape.name == "chair_recovery_request")
+        .unwrap();
+    assert_eq!(chair_recovery.opcode, 82);
+    assert_eq!(chair_recovery.length, Some(2));
+    assert_eq!(chair_recovery.operations.len(), 1);
 
     let shape = shapes
         .iter()
@@ -315,7 +339,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 195);
+    assert_eq!(dump.packet_shapes.len(), 198);
     assert_eq!(
         dump.handlers
             .iter()

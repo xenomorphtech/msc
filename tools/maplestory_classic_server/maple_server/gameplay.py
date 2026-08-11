@@ -14,6 +14,9 @@ from .gamestate import (
     decode_transcript,
 )
 from .packets import (
+    ChairRecoveryRequest,
+    ChairSitRequest,
+    ChairStandRequest,
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
@@ -609,6 +612,17 @@ class GameplayGameState:
     pending_item_acquisition_requests: int = 0
     last_item_acquisition_response_ms: float | None = None
     max_item_acquisition_response_ms: float | None = None
+    chair_sit_requests: int = 0
+    chair_sit_requests_by_item: Counter[int] = field(default_factory=Counter)
+    chair_sit_setup_matches: int = 0
+    chair_sit_setup_mismatches: int = 0
+    chair_stand_requests: int = 0
+    chair_stand_requests_with_open_sit: int = 0
+    chair_stand_requests_without_open_sit: int = 0
+    chair_recovery_requests: int = 0
+    chair_recovery_requests_with_open_sit: int = 0
+    chair_recovery_requests_without_open_sit: int = 0
+    requested_chair_item_id: int | None = None
     item_use_requests: int = 0
     item_use_requests_by_item: Counter[int] = field(default_factory=Counter)
     item_use_unknown_slots: int = 0
@@ -3692,6 +3706,34 @@ class GameplayAnalysis:
                 "max_item_acquisition_response_ms": (
                     self.state.max_item_acquisition_response_ms
                 ),
+                "chair": {
+                    "sit_requests": self.state.chair_sit_requests,
+                    "sit_requests_by_item": dict(
+                        self.state.chair_sit_requests_by_item
+                    ),
+                    "setup_inventory_matches": (
+                        self.state.chair_sit_setup_matches
+                    ),
+                    "setup_inventory_mismatches": (
+                        self.state.chair_sit_setup_mismatches
+                    ),
+                    "stand_requests": self.state.chair_stand_requests,
+                    "stand_requests_with_open_sit": (
+                        self.state.chair_stand_requests_with_open_sit
+                    ),
+                    "stand_requests_without_open_sit": (
+                        self.state.chair_stand_requests_without_open_sit
+                    ),
+                    "recovery_requests": self.state.chair_recovery_requests,
+                    "recovery_requests_with_open_sit": (
+                        self.state.chair_recovery_requests_with_open_sit
+                    ),
+                    "recovery_requests_without_open_sit": (
+                        self.state.chair_recovery_requests_without_open_sit
+                    ),
+                    "requested_item_id": self.state.requested_chair_item_id,
+                    "server_acknowledgement_modeled": False,
+                },
                 "item_use_requests": self.state.item_use_requests,
                 "item_use_requests_by_item": {
                     str(item_id): count
@@ -5685,6 +5727,78 @@ class GameplayStateFold:
                 issues=(
                     "client tick and trailing signed-count roles remain neutral",
                 ),
+            )
+        if opcode == 49:
+            request = ChairSitRequest.parse(payload)
+            setup_item_known = any(
+                item.item_id == request.item_id
+                for item in self.state.inventory_items.get("setup", ())
+            )
+            self.state.chair_sit_requests += 1
+            self.state.chair_sit_requests_by_item[request.item_id] += 1
+            if setup_item_known:
+                self.state.chair_sit_setup_matches += 1
+            else:
+                self.state.chair_sit_setup_mismatches += 1
+            self.state.requested_chair_item_id = request.item_id
+            details = {
+                **request.safe_dict(),
+                "setup_item_known": setup_item_known,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "chair_sit_requested", details=details)
+            return self._observation(
+                frame,
+                kind="chair_sit_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode == 48:
+            request = ChairStandRequest.parse(payload)
+            requested_item_id = self.state.requested_chair_item_id
+            matched_open_sit = requested_item_id is not None
+            self.state.chair_stand_requests += 1
+            if matched_open_sit:
+                self.state.chair_stand_requests_with_open_sit += 1
+            else:
+                self.state.chair_stand_requests_without_open_sit += 1
+            self.state.requested_chair_item_id = None
+            details = {
+                **request.safe_dict(),
+                "matched_open_sit": matched_open_sit,
+                "requested_item_id": requested_item_id,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "chair_stand_requested", details=details)
+            return self._observation(
+                frame,
+                kind="chair_stand_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode == 82:
+            request = ChairRecoveryRequest.parse(payload)
+            requested_item_id = self.state.requested_chair_item_id
+            matched_open_sit = requested_item_id is not None
+            self.state.chair_recovery_requests += 1
+            if matched_open_sit:
+                self.state.chair_recovery_requests_with_open_sit += 1
+            else:
+                self.state.chair_recovery_requests_without_open_sit += 1
+            details = {
+                "matched_open_sit": matched_open_sit,
+                "requested_item_id": requested_item_id,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "chair_recovery_requested", details=details)
+            return self._observation(
+                frame,
+                kind="chair_recovery_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
             )
         if opcode == 80:
             request = ItemUseRequest.parse(payload)
@@ -8312,6 +8426,9 @@ class GameplayStateFold:
             cleared_positioned_effects = len(
                 self.state.positioned_effect_entities
             )
+            cleared_chair_sit_intent = (
+                self.state.requested_chair_item_id is not None
+            )
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -8338,6 +8455,7 @@ class GameplayStateFold:
             self.state.pending_item_uses = 0
             self._pending_item_pickups.clear()
             self.state.pending_item_pickups = 0
+            self.state.requested_chair_item_id = None
             cleared_client_attack_effects = sum(
                 len(pending)
                 for pending in self._pending_client_attacks.values()
@@ -8359,6 +8477,7 @@ class GameplayStateFold:
                 "cleared_players": cleared_players,
                 "cleared_drops": cleared_drops,
                 "cleared_positioned_effects": cleared_positioned_effects,
+                "cleared_chair_sit_intent": cleared_chair_sit_intent,
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
                 ),
@@ -13020,6 +13139,18 @@ def render_gameplay_analysis(
             f"pending:{state.pending_item_acquisition_requests} "
             f"last_ms:{state.last_item_acquisition_response_ms} "
             f"max_ms:{state.max_item_acquisition_response_ms}"
+        ),
+        (
+            f"chair=sit:{state.chair_sit_requests} "
+            f"setup_matches:{state.chair_sit_setup_matches} "
+            f"setup_mismatches:{state.chair_sit_setup_mismatches} "
+            f"recovery:{state.chair_recovery_requests} "
+            "recovery_with_open_sit:"
+            f"{state.chair_recovery_requests_with_open_sit} "
+            f"stand:{state.chair_stand_requests} "
+            "stand_with_open_sit:"
+            f"{state.chair_stand_requests_with_open_sit} "
+            f"requested_item:{state.requested_chair_item_id}"
         ),
         (
             f"item_use=requests:{state.item_use_requests} "

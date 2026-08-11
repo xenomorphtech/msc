@@ -42,9 +42,12 @@ from maple_server.gameplay import (  # noqa: E402
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
-from maple_server.gamestate import PlainFrame  # noqa: E402
+from maple_server.gamestate import PlainFrame, ShapeCoverage  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     AbilityPointAllocationEntry,
+    ChairRecoveryRequest,
+    ChairSitRequest,
+    ChairStandRequest,
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
@@ -1814,6 +1817,26 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(PacketShapeError, "between 1 and 32767"):
             ItemUseRequest(client_tick=0, slot=0, item_id=2_000_014).to_bytes()
+
+    def test_chair_request_family_round_trip(self) -> None:
+        sit = ChairSitRequest(item_id=3_010_370)
+        stand = ChairStandRequest()
+        recovery = ChairRecoveryRequest()
+
+        self.assertEqual(sit.to_bytes().hex(), "310042ef2d00")
+        self.assertEqual(ChairSitRequest.parse(sit.to_bytes()), sit)
+        self.assertEqual(sit.safe_dict(), {"item_id": 3_010_370})
+        self.assertEqual(stand.to_bytes().hex(), "3000ffff")
+        self.assertEqual(ChairStandRequest.parse(stand.to_bytes()), stand)
+        self.assertEqual(stand.safe_dict(), {"marker": -1})
+        self.assertEqual(recovery.to_bytes().hex(), "5200")
+        self.assertEqual(ChairRecoveryRequest.parse(recovery.to_bytes()), recovery)
+        with self.assertRaisesRegex(PacketShapeError, "captured -1"):
+            ChairStandRequest(marker=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "opcode must be 49"):
+            ChairSitRequest(item_id=3_010_370, opcode=50).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "opcode must be 48"):
+            ChairStandRequest(opcode=49).to_bytes()
 
     def test_inventory_move_request_round_trip(self) -> None:
         requests = (
@@ -8247,6 +8270,95 @@ class GameplayStateFoldTest(unittest.TestCase):
             policy.respond(
                 ItemUseRequest(client_tick=102_101, slot=1, item_id=2_000_000)
             )
+
+    def test_folds_chair_sit_recovery_and_stand_requests(self) -> None:
+        chair_item_id = 3_010_370
+        chair_add = InventoryChangeSet(
+            update_flag=0,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.ADD,
+                    inventory_type=3,
+                    slot=1,
+                    item=fixture_stack_inventory_item(
+                        slot=1,
+                        item_id=chair_item_id,
+                        quantity=1,
+                    ),
+                ),
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_directional_plaintexts=(
+                ("server_to_client", chair_add.to_bytes()),
+                ("client_to_server", ChairSitRequest(chair_item_id).to_bytes()),
+                ("client_to_server", ChairRecoveryRequest().to_bytes()),
+                ("client_to_server", ChairStandRequest().to_bytes()),
+                ("client_to_server", ChairStandRequest().to_bytes()),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.chair_sit_requests, 1)
+        self.assertEqual(analysis.state.chair_sit_requests_by_item, {chair_item_id: 1})
+        self.assertEqual(analysis.state.chair_sit_setup_matches, 1)
+        self.assertEqual(analysis.state.chair_sit_setup_mismatches, 0)
+        self.assertEqual(analysis.state.chair_recovery_requests, 1)
+        self.assertEqual(analysis.state.chair_recovery_requests_with_open_sit, 1)
+        self.assertEqual(analysis.state.chair_stand_requests, 2)
+        self.assertEqual(analysis.state.chair_stand_requests_with_open_sit, 1)
+        self.assertEqual(analysis.state.chair_stand_requests_without_open_sit, 1)
+        self.assertIsNone(analysis.state.requested_chair_item_id)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"chair_sit_request", "chair_recovery_request", "chair_stand_request"}
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                for observation in observations
+            )
+        )
+        chair_state = analysis.safe_dict()["state"]["chair"]
+        self.assertEqual(chair_state["sit_requests_by_item"], {chair_item_id: 1})
+        self.assertEqual(chair_state["recovery_requests_with_open_sit"], 1)
+        self.assertFalse(chair_state["server_acknowledgement_modeled"])
+
+    def test_field_change_clears_open_chair_intent(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_directional_plaintexts=(
+                ("client_to_server", ChairSitRequest(3_010_370).to_bytes()),
+                (
+                    "server_to_client",
+                    FieldSnapshotEnvelope(
+                        opaque_snapshot=b"next-field"
+                    ).to_bytes(),
+                ),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.field_epoch, 2)
+        self.assertEqual(analysis.state.chair_sit_requests, 1)
+        self.assertIsNone(analysis.state.requested_chair_item_id)
+        field_observations = [
+            observation
+            for observation in analysis.observations
+            if "cleared_chair_sit_intent" in observation.details
+        ]
+        self.assertEqual(len(field_observations), 2)
+        self.assertFalse(field_observations[0].details["cleared_chair_sit_intent"])
+        self.assertTrue(field_observations[1].details["cleared_chair_sit_intent"])
 
     def test_correlates_item_pickup_effect_notice_and_removal_chains(self) -> None:
         analysis = analyze_gameplay_transcript(

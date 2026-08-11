@@ -203,7 +203,7 @@ bindings whose tuple index is the key code. Selector `1` binds a skill id, and
 selector `0` is an empty binding. Selector `5` binds an action id; live control
 identifies action `50` as pickup. Key code `29` is validated evdev Left Ctrl
 and key code `44` is evdev Z. The emitter round-trips and replaces the complete
-records; selectors `2/4/6`, action ids `51..54`, and opcode-`156` field meanings
+records; selectors `2/4/6`, action ids `52..54`, and opcode-`156` field meanings
 remain neutral. Safe output reports empty, skill, action, and pickup bindings
 without naming the other action ids.
 
@@ -232,7 +232,19 @@ to an authentic opcode-`104` skill request. Restoring the exact `5/50` entry
 and presenting an admitted nearby drop produced authentic opcode `185`. The
 folded snapshot sequence reports pickup keys `(44,78) -> (78) -> (44,78)`.
 This names selector `5` as an action binding and value `50` as pickup while
-leaving values `51..54` as neutral action ids.
+leaving values `52..54` as neutral action ids.
+
+Physical X at key `45` independently identifies action `51` as chair sit. It
+rendered setup-slot-`1` item `3010370` and emitted client opcode `49` as
+`uint16 opcode, uint32 item_id`. Exactly 20,006 ms later the seated client sent
+empty opcode `82`. Pressing X again sent opcode `48` with a captured signed
+`-1` marker; a later movement attempt repeated the same stand request because
+the custom server has no chair acknowledgement yet. The fold now models all
+three requests, correlates the sit item with Setup inventory, distinguishes
+recovery/stand requests with and without an open sit intent, and explicitly
+reports that server acknowledgement remains unmodeled. A field snapshot clears
+any still-open chair intent. This returns the active live transcript to zero
+unknown packets without inventing a response.
 
 The second captured selector-`1` binding is also causal. Physical evdev key
 code `71` under `71 -> 2001002` emitted client opcode `104` as the exact
@@ -2195,3 +2207,9 @@ preserve distinct Unity scan codes in this setup.
     opcode `104`, exact restoration plus a nearby admitted drop emitted opcode
     `185`, and folded pickup keys changed `(44,78) -> (78) -> (44,78)` while
     selector-`5` values `51..54` remain unnamed action ids.
+93. Identify selector-`5` action `51` as chair sit from physical X, model live
+    client opcode `49` as the exact Setup-item request, the 20.006-second empty
+    opcode `82` as seated recovery, and opcode `48` as the signed-`-1` stand
+    request. Correlate chair `3010370` with Setup slot `1`, retain server
+    acknowledgement as an explicit gap, and restore the active transcript to
+    zero unknown packets.
