@@ -378,6 +378,16 @@ A later bounded control introduced a typed source mob, removed it immediately
 before a mode-`1`/mode-`0` item pair at the player, and repeated the sequence
 with an explicit controller release. All variants retained a known source-mob
 history but still produced neither opcode `185` nor compact opcode `222`.
+A stricter control then replayed the capture's complete `4000004` pre-drop
+family after an authentic local opcode-`52` attack: current-MP update, mob HP
+`20 -> 0`, reason-`1` leave, opcode-`49` variant-`3` record, EXP `+10`, redacted
+variant-`10` text, and the source-matched mode-`1`/mode-`0` item pair. The
+health response arrived 92.526 ms after the attack versus 102.326 ms in the
+reference, but two pickup-key presses still emitted neither request opcode.
+The warning-free fold remained active with 700/700 heartbeats. PCAP references
+support `?character-stat=FIELD:VALUE` for a packet's sole captured stat and
+`?field-drop-position=X:Y[:SOURCE_X:SOURCE_Y]` for these typed controls; both
+preserve the packet's other fields exactly.
 Pair the position rewrite with
 `--reactive-item-pickup-responses` to handle a real client opcode-`185` or
 compact opcode-`222` request from modeled state. Pickup quantities and

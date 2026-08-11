@@ -1446,9 +1446,29 @@ physical pickup-key input. The fold remains `active`, valid, and warning-free
 at the bounded control snapshot, with zero pickup requests and 141/141 matched
 heartbeats. Owner equality, proximity, source-mob presence/history, immediate
 lifecycle timing, and controller release are therefore not sufficient alone.
-The exact captured
-pre-drop neighborhood's combat/reward state remains a bounded candidate; a
-generated server response is not evidence that the client accepted the drop.
+
+The exact captured combat/reward family is now negative too. A typed
+stream-`92` mob was placed at `(633,-2677)`, received an authentic local
+opcode-`52` attack, and then received the capture-ordered current-MP update,
+mob-health `20 -> 0`, reason-`1` leave, opcode-`49` variant-`3` record,
+current EXP `+10`, redacted variant-`10` text, and source-matched `4000004`
+mode-`1`/mode-`0` pair. The strongest run delivered the first health packet
+92.526 ms after the attack, close to the reference's 102.326 ms, and preserved
+the captured owner/source object relations while rewriting only current stat
+values and signed positions. Two pickup-key inputs after the 450 ms animation
+still produced neither opcode `185` nor compact opcode `222`; no synthetic
+pickup response was sent. The bounded fold stayed active, valid, and
+warning-free with 700/700 heartbeats and no pending probe.
+
+Two reusable PCAP transforms encode those bounded rewrites.
+`?character-stat=FIELD:VALUE` accepts only an opcode-`41` packet whose sole
+captured stat is `FIELD`, preserving its mask, request flag, and tail.
+`?field-drop-position=X:Y[:SOURCE_X:SOURCE_Y]` reparses opcode `311`, changes
+only the signed destination and optional animated source positions, and
+preserves the drop, owner, source-mob, item, timing, and flag fields. The
+negative result now excludes the captured payload order and capture-like
+attack-response timing as sufficient pickup switches; an unmodeled client-side
+admission condition remains.
 
 ## Reactive mob-health validation
 
@@ -2269,9 +2289,10 @@ project's own `README.md` for all options.
 Replace the remaining opaque replay portions with stateful handling:
 
 1. Isolate the additional client-side drop eligibility condition using the
-   now-falsified owner/proximity/source-lifecycle controls; test the captured
-   combat/reward neighborhood next, then run the reactive pickup effect only
-   after the real client emits opcode `185` or compact opcode `222`.
+   now-falsified owner/proximity/source-lifecycle and capture-timed
+   combat/reward controls; compare official and generated opcode-`311` client
+   admission without serving a pickup until the real client emits opcode `185`
+   or compact opcode `222`.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
    retain neutral roles for the opcode-`394`/`279` correlation.

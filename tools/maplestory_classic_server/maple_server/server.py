@@ -70,6 +70,7 @@ from .live_replay import (
 from .packets import (
     ChannelTransitionResponse,
     CharacterListEnvelope,
+    CharacterStatUpdate,
     ClientAttackAction,
     FieldDropSpawn,
     HeartbeatProbe,
@@ -2599,6 +2600,67 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
         entries = list(record.entries)
         entries[key_code] = replace(original, selector=0)
         return replace(record, entries=tuple(entries)).to_bytes()
+    if transform.startswith("character-stat="):
+        fields = transform.removeprefix("character-stat=").split(":")
+        if len(fields) != 2:
+            raise argparse.ArgumentTypeError(
+                "character-stat transform must use FIELD:VALUE"
+            )
+        field_name, value_text = fields
+        try:
+            value = int(value_text, 0)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "character-stat value must be an integer"
+            ) from error
+        try:
+            record = CharacterStatUpdate.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "character-stat transform requires a validated opcode-41 "
+                "character-stat packet"
+            ) from error
+        if set(record.values) != {field_name}:
+            raise argparse.ArgumentTypeError(
+                "character-stat transform field must be the packet's only "
+                "captured stat field"
+            )
+        try:
+            return replace(record, **{field_name: value}).to_bytes()
+        except (PacketShapeError, TypeError) as error:
+            raise argparse.ArgumentTypeError(
+                "character-stat value does not fit the captured stat field"
+            ) from error
+    if transform.startswith("field-drop-position="):
+        fields = transform.removeprefix("field-drop-position=").split(":")
+        if len(fields) not in {2, 4}:
+            raise argparse.ArgumentTypeError(
+                "field-drop-position transform must use X:Y or "
+                "X:Y:SOURCE_X:SOURCE_Y"
+            )
+        position_x, position_y = parse_i16_position(":".join(fields[:2]))
+        try:
+            drop = FieldDropSpawn.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "field-drop-position transform requires a validated "
+                "opcode-311 field-drop packet"
+            ) from error
+        source_x = drop.source_x
+        source_y = drop.source_y
+        if len(fields) == 4:
+            if not drop.animated:
+                raise argparse.ArgumentTypeError(
+                    "field-drop source position requires an animated packet"
+                )
+            source_x, source_y = parse_i16_position(":".join(fields[2:]))
+        return replace(
+            drop,
+            position_x=position_x,
+            position_y=position_y,
+            source_x=source_x,
+            source_y=source_y,
+        ).to_bytes()
     if transform.startswith("mob-spawn="):
         fields = transform.removeprefix("mob-spawn=").split(":")
         if len(fields) not in {2, 4}:
@@ -2662,7 +2724,8 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
     raise argparse.ArgumentTypeError(
         "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
         "character-list, keyboard-skill=KEY_CODE:SKILL_ID, "
-        "keyboard-selector-zero=KEY_CODE, or "
+        "keyboard-selector-zero=KEY_CODE, character-stat=FIELD:VALUE, "
+        "field-drop-position=X:Y[:SOURCE_X:SOURCE_Y], or "
         "mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
     )
 

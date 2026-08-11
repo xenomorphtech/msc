@@ -1078,6 +1078,83 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(parsed.entries[:71], tuple(bindings[:71]))
         self.assertEqual(parsed.entries[72:], tuple(bindings[72:]))
 
+    def test_pcap_plaintext_reference_can_rewrite_one_captured_stat(
+        self,
+    ) -> None:
+        original = CharacterStatUpdate(
+            request_flag=0,
+            stat_mask=CharacterStatUpdate.EXPERIENCE,
+            experience=1_615,
+            opaque_tail=b"\x00",
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@92:0?"
+                "character-stat=experience:1474"
+            )
+
+        parsed = CharacterStatUpdate.parse(payload)
+        self.assertEqual(parsed.experience, 1_474)
+        self.assertEqual(parsed.stat_mask, CharacterStatUpdate.EXPERIENCE)
+        self.assertEqual(parsed.request_flag, 0)
+        self.assertEqual(parsed.opaque_tail, b"\x00")
+
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            with self.assertRaisesRegex(
+                argparse.ArgumentTypeError, "only captured stat field"
+            ):
+                parse_pcap_plaintext_reference(
+                    "/private/reference.pcapng@92:0?"
+                    "character-stat=current_mp:86"
+                )
+
+    def test_pcap_plaintext_reference_can_rewrite_drop_positions(
+        self,
+    ) -> None:
+        original_record = FieldDropSpawn(
+            spawn_mode=1,
+            drop_object_id=40_004,
+            drop_kind=FieldDropSpawn.ITEM,
+            value=4_000_004,
+            owner_value_1=300_001,
+            owner_value_2=300_001,
+            ownership_flag=0,
+            position_x=516,
+            position_y=1_006,
+            source_mob_object_id=20_001,
+            source_x=526,
+            source_y=1_058,
+            animation_duration_ms=450,
+            expiration_ticks=150_842_304_000_000_000,
+            final_flag=1,
+        )
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original_record.to_bytes(),),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@92:0?"
+                "field-drop-position=633:-2677:633:-2677"
+            )
+
+        parsed = FieldDropSpawn.parse(payload)
+        self.assertEqual((parsed.position_x, parsed.position_y), (633, -2677))
+        self.assertEqual((parsed.source_x, parsed.source_y), (633, -2677))
+        self.assertEqual(parsed.drop_object_id, original_record.drop_object_id)
+        self.assertEqual(parsed.value, original_record.value)
+        self.assertEqual(parsed.owner_value_1, original_record.owner_value_1)
+        self.assertEqual(parsed.owner_value_2, original_record.owner_value_2)
+        self.assertEqual(
+            parsed.source_mob_object_id,
+            original_record.source_mob_object_id,
+        )
+
     def test_pcap_plaintext_reference_can_rewrite_typed_mob_spawn(self) -> None:
         original = MobEnterField(
             object_id=20_001,

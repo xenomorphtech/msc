@@ -2316,9 +2316,21 @@ compact opcode `222`. The bounded transcript snapshot was valid and
 warning-free with 141/141 matched heartbeats and zero pickup requests. Runtime
 status therefore reports only the modeled owner/source relations: owner
 equality, proximity, source-mob presence/history, immediate lifecycle timing,
-and controller
-release are not independently sufficient. The combat/reward records in the
-captured pre-drop neighborhood remain neutral candidates.
+and controller release are not independently sufficient.
+
+A later control closes the captured pre-drop payload/timing candidate without
+naming its neutral fields. It placed the capture's typed template-`210100` mob
+at the player, observed a real opcode-`52` attack, and sent the corresponding
+single-stat current-MP update, health `20 -> 0`, reason-`1` leave, opcode-`49`
+variant-`3` record, current EXP `+10`, redacted variant-`10` text, and
+source-matched `4000004` mode-`1`/mode-`0` pair. The first health response was
+92.526 ms after the attack versus 102.326 ms in the reference. Two physical
+pickup inputs after the 450 ms drop animation still emitted no opcode `185` or
+`222`, so no pickup response was served. The active fold stayed valid and
+warning-free with 700/700 heartbeat pairs. Typed PCAP transforms rewrite only
+the sole captured opcode-`41` stat value and opcode-`311` destination/animated
+source positions; every other byte-bearing field is preserved. Thus the
+captured order and capture-like response timing are not sufficient either.
 
 ## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 

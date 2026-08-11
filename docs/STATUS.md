@@ -721,7 +721,14 @@
   opcode-`185`/`222` requests and had 141/141 heartbeats at the bounded control
   snapshot. Runtime prediction now explicitly says that
   owner/proximity/source history and lifecycle timing require additional client
-  conditions.
+  conditions. A capture-timed combat/reward control is now negative as well:
+  an authentic opcode-`52` attack received the captured MP, HP `20 -> 0`,
+  leave, opcode-`49`, EXP `+10`, text, and source-matched `4000004` drop order,
+  with the first health response at 92.526 ms versus 102.326 ms in the
+  reference. Two post-animation pickup inputs emitted no opcode `185`/`222`,
+  no pickup response was fabricated, and the warning-free active fold retained
+  700/700 heartbeats. Typed PCAP transforms now support sole-field opcode-`41`
+  stat replacement and opcode-`311` destination/source-position replacement.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -1041,9 +1048,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Use the owner/proximity/source-lifecycle negative controls to test the
-   captured combat/reward neighborhood; serve a reactive pickup only after
-   observing an authentic opcode-`185` or compact opcode-`222` request.
+1. Compare official and generated opcode-`311` client admission now that
+   owner/proximity/source-lifecycle and capture-timed combat/reward controls are
+   negative; serve a reactive pickup only after observing an authentic
+   opcode-`185` or compact opcode-`222` request.
 2. Keep opcode-`385` selectors `2/4/5/6` neutral until an independently
    identifiable input/action permits another one-field control; selector `0`
    is now the bounded empty binding and selector `1` the skill binding.
