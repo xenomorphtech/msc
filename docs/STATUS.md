@@ -52,9 +52,9 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,661 full, 44,381 partial, 58 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,417 full, 21,782 partial,
-  8 unknown, and zero invalid; stream `114` reports 54/22/0/0. Seven
+  26,661 full, 44,400 partial, 39 unknown-but-lossless, and zero invalid
+  packet observations. Stream `92` now reports 13,417 full, 21,788 partial,
+  2 unknown, and zero invalid; stream `114` reports 54/22/0/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
   plus one aggregate warning for six one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -193,8 +193,24 @@
   after 165.073/167.004 ms. The gamestate now enters `exit_requested`, tracks
   the redacted status, and correlates the terminal transition. Coverage becomes
   `13,417/21,782/8/0`, `54/22/0/0`, and `26,661/44,381/58/0` for streams
-  `92`, `114`, and `126`. The current game-menu attempt emitted no opcode `241`,
-  so live terminal replay remains unclaimed.
+  `92`, `114`, and `126` before the fixed-width client records below. The
+  current game-menu attempt emitted no opcode `241`, so live terminal replay
+  remains unclaimed.
+- Client opcodes `100`, `307`, `308`, and `311` now consume and round-trip at
+  exact packet widths `26`, `14`, `74`, and `22`. Streams `92`/`126` contain
+  `1/1`, `1/1`, `2/11`, and `2/6`; opcode `308` repeats near 300 seconds and
+  opcode `311` near 600 seconds after its first bootstrap-skewed gap. Bodies
+  remain redacted and partial. Three direct-Wayland menu confirmations in the
+  local Wine client independently emitted three 41-byte opcode-`310` records,
+  not opcode `241`, and caused no phase transition. The safe fold reports only
+  opcode/body-size counts and periodic intervals. Coverage is now
+  `13,417/21,788/2/0`, `54/22/0/0`, and `26,661/44,400/39/0`. The first live
+  transcript has zero unknown packets; after nine opcode-`308` gaps near 300
+  seconds, one 592.004-second gap preceded a later unmodeled socket timeout.
+  A fresh browser-free local-Wine launch traversed world/channel/character
+  selection by direct nested-Wayland input and re-entered map `101000000`.
+  Its new transcript is warning-free at `60/43/0/0`, runtime HTTP status shows
+  one active world connection, and the programmatic audio mute remains active.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

@@ -412,6 +412,20 @@ is separately repeated at the same initial field-loading boundary in streams
 exit attempt did not emit opcode `241`; no server terminal packet was forced,
 so the live effect remains explicitly unproven.
 
+The remaining fixed-width outgoing records use the same capture-bounded rule.
+Opcodes `100`, `307`, `308`, and `311` have exact 26/14/74/22-byte packets in
+both sustained captures, so the codec can validate and round-trip their bodies
+without naming them. Timing supplies only a cadence observation: opcode `308`
+repeats near five minutes and opcode `311` near ten minutes after its first
+bootstrap-skewed interval. A later 592.004-second local opcode-`308` gap keeps
+that cadence observational rather than mandatory. Three controlled nested-
+Wayland menu confirmations in the local Wine session each emitted a 41-byte
+opcode-`310` record but no
+opcode `241` or phase change. The automatic manifest therefore adds a
+live-only opaque opcode-`310` shape, while the gameplay fold exposes only
+widths, counts, phase/epoch, and intervals. It does not promote timing or UI
+adjacency into a semantic or replay claim.
+
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
 accounting splits its 823 bytes into the shared character prefix, a 537-byte

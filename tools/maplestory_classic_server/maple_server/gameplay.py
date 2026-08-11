@@ -16,6 +16,7 @@ from .gamestate import (
 from .packets import (
     CharacterStatUpdate,
     ClientAttackAction,
+    ClientFixedOpaqueRecord,
     ClientOpcode43Envelope,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
@@ -1046,6 +1047,21 @@ class GameplayGameState:
     left_ctrl_skill_known: bool = False
     pending_movements: int = 0
     client_opcode_75_empty_records: int = 0
+    client_fixed_opaque_records_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_fixed_opaque_bytes_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_periodic_report_last_interval_ms: dict[int, float] = field(
+        default_factory=dict
+    )
+    client_periodic_report_min_interval_ms: dict[int, float] = field(
+        default_factory=dict
+    )
+    client_periodic_report_max_interval_ms: dict[int, float] = field(
+        default_factory=dict
+    )
     world_exit_requests: int = 0
     world_exit_requests_from_active_phase: int = 0
     world_exit_status_packets: int = 0
@@ -4388,6 +4404,33 @@ class GameplayAnalysis:
                         self.state.left_ctrl_skill_known
                     ),
                 },
+                "client_fixed_opaque_records": {
+                    "packets_by_opcode": dict(
+                        self.state.client_fixed_opaque_records_by_opcode
+                    ),
+                    "opaque_bytes_by_opcode": dict(
+                        self.state.client_fixed_opaque_bytes_by_opcode
+                    ),
+                    "periodic_last_interval_ms": {
+                        opcode: round(interval, 3)
+                        for opcode, interval in (
+                            self.state.client_periodic_report_last_interval_ms.items()
+                        )
+                    },
+                    "periodic_min_interval_ms": {
+                        opcode: round(interval, 3)
+                        for opcode, interval in (
+                            self.state.client_periodic_report_min_interval_ms.items()
+                        )
+                    },
+                    "periodic_max_interval_ms": {
+                        opcode: round(interval, 3)
+                        for opcode, interval in (
+                            self.state.client_periodic_report_max_interval_ms.items()
+                        )
+                    },
+                    "bodies_redacted": True,
+                },
                 "world_exit": {
                     "bootstrap_marker_count": (
                         self.state.client_opcode_75_empty_records
@@ -4477,6 +4520,7 @@ class GameplayStateFold:
         self._pending_server_opcode_348: dict[int, deque[int]] = {}
         self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
         self._pending_world_exit_requests: deque[int] = deque()
+        self._last_client_periodic_report_timestamp_ns: dict[int, int] = {}
         self._pending_skill_level_changes: deque[
             tuple[int, int, SkillLevelChangeRequest]
         ] = deque()
@@ -4912,6 +4956,65 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=marker,
                 details=details,
+            )
+        if opcode in {100, 307, 308, 310, 311}:
+            record = ClientFixedOpaqueRecord.parse(payload)
+            body_length = len(record.opaque_body)
+            self.state.client_fixed_opaque_records_by_opcode[opcode] += 1
+            self.state.client_fixed_opaque_bytes_by_opcode[opcode] += body_length
+            interval_ms: float | None = None
+            if opcode in {308, 311}:
+                previous_timestamp_ns = (
+                    self._last_client_periodic_report_timestamp_ns.get(opcode)
+                )
+                self._last_client_periodic_report_timestamp_ns[opcode] = (
+                    frame.timestamp_ns
+                )
+                if previous_timestamp_ns is not None:
+                    interval_ms = (
+                        frame.timestamp_ns - previous_timestamp_ns
+                    ) / 1e6
+                    self.state.client_periodic_report_last_interval_ms[
+                        opcode
+                    ] = interval_ms
+                    self.state.client_periodic_report_min_interval_ms[
+                        opcode
+                    ] = min(
+                        self.state.client_periodic_report_min_interval_ms.get(
+                            opcode, interval_ms
+                        ),
+                        interval_ms,
+                    )
+                    self.state.client_periodic_report_max_interval_ms[
+                        opcode
+                    ] = max(
+                        self.state.client_periodic_report_max_interval_ms.get(
+                            opcode, interval_ms
+                        ),
+                        interval_ms,
+                    )
+            details: dict[str, object] = {
+                **record.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+                "phase": self.state.phase.value,
+            }
+            if interval_ms is not None:
+                details["interval_ms"] = round(interval_ms, 3)
+            event_kind = (
+                "client_periodic_report_submitted"
+                if opcode in {308, 311}
+                else "client_fixed_record_submitted"
+            )
+            self._event(frame, event_kind, details=details)
+            return self._observation(
+                frame,
+                kind="client_fixed_opaque_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=details,
+                issues=(
+                    f"client opcode-{opcode} fixed body remains opaque",
+                ),
             )
         if opcode == 241:
             request = ClientWorldExitRequest.parse(payload)
@@ -12050,6 +12153,19 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_text_code_units.items()))} "
             "control_pairs:"
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
+        ),
+        (
+            "client_fixed_opaque_records="
+            "packets:"
+            f"{dict(sorted(state.client_fixed_opaque_records_by_opcode.items()))} "
+            "opaque_bytes:"
+            f"{dict(sorted(state.client_fixed_opaque_bytes_by_opcode.items()))} "
+            "periodic_last_ms:"
+            f"{dict(sorted(state.client_periodic_report_last_interval_ms.items()))} "
+            "periodic_min_ms:"
+            f"{dict(sorted(state.client_periodic_report_min_interval_ms.items()))} "
+            "periodic_max_ms:"
+            f"{dict(sorted(state.client_periodic_report_max_interval_ms.items()))}"
         ),
         (
             "world_exit="

@@ -9966,6 +9966,56 @@ class SkillRecordUpdateAcknowledgement:
             ) from error
 
 
+CLIENT_FIXED_OPAQUE_BODY_LENGTHS = {
+    100: 24,
+    307: 12,
+    308: 72,
+    310: 39,
+    311: 20,
+}
+
+
+@dataclass(frozen=True)
+class ClientFixedOpaqueRecord:
+    """Capture-bounded client record whose fixed body remains redacted."""
+
+    opaque_body: bytes = field(repr=False)
+    opcode: int
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientFixedOpaqueRecord":
+        reader = PacketReader(payload, packet_name="client_fixed_opaque_record")
+        opcode = reader.u16("opcode")
+        body_length = CLIENT_FIXED_OPAQUE_BODY_LENGTHS.get(opcode)
+        if body_length is None:
+            raise PacketShapeError(
+                f"fixed client record opcode is unsupported: {opcode}"
+            )
+        opaque_body = reader.bytes(body_length, "opaque_body")
+        reader.finish()
+        return cls(opaque_body=opaque_body, opcode=opcode)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "opcode": self.opcode,
+            "opaque_body_bytes": len(self.opaque_body),
+            "opaque_body_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        expected_length = CLIENT_FIXED_OPAQUE_BODY_LENGTHS.get(self.opcode)
+        if expected_length is None:
+            raise PacketShapeError(
+                f"fixed client record opcode is unsupported: {self.opcode}"
+            )
+        if len(self.opaque_body) != expected_length:
+            raise PacketShapeError(
+                f"client opcode-{self.opcode} body must be {expected_length} "
+                f"bytes, got {len(self.opaque_body)}"
+            )
+        return struct.pack("<H", self.opcode) + self.opaque_body
+
+
 @dataclass(frozen=True)
 class ClientOpcode75EmptyRecord:
     """Exact empty client marker observed during field bootstrap."""

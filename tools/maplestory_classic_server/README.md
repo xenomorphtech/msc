@@ -437,11 +437,11 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
-44,381 partial, 58 unknown, and zero invalid packet observations. PCAP
+44,400 partial, 39 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,417 full, 21,782 partial,
-8 unknown, and zero invalid observations; short stream `114` reaches 54 full,
+metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
+2 unknown, and zero invalid observations; short stream `114` reaches 54 full,
 22 partial, zero unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
@@ -589,6 +589,11 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `241`, client status opcode `45`/`46`, and terminal server
   opcode `9`: a repeated world-exit transaction that enters `exit_requested`,
   redacts the one-u32 status, and reaches `terminated` after 165–167 ms,
+- client opcodes `100`, `307`, `308`, and `311`: exact fixed-width redacted
+  records whose bodies remain opaque; the latter two additionally expose only
+  their observed approximately 300/600-second intervals. Client opcode `310`
+  is a separate 41-byte live-only record repeated by three controlled
+  direct-Wayland menu confirmations, with no opcode-`241` or phase transition,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
   records with two raw-byte-preserving IL2CPP booleans and two signed values per
   entry; zero is false and every nonzero byte is true, and the three-byte
@@ -1732,3 +1737,9 @@ preserve distinct Unity scan codes in this setup.
     opcode-`241`/status/terminal world-exit sequences into exact redacted
     gamestate events, close every unknown packet in short stream `114`, and
     confirm opcode `75` independently in the running local-Wine transcript.
+65. Fold client opcodes `100`, `307`, `308`, and `311` as exact-width redacted
+    records, publish only counts, body widths, phases/epochs, and the captured
+    `308`/`311` cadence, then bound the three controlled local-Wine menu
+    confirmations as a separate opaque opcode-`310` record. Validate both
+    sustained captures plus the live transcript without equating opcode `310`
+    with the captured opcode-`241` exit request.

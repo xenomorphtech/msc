@@ -1323,9 +1323,51 @@ full coverage. Stream `92` reaches `13,417/21,782/8/0`, stream `114` reaches
 `54/22/0/0`, and stream `126` reaches `26,661/44,381/58/0`.
 
 The current local client's game-menu confirmation did not emit opcode `241`,
-so a terminal injection was intentionally not attempted. This leaves the
-captured transaction exact and independently repeated, but its live UI trigger
-unproven in the current replay state.
+so a terminal injection was intentionally not attempted. Three controlled
+direct-Wayland confirmations instead emitted one client opcode-`310` packet
+each, with no phase transition or later opcode `241`. This leaves the captured
+transaction exact and independently repeated, but its live UI trigger unproven
+in the current replay state.
+
+## Fixed-width opaque client reports
+
+Four additional outgoing-client families repeat at exact widths in the two
+sustained gameplay captures. A fifth width is independently bounded by the
+three controlled local-Wine menu confirmations:
+
+| opcode | packet/body bytes | stream `92` | stream `126` | local Wine | bounded observation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `100` | `26/24` | 1 | 1 | 0 | one fixed record per sustained capture |
+| `307` | `14/12` | 1 | 1 | 1 | one fixed record near bootstrap |
+| `308` | `74/72` | 2 | 11 | 10 | approximately 300-second cadence |
+| `310` | `41/39` | 0 | 0 | 3 | one per controlled menu confirmation |
+| `311` | `22/20` | 2 | 6 | 6 | bootstrap-skewed first gap, then approximately 600 seconds |
+
+The codec consumes and re-emits each exact body but never includes its bytes in
+safe output. State exposes packet and opaque-byte counts by opcode. Events add
+only opcode, body length, field epoch, and phase; opcodes `308` and `311` also
+report the observed interval after the first record. Stream `92` observes a
+301.474-second opcode-`308` gap and a 584.534-second opcode-`311` gap. Stream
+`126` keeps opcode `308` within `299.995..310.551` seconds and opcode `311`
+within `557.141..610.544` seconds. In the first local run, the first nine
+opcode-`308` gaps stay within `299.992..300.017` seconds before one later
+592.004-second gap; opcode `311` has one bootstrap-skewed 346.476-second gap
+followed by approximately 600-second gaps. Cadence is therefore descriptive,
+not a guarantee that every interval produces a packet.
+
+These remain partial observations: cadence and controlled UI correlation do
+not establish field semantics, identifier safety, or replay safety. The
+automatic packet manifest retains the capture-pinned opaque widths and adds an
+explicit live-only opcode-`310` shape; it does not invent outgoing-client
+semantics from incoming handler reads. Coverage becomes
+`13,417/21,788/2/0` for stream `92`, remains `54/22/0/0` for stream `114`, and
+becomes `26,661/44,400/39/0` for stream `126`. The first local transcript folds
+all three opcode-`310` records with zero unknown packets and an `active` final
+packet state; its socket later timed out without opcode `241`. A fresh
+browser-free relaunch then traversed world/channel/character selection through
+the nested Wayland seat and re-entered map `101000000`. Its new transcript is
+valid and warning-free at `60/43/0/0`, already folds opcodes `307` and `311`,
+and runtime status reports one active local world connection.
 
 ## Field-bootstrap ledgers (`147`, `272`)
 
@@ -3199,9 +3241,9 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,661
-full, 44,381 partial, 58 unknown-but-lossless, and zero invalid packet
-observations. Stream `92` independently reaches 13,417 full, 21,782 partial,
-8 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
+full, 44,400 partial, 39 unknown-but-lossless, and zero invalid packet
+observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
+2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its seven remaining warnings are cross-packet state
 correlations: six pickup-effect mismatches plus one aggregate warning for six
@@ -3239,6 +3281,11 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 
 ## Current unknowns
 
+- Gameplay framing is complete for short stream `114`. Stream `92` retains two
+  22-byte client opcode-`115` packets. Long stream `126` retains 39 client
+  packets across opcode/length/count tuples `64/10/2`, `79/13/2`, `111/8/1`,
+  `222/19/6`, `225/16/15`, `276/210/1`, and `298/76/12`; all remain
+  losslessly framed but semantically unmodeled.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.

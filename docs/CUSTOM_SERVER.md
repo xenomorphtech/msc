@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,660 observations are full, 44,381 partial, 59
+`--fail-on-invalid`: 26,661 observations are full, 44,400 partial, 39
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -379,8 +379,34 @@ only opcodes, counts, phases, and timing. Stream `92` reaches
 
 A direct-Wayland game-menu attempt did not emit opcode `241` from the current
 client, so no terminal packet was injected and no live exit-effect claim is
-made. The client remained active in map `101000000`; the two independent
-captured terminal sequences remain the evidence for the transaction model.
+made. Three controlled confirmations instead emitted three exact 41-byte
+client opcode-`310` packets. No confirmation changed phase or led to opcode
+`241`; the client remained active in map `101000000`. The two independent
+captured terminal sequences remain the evidence for the exit transaction.
+
+Client opcodes `100`, `307`, `308`, and `311` now consume as fixed-width,
+redacted records. Their body widths are `24`, `12`, `72`, and `20` bytes.
+Streams `92`/`126` contain `1/1`, `1/1`, `2/11`, and `2/6` records,
+respectively. Opcode `308` repeats at approximately 300 seconds and opcode
+`311` at approximately 600 seconds after the bootstrap-skewed first interval.
+The current local-Wine transcript independently contains opcode `307`, ten
+opcode-`308`, six opcode-`311`, and the three controlled opcode-`310` records.
+Its first nine opcode-`308` gaps are within `299.992..300.017` seconds; a later
+592.004-second gap prevents treating the cadence as a guaranteed periodic send.
+The fold publishes only opcode/body-byte counts, field epoch, phase, and the
+periodic intervals; all bodies stay private and every record remains partial.
+The analyzer's safe JSON state exposes these aggregates under
+`client_fixed_opaque_records` and emits `client_fixed_record_submitted` or
+`client_periodic_report_submitted` events without packet bytes.
+
+That older local world socket later timed out without opcode `241`, leaving its
+recorded packet fold in `active` rather than falsely inferring a modeled exit.
+The browser-free launcher then restarted only the local Wine client, and direct
+nested-Wayland input traversed world, channel, and character selection without
+moving the host cursor. The fresh client re-entered map `101000000`; its new
+transcript validates warning-free at `60/43/0/0`, and runtime HTTP status
+reports one active world connection with packet injection ready. The
+programmatic Maple-only audio mute remained active throughout.
 
 Opcode `302` now separates the NPC manager's lifecycle control from ordinary
 opcode-`300` spawns. All 36 long-corpus records use control `1`, carry an
@@ -465,8 +491,8 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,661 full, 44,381 partial, 58 unknown-but-lossless, and zero invalid. Stream
-`92` now reaches 13,417 full, 21,782 partial, 8 unknown, and zero invalid;
+26,661 full, 44,400 partial, 39 unknown-but-lossless, and zero invalid. Stream
+`92` now reaches 13,417 full, 21,788 partial, 2 unknown, and zero invalid;
 stream `114` reaches 54/22/0/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The

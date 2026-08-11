@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 import struct
@@ -45,6 +46,7 @@ from maple_server.gamestate import PlainFrame  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAttackAction,
+    ClientFixedOpaqueRecord,
     ClientOpcode43Envelope,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
@@ -2907,6 +2909,34 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 self.assertNotIn(str(value), str(status.safe_dict()))
         with self.assertRaisesRegex(PacketShapeError, "45 or 46"):
             ClientWorldExitStatus(value=0, opcode=47).to_bytes()
+
+    def test_client_fixed_opaque_records_round_trip_and_redact(self) -> None:
+        for opcode, body_length in (
+            (100, 24),
+            (307, 12),
+            (308, 72),
+            (310, 39),
+            (311, 20),
+        ):
+            with self.subTest(opcode=opcode):
+                body = bytes(range(body_length))
+                record = ClientFixedOpaqueRecord(
+                    opaque_body=body,
+                    opcode=opcode,
+                )
+
+                self.assertEqual(len(record.to_bytes()), body_length + 2)
+                self.assertEqual(
+                    ClientFixedOpaqueRecord.parse(record.to_bytes()),
+                    record,
+                )
+                self.assertTrue(record.safe_dict()["opaque_body_redacted"])
+                self.assertNotIn(body.hex(), str(record.safe_dict()))
+                with self.assertRaisesRegex(PacketShapeError, "body must be"):
+                    ClientFixedOpaqueRecord(
+                        opaque_body=body[:-1],
+                        opcode=opcode,
+                    ).to_bytes()
 
     def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
         self,
@@ -5921,6 +5951,62 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn(str(status_value), str(analysis.safe_dict()))
         self.assertIn(
             "world_exit=bootstrap_markers:1 requests:1 active_requests:1",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_fixed_and_periodic_client_opaque_records(self) -> None:
+        def record(opcode: int, body_length: int) -> bytes:
+            return ClientFixedOpaqueRecord(
+                opaque_body=bytes([opcode & 0xFF]) * body_length,
+                opcode=opcode,
+            ).to_bytes()
+
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_client_plaintexts=(
+                record(100, 24),
+                record(307, 12),
+                record(310, 39),
+                record(308, 72),
+                record(311, 20),
+                record(308, 72),
+                record(311, 20),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(
+            analysis.state.client_fixed_opaque_records_by_opcode,
+            {100: 1, 307: 1, 308: 2, 310: 1, 311: 2},
+        )
+        self.assertEqual(
+            analysis.state.client_fixed_opaque_bytes_by_opcode,
+            {100: 24, 307: 12, 308: 144, 310: 39, 311: 40},
+        )
+        self.assertEqual(
+            set(analysis.state.client_periodic_report_last_interval_ms),
+            {308, 311},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_fixed_opaque_record"
+        ]
+        self.assertEqual(len(observations), 7)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "partial"
+                for observation in observations
+            )
+        )
+        event_counts = Counter(event.kind for event in analysis.events)
+        self.assertEqual(event_counts["client_fixed_record_submitted"], 3)
+        self.assertEqual(event_counts["client_periodic_report_submitted"], 4)
+        self.assertIn(
+            "client_fixed_opaque_records=packets:"
+            "{100: 1, 307: 1, 308: 2, 310: 1, 311: 2}",
             render_gameplay_analysis(analysis),
         )
 
