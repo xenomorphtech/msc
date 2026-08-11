@@ -48,6 +48,39 @@ python -m maple_server capture-proxy \
   --transcript-dir captures
 ```
 
+For a byte-transparent world proxy that also decrypts and folds the live
+gameplay state with the same packet models used by the server, run:
+
+```sh
+python -m maple_server live-proxy \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --upstream-host 43.142.194.150 \
+  --upstream-port 8587 \
+  --transcript-dir captures/live \
+  --state-file /tmp/maple-live-gamestate.json
+```
+
+The proxy forwards the handshake and every encrypted frame byte-for-byte. It
+infers both directional cipher masks, advances the observed IV streams, and
+publishes an atomic, identifier-free JSON snapshot after each folded packet.
+Point the client at the proxy listener just as for `capture-proxy`. HTTP CONNECT
+options and the `MAPLE_PROXY_USER` / `MAPLE_PROXY_PASSWORD` environment
+variables are also supported.
+
+In another terminal, start the egui dashboard:
+
+```sh
+cargo run --manifest-path ../maplestory_gamestate_ui/Cargo.toml --release -- \
+  --state-file /tmp/maple-live-gamestate.json
+```
+
+The dashboard renders the player position, HP/MP, active mobs and their
+modeled HP ranges, remote players, field drops, and typed inventory. Platform
+lines are explicitly inferred rather than treated as full map geometry: NPC
+foothold ranges are the strongest evidence, followed by mob foothold/position
+observations and finally a player-position fallback.
+
 Replay a captured session:
 
 ```sh
