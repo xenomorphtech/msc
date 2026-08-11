@@ -898,6 +898,91 @@ the existing `effect:N` alias. Python and native codecs both consume and
 re-emit every record exactly. Coverage moves from the opcode-`79` checkpoint
 `26,661/44,402/37/0` to `26,661/44,417/22/0`.
 
+## Redacted selector envelope (`276`)
+
+Two independently observed selector branches share client opcode `276`.
+Stream `126` contributes one 210-byte selector-`24` packet:
+
+```text
+uint16 opcode = 276
+uint32 selector = 24
+uint32 header_value_1                 # retained; redacted
+uint32 header_value_2                 # retained; redacted
+uint32 group_count
+repeat group_count:
+    uint32 group_selector             # retained; redacted
+    uint32 pair_count
+    repeat pair_count:
+        uint32 value_1                # retained; redacted
+        uint32 value_2                # retained; redacted
+```
+
+Its `group_count` is `5`; per-group pair counts are `3,5,5,3,3`, totaling 19.
+The active local-Wine transcript independently contributes the compact branch:
+
+```text
+uint16 opcode = 276
+uint32 selector = 17
+uint8  reserved[3] = 0
+```
+
+The fold publishes only selector, `compact`/`grouped` shape, group count, pair
+count, and field epoch. Header, group-selector, and pair values remain present
+for exact re-emission but are omitted from safe state and events. Both Python
+branches round-trip exactly, the native manifest keeps distinct nine- and
+210-byte shapes, and isolated native validation exact-consumes both packets.
+No request/response, UI, or gameplay meaning is assigned from the shared opcode
+alone. The long corpus moves from the opcode-`298` checkpoint
+`26,661/44,429/10/0` to `26,661/44,430/9/0`; the held-open live transcript
+moves from one unknown packet to zero and closes warning-free after the
+configured two-hour hold with all `1,440/1,440` heartbeats matched. Its final
+gameplay phase remains map `101000000` at HP `50/222`.
+
+## Item-acquisition transaction (`298` -> `39`)
+
+All 12 client opcode-`298` packets in stream `126` have one exact 76-byte
+shape:
+
+```text
+uint16 opcode = 298
+uint32 control_value = 0
+uint32 selection_index
+uint32 request_kind                  # observed 1 -> Use, 2 -> Cash
+uint32 item_id
+uint32 quantity
+uint32 duration_value                # observed 0, 10080, or 20160
+uint64 expires_at_ticks = 150842304000000000
+uint32 serial_value                  # retained for exact re-emission; redacted
+uint32 reserved_values[5] = 0
+int32  signed_sentinel_values[2] = -99
+uint32 trailing_values[2] = 0
+uint8  flag_1 = 0
+uint8  flag_2 = 1
+```
+
+The selection indices are `25,24,23,22,10,9,8,7,6,5,3,4`; request kinds are
+`{1:9,2:3}`, duration values are `{0:8,10080:1,20160:3}`, and only the three
+kind-`2` records carry nonzero serials. The serial field is excluded from safe
+packet state, events, and text reports.
+
+Every request is followed in the same field epoch by a server opcode-`39`
+addition with the request-kind inventory and exact item template. The bounded
+latencies are `388.332..711.700` ms. All nine Use requests match aggregate
+response quantity, including quantity `2` split into two quantity-`1` slots.
+Two Cash stack additions have response quantity `3` for request quantity `1`,
+and the Cash equipment-style addition has no quantity. The fold therefore
+records 12 item/inventory matches, nine quantity matches, two quantity
+mismatches, one quantity-unavailable response, and zero pending requests; it
+does not reject the three Cash distinctions or infer what authorizes the
+acquisition. Empty opcode-`39` change sets immediately before some additions
+do not prematurely close a request.
+
+The Python codec, fold, and native manifest consume and re-emit all 12 records
+exactly. Safe analysis adds request counts by inventory/kind, neutral duration
+distributions, nonzero-serial counts, match/quantity/pending counters, and
+last/maximum response latency. Coverage advances from
+`26,661/44,417/22/0` to `26,661/44,429/10/0`.
+
 ## Redacted text envelope (`348`)
 
 The pinned version-300 opcode-`348` handler performs four common primitive
@@ -3302,7 +3387,7 @@ mode-`2` field-load mesos records are exact 30-byte shapes. Variable opcode
 `303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,661
-full, 44,417 partial, 22 unknown-but-lossless, and zero invalid packet
+full, 44,430 partial, 9 unknown-but-lossless, and zero invalid packet
 observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
 2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
@@ -3343,10 +3428,9 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 ## Current unknowns
 
 - Gameplay framing is complete for short stream `114`. Stream `92` retains two
-  22-byte client opcode-`115` packets. Long stream `126` retains 22 client
-  packets across opcode/length/count tuples `64/10/2`, `111/8/1`, `222/19/6`,
-  `276/210/1`, and `298/76/12`; all remain losslessly framed but semantically
-  unmodeled.
+  22-byte client opcode-`115` packets. Long stream `126` retains nine client
+  packets across opcode/length/count tuples `64/10/2`, `111/8/1`, and
+  `222/19/6`; all remain losslessly framed but semantically unmodeled.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.

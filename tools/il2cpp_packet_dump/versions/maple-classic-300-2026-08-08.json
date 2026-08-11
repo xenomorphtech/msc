@@ -376,6 +376,61 @@
       ]
     },
     {
+      "name":"client_opcode_276_compact","direction":"client_to_server","opcode":276,"length":9,
+      "source":"packets.py:ClientOpcode276Envelope; active local-Wine transcript positioned_effect_actions_live_20260811 selector-17 packet",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":276},
+        {"op":"read","name":"selector","kind":"u32","equals":17},
+        {"op":"read","name":"reserved_u16","kind":"u16","equals":0},
+        {"op":"read","name":"reserved_u8","kind":"u8","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_276_grouped","direction":"client_to_server","opcode":276,"length":210,
+      "source":"packets.py:ClientOpcode276Envelope; sole 1-10FS stream-126 selector-24 packet has five groups and 19 u32 pairs",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":276},
+        {"op":"read","name":"selector","kind":"u32","equals":24},
+        {"op":"read","name":"header_value_1","kind":"u32"},
+        {"op":"read","name":"header_value_2","kind":"u32"},
+        {"op":"read","name":"group_count","kind":"u32"},
+        {"op":"repeat","count_from":"group_count","operations":[
+          {"op":"read","name":"group_selector","kind":"u32"},
+          {"op":"read","name":"pair_count","kind":"u32"},
+          {"op":"repeat","count_from":"pair_count","operations":[
+            {"op":"read","name":"value_1","kind":"u32"},
+            {"op":"read","name":"value_2","kind":"u32"}
+          ]}
+        ]}
+      ]
+    },
+    {
+      "name":"client_item_acquisition_request","direction":"client_to_server","opcode":298,"length":76,
+      "source":"packets.py:ClientOpcode298ItemAcquisitionRequest; 1-10FS stream-126 all 12 records match the next same-epoch server opcode-39 additions by request-kind inventory and item template",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":298},
+        {"op":"read","name":"control_value","kind":"u32","equals":0},
+        {"op":"read","name":"selection_index","kind":"u32"},
+        {"op":"read","name":"request_kind","kind":"u32"},
+        {"op":"read","name":"item_id","kind":"u32"},
+        {"op":"read","name":"quantity","kind":"u32"},
+        {"op":"read","name":"duration_value","kind":"u32"},
+        {"op":"read","name":"expires_at_ticks","kind":"u64"},
+        {"op":"read","name":"serial_value","kind":"u32"},
+        {"op":"read","name":"reserved_value_1","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_2","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_3","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_4","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_5","kind":"u32","equals":0},
+        {"op":"read","name":"signed_sentinel_1","kind":"i32","equals":-99},
+        {"op":"read","name":"signed_sentinel_2","kind":"i32","equals":-99},
+        {"op":"read","name":"trailing_value_1","kind":"u32","equals":0},
+        {"op":"read","name":"trailing_value_2","kind":"u32","equals":0},
+        {"op":"read","name":"flag_1","kind":"u8","equals":0},
+        {"op":"read","name":"flag_2","kind":"u8","equals":1}
+      ]
+    },
+    {
       "name":"item_use_request","direction":"client_to_server","opcode":80,"length":12,
       "source":"packets.py:ItemUseRequest; capture 111 stream 92",
       "operations":[

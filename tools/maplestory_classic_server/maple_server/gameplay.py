@@ -25,7 +25,9 @@ from .packets import (
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode225PositionedEffectAction,
+    ClientOpcode276Envelope,
     ClientOpcode279TextEnvelope,
+    ClientOpcode298ItemAcquisitionRequest,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
@@ -295,6 +297,14 @@ class PendingInventoryMove:
     request: InventoryMoveRequest
 
 
+@dataclass(frozen=True)
+class PendingItemAcquisition:
+    request_frame_index: int
+    request_timestamp_ns: int
+    field_epoch: int
+    request: ClientOpcode298ItemAcquisitionRequest
+
+
 @dataclass
 class PendingItemPickup:
     request_frame_index: int
@@ -547,6 +557,24 @@ class GameplayGameState:
     pending_inventory_move_requests: int = 0
     last_inventory_move_response_ms: float | None = None
     max_inventory_move_response_ms: float | None = None
+    client_item_acquisition_requests: int = 0
+    client_item_acquisition_requests_by_inventory: Counter[str] = field(
+        default_factory=Counter
+    )
+    client_item_acquisition_requests_by_kind: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_item_acquisition_duration_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_item_acquisition_serial_values_present: int = 0
+    item_acquisition_matches: int = 0
+    item_acquisition_quantity_matches: int = 0
+    item_acquisition_quantity_mismatches: int = 0
+    item_acquisition_quantity_unavailable: int = 0
+    pending_item_acquisition_requests: int = 0
+    last_item_acquisition_response_ms: float | None = None
+    max_item_acquisition_response_ms: float | None = None
     item_use_requests: int = 0
     item_use_requests_by_item: Counter[int] = field(default_factory=Counter)
     item_use_unknown_slots: int = 0
@@ -1018,6 +1046,15 @@ class GameplayGameState:
     )
     server_opcode_394_packets: int = 0
     server_opcode_394_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_276_packets: int = 0
+    client_opcode_276_selectors: Counter[int] = field(default_factory=Counter)
+    client_opcode_276_shapes: Counter[str] = field(default_factory=Counter)
+    client_opcode_276_group_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_276_pair_counts: Counter[int] = field(
         default_factory=Counter
     )
     client_opcode_279_text_packets: int = 0
@@ -3499,6 +3536,42 @@ class GameplayAnalysis:
                 "max_inventory_move_response_ms": (
                     self.state.max_inventory_move_response_ms
                 ),
+                "client_item_acquisition_requests": (
+                    self.state.client_item_acquisition_requests
+                ),
+                "client_item_acquisition_requests_by_inventory": dict(
+                    self.state.client_item_acquisition_requests_by_inventory
+                ),
+                "client_item_acquisition_requests_by_kind": dict(
+                    self.state.client_item_acquisition_requests_by_kind
+                ),
+                "client_item_acquisition_duration_values": dict(
+                    self.state.client_item_acquisition_duration_values
+                ),
+                "client_item_acquisition_serial_values_present": (
+                    self.state.client_item_acquisition_serial_values_present
+                ),
+                "item_acquisition_matches": (
+                    self.state.item_acquisition_matches
+                ),
+                "item_acquisition_quantity_matches": (
+                    self.state.item_acquisition_quantity_matches
+                ),
+                "item_acquisition_quantity_mismatches": (
+                    self.state.item_acquisition_quantity_mismatches
+                ),
+                "item_acquisition_quantity_unavailable": (
+                    self.state.item_acquisition_quantity_unavailable
+                ),
+                "pending_item_acquisition_requests": (
+                    self.state.pending_item_acquisition_requests
+                ),
+                "last_item_acquisition_response_ms": (
+                    self.state.last_item_acquisition_response_ms
+                ),
+                "max_item_acquisition_response_ms": (
+                    self.state.max_item_acquisition_response_ms
+                ),
                 "item_use_requests": self.state.item_use_requests,
                 "item_use_requests_by_item": {
                     str(item_id): count
@@ -4345,6 +4418,18 @@ class GameplayAnalysis:
                         self.state.server_opcode_348_control_pairs
                     ),
                 },
+                "client_opcode_276": {
+                    "packet_count": self.state.client_opcode_276_packets,
+                    "selectors": dict(self.state.client_opcode_276_selectors),
+                    "shapes": dict(self.state.client_opcode_276_shapes),
+                    "group_counts": dict(
+                        self.state.client_opcode_276_group_counts
+                    ),
+                    "pair_counts": dict(
+                        self.state.client_opcode_276_pair_counts
+                    ),
+                    "header_and_record_values_redacted": True,
+                },
                 "opcode_394_279": {
                     "server_packet_count": self.state.server_opcode_394_packets,
                     "server_text_code_units": dict(
@@ -4598,6 +4683,9 @@ class GameplayStateFold:
         ] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
         self._pending_inventory_moves: deque[PendingInventoryMove] = deque()
+        self._pending_item_acquisitions: deque[
+            PendingItemAcquisition
+        ] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._pending_client_attacks: dict[
             int, deque[PendingClientAttackHit]
@@ -5599,6 +5687,33 @@ class GameplayStateFold:
                 parsed=acknowledgement,
                 details=details,
             )
+        if opcode == 276:
+            envelope = ClientOpcode276Envelope.parse(payload)
+            self.state.client_opcode_276_packets += 1
+            self.state.client_opcode_276_selectors[envelope.selector] += 1
+            self.state.client_opcode_276_shapes[envelope.shape_name] += 1
+            self.state.client_opcode_276_group_counts[len(envelope.groups)] += 1
+            self.state.client_opcode_276_pair_counts[envelope.pair_count] += 1
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_276_record_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_276_envelope",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=envelope,
+                details=details,
+                issues=(
+                    "client opcode-276 selector, header, group, and pair roles "
+                    "remain neutral",
+                ),
+            )
         if opcode == 279:
             envelope = ClientOpcode279TextEnvelope.parse(payload)
             correlated_server_envelope = bool(self._pending_server_opcode_394)
@@ -5683,6 +5798,49 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=envelope,
                 details=details,
+            )
+        if opcode == 298:
+            request = ClientOpcode298ItemAcquisitionRequest.parse(payload)
+            self.state.client_item_acquisition_requests += 1
+            self.state.client_item_acquisition_requests_by_inventory[
+                request.inventory_name
+            ] += 1
+            self.state.client_item_acquisition_requests_by_kind[
+                request.request_kind
+            ] += 1
+            self.state.client_item_acquisition_duration_values[
+                request.duration_value
+            ] += 1
+            if request.serial_value:
+                self.state.client_item_acquisition_serial_values_present += 1
+            self.state.pending_item_acquisition_requests += 1
+            self._pending_item_acquisitions.append(
+                PendingItemAcquisition(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    field_epoch=self.state.field_epoch,
+                    request=request,
+                )
+            )
+            details = {
+                **request.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "inventory_item_acquisition_requested",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="inventory_item_acquisition_request",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=request,
+                details=details,
+                issues=(
+                    "client opcode-298 control, selection, duration, serial, "
+                    "sentinel, and flag roles remain neutral",
+                ),
             )
         if opcode == 309:
             acknowledgement = ClientOpcode309Acknowledgement.parse(payload)
@@ -6235,6 +6393,9 @@ class GameplayStateFold:
             change_set = InventoryChangeSet.parse(payload)
             modification_details: list[dict[str, object]] = []
             pickup_effect_candidates: list[dict[str, object]] = []
+            acquisition_additions: list[
+                tuple[str, InventoryItemEntity]
+            ] = []
             applied_modifications = 0
             self.state.inventory_change_packets += 1
             self.state.inventory_update_flags[change_set.update_flag] += 1
@@ -6278,6 +6439,7 @@ class GameplayStateFold:
                         items.append(added)
                     else:
                         items[existing_index] = added
+                    acquisition_additions.append((inventory_name, added))
                     if added.quantity is not None and added.quantity > 0:
                         pickup_effect_candidates.append(
                             {
@@ -6488,6 +6650,92 @@ class GameplayStateFold:
                     sorted(items, key=lambda item: item.slot)
                 )
                 modification_details.append(details)
+            acquisition_response: dict[str, object] | None = None
+            if self._pending_item_acquisitions and acquisition_additions:
+                pending_acquisition = self._pending_item_acquisitions[0]
+                matching_additions = tuple(
+                    (inventory_name, item)
+                    for inventory_name, item in acquisition_additions
+                    if (
+                        inventory_name
+                        == pending_acquisition.request.inventory_name
+                        and item.item_id
+                        == pending_acquisition.request.item_id
+                        and pending_acquisition.field_epoch
+                        == self.state.field_epoch
+                    )
+                )
+                if matching_additions:
+                    self._pending_item_acquisitions.popleft()
+                    self.state.pending_item_acquisition_requests -= 1
+                    self.state.item_acquisition_matches += 1
+                    response_quantities = tuple(
+                        item.quantity for _, item in matching_additions
+                    )
+                    response_quantity = (
+                        sum(
+                            quantity
+                            for quantity in response_quantities
+                            if quantity is not None
+                        )
+                        if all(
+                            quantity is not None
+                            for quantity in response_quantities
+                        )
+                        else None
+                    )
+                    quantity_matches = (
+                        response_quantity
+                        == pending_acquisition.request.quantity
+                        if response_quantity is not None
+                        else None
+                    )
+                    if quantity_matches is True:
+                        self.state.item_acquisition_quantity_matches += 1
+                    elif quantity_matches is False:
+                        self.state.item_acquisition_quantity_mismatches += 1
+                    else:
+                        self.state.item_acquisition_quantity_unavailable += 1
+                    response_ms = round(
+                        (
+                            frame.timestamp_ns
+                            - pending_acquisition.request_timestamp_ns
+                        )
+                        / 1e6,
+                        3,
+                    )
+                    self.state.last_item_acquisition_response_ms = response_ms
+                    self.state.max_item_acquisition_response_ms = max(
+                        self.state.max_item_acquisition_response_ms or 0.0,
+                        response_ms,
+                    )
+                    acquisition_response = {
+                        "request_frame": (
+                            pending_acquisition.request_frame_index
+                        ),
+                        "response_ms": response_ms,
+                        "inventory": (
+                            pending_acquisition.request.inventory_name
+                        ),
+                        "item_id": pending_acquisition.request.item_id,
+                        "request_quantity": (
+                            pending_acquisition.request.quantity
+                        ),
+                        "response_quantity": response_quantity,
+                        "quantity_matches": quantity_matches,
+                        "added_slots": [
+                            item.slot for _, item in matching_additions
+                        ],
+                        "field_epoch": self.state.field_epoch,
+                    }
+                    self._event(
+                        frame,
+                        "inventory_item_acquisition_confirmed",
+                        details={
+                            **pending_acquisition.request.safe_dict(),
+                            **acquisition_response,
+                        },
+                    )
             item_pickup_effect: dict[str, object] | None = None
             if len(pickup_effect_candidates) == 1:
                 pending_item_pickup = self._attach_item_pickup_effect(
@@ -6504,6 +6752,8 @@ class GameplayStateFold:
             }
             if item_pickup_effect is not None:
                 details["item_pickup_effect"] = item_pickup_effect
+            if acquisition_response is not None:
+                details["item_acquisition_response"] = acquisition_response
             self._event(frame, "inventory_change_set_received", details=details)
             return self._observation(
                 frame,
@@ -9902,6 +10152,11 @@ class GameplayStateFold:
                 f"{self.state.pending_inventory_move_requests} inventory-move "
                 "requests had no matching captured move update"
             )
+        if self.state.pending_item_acquisition_requests:
+            self.warnings.append(
+                f"{self.state.pending_item_acquisition_requests} item-"
+                "acquisition requests had no matching captured inventory add"
+            )
         if self.state.pending_item_pickups:
             self.warnings.append(
                 f"{self.state.pending_item_pickups} item-pickup requests had no "
@@ -9939,6 +10194,9 @@ class GameplayStateFold:
                     "pending_item_uses": self.state.pending_item_uses,
                     "pending_inventory_move_requests": (
                         self.state.pending_inventory_move_requests
+                    ),
+                    "pending_item_acquisition_requests": (
+                        self.state.pending_item_acquisition_requests
                     ),
                     "pending_item_pickups": self.state.pending_item_pickups,
                     "pending_client_attack_effects": (
@@ -11798,6 +12056,15 @@ def render_gameplay_analysis(
     inventory_modification_operations = json.dumps(
         dict(sorted(state.inventory_modifications_by_operation.items()))
     )
+    item_acquisition_inventories = json.dumps(
+        dict(sorted(state.client_item_acquisition_requests_by_inventory.items()))
+    )
+    item_acquisition_kinds = json.dumps(
+        dict(sorted(state.client_item_acquisition_requests_by_kind.items()))
+    )
+    item_acquisition_durations = json.dumps(
+        dict(sorted(state.client_item_acquisition_duration_values.items()))
+    )
     lines = [
         f"source={analysis.source}",
         f"valid={analysis.valid}",
@@ -11852,6 +12119,25 @@ def render_gameplay_analysis(
             f"pending_moves:{state.pending_inventory_move_requests} "
             f"last_move_ms:{state.last_inventory_move_response_ms} "
             f"max_move_ms:{state.max_inventory_move_response_ms}"
+        ),
+        (
+            "item_acquisition="
+            f"requests:{state.client_item_acquisition_requests} "
+            f"inventories:{item_acquisition_inventories} "
+            f"kinds:{item_acquisition_kinds} "
+            f"durations:{item_acquisition_durations} "
+            "serial_values_present:"
+            f"{state.client_item_acquisition_serial_values_present} "
+            f"matches:{state.item_acquisition_matches} "
+            "quantity_matches:"
+            f"{state.item_acquisition_quantity_matches} "
+            "quantity_mismatches:"
+            f"{state.item_acquisition_quantity_mismatches} "
+            "quantity_unavailable:"
+            f"{state.item_acquisition_quantity_unavailable} "
+            f"pending:{state.pending_item_acquisition_requests} "
+            f"last_ms:{state.last_item_acquisition_response_ms} "
+            f"max_ms:{state.max_item_acquisition_response_ms}"
         ),
         (
             f"item_use=requests:{state.item_use_requests} "
@@ -12444,6 +12730,16 @@ def render_gameplay_analysis(
             f"pending:{state.pending_world_exit_requests} "
             f"last_rtt_ms:{state.last_world_exit_round_trip_ms} "
             f"max_rtt_ms:{state.max_world_exit_round_trip_ms}"
+        ),
+        (
+            "client_opcode_276="
+            f"packets:{state.client_opcode_276_packets} "
+            f"selectors:{dict(sorted(state.client_opcode_276_selectors.items()))} "
+            f"shapes:{dict(sorted(state.client_opcode_276_shapes.items()))} "
+            "group_counts:"
+            f"{dict(sorted(state.client_opcode_276_group_counts.items()))} "
+            "pair_counts:"
+            f"{dict(sorted(state.client_opcode_276_pair_counts.items()))}"
         ),
         (
             "opcode_394_279="

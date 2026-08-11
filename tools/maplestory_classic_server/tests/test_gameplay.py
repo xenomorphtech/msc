@@ -55,7 +55,10 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
     ClientOpcode225PositionedEffectAction,
+    ClientOpcode276Envelope,
+    ClientOpcode276RecordGroup,
     ClientOpcode279TextEnvelope,
+    ClientOpcode298ItemAcquisitionRequest,
     ClientOpcode309Acknowledgement,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
@@ -695,6 +698,7 @@ def fixture_gameplay_transcript(
     stat_updates: bool = False,
     inventory_changes: bool = False,
     inventory_move: bool = False,
+    item_acquisition: bool = False,
     item_use: bool = False,
     item_pickup: bool = False,
     active_item_drop: bool = False,
@@ -865,6 +869,44 @@ def fixture_gameplay_transcript(
                         destination_slot=-11,
                         move_flag=2,
                     ),
+                ),
+            ).to_bytes(),
+        )
+    if item_acquisition:
+        append(
+            "client_to_server",
+            ClientOpcode298ItemAcquisitionRequest(
+                control_value=0,
+                selection_index=4,
+                request_kind=1,
+                item_id=2_433_928,
+                quantity=2,
+                duration_value=20_160,
+                expires_at_ticks=150_842_304_000_000_000,
+                serial_value=0,
+                reserved_values=(0, 0, 0, 0, 0),
+                signed_sentinel_values=(-99, -99),
+                trailing_values=(0, 0),
+                flag_1=0,
+                flag_2=1,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=tuple(
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=2,
+                        slot=slot,
+                        item=fixture_stack_inventory_item(
+                            slot=slot,
+                            item_id=2_433_928,
+                            quantity=1,
+                        ),
+                    )
+                    for slot in (11, 12)
                 ),
             ).to_bytes(),
         )
@@ -2750,6 +2792,120 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ServerOpcode323PositionedEffectRecord.parse(
                 records[-1][0].to_bytes() + b"\x00"
             )
+
+    def test_item_acquisition_request_round_trip_and_redacts_serial(
+        self,
+    ) -> None:
+        request = ClientOpcode298ItemAcquisitionRequest(
+            control_value=0,
+            selection_index=25,
+            request_kind=2,
+            item_id=5_510_000,
+            quantity=1,
+            duration_value=0,
+            expires_at_ticks=150_842_304_000_000_000,
+            serial_value=92_000_150,
+            reserved_values=(0, 0, 0, 0, 0),
+            signed_sentinel_values=(-99, -99),
+            trailing_values=(0, 0),
+            flag_1=0,
+            flag_2=1,
+        )
+
+        encoded = request.to_bytes()
+        self.assertEqual(
+            encoded.hex(),
+            "2a01000000001900000002000000701354000100000000000000008005"
+            "bb46e6170296cf7b050000000000000000000000000000000000000000"
+            "9dffffff9dffffff00000000000000000001",
+        )
+        self.assertEqual(
+            ClientOpcode298ItemAcquisitionRequest.parse(encoded),
+            request,
+        )
+        self.assertEqual(request.inventory_name, "cash")
+        safe = str(request.safe_dict())
+        self.assertNotIn("92000150", safe)
+        self.assertIn("serial_value_redacted", safe)
+        with self.assertRaisesRegex(PacketShapeError, "flags must"):
+            replace(request, flag_2=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            replace(request, duration_value=0x1_0000_0000).to_bytes()
+
+    def test_client_opcode_276_envelopes_round_trip_and_redact_values(
+        self,
+    ) -> None:
+        compact = ClientOpcode276Envelope(
+            selector=17,
+            header_value_1=None,
+            header_value_2=None,
+            groups=(),
+            compact_reserved=b"\x00\x00\x00",
+        )
+        grouped = ClientOpcode276Envelope(
+            selector=24,
+            header_value_1=1_020_000,
+            header_value_2=600_016,
+            groups=(
+                ClientOpcode276RecordGroup(
+                    selector=6,
+                    pairs=((1214, 35619), (1170, 35619), (1188, 35619)),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=5,
+                    pairs=(
+                        (549, 18477),
+                        (554, 18477),
+                        (619, 18477),
+                        (563, 27),
+                        (616, 27),
+                    ),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=0,
+                    pairs=(
+                        (451, 19800),
+                        (522, 19800),
+                        (478, 9353),
+                        (485, 34),
+                        (506, 34),
+                    ),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=1,
+                    pairs=((574, 276362), (862, 276362), (635, 141442)),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=4,
+                    pairs=((867, 27), (879, 27), (1274, 27)),
+                ),
+            ),
+            compact_reserved=b"",
+        )
+
+        self.assertEqual(compact.to_bytes().hex(), "140111000000000000")
+        self.assertEqual(
+            ClientOpcode276Envelope.parse(compact.to_bytes()), compact
+        )
+        encoded = grouped.to_bytes()
+        self.assertEqual(len(encoded), 210)
+        self.assertEqual(
+            encoded.hex(),
+            "14011800000060900f00d0270900050000000600000003000000be040000"
+            "238b000092040000238b0000a4040000238b000005000000050000002502"
+            "00002d4800002a0200002d4800006b0200002d480000330200001b000000"
+            "680200001b0000000000000005000000c3010000584d00000a020000584d"
+            "0000de01000089240000e501000022000000fa0100002200000001000000"
+            "030000003e0200008a3704005e0300008a3704007b020000822802000400"
+            "000003000000630300001b0000006f0300001b000000fa0400001b000000",
+        )
+        self.assertEqual(ClientOpcode276Envelope.parse(encoded), grouped)
+        self.assertEqual(grouped.pair_count, 19)
+        safe = str(grouped.safe_dict())
+        self.assertNotIn("1020000", safe)
+        self.assertNotIn("35619", safe)
+        with self.assertRaisesRegex(PacketShapeError, "reserved bytes"):
+            replace(compact, compact_reserved=b"\x00\x00\x01").to_bytes()
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,
@@ -7132,6 +7288,147 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(report["state"]["inventory_move_requests"], 1)
         self.assertEqual(
             report["state"]["pending_inventory_move_requests"], 0
+        )
+
+    def test_correlates_item_acquisition_request_with_inventory_adds(
+        self,
+    ) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(item_acquisition=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_item_acquisition_requests, 1)
+        self.assertEqual(
+            analysis.state.client_item_acquisition_requests_by_inventory,
+            {"use": 1},
+        )
+        self.assertEqual(analysis.state.item_acquisition_matches, 1)
+        self.assertEqual(
+            analysis.state.item_acquisition_quantity_matches,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.item_acquisition_quantity_mismatches,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.pending_item_acquisition_requests,
+            0,
+        )
+        request = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_item_acquisition_requested"
+        )
+        self.assertEqual(request.details["item_id"], 2_433_928)
+        confirmation = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_item_acquisition_confirmed"
+        )
+        self.assertEqual(confirmation.details["response_quantity"], 2)
+        self.assertEqual(confirmation.details["added_slots"], [11, 12])
+        inventory_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_change_set_received"
+        )
+        self.assertTrue(
+            inventory_event.details["item_acquisition_response"][
+                "quantity_matches"
+            ]
+        )
+        report = analysis.safe_dict()
+        self.assertEqual(
+            report["state"]["item_acquisition_matches"],
+            1,
+        )
+        self.assertEqual(
+            report["state"]["pending_item_acquisition_requests"],
+            0,
+        )
+        self.assertIn(
+            "item_acquisition=requests:1",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_276_compact_and_grouped_envelopes(
+        self,
+    ) -> None:
+        compact = ClientOpcode276Envelope(
+            selector=17,
+            header_value_1=None,
+            header_value_2=None,
+            groups=(),
+            compact_reserved=b"\x00\x00\x00",
+        )
+        grouped = ClientOpcode276Envelope(
+            selector=24,
+            header_value_1=100,
+            header_value_2=200,
+            groups=(
+                ClientOpcode276RecordGroup(
+                    selector=3,
+                    pairs=((400, 500), (600, 700)),
+                ),
+            ),
+            compact_reserved=b"",
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_client_plaintexts=(compact.to_bytes(), grouped.to_bytes())
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_opcode_276_packets, 2)
+        self.assertEqual(
+            analysis.state.client_opcode_276_selectors,
+            {17: 1, 24: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_276_shapes,
+            {"compact": 1, "grouped": 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_276_group_counts,
+            {0: 1, 1: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_276_pair_counts,
+            {0: 1, 2: 1},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_276_envelope"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "partial"
+                for observation in observations
+            )
+        )
+        events = [
+            event
+            for event in analysis.events
+            if event.kind == "client_opcode_276_record_submitted"
+        ]
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[-1].details["pair_count"], 2)
+        report = analysis.safe_dict()
+        self.assertTrue(
+            report["state"]["client_opcode_276"][
+                "header_and_record_values_redacted"
+            ]
+        )
+        self.assertIn(
+            "client_opcode_276=packets:2",
+            render_gameplay_analysis(analysis),
         )
 
     def test_correlates_item_use_request_inventory_and_stat_effects(self) -> None:

@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 103 semantic/manual shapes and 96 explicitly
+manifest currently declares 106 semantic/manual shapes and 96 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -94,8 +94,9 @@ fourteenth overlaps; opcode `135` adds the fifteenth. Opcode `169` adds a
 non-overlapping shape found only in `1-10FS`; server opcode `394` and client
 opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 `75`, and `241` add overlaps 18 through 20. The live-only, non-overlapping
-opcode-`310` width and capture-backed client opcode-`79`/`225` layouts add
-three active shapes. This leaves 179 active shapes and 76 active opaque pins.
+opcode-`310` width and capture-backed client opcode-`79`/`225`/`276`/`298`
+layouts add six active shapes. This leaves 182 active shapes and 76 active
+opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
 re-emits the sole 3,725-byte stream-`114` packet exactly; the checked-in shape
@@ -131,6 +132,18 @@ primary key exactly matches a current-field positioned-effect entity introduced
 by server opcode `320`/`322`/`323`, and every packet immediately follows client
 opcode `50` in client direction order. The native shape consumes all 15 records
 without assigning meanings to the remaining numeric fields.
+Client opcode `298` adds one exact 76-byte shape for 12 stream-`126` item-
+acquisition requests. The manifest consumes the selection, kind, item,
+quantity, neutral duration, expiration, redacted serial, five reserved zeros,
+two `-99` sentinels, two trailing zeros, and `0/1` flags. All 12 records match
+the next same-epoch server opcode-`39` additions by kind-derived inventory and
+item template; native validation consumes the isolated 12-packet corpus with
+zero failures.
+Client opcode `276` adds two capture-bounded selector shapes. The active local-
+Wine transcript supplies selector `17` followed by three zero bytes; the sole
+stream-`126` selector-`24` packet supplies two redacted header values, five
+counted groups, and 19 redacted u32 pairs. Both shapes consume exactly without
+assigning roles to the selector, group, header, or pair values.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short

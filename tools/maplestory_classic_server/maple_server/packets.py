@@ -1200,6 +1200,7 @@ class InitialCharacterSnapshot:
 
 
 INITIAL_ITEM_SENTINEL_TICKS = 94_354_848_000_000_000
+PERMANENT_ITEM_EXPIRATION_TICKS = 150_842_304_000_000_000
 
 
 @dataclass(frozen=True)
@@ -10263,6 +10264,188 @@ class ServerOpcode394TextEnvelope:
 
 
 @dataclass(frozen=True)
+class ClientOpcode276RecordGroup:
+    """Redacted counted pair group inside client opcode 276 selector 24."""
+
+    selector: int = field(repr=False)
+    pairs: tuple[tuple[int, int], ...] = field(repr=False)
+
+    @classmethod
+    def parse(
+        cls, reader: PacketReader, *, group_index: int
+    ) -> "ClientOpcode276RecordGroup":
+        selector = reader.u32(f"groups[{group_index}].selector")
+        pair_count = reader.u32(f"groups[{group_index}].pair_count")
+        if pair_count > 1024:
+            raise PacketShapeError(
+                f"client opcode-276 group {group_index} pair count "
+                f"{pair_count} exceeds 1024"
+            )
+        return cls(
+            selector=selector,
+            pairs=tuple(
+                (
+                    reader.u32(
+                        f"groups[{group_index}].pairs[{pair_index}].value_1"
+                    ),
+                    reader.u32(
+                        f"groups[{group_index}].pairs[{pair_index}].value_2"
+                    ),
+                )
+                for pair_index in range(pair_count)
+            ),
+        )
+
+    def to_bytes(self) -> bytes:
+        if len(self.pairs) > 1024:
+            raise PacketShapeError(
+                "client opcode-276 group cannot contain more than 1024 pairs"
+            )
+        try:
+            return struct.pack("<II", self.selector, len(self.pairs)) + b"".join(
+                struct.pack("<II", value_1, value_2)
+                for value_1, value_2 in self.pairs
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-276 group value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ClientOpcode276Envelope:
+    """Capture-bounded compact or grouped client opcode-276 envelope."""
+
+    selector: int
+    header_value_1: int | None = field(repr=False)
+    header_value_2: int | None = field(repr=False)
+    groups: tuple[ClientOpcode276RecordGroup, ...] = field(repr=False)
+    compact_reserved: bytes = field(repr=False)
+    opcode: int = 276
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode276Envelope":
+        reader = PacketReader(payload, packet_name="client_opcode_276_envelope")
+        _expect_opcode(reader, 276)
+        selector = reader.u32("selector")
+        if selector == 17:
+            envelope = cls(
+                selector=selector,
+                header_value_1=None,
+                header_value_2=None,
+                groups=(),
+                compact_reserved=reader.bytes(3, "compact_reserved"),
+            )
+        elif selector == 24:
+            header_value_1 = reader.u32("header_value_1")
+            header_value_2 = reader.u32("header_value_2")
+            group_count = reader.u32("group_count")
+            if group_count > 64:
+                raise PacketShapeError(
+                    f"client opcode-276 group count {group_count} exceeds 64"
+                )
+            envelope = cls(
+                selector=selector,
+                header_value_1=header_value_1,
+                header_value_2=header_value_2,
+                groups=tuple(
+                    ClientOpcode276RecordGroup.parse(
+                        reader, group_index=group_index
+                    )
+                    for group_index in range(group_count)
+                ),
+                compact_reserved=b"",
+            )
+        else:
+            raise PacketShapeError(
+                f"client opcode-276 selector is {selector}, expected 17 or 24"
+            )
+        reader.finish()
+        envelope._validate()
+        return envelope
+
+    def _validate(self) -> None:
+        if self.opcode != 276:
+            raise PacketShapeError("client opcode-276 envelope opcode must be 276")
+        if self.selector == 17:
+            if self.header_value_1 is not None or self.header_value_2 is not None:
+                raise PacketShapeError(
+                    "client opcode-276 selector 17 cannot include header values"
+                )
+            if self.groups:
+                raise PacketShapeError(
+                    "client opcode-276 selector 17 cannot include groups"
+                )
+            if self.compact_reserved != b"\x00\x00\x00":
+                raise PacketShapeError(
+                    "client opcode-276 selector 17 reserved bytes must be zero"
+                )
+            return
+        if self.selector != 24:
+            raise PacketShapeError(
+                f"client opcode-276 selector is {self.selector}, expected 17 or 24"
+            )
+        if self.header_value_1 is None or self.header_value_2 is None:
+            raise PacketShapeError(
+                "client opcode-276 selector 24 requires both header values"
+            )
+        if not self.groups or len(self.groups) > 64:
+            raise PacketShapeError(
+                "client opcode-276 selector 24 requires one through 64 groups"
+            )
+        if self.compact_reserved:
+            raise PacketShapeError(
+                "client opcode-276 selector 24 cannot include compact bytes"
+            )
+
+    @property
+    def shape_name(self) -> str:
+        return "compact" if self.selector == 17 else "grouped"
+
+    @property
+    def pair_count(self) -> int:
+        return sum(len(group.pairs) for group in self.groups)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "selector": self.selector,
+            "shape": self.shape_name,
+            "group_count": len(self.groups),
+            "pair_count": self.pair_count,
+            "group_pair_counts": [len(group.pairs) for group in self.groups],
+            "compact_reserved_zero": (
+                self.compact_reserved == b"\x00\x00\x00"
+                if self.selector == 17
+                else None
+            ),
+            "header_and_record_values_redacted": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            prefix = struct.pack("<HI", self.opcode, self.selector)
+            if self.selector == 17:
+                return prefix + self.compact_reserved
+            assert self.header_value_1 is not None
+            assert self.header_value_2 is not None
+            return (
+                prefix
+                + struct.pack(
+                    "<III",
+                    self.header_value_1,
+                    self.header_value_2,
+                    len(self.groups),
+                )
+                + b"".join(group.to_bytes() for group in self.groups)
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-276 envelope value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ClientOpcode279TextEnvelope:
     """Redacted counted-text envelope correlated with server opcode 394."""
 
@@ -10321,6 +10504,151 @@ class ClientOpcode279TextEnvelope:
                 f"client opcode-279 control is out of range: {error}"
             ) from error
         return prefix + encode_utf16_string(self.text, trailing_byte=True)
+
+
+@dataclass(frozen=True)
+class ClientOpcode298ItemAcquisitionRequest:
+    """Capture-bounded item request followed by inventory additions."""
+
+    control_value: int
+    selection_index: int
+    request_kind: int
+    item_id: int
+    quantity: int
+    duration_value: int
+    expires_at_ticks: int
+    serial_value: int = field(repr=False)
+    reserved_values: tuple[int, int, int, int, int]
+    signed_sentinel_values: tuple[int, int]
+    trailing_values: tuple[int, int]
+    flag_1: int
+    flag_2: int
+    opcode: int = 298
+
+    REQUEST_INVENTORY_NAMES = {1: "use", 2: "cash"}
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode298ItemAcquisitionRequest":
+        reader = PacketReader(
+            payload, packet_name="client_opcode_298_item_acquisition_request"
+        )
+        _expect_opcode(reader, 298)
+        request = cls(
+            control_value=reader.u32("control_value"),
+            selection_index=reader.u32("selection_index"),
+            request_kind=reader.u32("request_kind"),
+            item_id=reader.u32("item_id"),
+            quantity=reader.u32("quantity"),
+            duration_value=reader.u32("duration_value"),
+            expires_at_ticks=reader.u64("expires_at_ticks"),
+            serial_value=reader.u32("serial_value"),
+            reserved_values=tuple(
+                reader.u32(f"reserved_value_{index + 1}")
+                for index in range(5)
+            ),
+            signed_sentinel_values=(
+                reader.i32("signed_sentinel_1"),
+                reader.i32("signed_sentinel_2"),
+            ),
+            trailing_values=(
+                reader.u32("trailing_value_1"),
+                reader.u32("trailing_value_2"),
+            ),
+            flag_1=reader.u8("flag_1"),
+            flag_2=reader.u8("flag_2"),
+        )
+        reader.finish()
+        request._validate()
+        return request
+
+    def _validate(self) -> None:
+        if self.opcode != 298:
+            raise PacketShapeError(
+                "client item-acquisition request opcode must be 298"
+            )
+        if self.control_value != 0:
+            raise PacketShapeError(
+                "client opcode-298 control value must be zero"
+            )
+        if self.selection_index <= 0:
+            raise PacketShapeError(
+                "client opcode-298 selection index must be positive"
+            )
+        if self.request_kind not in self.REQUEST_INVENTORY_NAMES:
+            raise PacketShapeError(
+                "client opcode-298 request kind must be one or two"
+            )
+        if self.item_id <= 0 or self.quantity <= 0:
+            raise PacketShapeError(
+                "client opcode-298 item id and quantity must be positive"
+            )
+        if self.expires_at_ticks != PERMANENT_ITEM_EXPIRATION_TICKS:
+            raise PacketShapeError(
+                "client opcode-298 expiration must use the captured sentinel"
+            )
+        if self.reserved_values != (0, 0, 0, 0, 0):
+            raise PacketShapeError(
+                "client opcode-298 reserved values must be zero"
+            )
+        if self.signed_sentinel_values != (-99, -99):
+            raise PacketShapeError(
+                "client opcode-298 signed sentinels must both be -99"
+            )
+        if self.trailing_values != (0, 0):
+            raise PacketShapeError(
+                "client opcode-298 trailing values must be zero"
+            )
+        if (self.flag_1, self.flag_2) != (0, 1):
+            raise PacketShapeError(
+                "client opcode-298 flags must match the captured 0/1 pair"
+            )
+
+    @property
+    def inventory_name(self) -> str:
+        return self.REQUEST_INVENTORY_NAMES[self.request_kind]
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "control_value": self.control_value,
+            "selection_index": self.selection_index,
+            "inventory": self.inventory_name,
+            "request_kind": self.request_kind,
+            "item_id": self.item_id,
+            "quantity": self.quantity,
+            "duration_value": self.duration_value,
+            "expiration_is_sentinel": True,
+            "serial_value_present": self.serial_value != 0,
+            "serial_value_redacted": True,
+            "reserved_values_zero": True,
+            "signed_sentinel_values": list(self.signed_sentinel_values),
+            "trailing_values": list(self.trailing_values),
+            "flags": [self.flag_1, self.flag_2],
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<HIIIIIIQI5IiiIIBB",
+                self.opcode,
+                self.control_value,
+                self.selection_index,
+                self.request_kind,
+                self.item_id,
+                self.quantity,
+                self.duration_value,
+                self.expires_at_ticks,
+                self.serial_value,
+                *self.reserved_values,
+                *self.signed_sentinel_values,
+                *self.trailing_values,
+                self.flag_1,
+                self.flag_2,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-298 value is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)

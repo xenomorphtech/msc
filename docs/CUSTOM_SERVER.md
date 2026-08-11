@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 197 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,661 observations are full, 44,417 partial, 22
+`--fail-on-invalid`: 26,661 observations are full, 44,430 partial, 9
 unknown-but-lossless, and none invalid. Seven state-correlation warnings remain,
 not shape failures: six pickup-effect mismatches and one aggregate warning for
 six delayed combat predictions that differ by one HP.
@@ -142,6 +142,36 @@ aggregate `2/3`, `305/393`, and zero-trailer distributions, and never copies
 the primary key into safe output. Native validation exact-consumes all 15
 records. This moves the long corpus to `26,661/44,417/22/0` without assigning
 higher-level meanings to the remaining values.
+
+Client opcode `298` now forms a typed item-acquisition transaction with server
+opcode `39`. All 12 stream-`126` requests are exact 76-byte records carrying a
+selection index, request kind, item template, quantity, neutral duration value,
+the permanent-expiration sentinel, a redacted serial, fixed sentinels, and
+fixed flags. Request kinds `1` and `2` correlate respectively with Use and Cash
+inventory additions. Every request matches the next same-epoch addition by
+inventory and item template in `388.332..711.700` ms, including the final
+quantity-`2` request split across two quantity-`1` slots. Nine Use responses
+match aggregate quantity exactly; two Cash stack responses add quantity `3`
+for request value `1`, and one Cash equipment-style response has no quantity,
+so those distinctions remain telemetry rather than validation failures. Safe
+events and analysis state redact the three nonzero serials and expose request,
+inventory/kind/duration, match, quantity-correlation, pending, and latency
+counters. Python and native codecs consume all 12 records exactly, moving the
+long corpus to `26,661/44,429/10/0` without claiming the higher-level source of
+the acquisition.
+
+Client opcode `276` now has two capture-bounded selector branches. The sole
+stream-`126` packet is selector `24`, two redacted header values, five counted
+groups, and 19 redacted u32 pairs; it round-trips exactly as 210 bytes. The
+held-open local-Wine client independently emitted a nine-byte selector-`17`
+form containing three reserved zero bytes. Its warning-free transcript folds
+with zero unknown packets and closed cleanly after the configured two-hour hold
+with all `1,440/1,440` heartbeats matched; its final gameplay phase remains map
+`101000000` at HP `50/222`. Safe state/events expose only selector,
+compact/grouped shape, group count, pair count, and field epoch. Python and
+isolated native validation exact-consume both branches. Header, group-selector,
+pair, and higher-level opcode roles remain neutral. The long corpus advances to
+`26,661/44,430/9/0`.
 
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
@@ -436,7 +466,9 @@ adds `inventory_move_requests`, per-inventory counts, matches, unmatched server
 updates, pending requests, and last/maximum response milliseconds without
 including packet bytes. The Rust manifest independently exact-consumes both
 records, and stream `126` advances to `26,661/44,402/37/0`.
-These counters are part of finalized `analyze-gameplay --json` output.
+Inventory-move and item-acquisition request/match/pending/latency counters plus
+redacted opcode-`276` selector/shape/group/pair aggregates are part of finalized
+`analyze-gameplay --json` output.
 `GET /api/v1/status` remains the loopback runtime endpoint for connection,
 injection, heartbeat, and configured-protocol telemetry; it does not
 continuously refold or expose the current plaintext transcript.
@@ -524,7 +556,7 @@ the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
 Together, the currently modeled families leave the long-corpus totals at
-26,661 full, 44,417 partial, 22 unknown-but-lossless, and zero invalid. Stream
+26,661 full, 44,430 partial, 9 unknown-but-lossless, and zero invalid. Stream
 `92` now reaches 13,417 full, 21,788 partial, 2 unknown, and zero invalid;
 stream `114` reaches 54/22/0/0.
 

@@ -52,7 +52,7 @@
   drop spawns, and all 197 pickup requests with known drops and matching
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,661 full, 44,417 partial, 22 unknown-but-lossless, and zero invalid
+  26,661 full, 44,430 partial, 9 unknown-but-lossless, and zero invalid
   packet observations. Stream `92` now reports 13,417 full, 21,788 partial,
   2 unknown, and zero invalid; stream `114` reports 54/22/0/0. Seven
   long-corpus state-correlation warnings remain: six pickup-effect mismatches
@@ -237,6 +237,26 @@
   aggregate value distributions. Native validation consumes every packet
   exactly, bringing stream `126` to `26,661/44,417/22/0` while leaving streams
   `92` and `114` unchanged.
+- Client opcode `298` now models all 12 exact 76-byte item-acquisition
+  requests. Request kinds `1`/`2` correlate with Use/Cash additions, and every
+  request matches the next same-epoch server opcode-`39` addition by inventory
+  and item template in `388.332..711.700` ms. Nine Use quantities match
+  exactly, including one request split across two slots; two Cash quantities
+  differ and one Cash response has no quantity, so those are reported without
+  treating them as validation failures. Three nonzero serials stay redacted.
+  Python/native codecs consume all 12 exactly, safe analysis exposes bounded
+  request/match/quantity/pending/latency counters, and stream `126` advances to
+  `26,661/44,429/10/0` while streams `92` and `114` remain unchanged.
+- Client opcode `276` now has exact compact and grouped envelopes. The sole
+  stream-`126` selector-`24` packet contains two redacted headers, five counted
+  groups, and 19 redacted u32 pairs in 210 bytes. The active local-Wine client
+  independently emitted a nine-byte selector-`17` form with three reserved
+  zero bytes; the transcript closes warning-free after the configured two-hour
+  hold with zero unknown packets, all `1,440/1,440` heartbeats matched, and a
+  final gameplay phase in map `101000000` at HP `50/222`. Safe telemetry
+  exposes only selectors, shapes, group/pair counts, and epoch. Python and
+  isolated native validation consume both forms exactly, and stream
+  `126` advances to `26,661/44,430/9/0` without assigning higher-level roles.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`

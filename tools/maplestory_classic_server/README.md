@@ -437,7 +437,7 @@ python -m maple_server analyze-gameplay \
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
 gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
-44,417 partial, 22 unknown, and zero invalid packet observations. PCAP
+44,430 partial, 9 unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
@@ -554,6 +554,15 @@ The gameplay fold currently models these capture-backed boundaries:
   long-corpus keys resolve to a current-field effect alias and all 15 packets
   immediately follow opcode `50` in client direction order, while safe output
   exposes aliases and aggregate distributions rather than primary keys,
+- client opcode `276`: a live nine-byte selector-`17` compact form with three
+  reserved zero bytes and a 210-byte stream-`126` selector-`24` form with two
+  redacted headers, five counted groups, and 19 redacted u32 pairs; safe output
+  exposes only selector/shape/group/pair counts and field epoch,
+- client opcode `298`: exact 76-byte item-acquisition requests whose kind,
+  item template, and quantity correlate with same-epoch server opcode-`39`
+  additions; all 12 match by kind-derived inventory and item template, serials
+  stay redacted, and safe state distinguishes nine exact Use quantities from
+  two differing and one unavailable Cash response quantities,
 - server opcode `169`: selector `3` followed by one redacted, terminated
   counted UTF-16 value; the automatic dump plus native jump-table arm proves
   exact consumption, while safe state/events expose only selector, code-unit
@@ -1360,7 +1369,8 @@ curl http://127.0.0.1:8799/api/v1/status
 `GET /healthz` returns `{"ok":true}`. `GET /api/v1/status` reports the
 listener mode/address, safe replay configuration, start time,
 accepted/active/completed/failed connection counters, and a `protocol` object.
-Inventory-move request/match/pending/latency counters and client positioned-
+Inventory-move and item-acquisition request/match/pending/latency counters,
+redacted opcode-`276` selector/shape/group/pair counters, and client positioned-
 effect action alias/distribution counters belong to the finalized
 `analyze-gameplay --json` state. The runtime route intentionally reports
 connection and configured-protocol telemetry rather than continuously
@@ -1768,3 +1778,13 @@ preserve distinct Unity scan codes in this setup.
     is current-field-known and every packet follows opcode `50` in client order,
     validate the 16-byte shape natively, and reduce stream `126` to 22 unknown
     packets without naming the two u32 values or u16 trailer.
+68. Decode all 12 client opcode-`298` item-acquisition requests, redact their
+    serial values, correlate each request with the next same-epoch opcode-`39`
+    additions by kind-derived inventory and item template, retain Cash quantity
+    distinctions as telemetry, validate exact Python/Rust consumption, and
+    reduce stream `126` to 10 unknown packets.
+69. Decode the sole 210-byte stream-`126` opcode-`276` selector-`24` grouped
+    record plus the active client's nine-byte selector-`17` compact form,
+    redact all header/group/pair values, validate both exact branches, remove
+    the live transcript's final unknown, and reduce stream `126` to nine
+    unknown packets without assigning a higher-level opcode role.
