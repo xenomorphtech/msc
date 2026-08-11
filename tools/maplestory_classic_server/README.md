@@ -603,8 +603,18 @@ contains the result/account prefix, three zero flags, a redacted four-code-unit
 name, and a 16-byte zero suffix. The fold reports it as partial and leaves
 authentication to the later complete opcode-`1` response. Python and isolated
 native validation exact-consume the probe, reducing the active live login to
-zero unknown observations. Legacy stream `116` retains server opcodes
-`35/3/390/6/7` and client opcodes `255/9/10/16` as its nine remaining unknowns.
+zero unknown observations.
+
+Five legacy stream-`116` residuals now have neutral exact codecs. Server opcode
+`3` consumes generated `uint8 + int32 + bool` reads, opcode `390` consumes one
+generated `uint8`, and opcode `6` consumes generated trailing-zero counted
+UTF-16 plus `uint8`. Client opcode `255` is one capture-bounded redacted
+`uint32`; client opcode `9` is one capture-bounded redacted trailing-zero
+counted UTF-16 field. Opcode `6` echoes opcode `9`'s five-code-unit text after
+235.214 ms. Opcode `390` follows opcode `255` after 238.384 ms, but the model
+does not claim causality. Python remains warning-free and isolated native
+validation consumes all five records. Legacy stream `116` now retains only
+server opcodes `35/7` and client opcodes `10/16` as unknowns.
 
 Client opcode `31` is also capture-bounded across successful stream `83`,
 stream `116`, and the current live login. Each record has a 20-byte zero
@@ -2080,3 +2090,6 @@ preserve distinct Unity scan codes in this setup.
 84. Classify the final active-live unknown as the exact documented 36-byte
     local opcode-`0` account-bootstrap probe, keep it distinct from complete
     account authentication, and reach zero unknown observations live.
+85. Replace five legacy stream-`116` unknowns with exact neutral codecs backed
+    by generated server reads and capture-bounded client layouts, correlate the
+    redacted opcode-`9`/`6` text echo, and reduce that stream to four unknowns.

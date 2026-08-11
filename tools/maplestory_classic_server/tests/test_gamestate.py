@@ -32,7 +32,12 @@ from maple_server.packets import (  # noqa: E402
     HeartbeatProbe,
     HeartbeatResponse,
     InitialCharacterSnapshot,
+    LoginClientOpcode255Record,
+    LoginClientOpcode9TextRecord,
     LoginServerFixedRecord,
+    LoginServerOpcode3Record,
+    LoginServerOpcode390Record,
+    LoginServerOpcode6TextRecord,
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
@@ -177,6 +182,7 @@ def fixture_login_transcript(
     local_account_bootstrap_probe: (
         ServerOpcode0AccountBootstrapProbe | None
     ) = None,
+    legacy_login_records: tuple[tuple[str, bytes], ...] = (),
     opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
 ) -> Transcript:
@@ -228,6 +234,8 @@ def fixture_login_transcript(
         append("client_to_server", opcode_274_record.to_bytes())
     if local_account_bootstrap_probe is not None:
         append("server_to_client", local_account_bootstrap_probe.to_bytes())
+    for direction, payload in legacy_login_records:
+        append(direction, payload)
     if opcode_27_ledger is not None:
         append("server_to_client", opcode_27_ledger.to_bytes())
     if opcode_28_ledger is not None:
@@ -288,6 +296,45 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_legacy_login_record_cluster_round_trip_and_redact(self) -> None:
+        server_3 = LoginServerOpcode3Record(
+            leading_value=0,
+            neutral_value=1,
+            flag=False,
+        )
+        client_255 = LoginClientOpcode255Record(neutral_value=0xDEAD_BEEF)
+        server_390 = LoginServerOpcode390Record(neutral_value=0)
+        client_9 = LoginClientOpcode9TextRecord(opaque_text="private")
+        server_6 = LoginServerOpcode6TextRecord(
+            opaque_text="private",
+            neutral_value=0,
+        )
+
+        self.assertEqual(
+            LoginServerOpcode3Record.parse(server_3.to_bytes()), server_3
+        )
+        self.assertEqual(
+            LoginClientOpcode255Record.parse(client_255.to_bytes()), client_255
+        )
+        self.assertEqual(
+            LoginServerOpcode390Record.parse(server_390.to_bytes()), server_390
+        )
+        self.assertEqual(
+            LoginClientOpcode9TextRecord.parse(client_9.to_bytes()), client_9
+        )
+        self.assertEqual(
+            LoginServerOpcode6TextRecord.parse(server_6.to_bytes()), server_6
+        )
+        safe = [
+            server_3.safe_dict(),
+            client_255.safe_dict(),
+            server_390.safe_dict(),
+            client_9.safe_dict(),
+            server_6.safe_dict(),
+        ]
+        self.assertNotIn(str(0xDEAD_BEEF), str(safe))
+        self.assertNotIn("private", str(safe))
+
     def test_local_account_bootstrap_probe_round_trip_and_redact(self) -> None:
         probe = ServerOpcode0AccountBootstrapProbe(
             account_id=0xDEAD_BEEF,
@@ -617,6 +664,69 @@ class GameStateFoldTest(unittest.TestCase):
         self.assertNotIn("test", str(observation.details))
         self.assertIn(
             "local_account_bootstrap_probes=1",
+            render_login_analysis(analysis),
+        )
+
+    def test_folds_legacy_login_record_cluster(self) -> None:
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(
+                legacy_login_records=(
+                    (
+                        "server_to_client",
+                        LoginServerOpcode3Record(
+                            leading_value=0,
+                            neutral_value=1,
+                            flag=False,
+                        ).to_bytes(),
+                    ),
+                    (
+                        "client_to_server",
+                        LoginClientOpcode255Record(
+                            neutral_value=0xDEAD_BEEF
+                        ).to_bytes(),
+                    ),
+                    (
+                        "server_to_client",
+                        LoginServerOpcode390Record(
+                            neutral_value=0
+                        ).to_bytes(),
+                    ),
+                    (
+                        "client_to_server",
+                        LoginClientOpcode9TextRecord(
+                            opaque_text="private"
+                        ).to_bytes(),
+                    ),
+                    (
+                        "server_to_client",
+                        LoginServerOpcode6TextRecord(
+                            opaque_text="private",
+                            neutral_value=0,
+                        ).to_bytes(),
+                    ),
+                )
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.login_server_opcode_3_records, 1)
+        self.assertEqual(analysis.state.login_client_opcode_255_records, 1)
+        self.assertEqual(analysis.state.login_server_opcode_390_records, 1)
+        self.assertEqual(analysis.state.login_client_opcode_9_text_records, 1)
+        self.assertEqual(analysis.state.login_server_opcode_6_text_records, 1)
+        self.assertEqual(analysis.state.login_opcode_9_6_text_matches, 1)
+        self.assertEqual(analysis.state.login_opcode_9_6_text_mismatches, 0)
+        response = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "login_server_opcode_6_text_record"
+        )
+        self.assertTrue(response.details["client_opcode_9_text_match"])
+        self.assertNotIn(str(0xDEAD_BEEF), str(analysis.safe_dict()))
+        self.assertNotIn("private", str(analysis.safe_dict()))
+        self.assertIn(
+            "legacy_login_records=server3:1 client255:1 server390:1 "
+            "client9:1 server6:1 text_matches:1 text_mismatches:0",
             render_login_analysis(analysis),
         )
 

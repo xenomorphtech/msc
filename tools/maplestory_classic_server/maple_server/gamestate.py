@@ -17,7 +17,12 @@ from .packets import (
     ClientStatusMessage,
     HeartbeatProbe,
     HeartbeatResponse,
+    LoginClientOpcode255Record,
+    LoginClientOpcode9TextRecord,
     LoginServerFixedRecord,
+    LoginServerOpcode3Record,
+    LoginServerOpcode390Record,
+    LoginServerOpcode6TextRecord,
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
@@ -164,6 +169,13 @@ class LoginGameState:
         default_factory=dict
     )
     local_account_bootstrap_probes: int = 0
+    login_server_opcode_3_records: int = 0
+    login_client_opcode_255_records: int = 0
+    login_server_opcode_390_records: int = 0
+    login_client_opcode_9_text_records: int = 0
+    login_server_opcode_6_text_records: int = 0
+    login_opcode_9_6_text_matches: int = 0
+    login_opcode_9_6_text_mismatches: int = 0
 
 
 @dataclass(frozen=True)
@@ -373,6 +385,27 @@ class LoginAnalysis:
                 "local_account_bootstrap_probes": (
                     self.state.local_account_bootstrap_probes
                 ),
+                "login_server_opcode_3_records": (
+                    self.state.login_server_opcode_3_records
+                ),
+                "login_client_opcode_255_records": (
+                    self.state.login_client_opcode_255_records
+                ),
+                "login_server_opcode_390_records": (
+                    self.state.login_server_opcode_390_records
+                ),
+                "login_client_opcode_9_text_records": (
+                    self.state.login_client_opcode_9_text_records
+                ),
+                "login_server_opcode_6_text_records": (
+                    self.state.login_server_opcode_6_text_records
+                ),
+                "login_opcode_9_6_text_matches": (
+                    self.state.login_opcode_9_6_text_matches
+                ),
+                "login_opcode_9_6_text_mismatches": (
+                    self.state.login_opcode_9_6_text_mismatches
+                ),
             },
             "packets": [
                 {
@@ -572,6 +605,7 @@ class LoginStateFold:
         self._pending_server_opcode_22_index_sets: deque[frozenset[int]] = (
             deque()
         )
+        self._pending_client_opcode_9_texts: deque[tuple[int, str]] = deque()
 
     def _invalid(
         self, frame: PlainFrame, kind: str, error: PacketShapeError
@@ -772,6 +806,64 @@ class LoginStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=ledger,
                 details=ledger.safe_dict(),
+            )
+        if opcode == 3:
+            record = LoginServerOpcode3Record.parse(payload)
+            self.state.login_server_opcode_3_records += 1
+            return self._observation(
+                frame,
+                kind="login_server_opcode_3_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=("opcode-3 values and higher-level role remain neutral",),
+            )
+        if opcode == 390:
+            record = LoginServerOpcode390Record.parse(payload)
+            self.state.login_server_opcode_390_records += 1
+            return self._observation(
+                frame,
+                kind="login_server_opcode_390_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-390 value and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 6:
+            record = LoginServerOpcode6TextRecord.parse(payload)
+            self.state.login_server_opcode_6_text_records += 1
+            details = record.safe_dict()
+            if self._pending_client_opcode_9_texts:
+                request_timestamp_ns, request_text = (
+                    self._pending_client_opcode_9_texts.popleft()
+                )
+                text_match = record.opaque_text == request_text
+                details["client_opcode_9_text_match"] = text_match
+                details["response_latency_ms"] = round(
+                    (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                    3,
+                )
+                if text_match:
+                    self.state.login_opcode_9_6_text_matches += 1
+                else:
+                    self.state.login_opcode_9_6_text_mismatches += 1
+                    self.warnings.append(
+                        "server opcode-6 text does not match preceding client "
+                        "opcode-9 text"
+                    )
+            else:
+                details["client_opcode_9_text_match"] = None
+            return self._observation(
+                frame,
+                kind="login_server_opcode_6_text_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=details,
+                issues=(
+                    "opcode-6 text, value, and higher-level role remain neutral",
+                ),
             )
         if opcode == 0 and len(payload) == 36:
             probe = ServerOpcode0AccountBootstrapProbe.parse(payload)
@@ -979,6 +1071,35 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 255:
+            record = LoginClientOpcode255Record.parse(payload)
+            self.state.login_client_opcode_255_records += 1
+            return self._observation(
+                frame,
+                kind="login_client_opcode_255_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-255 value and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 9:
+            record = LoginClientOpcode9TextRecord.parse(payload)
+            self.state.login_client_opcode_9_text_records += 1
+            self._pending_client_opcode_9_texts.append(
+                (frame.timestamp_ns, record.opaque_text)
+            )
+            return self._observation(
+                frame,
+                kind="login_client_opcode_9_text_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-9 text and higher-level role remain neutral",
+                ),
+            )
         if opcode == 274:
             record = ClientOpcode274OpaqueTextRecord.parse(payload)
             text_pattern = "/".join(
@@ -1334,6 +1455,16 @@ def render_login_analysis(
         (
             "local_account_bootstrap_probes="
             f"{state['local_account_bootstrap_probes']}"
+        ),
+        (
+            "legacy_login_records="
+            f"server3:{state['login_server_opcode_3_records']} "
+            f"client255:{state['login_client_opcode_255_records']} "
+            f"server390:{state['login_server_opcode_390_records']} "
+            f"client9:{state['login_client_opcode_9_text_records']} "
+            f"server6:{state['login_server_opcode_6_text_records']} "
+            f"text_matches:{state['login_opcode_9_6_text_matches']} "
+            f"text_mismatches:{state['login_opcode_9_6_text_mismatches']}"
         ),
         f"packet_shapes={json.dumps(packet_counts, sort_keys=True)}",
     ]

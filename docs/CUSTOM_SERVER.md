@@ -2399,8 +2399,13 @@ project's own `README.md` for all options.
   documented local account-bootstrap probe, not a complete account result. Its
   id/name remain redacted, its 16-byte suffix is fixed to zero, and it does not
   authenticate state before the later full opcode-`1` response. The active live
-  login now also has zero unknown observations. Legacy stream `116` still has
-  nine unrelated unknown packets across five server and four client opcodes.
+  login now also has zero unknown observations.
+- Five of legacy stream `116`'s nine residuals now have exact neutral layouts:
+  generated reads bound server opcodes `3`, `390`, and `6`, while capture bounds
+  client opcodes `255` and `9`. The server opcode-`6` text exactly echoes the
+  preceding client opcode-`9` text after 235.214 ms; the opcode-`255`/`390`
+  adjacency remains non-causal. All retained values/text stay redacted. Four
+  unknowns remain: server `35/7` and client `10/16`.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

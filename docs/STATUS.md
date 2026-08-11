@@ -1143,8 +1143,18 @@ name, and a 16-byte zero suffix. The fold keeps it partial and explicitly does
 not authenticate from it; the later full opcode-`1` record still does. Python
 round-trips the probe and isolated native validation exact-consumes it. The
 successful stream-`83` reference and active live login now both have zero
-unknown packet observations. Legacy stream `116` still has nine unrelated
-unknowns: server `35/3/390/6/7` and client `255/9/10/16`.
+unknown packet observations.
+
+Legacy stream `116` now exact-decodes five of its nine residuals without naming
+their higher-level roles. Generated reads bound server opcode `3` to
+`uint8 + int32 + bool`, opcode `390` to one `uint8`, and opcode `6` to
+trailing-zero counted UTF-16 plus `uint8`. Capture bounds client opcode `255` to
+one redacted `uint32` and opcode `9` to one redacted trailing-zero counted
+UTF-16 field. The opcode-`6` text exactly matches the client opcode-`9` field
+235.214 ms earlier; opcode `390` is merely adjacent to opcode `255` at 238.384
+ms, with no causal claim. Python is warning-free and isolated native validation
+consumes all five records. Four legacy unknowns remain: server `35/7` and client
+`10/16`.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.

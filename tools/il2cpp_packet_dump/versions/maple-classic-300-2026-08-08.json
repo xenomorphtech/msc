@@ -273,6 +273,49 @@
       ]
     },
     {
+      "name":"login_server_opcode_3_generated_record","direction":"server_to_client","opcode":3,"length":8,
+      "source":"packets.py:LoginServerOpcode3Record; generated handler baf480... direct u8/i32/bool reads plus 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":3},
+        {"op":"read","name":"leading_value","kind":"u8"},
+        {"op":"read","name":"neutral_value","kind":"i32"},
+        {"op":"read","name":"flag","kind":"bool"}
+      ]
+    },
+    {
+      "name":"login_client_opcode_255_u32","direction":"client_to_server","opcode":255,"length":6,
+      "source":"packets.py:LoginClientOpcode255Record; single capture-bounded record from 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":255},
+        {"op":"read","name":"neutral_value","kind":"u32"}
+      ]
+    },
+    {
+      "name":"login_server_opcode_390_u8","direction":"server_to_client","opcode":390,"length":3,
+      "source":"packets.py:LoginServerOpcode390Record; generated handler direct u8 read plus 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":390},
+        {"op":"read","name":"neutral_value","kind":"u8"}
+      ]
+    },
+    {
+      "name":"login_client_opcode_9_text_record","direction":"client_to_server","opcode":9,
+      "source":"packets.py:LoginClientOpcode9TextRecord; single capture-bounded record from 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":9},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true}
+      ]
+    },
+    {
+      "name":"login_server_opcode_6_text_record","direction":"server_to_client","opcode":6,
+      "source":"packets.py:LoginServerOpcode6TextRecord; generated handler direct UTF-16/u8 reads plus 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":6},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"read","name":"neutral_value","kind":"u8"}
+      ]
+    },
+    {
       "name":"heartbeat_response","direction":"client_to_server","opcode":23,"length":10,
       "source":"packets.py:HeartbeatResponse; capture 111 stream 92",
       "operations":[

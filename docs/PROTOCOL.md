@@ -66,6 +66,11 @@ the main blocker is obsolete.
 ```text
 server 0   bootstrap/login prelude
 server 0   local 36-byte diagnostic account-prefix probe
+server 3   redacted u8/i32/bool record
+server 6   redacted trailing-zero UTF-16 plus uint8 record
+server 390 redacted uint8 record
+client 9   redacted trailing-zero UTF-16 record
+client 255 redacted uint32 record
 server 10  empty heartbeat probe
 client 6   redacted indexed record set
 client 274 fixed 768/74-code-unit redacted text record
@@ -102,6 +107,16 @@ redacted four-code-unit UTF-16 name, and a 16-byte zero suffix. The fold records
 it as a partial local bootstrap probe and does not authenticate the account from
 it; the later full opcode-`1` account result performs that transition. This
 exact live-only shape consumes natively without publishing the id or name.
+
+Five legacy stream-`116` records now have neutral, exact boundaries. Generated
+server handlers read opcode `3` as `uint8 + int32 + bool`, opcode `390` as one
+`uint8`, and opcode `6` as trailing-zero counted UTF-16 plus `uint8`; the
+captured records consume exactly under those layouts. Capture-bounded client
+opcode `255` is one redacted `uint32`, while client opcode `9` is one redacted
+trailing-zero counted UTF-16 field. The opcode-`6` text exactly echoes the
+preceding opcode-`9` text after 235.214 ms. Opcode `390` follows client opcode
+`255` after 238.384 ms, but that adjacency is not treated as causal. Safe output
+publishes only widths, text length, boolean state, and echo/timing evidence.
 
 The login fold now reuses the world transport heartbeat shapes: server opcode
 `10` is exactly two bytes and client opcode `23` is exactly ten bytes, carrying

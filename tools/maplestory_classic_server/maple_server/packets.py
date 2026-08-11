@@ -315,6 +315,215 @@ class ServerOpcode0AccountBootstrapProbe:
 
 
 @dataclass(frozen=True)
+class LoginServerOpcode3Record:
+    """Generated-read-backed neutral login record for server opcode 3."""
+
+    leading_value: int = field(repr=False)
+    neutral_value: int = field(repr=False)
+    flag: bool
+    opcode: int = 3
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LoginServerOpcode3Record":
+        reader = PacketReader(payload, packet_name="login_server_opcode_3")
+        _expect_opcode(reader, 3)
+        leading_value = reader.u8("leading_value")
+        neutral_value = reader.i32("neutral_value")
+        flag_raw = reader.u8("flag")
+        if flag_raw not in {0, 1}:
+            raise PacketShapeError(
+                "login server opcode-3 flag must be boolean"
+            )
+        reader.finish()
+        return cls(
+            leading_value=leading_value,
+            neutral_value=neutral_value,
+            flag=bool(flag_raw),
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "leading_value_redacted": True,
+            "neutral_value_redacted": True,
+            "flag": self.flag,
+            "higher_level_role": "neutral",
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 3:
+            raise PacketShapeError("login server opcode-3 record opcode must be 3")
+        if not 0 <= self.leading_value <= 0xFF:
+            raise PacketShapeError(
+                "login server opcode-3 leading value must fit u8"
+            )
+        if not -(1 << 31) <= self.neutral_value < (1 << 31):
+            raise PacketShapeError(
+                "login server opcode-3 neutral value must fit i32"
+            )
+        return struct.pack(
+            "<HBiB",
+            self.opcode,
+            self.leading_value,
+            self.neutral_value,
+            int(self.flag),
+        )
+
+
+@dataclass(frozen=True)
+class LoginClientOpcode255Record:
+    """Capture-bounded redacted u32 record for client opcode 255."""
+
+    neutral_value: int = field(repr=False)
+    opcode: int = 255
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LoginClientOpcode255Record":
+        reader = PacketReader(payload, packet_name="login_client_opcode_255")
+        _expect_opcode(reader, 255)
+        record = cls(neutral_value=reader.u32("neutral_value"))
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "value_width_bits": 32,
+            "value_redacted": True,
+            "higher_level_role": "neutral",
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 255:
+            raise PacketShapeError(
+                "login client opcode-255 record opcode must be 255"
+            )
+        if not 0 <= self.neutral_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "login client opcode-255 neutral value must fit u32"
+            )
+        return struct.pack("<HI", self.opcode, self.neutral_value)
+
+
+@dataclass(frozen=True)
+class LoginServerOpcode390Record:
+    """Generated-read-backed neutral u8 record for server opcode 390."""
+
+    neutral_value: int = field(repr=False)
+    opcode: int = 390
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LoginServerOpcode390Record":
+        reader = PacketReader(payload, packet_name="login_server_opcode_390")
+        _expect_opcode(reader, 390)
+        record = cls(neutral_value=reader.u8("neutral_value"))
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "value_width_bits": 8,
+            "value_redacted": True,
+            "higher_level_role": "neutral",
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 390:
+            raise PacketShapeError(
+                "login server opcode-390 record opcode must be 390"
+            )
+        if not 0 <= self.neutral_value <= 0xFF:
+            raise PacketShapeError(
+                "login server opcode-390 neutral value must fit u8"
+            )
+        return struct.pack("<HB", self.opcode, self.neutral_value)
+
+
+@dataclass(frozen=True)
+class LoginClientOpcode9TextRecord:
+    """Capture-bounded redacted text record for client opcode 9."""
+
+    opaque_text: str = field(repr=False)
+    opcode: int = 9
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.opaque_text.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LoginClientOpcode9TextRecord":
+        reader = PacketReader(payload, packet_name="login_client_opcode_9")
+        _expect_opcode(reader, 9)
+        record = cls(
+            opaque_text=reader.utf16_string(
+                "opaque_text", trailing_byte=True
+            )
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+            "higher_level_role": "neutral",
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 9:
+            raise PacketShapeError("login client opcode-9 record opcode must be 9")
+        return struct.pack("<H", self.opcode) + encode_utf16_string(
+            self.opaque_text, trailing_byte=True
+        )
+
+
+@dataclass(frozen=True)
+class LoginServerOpcode6TextRecord:
+    """Generated-read-backed redacted text record for server opcode 6."""
+
+    opaque_text: str = field(repr=False)
+    neutral_value: int = field(repr=False)
+    opcode: int = 6
+
+    @property
+    def text_code_units(self) -> int:
+        return len(self.opaque_text.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "LoginServerOpcode6TextRecord":
+        reader = PacketReader(payload, packet_name="login_server_opcode_6")
+        _expect_opcode(reader, 6)
+        record = cls(
+            opaque_text=reader.utf16_string(
+                "opaque_text", trailing_byte=True
+            ),
+            neutral_value=reader.u8("neutral_value"),
+        )
+        reader.finish()
+        return record
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "text_code_units": self.text_code_units,
+            "text_redacted": True,
+            "value_width_bits": 8,
+            "value_redacted": True,
+            "higher_level_role": "neutral",
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 6:
+            raise PacketShapeError("login server opcode-6 record opcode must be 6")
+        if not 0 <= self.neutral_value <= 0xFF:
+            raise PacketShapeError(
+                "login server opcode-6 neutral value must fit u8"
+            )
+        return (
+            struct.pack("<H", self.opcode)
+            + encode_utf16_string(self.opaque_text, trailing_byte=True)
+            + struct.pack("<B", self.neutral_value)
+        )
+
+
+@dataclass(frozen=True)
 class ChannelRecord:
     name: str
     population: int
