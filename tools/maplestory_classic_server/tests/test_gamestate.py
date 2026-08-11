@@ -26,6 +26,8 @@ from maple_server.packets import (  # noqa: E402
     CharacterLookEntry,
     CharacterSelection,
     ClientStatusMessage,
+    HeartbeatProbe,
+    HeartbeatResponse,
     InitialCharacterSnapshot,
     PacketShapeError,
     Opcode13Ack,
@@ -155,6 +157,8 @@ def fixture_login_transcript(
     selected_channel: int = 23,
     transition_world: int = 4,
     selected_character: int = 300_001,
+    heartbeat_rounds: int = 0,
+    pending_heartbeat_probe: bool = False,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -190,6 +194,16 @@ def fixture_login_transcript(
         )
         timestamp_ns += 1
 
+    for round_index in range(heartbeat_rounds):
+        append("server_to_client", HeartbeatProbe().to_bytes())
+        append(
+            "client_to_server",
+            HeartbeatResponse(
+                opaque_token=round_index.to_bytes(8, "little")
+            ).to_bytes(),
+        )
+    if pending_heartbeat_probe:
+        append("server_to_client", HeartbeatProbe().to_bytes())
     append("server_to_client", fixture_account().to_bytes())
     append("server_to_client", fixture_world().to_bytes())
     append("server_to_client", WorldListEnd().to_bytes())
@@ -370,6 +384,62 @@ class GameStateFoldTest(unittest.TestCase):
         self.assertEqual(
             analysis.state.character_list.records[0].snapshot.character_id,
             300_001,
+        )
+
+    def test_correlates_login_heartbeat_probe_response_pairs(self) -> None:
+        transcript = fixture_login_transcript(
+            heartbeat_rounds=3,
+            pending_heartbeat_probe=True,
+        )
+        transcript = Transcript(
+            path=transcript.path,
+            events=tuple(
+                TranscriptEvent(
+                    event=event.event,
+                    timestamp_ns=event.timestamp_ns * 1_000_000,
+                    direction=event.direction,
+                    data=event.data,
+                    metadata=event.metadata,
+                )
+                for event in transcript.events
+            ),
+        )
+
+        analysis = analyze_login_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.heartbeat_probes, 4)
+        self.assertEqual(analysis.state.heartbeat_responses, 3)
+        self.assertEqual(analysis.state.matched_heartbeat_responses, 3)
+        self.assertEqual(analysis.state.unmatched_heartbeat_responses, 0)
+        self.assertEqual(analysis.state.pending_heartbeat_probes, 1)
+        self.assertEqual(analysis.state.last_heartbeat_round_trip_ms, 1.0)
+        self.assertEqual(analysis.state.max_heartbeat_round_trip_ms, 1.0)
+        responses = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "heartbeat_response"
+        ]
+        self.assertEqual(len(responses), 3)
+        self.assertTrue(
+            all(response.details["matched_probe"] for response in responses)
+        )
+        self.assertTrue(
+            all(response.details["round_trip_ms"] == 1.0 for response in responses)
+        )
+        self.assertTrue(
+            all(response.coverage == ShapeCoverage.PARTIAL for response in responses)
+        )
+        self.assertTrue(
+            all(
+                set(response.details)
+                == {"matched_probe", "opaque_token_bytes", "round_trip_ms"}
+                for response in responses
+            )
+        )
+        self.assertIn(
+            "heartbeats=probes:4 responses:3 matched:3 unmatched:0 pending:1",
+            render_login_analysis(analysis),
         )
 
     def test_rejects_character_selection_not_in_advertised_list(self) -> None:

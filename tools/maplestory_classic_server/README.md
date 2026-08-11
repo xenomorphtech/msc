@@ -544,6 +544,12 @@ acknowledgments and client status messages are fully decoded; other
 length-prefixed type-`6`/type-`7` envelopes are structurally bounded and
 intentionally reported as opaque. They use neutral opcode-envelope names
 because adjacency in one capture does not establish security semantics.
+Login heartbeat traffic is also folded: empty server opcode `10` queues a
+probe and fixed ten-byte client opcode `23` consumes it while retaining the
+eight-byte token as opaque. Stream `83` has one matched pair, stream `116` has
+four probes/three matches/one final pending probe, and the current local login
+has eight matched pairs. JSON/text state reports match/pending counts and
+round-trip timing without exposing token bytes.
 
 Validate a world capture, fold it into field state, and optionally emit the
 timestamped gameplay event stream:
@@ -1974,3 +1980,8 @@ preserve distinct Unity scan codes in this setup.
     1,591.279-4,124.092 ms and primed live admissions at
     1,517.335-1,595.243 ms, and retain a warning-free 180/180-heartbeat fresh
     control after cleanup.
+77. Reuse the exact opcode-`10`/`23` heartbeat codecs in the login fold,
+    correlate one stream-`83` pair, four-probe/three-response stream-`116`
+    traffic, and eight pairs in the current local login, and reduce that live
+    login's unknown client inventory to only opcodes `6` and `31` without
+    exposing the eight-byte response token.

@@ -65,6 +65,8 @@ the main blocker is obsolete.
 
 ```text
 server 0   bootstrap/login prelude
+server 10  empty heartbeat probe
+client 23  8-byte opaque-token heartbeat response
 client 13  typed opcode-13 envelope or status message
 server 13  typed opcode-13 envelope or three-byte acknowledgment
 server 1   account/login result
@@ -81,6 +83,16 @@ The custom replay acknowledges the client's type-`15` opcode-`13` status with
 plaintext `0d0000`. That is enough for the client to continue into the login
 controller. It is a local-server behavior, not a claim that the official NGS
 proof has been reproduced.
+
+The login fold now reuses the world transport heartbeat shapes: server opcode
+`10` is exactly two bytes and client opcode `23` is exactly ten bytes, carrying
+an eight-byte token whose contents remain opaque. Every observed response
+immediately follows a probe. Successful stream `83` has one matched pair at
+14.107 ms. Stream `116` has four probes, three matched responses at 10.006,
+0.349, and 14.445 ms, and one final pending probe. The current local login has
+eight matched pairs, zero unmatched/pending responses, and a maximum 2,594.990
+ms round trip caused by replay pacing. Safe output exposes only token byte
+count, pair counters, and round-trip timing.
 
 Opcode `13` has four bounded envelopes in the observed sessions:
 

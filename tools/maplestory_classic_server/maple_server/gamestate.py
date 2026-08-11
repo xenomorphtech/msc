@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 import json
@@ -11,6 +12,8 @@ from .packets import (
     CharacterListEnvelope,
     CharacterSelection,
     ClientStatusMessage,
+    HeartbeatProbe,
+    HeartbeatResponse,
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
@@ -107,6 +110,13 @@ class LoginGameState:
     )
     selected_character_id: int | None = field(default=None, repr=False)
     handoff: WorldHandoff | None = None
+    heartbeat_probes: int = 0
+    heartbeat_responses: int = 0
+    matched_heartbeat_responses: int = 0
+    unmatched_heartbeat_responses: int = 0
+    pending_heartbeat_probes: int = 0
+    last_heartbeat_round_trip_ms: float | None = None
+    max_heartbeat_round_trip_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -228,6 +238,23 @@ class LoginAnalysis:
                 "characters": characters,
                 "selected_character_id": character_id,
                 "handoff": handoff,
+                "heartbeat_probes": self.state.heartbeat_probes,
+                "heartbeat_responses": self.state.heartbeat_responses,
+                "matched_heartbeat_responses": (
+                    self.state.matched_heartbeat_responses
+                ),
+                "unmatched_heartbeat_responses": (
+                    self.state.unmatched_heartbeat_responses
+                ),
+                "pending_heartbeat_probes": (
+                    self.state.pending_heartbeat_probes
+                ),
+                "last_heartbeat_round_trip_ms": (
+                    self.state.last_heartbeat_round_trip_ms
+                ),
+                "max_heartbeat_round_trip_ms": (
+                    self.state.max_heartbeat_round_trip_ms
+                ),
             },
             "packets": [
                 {
@@ -423,6 +450,7 @@ class LoginStateFold:
         self.state = LoginGameState()
         self.issues: list[str] = []
         self.warnings: list[str] = []
+        self._pending_heartbeat_probes: deque[int] = deque()
 
     def _invalid(
         self, frame: PlainFrame, kind: str, error: PacketShapeError
@@ -487,6 +515,20 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 10:
+            probe = HeartbeatProbe.parse(payload)
+            self._pending_heartbeat_probes.append(frame.timestamp_ns)
+            self.state.heartbeat_probes += 1
+            self.state.pending_heartbeat_probes += 1
+            return self._observation(
+                frame,
+                kind="heartbeat_probe",
+                coverage=ShapeCoverage.FULL,
+                parsed=probe,
+                details={
+                    "pending_probes": self.state.pending_heartbeat_probes
+                },
+            )
         if opcode == 13:
             if len(payload) == 3:
                 acknowledgment = Opcode13Ack.parse(payload)
@@ -711,6 +753,39 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 23:
+            response = HeartbeatResponse.parse(payload)
+            matched_probe = bool(self._pending_heartbeat_probes)
+            round_trip_ms: float | None = None
+            if matched_probe:
+                probe_timestamp_ns = self._pending_heartbeat_probes.popleft()
+                round_trip_ms = (
+                    frame.timestamp_ns - probe_timestamp_ns
+                ) / 1e6
+                self.state.pending_heartbeat_probes -= 1
+                self.state.matched_heartbeat_responses += 1
+                self.state.last_heartbeat_round_trip_ms = round_trip_ms
+                self.state.max_heartbeat_round_trip_ms = max(
+                    self.state.max_heartbeat_round_trip_ms or 0.0,
+                    round_trip_ms,
+                )
+            else:
+                self.state.unmatched_heartbeat_responses += 1
+            self.state.heartbeat_responses += 1
+            details: dict[str, object] = {
+                "matched_probe": matched_probe,
+                "opaque_token_bytes": 8,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
+            return self._observation(
+                frame,
+                kind="heartbeat_response",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=response,
+                details=details,
+                issues=("heartbeat response token remains opaque",),
+            )
         if opcode == 13:
             if len(payload) >= 3 and payload[2] == 15:
                 status = ClientStatusMessage.parse(payload)
@@ -870,6 +945,13 @@ def render_login_analysis(
         ),
         f"character_list_received={state['character_list_received']}",
         f"handoff={state['handoff']}",
+        (
+            f"heartbeats=probes:{state['heartbeat_probes']} "
+            f"responses:{state['heartbeat_responses']} "
+            f"matched:{state['matched_heartbeat_responses']} "
+            f"unmatched:{state['unmatched_heartbeat_responses']} "
+            f"pending:{state['pending_heartbeat_probes']}"
+        ),
         f"packet_shapes={json.dumps(packet_counts, sort_keys=True)}",
     ]
     lines.extend(f"issue={issue}" for issue in analysis.issues)

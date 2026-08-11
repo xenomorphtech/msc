@@ -2355,6 +2355,12 @@ project's own `README.md` for all options.
   level/job/stats, reached character selection without a stall, handed off on
   opcode `7`, and entered the local gameplay replay; its strict login fold has
   full character-list coverage and no issues or warnings.
+- Login heartbeat traffic now shares the exact world codecs and is folded as
+  empty server opcode-`10` probes plus ten-byte client opcode-`23` responses.
+  Stream `83` has one match, stream `116` has four probes/three matches/one
+  pending probe, and the current local login has eight matches with no
+  unmatched or pending response. Safe reports retain only token width and
+  round-trip counters/timing.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

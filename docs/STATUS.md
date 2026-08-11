@@ -1074,6 +1074,15 @@ and entered gameplay. Its closed login transcript is
 the strict fold is `handoff_ready`, character count `1`, full opcode-`4`
 coverage, and zero issues/warnings.
 
+Login opcode `23` is no longer an unknown packet boundary. The existing exact
+codec consumes its fixed eight-byte opaque token, while the login fold now
+queues empty server opcode-`10` probes and reports matched/unmatched/pending
+responses plus round-trip timing. Stream `83` has one matched pair at 14.107
+ms; stream `116` has four probes, three matches, one final pending probe, and a
+14.445-ms maximum; the current local login has eight matches, zero unmatched
+or pending responses, and a 2,594.990-ms replay-paced maximum. Its remaining
+unknown client inventory is one opcode `6` and one opcode `31`.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
