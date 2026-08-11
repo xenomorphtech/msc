@@ -2162,3 +2162,10 @@ preserve distinct Unity scan codes in this setup.
 89. Replace the final fixed-opaque client bucket with typed neutral opcode-
     `307` and counted/redacted UTF-16 opcode-`310` records, validating 30 and
     three samples respectively without assigning purpose.
+90. Add an evidence-derived `inject-item-pickup` workflow that samples the
+    latest folded player position, waits for authentic opcode `185`/`222`
+    admission before serving `[39,49,312]`, verifies the complete state delta,
+    and cleans up on timeout. Prove one primed `75 -> 76` success at the actual
+    moved position and two clean fresh-session failures, then re-run strict
+    analysis to confirm zero unknown packets in gameplay streams `92`, `114`,
+    and `126`.
