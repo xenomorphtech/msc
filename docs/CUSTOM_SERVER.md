@@ -589,9 +589,18 @@ capture-preexisting resets, four leave-time clears, and zero active statuses at
 the end. The source-level and duration fields remain neutral, other masks stay
 unknown, and no live effect is claimed yet.
 
+Client opcode `115` now models both same-field inner-portal requests in stream
+`92`. Each exact 22-byte record carries active field epoch `7`, a redacted
+four-code-unit portal name, and signed source/destination positions. The paths
+chain within one pixel—`(1050,234) -> (1099,410)` followed by
+`(1099,411) -> (1040,1007)`—and are followed by same-epoch visibility
+removals/entries without a field transition. Python and native codecs consume
+both records exactly; safe state exposes no portal text. Stream `92` reaches
+`13,419/21,788/0/0` with no warnings.
+
 Together, the currently modeled families leave the long-corpus totals at
 26,661 full, 44,439 partial, zero unknown, and zero invalid. Stream
-`92` now reaches 13,417 full, 21,788 partial, 2 unknown, and zero invalid;
+`92` now reaches 13,419 full, 21,788 partial, zero unknown, and zero invalid;
 stream `114` reaches 54/22/0/0.
 
 Client/server opcode `43` is now folded as a neutral redacted family. The

@@ -17,6 +17,7 @@ from .packets import (
     CharacterStatUpdate,
     ClientAttackAction,
     ClientFixedOpaqueRecord,
+    ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
     ClientOpcode64PositionAction,
@@ -875,6 +876,15 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_114_redacted_values: int = 0
+    client_inner_portal_requests: int = 0
+    client_inner_portal_field_epoch_matches: int = 0
+    client_inner_portal_field_epoch_mismatches: int = 0
+    client_inner_portal_name_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_inner_portal_redacted_names: int = 0
+    client_inner_portal_same_epoch_chains: int = 0
+    client_inner_portal_chained_sources_within_one_pixel: int = 0
     client_opcode_122_packets: int = 0
     client_opcode_122_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_122_shapes: Counter[str] = field(default_factory=Counter)
@@ -4188,6 +4198,27 @@ class GameplayAnalysis:
                         self.state.client_opcode_114_redacted_values
                     ),
                 },
+                "client_inner_portal": {
+                    "request_count": self.state.client_inner_portal_requests,
+                    "field_epoch_matches": (
+                        self.state.client_inner_portal_field_epoch_matches
+                    ),
+                    "field_epoch_mismatches": (
+                        self.state.client_inner_portal_field_epoch_mismatches
+                    ),
+                    "portal_name_code_units": dict(
+                        self.state.client_inner_portal_name_code_units
+                    ),
+                    "redacted_name_count": (
+                        self.state.client_inner_portal_redacted_names
+                    ),
+                    "same_epoch_chains": (
+                        self.state.client_inner_portal_same_epoch_chains
+                    ),
+                    "chained_sources_within_one_pixel": (
+                        self.state.client_inner_portal_chained_sources_within_one_pixel
+                    ),
+                },
                 "client_opcode_122": {
                     "packet_count": self.state.client_opcode_122_packets,
                     "selectors": dict(self.state.client_opcode_122_selectors),
@@ -4752,6 +4783,9 @@ class GameplayStateFold:
         self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
         self._pending_world_exit_requests: deque[int] = deque()
         self._last_client_periodic_report_timestamp_ns: dict[int, int] = {}
+        self._last_client_inner_portal_destination: (
+            tuple[int, int, int] | None
+        ) = None
         self._pending_skill_level_changes: deque[
             tuple[int, int, SkillLevelChangeRequest]
         ] = deque()
@@ -6408,6 +6442,53 @@ class GameplayStateFold:
                     "client opcode-114 text, trailing value, and "
                     "higher-level purpose remain semantically unresolved",
                 ),
+            )
+        if opcode == 115:
+            request = ClientInnerPortalRequest.parse(payload)
+            field_epoch_matches = request.field_epoch == self.state.field_epoch
+            previous_destination = self._last_client_inner_portal_destination
+            same_epoch_chain = (
+                previous_destination is not None
+                and previous_destination[0] == request.field_epoch
+            )
+            source_near_previous_destination: bool | None = None
+            if same_epoch_chain and previous_destination is not None:
+                self.state.client_inner_portal_same_epoch_chains += 1
+                source_near_previous_destination = (
+                    abs(request.source_x - previous_destination[1]) <= 1
+                    and abs(request.source_y - previous_destination[2]) <= 1
+                )
+                if source_near_previous_destination:
+                    self.state.client_inner_portal_chained_sources_within_one_pixel += 1
+            self._last_client_inner_portal_destination = (
+                request.field_epoch,
+                request.destination_x,
+                request.destination_y,
+            )
+            self.state.client_inner_portal_requests += 1
+            self.state.client_inner_portal_name_code_units[
+                request.portal_name_code_units
+            ] += 1
+            self.state.client_inner_portal_redacted_names += 1
+            if field_epoch_matches:
+                self.state.client_inner_portal_field_epoch_matches += 1
+            else:
+                self.state.client_inner_portal_field_epoch_mismatches += 1
+            details = {
+                **request.safe_dict(),
+                "field_epoch_matches": field_epoch_matches,
+                "same_epoch_chain": same_epoch_chain,
+                "source_near_previous_destination": (
+                    source_near_previous_destination
+                ),
+            }
+            self._event(frame, "inner_portal_requested", details=details)
+            return self._observation(
+                frame,
+                kind="client_inner_portal_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
             )
         if opcode == 122 and ClientOpcode122Envelope.is_captured_shape(payload):
             envelope = ClientOpcode122Envelope.parse(payload)
@@ -10343,6 +10424,12 @@ class GameplayStateFold:
                 "opcode-64 positions did not match the last same-epoch "
                 "client life-movement path"
             )
+        if self.state.client_inner_portal_field_epoch_mismatches:
+            self.warnings.append(
+                f"{self.state.client_inner_portal_field_epoch_mismatches} "
+                "client inner-portal requests did not match the active field "
+                "epoch"
+            )
         if self.state.pending_client_opcode_64_actions:
             self.warnings.append(
                 f"{self.state.pending_client_opcode_64_actions} client "
@@ -13091,6 +13178,19 @@ def render_gameplay_analysis(
             "text_code_units:"
             f"{dict(sorted(state.client_opcode_114_text_code_units.items()))} "
             f"redacted_values:{state.client_opcode_114_redacted_values}"
+        ),
+        (
+            "client_inner_portal="
+            f"requests:{state.client_inner_portal_requests} "
+            f"epoch_matches:{state.client_inner_portal_field_epoch_matches} "
+            "epoch_mismatches:"
+            f"{state.client_inner_portal_field_epoch_mismatches} "
+            "name_code_units:"
+            f"{dict(sorted(state.client_inner_portal_name_code_units.items()))} "
+            f"redacted_names:{state.client_inner_portal_redacted_names} "
+            f"chains:{state.client_inner_portal_same_epoch_chains} "
+            "chains_within_one_pixel:"
+            f"{state.client_inner_portal_chained_sources_within_one_pixel}"
         ),
         (
             f"client_opcode_122=packets:{state.client_opcode_122_packets} "

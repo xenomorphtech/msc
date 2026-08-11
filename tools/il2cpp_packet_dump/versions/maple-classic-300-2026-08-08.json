@@ -968,6 +968,19 @@
       ]
     },
     {
+      "name":"client_inner_portal_request","direction":"client_to_server","opcode":115,"length":22,
+      "source":"ClientInnerPortalRequest; both capture-111 stream-92 records carry the active field epoch, a redacted inner-portal name, and chained source/destination positions",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":115},
+        {"op":"read","name":"field_epoch","kind":"u8"},
+        {"op":"utf16","name":"portal_name","trailing_zero":true},
+        {"op":"read","name":"source_x","kind":"i16"},
+        {"op":"read","name":"source_y","kind":"i16"},
+        {"op":"read","name":"destination_x","kind":"i16"},
+        {"op":"read","name":"destination_y","kind":"i16"}
+      ]
+    },
+    {
       "name":"client_opcode_54","direction":"client_to_server","opcode":54,"length":24,
       "source":"31 capture frames compared at fixed field offsets",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":54},{"op":"read","name":"control_value","kind":"u32"},{"op":"read","name":"flag_1","kind":"u8"},{"op":"read","name":"flag_2","kind":"u8"},{"op":"read","name":"value_1","kind":"u32"},{"op":"read","name":"value_2","kind":"u32"},{"op":"read","name":"value_3","kind":"u32"},{"op":"read","name":"tail","kind":"u32"}]

@@ -441,8 +441,8 @@ gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
 44,439 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,417 full, 21,788 partial,
-2 unknown, and zero invalid observations; short stream `114` reaches 54 full,
+metadata. Stream `92` independently passes with 13,419 full, 21,788 partial,
+zero unknown, and zero invalid observations; short stream `114` reaches 54 full,
 22 partial, zero unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
@@ -1815,3 +1815,7 @@ preserve distinct Unity scan codes in this setup.
     signed slot `3` with the next opcode-`39` Cash remove/add, preserve the u32
     and higher-level purpose as neutral, validate exact Python/Rust consumption,
     and reduce stream `126` to zero unknown packets.
+73. Decode both 22-byte client opcode-`115` inner-portal requests, redact their
+    four-code-unit portal names, validate the active epoch and chained signed
+    source/destination positions, preserve the native four-code-unit boundary,
+    and reduce stream `92` to zero unknown packets.

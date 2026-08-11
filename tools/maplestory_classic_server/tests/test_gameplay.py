@@ -47,6 +47,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAttackAction,
     ClientFixedOpaqueRecord,
+    ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
     ClientOpcode43Envelope,
     ClientOpcode64PositionAction,
@@ -2749,6 +2750,48 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(envelopes[0], control_value=256).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
             replace(envelopes[0], opaque_value=0x1_0000_0000).to_bytes()
+
+    def test_client_inner_portal_requests_round_trip_and_redact(self) -> None:
+        payloads = (
+            bytes.fromhex("73000704006400770030003000001a04ea004b049a01"),
+            bytes.fromhex("73000704006400770030003100004b049b011004ef03"),
+        )
+        requests = tuple(
+            ClientInnerPortalRequest.parse(payload) for payload in payloads
+        )
+
+        self.assertEqual(
+            tuple(request.to_bytes() for request in requests),
+            payloads,
+        )
+        self.assertEqual(requests[0].field_epoch, 7)
+        self.assertEqual(requests[0].portal_name, "dw00")
+        self.assertEqual(requests[0].portal_name_code_units, 4)
+        self.assertEqual(
+            (
+                requests[0].source_x,
+                requests[0].source_y,
+                requests[0].destination_x,
+                requests[0].destination_y,
+            ),
+            (1_050, 234, 1_099, 410),
+        )
+        self.assertEqual(
+            (requests[1].source_x, requests[1].source_y),
+            (1_099, 411),
+        )
+        safe = str(requests[0].safe_dict())
+        self.assertNotIn("dw00", safe)
+        self.assertIn("portal_name_redacted", safe)
+
+        invalid_terminator = bytearray(payloads[0])
+        invalid_terminator[13] = 1
+        with self.assertRaisesRegex(PacketShapeError, "expected 0"):
+            ClientInnerPortalRequest.parse(bytes(invalid_terminator))
+        with self.assertRaisesRegex(PacketShapeError, "fit in u8"):
+            replace(requests[0], field_epoch=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
+            replace(requests[0], destination_y=0x8000).to_bytes()
 
     def test_client_opcode_122_captured_variants_round_trip(self) -> None:
         payloads = (
@@ -6067,6 +6110,82 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("4567890", safe)
         self.assertIn(
             "client_opcode_114=packets:2 control_values:{1: 1, 32: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_chained_inner_portal_requests(self) -> None:
+        requests = (
+            ClientInnerPortalRequest(
+                field_epoch=1,
+                portal_name="secret00",
+                source_x=100,
+                source_y=200,
+                destination_x=300,
+                destination_y=400,
+            ),
+            ClientInnerPortalRequest(
+                field_epoch=1,
+                portal_name="secret01",
+                source_x=300,
+                source_y=401,
+                destination_x=500,
+                destination_y=600,
+            ),
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_client_plaintexts=tuple(
+                    request.to_bytes() for request in requests
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_inner_portal_requests, 2)
+        self.assertEqual(
+            analysis.state.client_inner_portal_field_epoch_matches,
+            2,
+        )
+        self.assertEqual(
+            analysis.state.client_inner_portal_field_epoch_mismatches,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.client_inner_portal_name_code_units,
+            {8: 2},
+        )
+        self.assertEqual(analysis.state.client_inner_portal_redacted_names, 2)
+        self.assertEqual(analysis.state.client_inner_portal_same_epoch_chains, 1)
+        self.assertEqual(
+            analysis.state.client_inner_portal_chained_sources_within_one_pixel,
+            1,
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_inner_portal_request"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "inner_portal_requested"
+                for event in analysis.events
+            ),
+            2,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("secret00", safe)
+        self.assertNotIn("secret01", safe)
+        self.assertIn(
+            "client_inner_portal=requests:2 epoch_matches:2",
             render_gameplay_analysis(analysis),
         )
 

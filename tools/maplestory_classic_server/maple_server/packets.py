@@ -5680,6 +5680,87 @@ class ClientOpcode114TextEnvelope:
 
 
 @dataclass(frozen=True)
+class ClientInnerPortalRequest:
+    """Capture-backed same-field portal traversal request."""
+
+    field_epoch: int
+    portal_name: str = field(repr=False)
+    source_x: int
+    source_y: int
+    destination_x: int
+    destination_y: int
+    opcode: int = 115
+
+    @property
+    def portal_name_code_units(self) -> int:
+        return len(self.portal_name.encode("utf-16-le")) // 2
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientInnerPortalRequest":
+        reader = PacketReader(payload, packet_name="client_inner_portal_request")
+        _expect_opcode(reader, 115)
+        request = cls(
+            field_epoch=reader.u8("field_epoch"),
+            portal_name=reader.utf16_string(
+                "portal_name", trailing_byte=True
+            ),
+            source_x=reader.i16("source_x"),
+            source_y=reader.i16("source_y"),
+            destination_x=reader.i16("destination_x"),
+            destination_y=reader.i16("destination_y"),
+        )
+        reader.finish()
+        return request
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "portal_name_code_units": self.portal_name_code_units,
+            "portal_name_redacted": True,
+            "source": {"x": self.source_x, "y": self.source_y},
+            "destination": {
+                "x": self.destination_x,
+                "y": self.destination_y,
+            },
+            "delta": {
+                "x": self.destination_x - self.source_x,
+                "y": self.destination_y - self.source_y,
+            },
+        }
+
+    def to_bytes(self) -> bytes:
+        if self.opcode != 115:
+            raise PacketShapeError(
+                "client inner-portal request opcode must be 115"
+            )
+        if not 0 <= self.field_epoch <= 0xFF:
+            raise PacketShapeError(
+                "client inner-portal field epoch must fit in u8"
+            )
+        for name, value in (
+            ("source x", self.source_x),
+            ("source y", self.source_y),
+            ("destination x", self.destination_x),
+            ("destination y", self.destination_y),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(
+                    f"client inner-portal {name} must fit in i16"
+                )
+        return (
+            struct.pack("<HB", self.opcode, self.field_epoch)
+            + encode_utf16_string(self.portal_name, trailing_byte=True)
+            + struct.pack(
+                "<hhhh",
+                self.source_x,
+                self.source_y,
+                self.destination_x,
+                self.destination_y,
+            )
+        )
+
+
+@dataclass(frozen=True)
 class ClientOpcode101Record:
     header_value: int
     primary_value: int

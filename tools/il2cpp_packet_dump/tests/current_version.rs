@@ -16,7 +16,7 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 109);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 110);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
     assert_eq!(shapes.len(), 185);
 
@@ -104,6 +104,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_114.opcode, 114);
     assert_eq!(opcode_114.length, None);
     assert_eq!(opcode_114.operations.len(), 4);
+
+    let inner_portal = shapes
+        .iter()
+        .find(|shape| shape.name == "client_inner_portal_request")
+        .unwrap();
+    assert_eq!(inner_portal.opcode, 115);
+    assert_eq!(inner_portal.length, Some(22));
+    assert_eq!(inner_portal.operations.len(), 7);
 
     let opcode_66 = shapes
         .iter()

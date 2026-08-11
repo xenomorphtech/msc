@@ -217,6 +217,42 @@ without ambiguity or failure. Because the family is client-originated and the
 active idle level-12 client emits none, no server-to-client live replay or
 client-visible effect is claimed.
 
+## Inner-portal traversal (`client opcode 115`)
+
+The final two unknown stream-`92` packets are exact same-field portal requests:
+
+```text
+uint16 opcode = 115
+uint8  field_epoch
+uint16 portal_name_code_units
+utf16le[portal_name_code_units] portal_name
+uint8  zero_terminator = 0
+int16  source_x
+int16  source_y
+int16  destination_x
+int16  destination_y
+```
+
+Both requests carry the active field epoch `7` and a four-code-unit portal
+name, retained only for exact re-emission and redacted from safe output. Their
+source/destination paths are `(1050,234) -> (1099,410)` and
+`(1099,411) -> (1040,1007)`: the second source is within one pixel of the first
+destination. The first request is followed by same-epoch mob visibility
+removals and entries; the second is followed by remote-player, mob, and drop
+visibility removals. No field snapshot or epoch transition occurs.
+
+This structure and role also agree with the older open-source
+`UseInnerPortalHandler`/`InnerPortalHandler` family, which reads an inner-portal
+name plus start/final positions and updates the character within the current
+map. Capture-local position chaining and visibility changes remain the primary
+version-300 evidence; older layouts are not used to widen the accepted modern
+shape. The Python codec accepts the typed variable-name grammar, while the
+native manifest deliberately pins the only observed 22-byte/four-code-unit
+variant. Both captured records consume and re-emit exactly at full coverage.
+Safe state exposes only counts, name length, epoch matches, coordinates,
+deltas, and the one-pixel chain result. Stream `92` advances from
+`13,417/21,788/2/0` to `13,419/21,788/0/0` with no warnings.
+
 The captured server frame at index `3` is a second opcode-`0` message with
 plaintext result byte `2`. It is the direct source of the replayed
 account-policy dialog: replacing only this frame with heartbeat `0a00` removes
@@ -3464,8 +3500,8 @@ shapes. Variable opcode
 word `1` plus a nine-byte tail) are preserved and reported as partial semantic
 coverage. Strict validation succeeds across all 71,100 frames with 26,661
 full, 44,439 partial, zero unknown, and zero invalid packet
-observations. Stream `92` independently reaches 13,417 full, 21,788 partial,
-2 unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
+observations. Stream `92` independently reaches 13,419 full, 21,788 partial,
+zero unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its one remaining warning is a cross-packet state correlation:
 an aggregate warning for six delayed combat predictions that differ by one
@@ -3503,9 +3539,9 @@ frames. The `58880` exchange contains 77 client bytes and 221 server bytes.
 
 ## Current unknowns
 
-- Gameplay framing is complete for short stream `114` and long stream `126`.
-  Stream `92` retains two 22-byte client opcode-`115` packets as its only
-  unknown packet family.
+- Gameplay framing is complete across reference gameplay streams `92`, `114`,
+  and `126`; all packets are typed or capture-bounded and none remain unknown
+  or invalid.
 - The successful account shape is decoded, but the regional opcode mapping
   differs (`0` in the successful capture, `1` for the local handler), and
   several fields still have unknown semantics.

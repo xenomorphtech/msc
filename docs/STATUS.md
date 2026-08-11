@@ -53,8 +53,8 @@
   epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
   bounded as partial. Strict decoding now succeeds across all 71,100 frames:
   26,661 full, 44,439 partial, zero unknown, and zero invalid
-  packet observations. Stream `92` now reports 13,417 full, 21,788 partial,
-  2 unknown, and zero invalid; stream `114` reports 54/22/0/0. One
+  packet observations. Stream `92` now reports 13,419 full, 21,788 partial,
+  zero unknown, and zero invalid; stream `114` reports 54/22/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
   one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -276,6 +276,14 @@
   ms, while its u32 and action purpose remain neutral. Python/native validation
   consumes all three records, pending/mismatch counters are zero, and stream
   `126` reaches `26,661/44,439/0/0`.
+- Client opcode `115` now consumes both exact 22-byte stream-`92` inner-portal
+  requests. Each carries active field epoch `7`, a redacted four-code-unit
+  portal name, and signed source/destination positions. The two paths chain
+  within one pixel and are followed by same-epoch visibility changes without a
+  field transition. Python/native validation consumes both records exactly,
+  epoch mismatches are zero, and stream `92` reaches
+  `13,419/21,788/0/0` with no warnings. All three reference gameplay streams
+  now have zero unknown and zero invalid packets.
 - Client/server opcode `43` now uses two redacted client envelopes and one
   fixed server envelope instead of a sequence-keyed stream-specific switch.
   All 45 client and three server packets across streams `92` and `126`
