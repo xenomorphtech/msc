@@ -602,6 +602,96 @@ class ServerTime:
 
 
 @dataclass(frozen=True)
+class ClientOpcode31Record:
+    """Capture-bounded, content-redacted variable record for client opcode 31."""
+
+    reserved_prefix: bytes = field(repr=False)
+    variant: int
+    opaque_texts: tuple[str, str, str] = field(repr=False)
+    opaque_blob: bytes = field(repr=False)
+    reserved_suffix: bytes = field(repr=False)
+    opcode: int = 31
+
+    @property
+    def text_code_units(self) -> tuple[int, int, int]:
+        return (
+            len(self.opaque_texts[0].encode("utf-16-le")) // 2,
+            len(self.opaque_texts[1].encode("utf-16-le")) // 2,
+            len(self.opaque_texts[2].encode("utf-16-le")) // 2,
+        )
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "ClientOpcode31Record":
+        reader = PacketReader(payload, packet_name="client_opcode_31_record")
+        _expect_opcode(reader, 31)
+        record = cls(
+            reserved_prefix=reader.bytes(20, "reserved_prefix"),
+            variant=reader.u8("variant"),
+            opaque_texts=tuple(
+                reader.utf16_string(
+                    f"opaque_text_{index}", trailing_byte=True
+                )
+                for index in range(1, 4)
+            ),
+            opaque_blob=reader.bytes(
+                reader.u32("opaque_blob_length"), "opaque_blob"
+            ),
+            reserved_suffix=reader.bytes(3, "reserved_suffix"),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if self.opcode != 31:
+            raise PacketShapeError("client opcode-31 record opcode must be 31")
+        if self.reserved_prefix != b"\x00" * 20:
+            raise PacketShapeError(
+                "client opcode-31 reserved prefix must contain 20 zero bytes"
+            )
+        if self.variant != 2:
+            raise PacketShapeError("client opcode-31 variant must be 2")
+        if len(self.opaque_texts) != 3:
+            raise PacketShapeError(
+                "client opcode-31 record must contain three text fields"
+            )
+        if len(self.opaque_blob) != 48:
+            raise PacketShapeError(
+                "client opcode-31 opaque blob must contain 48 bytes"
+            )
+        if self.reserved_suffix != b"\x00" * 3:
+            raise PacketShapeError(
+                "client opcode-31 reserved suffix must contain three zero bytes"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "variant": self.variant,
+            "reserved_prefix_zero": True,
+            "text_code_units": list(self.text_code_units),
+            "text_fields_redacted": True,
+            "opaque_blob_bytes": len(self.opaque_blob),
+            "opaque_blob_redacted": True,
+            "reserved_suffix_zero": True,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return (
+            struct.pack("<H", self.opcode)
+            + self.reserved_prefix
+            + struct.pack("<B", self.variant)
+            + b"".join(
+                encode_utf16_string(text, trailing_byte=True)
+                for text in self.opaque_texts
+            )
+            + struct.pack("<I", len(self.opaque_blob))
+            + self.opaque_blob
+            + self.reserved_suffix
+        )
+
+
+@dataclass(frozen=True)
 class ChannelSelection:
     world_id: int
     channel_id: int

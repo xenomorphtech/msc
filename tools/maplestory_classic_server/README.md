@@ -551,6 +551,16 @@ four probes/three matches/one final pending probe, and the current local login
 has eight matched pairs. JSON/text state reports match/pending counts and
 round-trip timing without exposing token bytes.
 
+Client opcode `31` is also capture-bounded across successful stream `83`,
+stream `116`, and the current live login. Each record has a 20-byte zero
+prefix, variant `2`, three terminated counted UTF-16 fields, a length-prefixed
+48-byte opaque blob, and a three-byte zero suffix. The three observed packet
+lengths are `183/275/201`, driven by text code-unit patterns `10/0/38`,
+`7/51/36`, and `1/51/5`. The codec and version manifest consume and re-emit the
+full record, but safe output redacts all text/blob contents and leaves their
+higher-level role neutral. This removes opcode `31` from the current live
+login's unknown inventory, leaving only opcode `6`.
+
 Validate a world capture, fold it into field state, and optionally emit the
 timestamped gameplay event stream:
 
@@ -1985,3 +1995,9 @@ preserve distinct Unity scan codes in this setup.
     traffic, and eight pairs in the current local login, and reduce that live
     login's unknown client inventory to only opcodes `6` and `31` without
     exposing the eight-byte response token.
+78. Replace the login opcode-`31` 183-byte opaque pin with the shared variable
+    grammar proven by stream `83`, stream `116`, and the current live login;
+    exact-consume and round-trip all `183/275/201`-byte records, publish only
+    redacted text/blob lengths and distributions, and reduce the live login's
+    unknown client inventory to only opcode `6` without assigning a semantic
+    role to the retained contents.

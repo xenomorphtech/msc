@@ -67,6 +67,7 @@ the main blocker is obsolete.
 server 0   bootstrap/login prelude
 server 10  empty heartbeat probe
 client 23  8-byte opaque-token heartbeat response
+client 31  three redacted UTF-16 fields and a 48-byte opaque blob
 client 13  typed opcode-13 envelope or status message
 server 13  typed opcode-13 envelope or three-byte acknowledgment
 server 1   account/login result
@@ -93,6 +94,28 @@ immediately follows a probe. Successful stream `83` has one matched pair at
 eight matched pairs, zero unmatched/pending responses, and a maximum 2,594.990
 ms round trip caused by replay pacing. Safe output exposes only token byte
 count, pair counters, and round-trip timing.
+
+Client opcode `31` is a capture-bounded variable record rather than an opaque
+width pin. Stream `83`, stream `116`, and the current live login independently
+establish this grammar:
+
+```text
+uint16 opcode = 31
+byte[20] reserved_prefix = zero
+uint8  variant = 2
+utf16  opaque_text_1 + trailing zero byte
+utf16  opaque_text_2 + trailing zero byte
+utf16  opaque_text_3 + trailing zero byte
+uint32 opaque_blob_length = 48
+byte[48] opaque_blob
+byte[3] reserved_suffix = zero
+```
+
+The three packet lengths are `183`, `275`, and `201` bytes, with text
+code-unit patterns `10/0/38`, `7/51/36`, and `1/51/5`. The codec round-trips
+the contents but safe packet/state output exposes only the variant, zero-field
+checks, text lengths, blob length, and aggregate pattern/count telemetry. The
+text, blob contents, and higher-level role remain deliberately neutral.
 
 Opcode `13` has four bounded envelopes in the observed sessions:
 

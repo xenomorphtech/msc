@@ -1081,7 +1081,16 @@ responses plus round-trip timing. Stream `83` has one matched pair at 14.107
 ms; stream `116` has four probes, three matches, one final pending probe, and a
 14.445-ms maximum; the current local login has eight matches, zero unmatched
 or pending responses, and a 2,594.990-ms replay-paced maximum. Its remaining
-unknown client inventory is one opcode `6` and one opcode `31`.
+unknown client inventory was one opcode `6` and one opcode `31`.
+
+Login opcode `31` is now a structurally exact, semantically partial redacted
+record: 20 zero bytes, variant `2`, three terminated counted UTF-16 fields, a
+`uint32` length and 48-byte opaque blob, then three zero bytes. Stream `83`,
+stream `116`, and the current local login supply distinct packet lengths
+`183/275/201` and text-length patterns `10/0/38`, `7/51/36`, and `1/51/5` while
+agreeing on every fixed field. All three consume and round-trip exactly; safe
+analysis exposes only lengths and counts. The live login's remaining unknown
+client inventory is now only its opcode-`6` record.
 
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.

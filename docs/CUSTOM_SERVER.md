@@ -2361,6 +2361,13 @@ project's own `README.md` for all options.
   pending probe, and the current local login has eight matches with no
   unmatched or pending response. Safe reports retain only token width and
   round-trip counters/timing.
+- Login client opcode `31` now has one shared variable codec and manifest shape
+  across the `183`-, `275`-, and `201`-byte stream-`83`/stream-`116`/live
+  records. The exact boundary is a zero prefix, variant `2`, three terminated
+  counted UTF-16 fields, a fixed 48-byte length-prefixed opaque blob, and a
+  zero suffix. Safe reports expose only text-length patterns and blob byte
+  totals, leaving all retained contents and their higher-level purpose neutral;
+  only opcode `6` remains unknown in the current live login transcript.
 - Nested UI pointer input now stays on the Sway seat, and the checked-in
   `send_wayland_evdev_key.py` helper sends physical evdev codes directly over
   Wayland for Unity raw input without `xdotool` or the host cursor.

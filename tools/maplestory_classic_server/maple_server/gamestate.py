@@ -11,6 +11,7 @@ from .packets import (
     ChannelSelection,
     CharacterListEnvelope,
     CharacterSelection,
+    ClientOpcode31Record,
     ClientStatusMessage,
     HeartbeatProbe,
     HeartbeatResponse,
@@ -117,6 +118,11 @@ class LoginGameState:
     pending_heartbeat_probes: int = 0
     last_heartbeat_round_trip_ms: float | None = None
     max_heartbeat_round_trip_ms: float | None = None
+    client_opcode_31_records: int = 0
+    client_opcode_31_text_code_unit_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    client_opcode_31_opaque_blob_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -254,6 +260,15 @@ class LoginAnalysis:
                 ),
                 "max_heartbeat_round_trip_ms": (
                     self.state.max_heartbeat_round_trip_ms
+                ),
+                "client_opcode_31_records": (
+                    self.state.client_opcode_31_records
+                ),
+                "client_opcode_31_text_code_unit_patterns": (
+                    self.state.client_opcode_31_text_code_unit_patterns
+                ),
+                "client_opcode_31_opaque_blob_bytes": (
+                    self.state.client_opcode_31_opaque_blob_bytes
                 ),
             },
             "packets": [
@@ -753,6 +768,34 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 31:
+            record = ClientOpcode31Record.parse(payload)
+            text_pattern = "/".join(
+                str(length) for length in record.text_code_units
+            )
+            self.state.client_opcode_31_records += 1
+            self.state.client_opcode_31_text_code_unit_patterns[
+                text_pattern
+            ] = (
+                self.state.client_opcode_31_text_code_unit_patterns.get(
+                    text_pattern, 0
+                )
+                + 1
+            )
+            self.state.client_opcode_31_opaque_blob_bytes += len(
+                record.opaque_blob
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_31_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-31 text, blob contents, and higher-level role "
+                    "remain neutral",
+                ),
+            )
         if opcode == 23:
             response = HeartbeatResponse.parse(payload)
             matched_probe = bool(self._pending_heartbeat_probes)
@@ -951,6 +994,13 @@ def render_login_analysis(
             f"matched:{state['matched_heartbeat_responses']} "
             f"unmatched:{state['unmatched_heartbeat_responses']} "
             f"pending:{state['pending_heartbeat_probes']}"
+        ),
+        (
+            "client_opcode_31="
+            f"records:{state['client_opcode_31_records']} "
+            "text_patterns:"
+            f"{state['client_opcode_31_text_code_unit_patterns']} "
+            f"opaque_blob_bytes:{state['client_opcode_31_opaque_blob_bytes']}"
         ),
         f"packet_shapes={json.dumps(packet_counts, sort_keys=True)}",
     ]

@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 110 semantic/manual shapes and 96 explicitly
+manifest currently declares 111 semantic/manual shapes and 95 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -97,7 +97,7 @@ opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
 The live-only, non-overlapping
 opcode-`310` width and capture-backed client
 opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add nine active shapes.
-This leaves 185 active shapes and 75 active
+This leaves 185 active shapes and 74 active
 opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -167,6 +167,14 @@ portal name with zero terminator, and signed source/destination positions. The
 two stream-`92` paths chain within one pixel and remain in the same field epoch.
 The native shape intentionally accepts only the captured four-code-unit width;
 isolated validation consumes both records with zero failures.
+Login client opcode `31` replaces its 183-byte observed-opaque pin with one
+variable redacted shape shared by stream `83`, stream `116`, and the current
+live login transcript. All three records have a 20-byte zero prefix, variant
+`2`, three trailing-zero UTF-16 fields, a `uint32` blob length fixed at `48`,
+the opaque blob, and a three-byte zero suffix. Their distinct total lengths
+`183/275/201` and text code-unit patterns `10/0/38`, `7/51/36`, and `1/51/5`
+exact-consume under the same grammar without assigning semantics or publishing
+the retained contents.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short

@@ -25,6 +25,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterListRecord,
     CharacterLookEntry,
     CharacterSelection,
+    ClientOpcode31Record,
     ClientStatusMessage,
     HeartbeatProbe,
     HeartbeatResponse,
@@ -159,6 +160,7 @@ def fixture_login_transcript(
     selected_character: int = 300_001,
     heartbeat_rounds: int = 0,
     pending_heartbeat_probe: bool = False,
+    opcode_31_record: ClientOpcode31Record | None = None,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -204,6 +206,8 @@ def fixture_login_transcript(
         )
     if pending_heartbeat_probe:
         append("server_to_client", HeartbeatProbe().to_bytes())
+    if opcode_31_record is not None:
+        append("client_to_server", opcode_31_record.to_bytes())
     append("server_to_client", fixture_account().to_bytes())
     append("server_to_client", fixture_world().to_bytes())
     append("server_to_client", WorldListEnd().to_bytes())
@@ -252,6 +256,41 @@ def fixture_login_transcript(
 
 
 class PacketShapeTest(unittest.TestCase):
+    def test_client_opcode_31_variable_record_round_trip_and_redact(self) -> None:
+        record = ClientOpcode31Record(
+            reserved_prefix=b"\x00" * 20,
+            variant=2,
+            opaque_texts=("1234567890", "", "opaque-text"),
+            opaque_blob=bytes(range(48)),
+            reserved_suffix=b"\x00" * 3,
+        )
+
+        payload = record.to_bytes()
+        parsed = ClientOpcode31Record.parse(payload)
+
+        self.assertEqual(parsed, record)
+        self.assertEqual(parsed.text_code_units, (10, 0, 11))
+        self.assertEqual(parsed.safe_dict()["text_code_units"], [10, 0, 11])
+        self.assertEqual(parsed.safe_dict()["opaque_blob_bytes"], 48)
+        self.assertNotIn("1234567890", str(parsed.safe_dict()))
+        self.assertNotIn("opaque-text", str(parsed.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "variant must be 2"):
+            ClientOpcode31Record(
+                reserved_prefix=b"\x00" * 20,
+                variant=1,
+                opaque_texts=("", "", ""),
+                opaque_blob=bytes(48),
+                reserved_suffix=b"\x00" * 3,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "contain 48 bytes"):
+            ClientOpcode31Record(
+                reserved_prefix=b"\x00" * 20,
+                variant=2,
+                opaque_texts=("", "", ""),
+                opaque_blob=bytes(47),
+                reserved_suffix=b"\x00" * 3,
+            ).to_bytes()
+
     def test_account_success_round_trip(self) -> None:
         account = fixture_account()
         self.assertEqual(AccountLoginResponse.parse(account.to_bytes()), account)
@@ -439,6 +478,41 @@ class GameStateFoldTest(unittest.TestCase):
         )
         self.assertIn(
             "heartbeats=probes:4 responses:3 matched:3 unmatched:0 pending:1",
+            render_login_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_31_variable_record_without_content(self) -> None:
+        record = ClientOpcode31Record(
+            reserved_prefix=b"\x00" * 20,
+            variant=2,
+            opaque_texts=("1", "x" * 51, "y" * 5),
+            opaque_blob=bytes(range(48)),
+            reserved_suffix=b"\x00" * 3,
+        )
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(opcode_31_record=record)
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_opcode_31_records, 1)
+        self.assertEqual(
+            analysis.state.client_opcode_31_text_code_unit_patterns,
+            {"1/51/5": 1},
+        )
+        self.assertEqual(analysis.state.client_opcode_31_opaque_blob_bytes, 48)
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_31_record"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(observation.details["text_code_units"], [1, 51, 5])
+        self.assertEqual(observation.details["opaque_blob_bytes"], 48)
+        self.assertNotIn("x" * 51, str(analysis.safe_dict()))
+        self.assertNotIn("y" * 5, str(analysis.safe_dict()))
+        self.assertIn(
+            "client_opcode_31=records:1 text_patterns:{'1/51/5': 1} "
+            "opaque_blob_bytes:48",
             render_login_analysis(analysis),
         )
 
