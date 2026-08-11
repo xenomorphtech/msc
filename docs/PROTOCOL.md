@@ -2083,8 +2083,9 @@ rather than coalescing input repetition.
 
 Evdev keypad zero (`82`) remains bound to action `52`, but the controlled input
 did not produce a distinguishable action. The nearby blue `10` recovery display
-and alternating client opcode-`101` records were already occurring
-automatically; they are not evidence for action `52`. Safe keyboard state now
+and alternating client opcode-`101` HP/MP recovery requests were already
+occurring automatically; they are not evidence for action `52`. Safe keyboard
+state now
 publishes the validated key codes and the proven jump/NPC-interaction action
 ids and bindings while leaving action `52` unnamed.
 
@@ -3652,36 +3653,47 @@ notification/acknowledgement relationship, records matched/unmatched/pending
 counts and round-trip times, and keeps the higher-level purpose distinct from
 the separately modeled opcode-`10`/`23` heartbeat.
 
-## Client opcode `101` neutral numeric record
+## Client opcode `101` HP/MP recovery request
 
 The client packet is exactly 11 bytes:
 
 ```text
 uint16 opcode = 101
-uint8  header_value
-uint32 primary_value
-uint8  flag_value
-uint16 secondary_value
-uint8  tail_value
+uint8  reserved_prefix = 0
+uint8  request_type = 20
+uint16 reserved_value = 0
+uint16 hp_recovery
+uint16 mp_recovery
+uint8  reserved_tail = 0
 ```
 
-Stream `126` contains 146 records. Header, flag, and tail are zero throughout;
-`(primary_value, secondary_value)` is `(20,3)` in 113 packets and
-`(0x0a000014,0)` in 33. Stream `92` contains another 73 records: `(20,5)` in
-66 and the same alternate `(0x0a000014,0)` in seven. Stream `114` contains
-none. All 219 packets consume exactly and re-encode byte-for-byte.
+The old byte/u32/byte/u16/byte grouping hid the invariant boundary: every
+packet starts `00 14 00 00`, ends in zero, and puts exactly one non-zero amount
+in the two intervening u16 fields. Stream `126` has 33 HP-`10` and 113 MP-`3`
+requests. All 146 match a following authoritative opcode-`41` update in the
+same field: 136 apply the requested amount exactly, six HP updates are capped
+by max HP, and four occur before a prior HP baseline is known. None remains
+pending; maximum response time is `1,543.604` ms.
 
-The shape manifest tentatively labeled the 32-bit field `client_tick`, but its
-two discrete, non-monotonic values do not support that semantic interpretation.
-The active local client independently emits alternating `(20,5)` and
-`(0x0a000014,0)` records on an automatic roughly one-second cadence alongside
-the blue `10` recovery display. Stream `92` also changes from sparse `(20,5)`
-records while moving to the same faster paired pattern later in the field.
-This disproves attributing the records or display to the controlled action-`52`
-key press, but does not by itself name the packet's recovery role.
-The codec and fold therefore preserve the exact numeric boundaries under
-neutral names, emit value distributions and events, and classify the family as
-partial semantic coverage.
+Stream `92` independently has seven HP-`10` and 66 MP-`5` requests. Every one
+of its 73 following opcode-`41` updates applies the exact amount, none remains
+pending, and response time is at most `105.781` ms. Stream `114` contains none.
+Python and isolated native validation consume and re-emit all 219 records
+exactly. Promoting the family to full coverage moves stream `126` to
+`26,810/44,290/0/0` and stream `92` to `13,493/21,714/0/0`.
+
+The active local client supplies an independent no-response control. At the
+validation checkpoint it had automatically emitted 178 HP-`10` and 274 MP-`5`
+requests alongside the visible recovery cadence. The custom replay does not
+serve opcode-`41` recovery updates, so all 452 stay explicitly pending without
+being treated as malformed. The same cadence was already running before the
+controlled keypad-zero/action-`52` input; neither the packets nor the blue
+recovery number are evidence for that still-unnamed action.
+
+The fold emits full `client_recovery_request` observations, HP/MP amount
+distributions, authoritative stat-update matches, exact/capped/unverified
+amount classes, pending counts, and response timing. A field snapshot clears
+old-epoch pending requests.
 
 ## Attack actions (`client 50`, `52`, and `54`)
 

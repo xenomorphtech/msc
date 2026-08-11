@@ -257,7 +257,8 @@ folded player position `(677,-2695)`. The two reference opcode-`64` ids also
 resolve to active NPCs, templates `2003` and `22000`, so the packet is now a
 full `ClientNpcInteractionRequest` rather than a neutral position action.
 Keypad-zero action `52` remains unnamed; its apparent blue `10` recovery and
-opcode-`101` traffic were already occurring automatically.
+typed opcode-`101` HP/MP recovery requests were already occurring
+automatically.
 
 The second captured selector-`1` binding is also causal. Physical evdev key
 code `71` under `71 -> 2001002` emitted client opcode `104` as the exact
@@ -791,8 +792,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `114`: one neutral redacted envelope with a control byte,
   counted UTF-16 field, required zero terminator, and omitted trailing u32;
   tutorial/UI timing remains a hypothesis rather than a semantic name,
-- client opcode `101`: exact 11-byte five-value record whose numeric widths and
-  distributions are typed while all field roles remain neutral,
+- client opcode `101`: exact 11-byte HP/MP recovery request with constant
+  prefix/tail, one non-zero recovery amount, and authoritative opcode-`41`
+  stat-update correlation,
 - client opcode `122`: capture-bounded selector envelopes containing two to
   four redacted u32 values; selectors `1`/`2` have short and long forms,
   selectors `4`/`5` have one form, selector `2` requires terminal
@@ -1497,16 +1499,17 @@ packet when `426` arrives. The fold emits full-coverage events plus last/max
 round-trip telemetry, while the still-unknown higher-level purpose remains
 neutral.
 
-Client opcode `101` is an exact 11-byte numeric record: one byte, one
-little-endian 32-bit value, one byte, one little-endian 16-bit value, and a
-final byte after the opcode. Stream `126` has 146 packets and stream `92` has
-73; stream `114` has none. The outer bytes and flag are always zero. In stream
-`126`, the `(primary, secondary)` pairs are `(20,3)` 113 times and
-`(0x0a000014,0)` 33 times; stream `92` uses `(20,5)` 66 times and the alternate
-pair seven times. Every packet consumes exactly and round-trips. Because the
-32-bit value is two discrete, non-monotonic values, the earlier tentative
-`client_tick` label is not retained; the fold emits neutral numeric
-distributions and partial semantic coverage.
+Client opcode `101` is an exact 11-byte HP/MP recovery request. After the
+opcode it contains reserved zero, request type `20`, reserved zero u16, HP
+recovery u16, MP recovery u16, and a final zero; exactly one recovery amount is
+non-zero. Stream `126` has 33 HP-`10` and 113 MP-`3` requests. All `146/146`
+match following same-field opcode-`41` updates: `136` exact, `6` max-HP
+capped, and `4` before a prior baseline is known. Stream `92` has seven HP-`10`
+and 66 MP-`5` requests, all `73/73` exact. Neither reference leaves a request
+pending. The active local client independently emits HP-`10`/MP-`5` on its
+automatic recovery cadence; the custom replay serves no stat response, so
+those remain explicitly pending without a warning. Python/native codecs exact-
+consume all 219 reference requests at full coverage.
 
 Client opcodes `50`, `52`, and `54` are a capture-correlated attack-action
 family. Stream `126` contains 552 opcode-`50`, 130 opcode-`52`, and 120
@@ -1953,9 +1956,9 @@ preserve distinct Unity scan codes in this setup.
 31. Type the empty server opcode-`426` notification and client opcode-`309`
     acknowledgement, prove one-for-one temporal matching in every reference
     world stream, and retain a neutral name for their higher-level purpose.
-32. Bound client opcode `101` as a fixed five-value record, validate all 219
-    sustained-capture instances, and keep its non-monotonic 32-bit field
-    neutral instead of preserving an unsupported `client_tick` interpretation.
+32. Initially bound client opcode `101` as a fixed five-value record; later
+    cross-capture/stat-update evidence in step 95 resolves its exact HP/MP
+    recovery fields.
 33. Bound client opcode `54` as a fixed seven-value record, validate all 151
     sustained-capture packets, and recover its third trailing u32 as the mob
     target while leaving the other numeric roles neutral.
@@ -2231,3 +2234,7 @@ preserve distinct Unity scan codes in this setup.
     `ClientNpcInteractionRequest`, resolve both reference targets and three live
     requests to active NPCs, validate movement positions and opcode-`348`
     response correlation, and leave only keypad-zero action `52` unnamed.
+95. Re-segment opcode `101` as constant type `20` plus HP/MP recovery u16
+    fields, correlate all `219/219` reference requests with authoritative
+    opcode-`41` stat updates, distinguish exact/capped/baseline-unverified
+    effects, and keep active no-response requests visible but non-warning.

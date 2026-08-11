@@ -478,8 +478,8 @@
   template `1032005`. The current live fold resolves all three targets and
   movement positions, with one expected warning because the custom replay does
   not serve their opcode-`348` response. Keypad-zero action `52` remains
-  unassigned; the adjacent blue `10` recovery display and opcode-`101` cadence
-  were automatic, not caused by that input.
+  unassigned; the adjacent blue `10` display and typed opcode-`101` HP/MP
+  recovery cadence were automatic, not caused by that input.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -605,12 +605,15 @@
   Pinned handler code independently constructs opcode `309` in response to
   `426`. The higher-level purpose remains neutral and distinct from heartbeat
   opcodes `10`/`23`.
-- Client opcode `101` now has an exact 11-byte, five-value numeric shape.
-  Stream `126` contributes 146 packets and stream `92` another 73; all consume
-  exactly and round-trip. Only two primary/secondary pairs occur in each
-  corpus, while the outer byte fields remain zero. The primary value is not
-  monotonic, so the fold exposes neutral distributions rather than retaining
-  the shape manifest's tentative `client_tick` name.
+- Client opcode `101` is now a full HP/MP recovery request: zero, type `20`,
+  zero u16, HP recovery u16, MP recovery u16, and final zero. Stream `126`
+  contains 33 HP-`10` and 113 MP-`3` requests; all `146/146` match same-field
+  opcode-`41` updates (`136` exact, `6` max-HP capped, `4` baseline-unverified).
+  Stream `92` contains seven HP-`10` and 66 MP-`5` requests, all `73/73` exact.
+  No reference request remains pending. Full coverage is now
+  `26,810/44,290/0/0` for stream `126` and `13,493/21,714/0/0` for stream `92`.
+  At the active no-response checkpoint, 178 HP-`10` and 274 MP-`5` requests
+  remain explicitly pending without adding a warning.
 - Client opcodes `50`/`52`/`54` now fold as one attack-action family. Stream
   `126` contributes 552/130/120 packets and stream `92` contributes 0/128/31.
   Extended `50`/`52` variants and every opcode-`54` action carry a mob object

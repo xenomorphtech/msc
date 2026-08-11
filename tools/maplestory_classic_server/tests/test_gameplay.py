@@ -57,7 +57,7 @@ from maple_server.packets import (  # noqa: E402
     ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
-    ClientOpcode101Record,
+    ClientRecoveryRequest,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
@@ -701,7 +701,7 @@ def fixture_gameplay_transcript(
     initial_snapshot_payload: bytes | None = None,
     player_movement: bool = False,
     attack_actions: bool = False,
-    opcode_101_records: bool = False,
+    recovery_requests: bool = False,
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
     opcode_426_acknowledgement: bool = False,
@@ -1366,25 +1366,19 @@ def fixture_gameplay_transcript(
                 ),
             ).to_bytes(),
         )
-    if opcode_101_records:
+    if recovery_requests:
         append(
             "client_to_server",
-            ClientOpcode101Record(
-                header_value=0,
-                primary_value=20,
-                flag_value=0,
-                secondary_value=3,
-                tail_value=0,
+            ClientRecoveryRequest(
+                hp_recovery=0,
+                mp_recovery=3,
             ).to_bytes(),
         )
         append(
             "client_to_server",
-            ClientOpcode101Record(
-                header_value=0,
-                primary_value=0x0A00_0014,
-                flag_value=0,
-                secondary_value=0,
-                tail_value=0,
+            ClientRecoveryRequest(
+                hp_recovery=10,
+                mp_recovery=0,
             ).to_bytes(),
         )
     if opcode_13_messages:
@@ -4077,12 +4071,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
         response = HeartbeatResponse(opaque_token=b"response")
         notification = ServerOpcode426Notification()
         acknowledgement = ClientOpcode309Acknowledgement()
-        opcode_101_record = ClientOpcode101Record(
-            header_value=0,
-            primary_value=0x0A00_0014,
-            flag_value=0,
-            secondary_value=0,
-            tail_value=0,
+        recovery_request = ClientRecoveryRequest(
+            hp_recovery=10,
+            mp_recovery=0,
         )
         opcode_54_record = ClientOpcode54AttackAction(
             control_value=364_201,
@@ -4162,10 +4153,16 @@ class GameplayPacketShapeTest(unittest.TestCase):
             acknowledgement,
         )
         self.assertEqual(
-            ClientOpcode101Record.parse(opcode_101_record.to_bytes()),
-            opcode_101_record,
+            ClientRecoveryRequest.parse(recovery_request.to_bytes()),
+            recovery_request,
         )
-        self.assertEqual(len(opcode_101_record.to_bytes()), 11)
+        self.assertEqual(len(recovery_request.to_bytes()), 11)
+        self.assertEqual(recovery_request.stat_name, "current_hp")
+        self.assertEqual(recovery_request.recovery_amount, 10)
+        invalid_recovery_type = bytearray(recovery_request.to_bytes())
+        invalid_recovery_type[3] = 19
+        with self.assertRaisesRegex(PacketShapeError, "type must be 20"):
+            ClientRecoveryRequest.parse(bytes(invalid_recovery_type))
         self.assertEqual(
             ClientOpcode54AttackAction.parse(opcode_54_record.to_bytes()),
             opcode_54_record,
@@ -4301,14 +4298,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 target_object_id=MOB_OBJECT_ID,
                 tail_value=1,
             ).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "tail_value must fit"):
-            ClientOpcode101Record(
-                header_value=0,
-                primary_value=20,
-                flag_value=0,
-                secondary_value=3,
-                tail_value=256,
+        with self.assertRaisesRegex(PacketShapeError, "must fit in u16"):
+            ClientRecoveryRequest(
+                hp_recovery=0,
+                mp_recovery=0x1_0000,
             ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "exactly one"):
+            ClientRecoveryRequest(hp_recovery=0, mp_recovery=0).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode426Notification.parse(
                 notification.to_bytes() + b"\x00"
@@ -8093,6 +8089,97 @@ class GameplayStateFoldTest(unittest.TestCase):
             {"0x00010400": 1, "0x00040000": 1},
         )
 
+    def test_correlates_client_recovery_with_stat_updates(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_directional_plaintexts=(
+                    (
+                        "server_to_client",
+                        CharacterStatUpdate(
+                            request_flag=0,
+                            stat_mask=CharacterStatUpdate.CURRENT_HP,
+                            current_hp=218,
+                        ).to_bytes(),
+                    ),
+                    (
+                        "client_to_server",
+                        ClientRecoveryRequest(
+                            hp_recovery=10,
+                            mp_recovery=0,
+                        ).to_bytes(),
+                    ),
+                    (
+                        "server_to_client",
+                        CharacterStatUpdate(
+                            request_flag=0,
+                            stat_mask=CharacterStatUpdate.CURRENT_HP,
+                            current_hp=222,
+                        ).to_bytes(),
+                    ),
+                    (
+                        "client_to_server",
+                        ClientRecoveryRequest(
+                            hp_recovery=0,
+                            mp_recovery=3,
+                        ).to_bytes(),
+                    ),
+                    (
+                        "server_to_client",
+                        CharacterStatUpdate(
+                            request_flag=0,
+                            stat_mask=CharacterStatUpdate.CURRENT_MP,
+                            current_mp=139,
+                        ).to_bytes(),
+                    ),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_recovery_requests, 2)
+        self.assertEqual(
+            analysis.state.client_recovery_requests_by_stat,
+            {"current_hp": 1, "current_mp": 1},
+        )
+        self.assertEqual(analysis.state.client_hp_recovery_amounts, {10: 1})
+        self.assertEqual(analysis.state.client_mp_recovery_amounts, {3: 1})
+        self.assertEqual(
+            analysis.state.client_recovery_stat_update_matches,
+            2,
+        )
+        self.assertEqual(
+            analysis.state.client_recovery_exact_amount_matches,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.client_recovery_capped_amount_matches,
+            1,
+        )
+        self.assertEqual(analysis.state.pending_client_recovery_requests, 0)
+        requests = [
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 101
+        ]
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(
+            all(request.coverage.value == "full" for request in requests)
+        )
+        responses = [
+            response
+            for event in analysis.events
+            if event.kind == "player_stats_updated"
+            for response in event.details.get(
+                "client_recovery_responses", ()
+            )
+        ]
+        self.assertEqual(
+            [response["amount_match"] for response in responses],
+            ["capped", "exact"],
+        )
+
     def test_folds_inventory_changes_into_item_state(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
@@ -8450,6 +8537,13 @@ class GameplayStateFoldTest(unittest.TestCase):
                 ),
                 ("client_to_server", ChairSitRequest(3_010_370).to_bytes()),
                 (
+                    "client_to_server",
+                    ClientRecoveryRequest(
+                        hp_recovery=10,
+                        mp_recovery=0,
+                    ).to_bytes(),
+                ),
+                (
                     "server_to_client",
                     FieldSnapshotEnvelope(
                         opaque_snapshot=b"next-field"
@@ -8466,6 +8560,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIsNone(analysis.state.requested_chair_item_id)
         self.assertEqual(analysis.state.npc_interaction_requests, 1)
         self.assertEqual(analysis.state.pending_npc_interaction_requests, 0)
+        self.assertEqual(analysis.state.client_recovery_requests, 1)
+        self.assertEqual(analysis.state.pending_client_recovery_requests, 0)
         self.assertFalse(
             any(
                 "NPC interaction requests had no following" in warning
@@ -8482,6 +8578,10 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(field_observations[1].details["cleared_chair_sit_intent"])
         self.assertEqual(
             field_observations[1].details["cleared_npc_interaction_requests"],
+            1,
+        )
+        self.assertEqual(
+            field_observations[1].details["cleared_client_recovery_requests"],
             1,
         )
 
@@ -9139,7 +9239,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             fixture_gameplay_transcript(
                 player_movement=True,
                 attack_actions=True,
-                opcode_101_records=True,
+                recovery_requests=True,
                 opcode_13_messages=True,
                 opcode_217_records=True,
                 opcode_426_acknowledgement=True,
@@ -9449,32 +9549,23 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("987654321", report)
         self.assertNotIn(str(MOB_OBJECT_ID), report)
         self.assertNotIn(str(PLAYER_OBJECT_ID), report)
-        self.assertEqual(analysis.state.client_opcode_101_packets, 2)
+        self.assertEqual(analysis.state.client_recovery_requests, 2)
         self.assertEqual(
-            analysis.state.client_opcode_101_header_values, {0: 2}
+            analysis.state.client_recovery_requests_by_stat,
+            {"current_hp": 1, "current_mp": 1},
         )
-        self.assertEqual(
-            analysis.state.client_opcode_101_primary_values,
-            {20: 1, 0x0A00_0014: 1},
-        )
-        self.assertEqual(
-            analysis.state.client_opcode_101_flag_values, {0: 2}
-        )
-        self.assertEqual(
-            analysis.state.client_opcode_101_secondary_values, {0: 1, 3: 1}
-        )
-        self.assertEqual(
-            analysis.state.client_opcode_101_tail_values, {0: 2}
-        )
+        self.assertEqual(analysis.state.client_hp_recovery_amounts, {10: 1})
+        self.assertEqual(analysis.state.client_mp_recovery_amounts, {3: 1})
+        self.assertEqual(analysis.state.pending_client_recovery_requests, 2)
         self.assertIn(
-            'client_opcode_101=packets:2 header_values:{"0": 2} '
-            'primary_values:{"20": 1, "167772180": 1} '
-            'flag_values:{"0": 2} secondary_values:{"0": 1, "3": 1} '
-            'tail_values:{"0": 2}',
+            'client_recovery=requests:2 by_stat:{"current_hp": 1, '
+            '"current_mp": 1} hp_amounts:{"10": 1} '
+            'mp_amounts:{"3": 1} stat_update_matches:0 exact:0 '
+            'capped:0 unverified:0 pending:2 last_ms:None max_ms:None',
             report,
         )
         self.assertIn(
-            "opcode=101 kind=client_opcode_101_record coverage=partial",
+            "opcode=101 kind=client_recovery_request coverage=full",
             report,
         )
         self.assertNotIn("variable-thirteen", report)

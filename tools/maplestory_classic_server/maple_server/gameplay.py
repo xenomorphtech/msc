@@ -26,7 +26,7 @@ from .packets import (
     ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
-    ClientOpcode101Record,
+    ClientRecoveryRequest,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientOpcode217RecordSet,
@@ -827,22 +827,19 @@ class GameplayGameState:
     server_attack_damage_min: int | None = None
     server_attack_damage_max: int | None = None
     server_attack_damage_high_bit_markers: int = 0
-    client_opcode_101_packets: int = 0
-    client_opcode_101_header_values: Counter[int] = field(
+    client_recovery_requests: int = 0
+    client_recovery_requests_by_stat: Counter[str] = field(
         default_factory=Counter
     )
-    client_opcode_101_primary_values: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_opcode_101_flag_values: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_opcode_101_secondary_values: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_opcode_101_tail_values: Counter[int] = field(
-        default_factory=Counter
-    )
+    client_hp_recovery_amounts: Counter[int] = field(default_factory=Counter)
+    client_mp_recovery_amounts: Counter[int] = field(default_factory=Counter)
+    client_recovery_stat_update_matches: int = 0
+    client_recovery_exact_amount_matches: int = 0
+    client_recovery_capped_amount_matches: int = 0
+    client_recovery_unverified_amount_matches: int = 0
+    pending_client_recovery_requests: int = 0
+    last_client_recovery_response_ms: float | None = None
+    max_client_recovery_response_ms: float | None = None
     client_skill_use_requests: int = 0
     client_skill_use_requests_by_skill_id: Counter[int] = field(
         default_factory=Counter
@@ -4190,24 +4187,39 @@ class GameplayAnalysis:
                 "server_attack_damage_high_bit_markers": (
                     self.state.server_attack_damage_high_bit_markers
                 ),
-                "client_opcode_101_packets": (
-                    self.state.client_opcode_101_packets
-                ),
-                "client_opcode_101_header_values": dict(
-                    self.state.client_opcode_101_header_values
-                ),
-                "client_opcode_101_primary_values": dict(
-                    self.state.client_opcode_101_primary_values
-                ),
-                "client_opcode_101_flag_values": dict(
-                    self.state.client_opcode_101_flag_values
-                ),
-                "client_opcode_101_secondary_values": dict(
-                    self.state.client_opcode_101_secondary_values
-                ),
-                "client_opcode_101_tail_values": dict(
-                    self.state.client_opcode_101_tail_values
-                ),
+                "client_recovery": {
+                    "request_count": self.state.client_recovery_requests,
+                    "requests_by_stat": dict(
+                        self.state.client_recovery_requests_by_stat
+                    ),
+                    "hp_amounts": dict(
+                        self.state.client_hp_recovery_amounts
+                    ),
+                    "mp_amounts": dict(
+                        self.state.client_mp_recovery_amounts
+                    ),
+                    "stat_update_matches": (
+                        self.state.client_recovery_stat_update_matches
+                    ),
+                    "exact_amount_matches": (
+                        self.state.client_recovery_exact_amount_matches
+                    ),
+                    "capped_amount_matches": (
+                        self.state.client_recovery_capped_amount_matches
+                    ),
+                    "unverified_amount_matches": (
+                        self.state.client_recovery_unverified_amount_matches
+                    ),
+                    "pending_requests": (
+                        self.state.pending_client_recovery_requests
+                    ),
+                    "last_response_ms": (
+                        self.state.last_client_recovery_response_ms
+                    ),
+                    "max_response_ms": (
+                        self.state.max_client_recovery_response_ms
+                    ),
+                },
                 "client_skill_uses": {
                     "request_count": self.state.client_skill_use_requests,
                     "requests_by_skill_id": dict(
@@ -4998,6 +5010,12 @@ class GameplayStateFold:
         self._pending_client_opcode_111: deque[
             tuple[int, int, int, ClientOpcode111CashSlotAction]
         ] = deque()
+        self._pending_client_recoveries: dict[
+            str, deque[tuple[int, int, int, ClientRecoveryRequest]]
+        ] = {
+            "current_hp": deque(),
+            "current_mp": deque(),
+        }
         self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
         self._pending_world_exit_requests: deque[int] = deque()
         self._last_client_periodic_report_timestamp_ns: dict[int, int] = {}
@@ -6663,39 +6681,42 @@ class GameplayStateFold:
                 details=details,
             )
         if opcode == 101:
-            record = ClientOpcode101Record.parse(payload)
-            self.state.client_opcode_101_packets += 1
-            self.state.client_opcode_101_header_values[
-                record.header_value
-            ] += 1
-            self.state.client_opcode_101_primary_values[
-                record.primary_value
-            ] += 1
-            self.state.client_opcode_101_flag_values[
-                record.flag_value
-            ] += 1
-            self.state.client_opcode_101_secondary_values[
-                record.secondary_value
-            ] += 1
-            self.state.client_opcode_101_tail_values[
-                record.tail_value
-            ] += 1
+            request = ClientRecoveryRequest.parse(payload)
+            stat_name = request.stat_name
+            self.state.client_recovery_requests += 1
+            self.state.client_recovery_requests_by_stat[stat_name] += 1
+            if request.hp_recovery:
+                self.state.client_hp_recovery_amounts[
+                    request.hp_recovery
+                ] += 1
+            else:
+                self.state.client_mp_recovery_amounts[
+                    request.mp_recovery
+                ] += 1
+            self._pending_client_recoveries[stat_name].append(
+                (
+                    frame.index,
+                    frame.timestamp_ns,
+                    self.state.field_epoch,
+                    request,
+                )
+            )
+            self.state.pending_client_recovery_requests += 1
             details = {
-                **record.safe_dict(),
+                **request.safe_dict(),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
                 frame,
-                "client_opcode_101_submitted",
+                "client_recovery_requested",
                 details=details,
             )
             return self._observation(
                 frame,
-                kind="client_opcode_101_record",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=record,
+                kind="client_recovery_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
-                issues=("client opcode-101 field roles remain neutral",),
             )
         if opcode == 13 and len(payload) >= 3:
             message_type = payload[2]
@@ -7825,6 +7846,83 @@ class GameplayStateFold:
                     "current": current_value,
                 }
                 self.state.player_stat_fields_updated[field_name] += 1
+            client_recovery_responses: list[dict[str, object]] = []
+            for stat_name, maximum_name in (
+                ("current_hp", "max_hp"),
+                ("current_mp", "max_mp"),
+            ):
+                if stat_name not in changes:
+                    continue
+                pending = next(
+                    (
+                        candidate
+                        for candidate in self._pending_client_recoveries[
+                            stat_name
+                        ]
+                        if candidate[2] == self.state.field_epoch
+                    ),
+                    None,
+                )
+                if pending is None:
+                    continue
+                (
+                    request_frame_index,
+                    request_timestamp_ns,
+                    _,
+                    request,
+                ) = pending
+                previous_value = changes[stat_name]["previous"]
+                current_value = changes[stat_name]["current"]
+                if current_value is None:
+                    continue
+                actual_increment = (
+                    None
+                    if previous_value is None
+                    else current_value - previous_value
+                )
+                expected_increment = request.recovery_amount
+                maximum_value = getattr(self.state, maximum_name)
+                if actual_increment is None:
+                    amount_match = "unverified"
+                elif actual_increment == expected_increment:
+                    amount_match = "exact"
+                elif (
+                    0 <= actual_increment < expected_increment
+                    and maximum_value is not None
+                    and current_value == maximum_value
+                ):
+                    amount_match = "capped"
+                else:
+                    continue
+                response_ms = round(
+                    (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                    3,
+                )
+                self._pending_client_recoveries[stat_name].remove(pending)
+                self.state.pending_client_recovery_requests -= 1
+                self.state.client_recovery_stat_update_matches += 1
+                if amount_match == "exact":
+                    self.state.client_recovery_exact_amount_matches += 1
+                elif amount_match == "capped":
+                    self.state.client_recovery_capped_amount_matches += 1
+                else:
+                    self.state.client_recovery_unverified_amount_matches += 1
+                self.state.last_client_recovery_response_ms = response_ms
+                self.state.max_client_recovery_response_ms = max(
+                    self.state.max_client_recovery_response_ms or 0.0,
+                    response_ms,
+                )
+                client_recovery_responses.append(
+                    {
+                        "request_frame": request_frame_index,
+                        "stat": stat_name,
+                        "requested_increment": expected_increment,
+                        "actual_increment": actual_increment,
+                        "amount_match": amount_match,
+                        "response_ms": response_ms,
+                        "field_epoch": self.state.field_epoch,
+                    }
+                )
             ability_point_allocation: dict[str, object] | None = None
             pending_allocation = next(
                 (
@@ -8014,6 +8112,10 @@ class GameplayStateFold:
             if ability_point_allocation is not None:
                 details["ability_point_allocation"] = (
                     ability_point_allocation
+                )
+            if client_recovery_responses:
+                details["client_recovery_responses"] = (
+                    client_recovery_responses
                 )
             self._event(frame, "player_stats_updated", details=details)
             issues = [
@@ -8489,6 +8591,10 @@ class GameplayStateFold:
             cleared_npc_interaction_requests = len(
                 self._pending_npc_interactions
             )
+            cleared_client_recovery_requests = sum(
+                len(pending)
+                for pending in self._pending_client_recoveries.values()
+            )
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -8517,6 +8623,9 @@ class GameplayStateFold:
             self.state.pending_item_pickups = 0
             self._pending_npc_interactions.clear()
             self.state.pending_npc_interaction_requests = 0
+            for pending in self._pending_client_recoveries.values():
+                pending.clear()
+            self.state.pending_client_recovery_requests = 0
             self.state.requested_chair_item_id = None
             cleared_client_attack_effects = sum(
                 len(pending)
@@ -8542,6 +8651,9 @@ class GameplayStateFold:
                 "cleared_chair_sit_intent": cleared_chair_sit_intent,
                 "cleared_npc_interaction_requests": (
                     cleared_npc_interaction_requests
+                ),
+                "cleared_client_recovery_requests": (
+                    cleared_client_recovery_requests
                 ),
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
@@ -13023,20 +13135,14 @@ def render_gameplay_analysis(
     server_ranged_attack_projectile_ids = json.dumps(
         dict(sorted(state.server_ranged_attack_projectile_ids.items()))
     )
-    client_opcode_101_header_values = json.dumps(
-        dict(sorted(state.client_opcode_101_header_values.items()))
+    client_recovery_requests_by_stat = json.dumps(
+        dict(sorted(state.client_recovery_requests_by_stat.items()))
     )
-    client_opcode_101_primary_values = json.dumps(
-        dict(sorted(state.client_opcode_101_primary_values.items()))
+    client_hp_recovery_amounts = json.dumps(
+        dict(sorted(state.client_hp_recovery_amounts.items()))
     )
-    client_opcode_101_flag_values = json.dumps(
-        dict(sorted(state.client_opcode_101_flag_values.items()))
-    )
-    client_opcode_101_secondary_values = json.dumps(
-        dict(sorted(state.client_opcode_101_secondary_values.items()))
-    )
-    client_opcode_101_tail_values = json.dumps(
-        dict(sorted(state.client_opcode_101_tail_values.items()))
+    client_mp_recovery_amounts = json.dumps(
+        dict(sorted(state.client_mp_recovery_amounts.items()))
     )
     client_skill_use_requests_by_skill_id = json.dumps(
         dict(sorted(state.client_skill_use_requests_by_skill_id.items()))
@@ -13587,12 +13693,18 @@ def render_gameplay_analysis(
             f"{state.server_attack_damage_high_bit_markers}"
         ),
         (
-            f"client_opcode_101=packets:{state.client_opcode_101_packets} "
-            f"header_values:{client_opcode_101_header_values} "
-            f"primary_values:{client_opcode_101_primary_values} "
-            f"flag_values:{client_opcode_101_flag_values} "
-            f"secondary_values:{client_opcode_101_secondary_values} "
-            f"tail_values:{client_opcode_101_tail_values}"
+            f"client_recovery=requests:{state.client_recovery_requests} "
+            f"by_stat:{client_recovery_requests_by_stat} "
+            f"hp_amounts:{client_hp_recovery_amounts} "
+            f"mp_amounts:{client_mp_recovery_amounts} "
+            "stat_update_matches:"
+            f"{state.client_recovery_stat_update_matches} "
+            f"exact:{state.client_recovery_exact_amount_matches} "
+            f"capped:{state.client_recovery_capped_amount_matches} "
+            f"unverified:{state.client_recovery_unverified_amount_matches} "
+            f"pending:{state.pending_client_recovery_requests} "
+            f"last_ms:{state.last_client_recovery_response_ms} "
+            f"max_ms:{state.max_client_recovery_response_ms}"
         ),
         (
             f"client_skill_uses=requests:{state.client_skill_use_requests} "

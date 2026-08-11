@@ -181,6 +181,12 @@ sole slot `3` matches the next opcode-`39` Cash remove/add after `486.349` ms.
 The opcode-`111` u32, its higher-level action role, and causality remain
 neutral. Isolated native validation consumes all three reference packets with
 zero failures.
+Client opcode `101` replaces its earlier five-neutral-value shape with the
+exact recovery request boundary: reserved zero, type `20`, reserved u16, HP
+recovery u16, MP recovery u16, and final zero. Stream `126` supplies 33 HP-`10`
+and 113 MP-`3` packets; stream `92` supplies seven HP-`10` and 66 MP-`5`
+packets. Python correlation matches all 219 to authoritative opcode-`41` stat
+updates, while isolated native validation consumes all 219 with zero failures.
 Client opcode `115` replaces its observed-opaque pin with the exact 22-byte
 inner-portal request shape: active field epoch, redacted four-code-unit UTF-16
 portal name with zero terminator, and signed source/destination positions. The

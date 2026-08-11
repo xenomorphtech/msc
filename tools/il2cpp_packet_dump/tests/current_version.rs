@@ -233,6 +233,7 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         ("client_world_exit_status_46", 46, 6, 2),
         ("client_opcode_75_empty_bootstrap_marker", 75, 2, 1),
         ("client_npc_interaction_request", 64, 10, 4),
+        ("client_recovery_request", 101, 11, 7),
         ("client_opcode_111_cash_slot_action", 111, 8, 3),
         ("inventory_move_request", 79, 13, 6),
         ("client_positioned_effect_action", 225, 16, 5),

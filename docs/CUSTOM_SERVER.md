@@ -666,11 +666,15 @@ constructs and sends opcode `309` without a body. State and events expose pair
 counts and round-trip timing, while deliberately leaving the higher-level role
 neutral and distinct from the opcode-`10`/`23` heartbeat.
 
-Client opcode `101` is now structurally decoded as an exact 11-byte record
-containing byte/u32/byte/u16/byte values. All 146 stream-`126` and 73
-stream-`92` instances round-trip. Reports expose only numeric distributions;
-the 32-bit field takes two discrete, non-monotonic values, so it remains
-neutral rather than using the shape manifest's tentative `client_tick` label.
+Client opcode `101` is now a typed HP/MP recovery request. Its exact 11-byte
+layout is zero, request type `20`, zero u16, HP recovery u16, MP recovery u16,
+and a final zero after the opcode; exactly one recovery amount is non-zero.
+Stream `126` contributes 33 HP-`10` and 113 MP-`3` requests, all matched to
+same-field opcode-`41` updates (`136` exact, `6` max-HP capped, `4` without a
+prior baseline). Stream `92` contributes seven HP-`10` and 66 MP-`5` requests,
+all exact. Reports expose request/amount distributions, response classes,
+pending counts, and timing. Python/native codecs exact-consume all 219 records
+at full coverage.
 
 Client opcodes `50`/`52`/`54` now fold into one attack-action model. Stream
 `126` has 802 actions and stream `92` has 159. Extended opcode-`50`/`52`
@@ -1027,9 +1031,9 @@ than a neutral position action. It exposes jump and NPC-interaction key sets in
 safe keyboard state.
 
 Keypad zero at evdev key `82` remains action `52`. Its controlled press produced
-no distinguishable action. The blue `10` recovery display and alternating
-opcode-`101` records were already running automatically, so neither is
-attributed to action `52`.
+no distinguishable action. The blue `10` display and typed opcode-`101` HP/MP
+recovery requests were already running automatically, so neither is attributed
+to action `52`.
 
 ## Opt-in live server-packet injection
 
@@ -2383,8 +2387,11 @@ project's own `README.md` for all options.
 - Empty server opcode `426` and client opcode `309` now fold as a one-for-one
   notification/acknowledgement pair across all three gameplay streams, with
   full shape coverage and explicit unmatched/pending telemetry.
-- Client opcode `101` now folds all 219 sustained-capture packets into neutral
-  five-field distributions with exact byte consumption and round trips.
+- Client opcode `101` now folds all 219 sustained-capture packets as full
+  HP/MP recovery requests. Stream `126` matches all `146/146` authoritative
+  stat updates (`136` exact, `6` capped, `4` baseline-unverified), and stream
+  `92` matches all `73/73` exactly. The active no-response replay independently
+  emits HP-`10`/MP-`5`; those requests remain pending without a warning.
 - Client opcodes `50`/`52`/`54` now fold 961 sustained-capture attack actions
   with aliased mob targets where present; server opcodes `218`/`219` fold 183
   attack relays with packed target/hit counts, 194 typed target records, and

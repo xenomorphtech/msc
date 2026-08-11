@@ -6909,58 +6909,88 @@ class ClientInnerPortalRequest:
 
 
 @dataclass(frozen=True)
-class ClientOpcode101Record:
-    header_value: int
-    primary_value: int
-    flag_value: int
-    secondary_value: int
-    tail_value: int
+class ClientRecoveryRequest:
+    """Natural HP or MP recovery request with one non-zero amount."""
+
+    hp_recovery: int
+    mp_recovery: int
     opcode: int = 101
+    REQUEST_TYPE = 20
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ClientOpcode101Record":
-        reader = PacketReader(payload, packet_name="client_opcode_101")
+    def parse(cls, payload: bytes) -> "ClientRecoveryRequest":
+        reader = PacketReader(payload, packet_name="client_recovery_request")
         _expect_opcode(reader, 101)
-        record = cls(
-            header_value=reader.u8("header_value"),
-            primary_value=reader.u32("primary_value"),
-            flag_value=reader.u8("flag_value"),
-            secondary_value=reader.u16("secondary_value"),
-            tail_value=reader.u8("tail_value"),
+        if reader.u8("reserved_prefix") != 0:
+            raise PacketShapeError(
+                "client recovery request reserved prefix must be zero"
+            )
+        request_type = reader.u8("request_type")
+        if request_type != cls.REQUEST_TYPE:
+            raise PacketShapeError(
+                "client recovery request type must be 20"
+            )
+        if reader.u16("reserved_value") != 0:
+            raise PacketShapeError(
+                "client recovery request reserved u16 must be zero"
+            )
+        request = cls(
+            hp_recovery=reader.u16("hp_recovery"),
+            mp_recovery=reader.u16("mp_recovery"),
         )
+        if reader.u8("reserved_tail") != 0:
+            raise PacketShapeError(
+                "client recovery request reserved tail must be zero"
+            )
         reader.finish()
-        return record
+        request._validate()
+        return request
 
-    def safe_dict(self) -> dict[str, int]:
+    @property
+    def stat_name(self) -> str:
+        return "current_hp" if self.hp_recovery else "current_mp"
+
+    @property
+    def recovery_amount(self) -> int:
+        return self.hp_recovery or self.mp_recovery
+
+    def safe_dict(self) -> dict[str, int | str]:
         return {
-            "header_value": self.header_value,
-            "primary_value": self.primary_value,
-            "flag_value": self.flag_value,
-            "secondary_value": self.secondary_value,
-            "tail_value": self.tail_value,
+            "stat": self.stat_name,
+            "amount": self.recovery_amount,
+            "hp_recovery": self.hp_recovery,
+            "mp_recovery": self.mp_recovery,
         }
 
-    def to_bytes(self) -> bytes:
-        for name, value, maximum in (
-            ("header_value", self.header_value, 0xFF),
-            ("primary_value", self.primary_value, 0xFFFF_FFFF),
-            ("flag_value", self.flag_value, 0xFF),
-            ("secondary_value", self.secondary_value, 0xFFFF),
-            ("tail_value", self.tail_value, 0xFF),
+    def _validate(self) -> None:
+        if self.opcode != 101:
+            raise PacketShapeError(
+                "client recovery request opcode must be 101"
+            )
+        for name, value in (
+            ("HP recovery", self.hp_recovery),
+            ("MP recovery", self.mp_recovery),
         ):
-            if not 0 <= value <= maximum:
+            if not 0 <= value <= 0xFFFF:
                 raise PacketShapeError(
-                    f"client opcode-101 {name} must fit in "
-                    f"u{maximum.bit_length()}"
+                    f"client recovery request {name} must fit in u16"
                 )
+        if (self.hp_recovery > 0) == (self.mp_recovery > 0):
+            raise PacketShapeError(
+                "client recovery request needs exactly one non-zero amount"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
         return struct.pack(
-            "<HBIBHB",
+            "<HBBHHHB",
             self.opcode,
-            self.header_value,
-            self.primary_value,
-            self.flag_value,
-            self.secondary_value,
-            self.tail_value,
+            0,
+            self.REQUEST_TYPE,
+            0,
+            self.hp_recovery,
+            self.mp_recovery,
+            0,
         )
 
 
