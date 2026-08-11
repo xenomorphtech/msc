@@ -249,6 +249,8 @@ class PositionedEffectEntity:
 class FieldDropEntity:
     alias: str
     spawn: FieldDropSpawn = field(repr=False)
+    first_spawn_frame_index: int | None = None
+    first_spawn_timestamp_ns: int | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -4849,6 +4851,9 @@ class GameplayStateFold:
             PendingItemAcquisition
         ] = deque()
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
+        self._last_mob_controller_releases: dict[
+            int, tuple[int, int]
+        ] = {}
         self._pending_client_attacks: dict[
             int, deque[PendingClientAttackHit]
         ] = {}
@@ -5667,6 +5672,30 @@ class GameplayStateFold:
             }
             if drop is not None:
                 details["predicted_result_kind"] = drop.spawn.kind_name
+                if drop.first_spawn_timestamp_ns is not None:
+                    details["drop_spawn_frame"] = (
+                        drop.first_spawn_frame_index
+                    )
+                    details["drop_age_ms"] = round(
+                        (
+                            frame.timestamp_ns
+                            - drop.first_spawn_timestamp_ns
+                        )
+                        / 1e6,
+                        3,
+                    )
+                source_release = self._last_mob_controller_releases.get(
+                    drop.spawn.source_mob_object_id
+                )
+                if source_release is not None:
+                    release_frame, release_timestamp_ns = source_release
+                    details["source_controller_release_frame"] = (
+                        release_frame
+                    )
+                    details["source_controller_release_age_ms"] = round(
+                        (frame.timestamp_ns - release_timestamp_ns) / 1e6,
+                        3,
+                    )
                 if drop.spawn.drop_kind == FieldDropSpawn.ITEM:
                     details["predicted_item_id"] = drop.spawn.value
                 else:
@@ -7795,6 +7824,16 @@ class GameplayStateFold:
             self.state.field_drops[spawn.drop_object_id] = FieldDropEntity(
                 alias=alias,
                 spawn=spawn,
+                first_spawn_frame_index=(
+                    frame.index
+                    if existing is None
+                    else existing.first_spawn_frame_index
+                ),
+                first_spawn_timestamp_ns=(
+                    frame.timestamp_ns
+                    if existing is None
+                    else existing.first_spawn_timestamp_ns
+                ),
             )
             details: dict[str, object] = {
                 **spawn.safe_dict(),
@@ -8017,6 +8056,7 @@ class GameplayStateFold:
             self.state.observed_players.clear()
             self.state.field_drops.clear()
             self.state.positioned_effect_entities.clear()
+            self._last_mob_controller_releases.clear()
             self.state.player_x = None
             self.state.player_y = None
             self._drop_aliases.clear()
@@ -9538,6 +9578,7 @@ class GameplayStateFold:
             entered = MobEnterField.parse(payload)
             alias = self._alias(self._mob_aliases, entered.object_id, "mob")
             existing = self.state.mobs.get(entered.object_id)
+            self._last_mob_controller_releases.pop(entered.object_id, None)
             cleared_client_attack_effects = len(
                 self._pending_client_attacks.pop(entered.object_id, ())
             )
@@ -9642,6 +9683,7 @@ class GameplayStateFold:
             entity = self.state.mobs.get(change.object_id)
             known_entity = entity is not None
             if change.spawn is not None:
+                self._last_mob_controller_releases.pop(change.object_id, None)
                 self.state.mob_templates[change.object_id] = (
                     change.spawn.template_id
                 )
@@ -9655,8 +9697,13 @@ class GameplayStateFold:
                 entity.foothold_id = change.spawn.foothold_id
                 entity.stance = change.spawn.stance
                 entity.controller_level = change.control_level
-            elif entity is not None:
-                entity.controller_level = 0
+            else:
+                self._last_mob_controller_releases[change.object_id] = (
+                    frame.index,
+                    frame.timestamp_ns,
+                )
+                if entity is not None:
+                    entity.controller_level = 0
             self.state.mob_controller_changes += 1
             details = {
                 "entity": alias,
@@ -9667,6 +9714,27 @@ class GameplayStateFold:
             }
             if change.spawn is not None:
                 details.update(self._mob_spawn_details(change.spawn))
+            else:
+                source_drop_release_delays_ms = {
+                    drop.alias: round(
+                        (
+                            frame.timestamp_ns
+                            - drop.first_spawn_timestamp_ns
+                        )
+                        / 1e6,
+                        3,
+                    )
+                    for drop in self.state.field_drops.values()
+                    if drop.spawn.source_mob_object_id == change.object_id
+                    and drop.first_spawn_timestamp_ns is not None
+                }
+                details["source_drop_count"] = len(
+                    source_drop_release_delays_ms
+                )
+                if source_drop_release_delays_ms:
+                    details["source_drop_release_delays_ms"] = (
+                        source_drop_release_delays_ms
+                    )
             self._event(
                 frame,
                 "mob_controller_changed",

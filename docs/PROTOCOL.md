@@ -2366,6 +2366,19 @@ warning-free with 76 raw requests, three admitted chains, 73 retries, two
 matched completions, one interruption, zero pending pickups, and 1,064/1,064
 heartbeats.
 
+A cold-client control then exercised the neutral-state boundary. The exact
+second admitted pair received a controller release 394.575 ms after spawn and
+capture-timed physical pickup input but generated no request. The first
+admitted combat/death/reward family was replayed next. A calibrated repeat
+delivered its first HP update 64.085 ms after the real opcode-`52` attack,
+released control 450.850 ms after spawn, and scheduled pickup input at the
+previously successful live drop age of 1,517.335 ms; it also generated no
+opcode `185` or `222`. After removing the injected object, the fresh fold is
+active, valid, and warning-free with zero pickup requests/chains/pending work,
+one baseline field-load drop, and 180/180 heartbeats. Exact admitted bytes plus
+matching release timing and near-reference combat-response timing are not
+sufficient to initialize admission from a neutral client session.
+
 ## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 
 The capture-validated client request has a 23-byte base form and a 35-byte
@@ -2431,6 +2444,19 @@ arrives before any effect/result closes that chain as
 a mismatch and cannot remain pending. The expected local removal without its
 effect/result remains a mismatch. The second live cut exercises one interrupted
 ten-attempt chain followed by a completed four-attempt chain.
+
+Each request event now includes `drop_spawn_frame` and `drop_age_ms` from the
+first mode-`1` spawn, plus `source_controller_release_frame` and
+`source_controller_release_age_ms` when the source has released control.
+Controller-release events expose aliased `source_drop_release_delays_ms`;
+mode-`0` refreshes preserve rather than restart the first-spawn clock. The four
+official template-`4000004` requests have drop ages `2,938.908`, `1,591.279`,
+`4,124.092`, and `2,378.920` ms. Their corresponding release ages at request
+are `2,488.457`, `1,192.460`, `4,124.092`, and `1,988.300` ms. The third source
+release precedes its drop spawn, so that family has no post-spawn release. The
+three primed live admissions have drop ages `1,517.335`, `1,584.485`, and
+`1,595.243` ms, while the fresh controls expose their matched release delays
+without inventing a request event.
 
 The corresponding short server opcode-`49` records have three exact variants:
 

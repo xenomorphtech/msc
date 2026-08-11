@@ -1486,6 +1486,22 @@ proves the admitted pair and an already-active pickup action do not need the
 combat/reward prefix, but does not yet prove the pair initiates pickup from a
 fresh neutral input state.
 
+The next control started a new client and world connection, re-entered map
+`101000000`, and established an active zero-request baseline. The exact second
+admitted pair plus its controller release at 394.575 ms stayed negative after
+capture-timed physical pickup input. The first admitted combat/death/reward
+family also stayed negative. Its first scheduling pass delivered HP at 169.033
+ms and was discarded as a timing control; the calibrated pass delivered the
+first HP update 64.085 ms after the real opcode-`52` attack, released the source
+controller 450.850 ms after the pair, and scheduled pickup input at the prior
+positive live age of 1,517.335 ms. No opcode `185` or `222` followed. After
+reason-`1` cleanup, the fresh transcript remains active, valid, and
+warning-free with zero pickup requests/chains/pending work, one baseline
+field-load drop, and 180/180 heartbeat pairs. Pair/release timing and
+near-reference combat-response timing therefore do not initialize admission
+from neutral state by themselves; the earlier drop-only success relied on
+pickup-action state already active in that session.
+
 Two reusable PCAP transforms encode those bounded rewrites.
 `?character-stat=FIELD:VALUE` accepts only an opcode-`41` packet whose sole
 captured stat is `FIELD`, preserving its mask, request flag, and tail.
@@ -1501,6 +1517,16 @@ mismatch; an expected local-pickup removal with no result still fails. The
 aggregate live fold is warning-free with 76 requests, three chains, 73 retries,
 two completions, one interruption, no pending pickup, and 1,064/1,064
 heartbeats.
+Request events now also retain the aliased drop's first-spawn frame/age and the
+source controller's last release frame/age. Release events list aliased active
+drops from that source and their first-spawn-to-release delays, preserving the
+mode-`1` clock across the matching mode-`0` refresh. In stream `92`, the four
+official `4000004` admissions have drop ages `2,938.908`, `1,591.279`,
+`4,124.092`, and `2,378.920` ms. Their source-controller release ages at request
+are `2,488.457`, `1,192.460`, `4,124.092`, and `1,988.300` ms; the third release
+precedes its drop spawn, so it is specifically the only one without a
+post-spawn release. The three primed live admissions have drop ages
+`1,517.335`, `1,584.485`, and `1,595.243` ms.
 
 ## Reactive mob-health validation
 
@@ -2309,6 +2335,13 @@ project's own `README.md` for all options.
   unanswered ten-attempt chain was explicitly interrupted; the reinjected
   four-attempt chain completed `75 -> 76`. The fold distinguishes both cases,
   has no pending pickup or warnings, and retains 1,064/1,064 heartbeat pairs.
+- A cold client/world control replayed that exact pair with a 394.575-ms
+  release and then the full first admitted family with a calibrated 64.085-ms
+  attack-to-HP response and 450.850-ms release. Capture-timed physical pickup
+  input still produced zero requests. After cleanup the active warning-free
+  fold has no pickup chains or pending work and 180/180 heartbeat pairs. The
+  fold now emits drop/release age telemetry for every admitted request and
+  release event so future controls compare the causal timing directly.
 - An opt-in reactive mob-health policy now adopts exact typed mob state and
   emits per-hit opcode-`293` updates plus opcode-`280` reason `1` on death. A
   real typed-snail injection received opcode-`52` damage `[27,32]`, produced
@@ -2330,9 +2363,11 @@ project's own `README.md` for all options.
 
 Replace the remaining opaque replay portions with stateful handling:
 
-1. Reset the pickup-action state with a fresh world connection, then test the
-   exact admitted pair with precisely timed physical input and continue to gate
-   `[39,49,312]` on an authentic opcode `185` or compact opcode `222` request.
+1. Isolate the client-side state transition that initializes pickup admission;
+   the fresh exact-pair and calibrated full-family controls now exclude
+   pair/release timing and near-reference attack-response timing alone. Continue
+   to gate `[39,49,312]` on an authentic opcode `185` or compact opcode `222`
+   request.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
    retain neutral roles for the opcode-`394`/`279` correlation.

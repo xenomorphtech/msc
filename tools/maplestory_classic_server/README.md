@@ -445,6 +445,21 @@ contains 76 raw requests, three admitted chains, 73 retries, two completed
 effect/result/removal chains, one interrupted chain, no pending pickup, and
 1,064/1,064 heartbeats at the second snapshot.
 
+A cold client/world connection then tested the missing neutral-state boundary.
+The same second admitted pair received its release after 394.575 ms and
+capture-timed physical pickup input, but emitted no request. The first admitted
+combat/death/reward family was also replayed in that fresh connection. After a
+discarded scheduling control delivered HP too late, the calibrated repeat
+delivered the first HP update 64.085 ms after the real client attack, sent the
+drop release after 450.850 ms, and scheduled pickup input at the previously
+successful 1,517.335-ms drop age. It still emitted neither opcode `185` nor
+`222`. The warning-free active transcript has zero pickup requests, zero
+pending pickup chains, one baseline field-load drop after cleanup, and 180/180
+heartbeats at the bounded snapshot. Thus matching pair/release timing and
+near-reference attack-response timing do not independently initialize pickup
+admission; the positive drop-only replay still depended on pickup-action state
+already active in that client session.
+
 PCAP references support `?character-stat=FIELD:VALUE` for a packet's sole
 captured stat and
 `?field-drop-position=X:Y[:SOURCE_X:SOURCE_Y]` for these typed controls; both
@@ -493,6 +508,11 @@ frame plus total attempt count. A different-reason drop removal before any
 effect/result closes the request as `item_pickup_interrupted_chains`; it does
 not become a false completed-removal mismatch or remain pending. An expected
 local-pickup removal without its result still remains a mismatch.
+Pickup request events also expose identifier-free `drop_spawn_frame`,
+`drop_age_ms`, `source_controller_release_frame`, and
+`source_controller_release_age_ms` evidence. Controller-release events report
+the aliased source drops and release delay from their first mode-`1` spawn;
+mode-`0` refreshes do not reset that clock.
 
 Runtime prediction for the owner patch reports
 `drop_owner_fields: match_initial_player` and
@@ -1946,3 +1966,11 @@ preserve distinct Unity scan codes in this setup.
     unanswered chain removed for a different reason as interrupted rather than
     malformed. The resulting fold is warning-free with two completions, one
     interruption, no pending pickup, and 1,064/1,064 heartbeats.
+76. Re-enter the custom world on a cold client and test the exact second pair
+    plus the full first admitted combat/death/reward family from neutral state.
+    Match release timing at 394.575/450.850 ms and calibrate the first HP reply
+    to 64.085 ms, yet observe zero pickup requests. Add first-spawn and
+    controller-release age telemetry, prove official `4000004` admissions at
+    1,591.279-4,124.092 ms and primed live admissions at
+    1,517.335-1,595.243 ms, and retain a warning-free 180/180-heartbeat fresh
+    control after cleanup.

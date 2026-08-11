@@ -8172,6 +8172,93 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
+    def test_annotates_pickup_admission_with_drop_and_release_ages(self) -> None:
+        drop_object_id = 40_005
+        spawn = fixture_field_drop_spawn(
+            spawn_mode=1,
+            drop_object_id=drop_object_id,
+            drop_kind=FieldDropSpawn.ITEM,
+            value=4_010_003,
+            position_x=100,
+            position_y=-200,
+        )
+        transcript = fixture_gameplay_transcript(
+            extra_directional_plaintexts=(
+                ("server_to_client", spawn.to_bytes()),
+                (
+                    "server_to_client",
+                    replace(spawn, spawn_mode=0).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    MobControllerChange(
+                        control_level=0,
+                        object_id=MOB_OBJECT_ID,
+                    ).to_bytes(),
+                ),
+                (
+                    "client_to_server",
+                    ItemPickupRequest(
+                        control_value=0,
+                        field_epoch=1,
+                        client_tick=102_100,
+                        position_x=100,
+                        position_y=-200,
+                        drop_object_id=drop_object_id,
+                        item_validation_token=1_352_639_939,
+                    ).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    FieldDropRemoval(
+                        reason=1,
+                        drop_object_id=drop_object_id,
+                    ).to_bytes(),
+                ),
+            ),
+        )
+        transcript = replace(
+            transcript,
+            events=tuple(
+                replace(event, timestamp_ns=event.timestamp_ns * 1_000_000)
+                for event in transcript.events
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        spawned = next(
+            event
+            for event in analysis.events
+            if event.kind == "field_drop_spawned"
+        )
+        released = next(
+            event
+            for event in analysis.events
+            if event.kind == "mob_controller_changed"
+            and not event.details["has_spawn"]
+        )
+        requested = next(
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_requested"
+        )
+        self.assertEqual(
+            released.details["source_drop_release_delays_ms"],
+            {"drop:1": 2.0},
+        )
+        self.assertEqual(requested.details["drop_spawn_frame"], spawned.frame_index)
+        self.assertEqual(requested.details["drop_age_ms"], 3.0)
+        self.assertEqual(
+            requested.details["source_controller_release_frame"],
+            released.frame_index,
+        )
+        self.assertEqual(
+            requested.details["source_controller_release_age_ms"], 1.0
+        )
+
     def test_closes_interrupted_pickup_chain_on_nonresult_removal(self) -> None:
         request = ItemPickupRequest(
             control_value=0,
