@@ -3539,7 +3539,19 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(records[2].left_ctrl_skill_id, 2_001_005)
         self.assertEqual(records[2].nonzero_keyboard_selector_count, 3)
         self.assertEqual(records[2].empty_keyboard_binding_count, 86)
+        action_entries = list(records[2].entries)
+        action_entries[44] = VariableServerEntry(selector=5, value=50)
+        action_entries[45] = VariableServerEntry(selector=5, value=51)
+        action_entries[78] = VariableServerEntry(selector=5, value=50)
+        action_record = replace(records[2], entries=tuple(action_entries))
+        self.assertEqual(
+            action_record.keyboard_action_bindings,
+            {44: 50, 45: 51, 78: 50},
+        )
+        self.assertEqual(action_record.pickup_key_codes, (44, 78))
         self.assertEqual(records[3].keyboard_skill_bindings, {})
+        self.assertEqual(records[3].keyboard_action_bindings, {})
+        self.assertEqual(records[3].pickup_key_codes, ())
         self.assertEqual(records[3].empty_keyboard_binding_count, 0)
 
     def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
@@ -5109,6 +5121,9 @@ class GameplayStateFoldTest(unittest.TestCase):
             safe["prediction"]["final_left_ctrl_skill_id"], 2_001_005
         )
         self.assertEqual(safe["frames"][2]["skill_binding_count"], 2)
+        self.assertEqual(safe["frames"][2]["action_binding_count"], 0)
+        self.assertEqual(safe["frames"][2]["pickup_binding_count"], 0)
+        self.assertEqual(safe["frames"][2]["pickup_key_codes"], ())
         self.assertEqual(safe["frames"][2]["empty_binding_count"], 86)
         self.assertEqual(
             safe["frames"][2]["left_ctrl_skill_id"], 2_001_005
@@ -5116,12 +5131,15 @@ class GameplayStateFoldTest(unittest.TestCase):
         keyboard_state = analysis.safe_dict()["state"]["keyboard_bindings"]
         self.assertEqual(keyboard_state["key_code_space"], "linux_evdev")
         self.assertEqual(
-            keyboard_state["validated_key_codes"], {"left_ctrl": 29}
+            keyboard_state["validated_key_codes"],
+            {"left_ctrl": 29, "z": 44},
         )
         self.assertEqual(
             keyboard_state["skill_bindings"],
             {29: 2_001_005, 71: 2_001_002},
         )
+        self.assertEqual(keyboard_state["action_bindings"], {})
+        self.assertEqual(keyboard_state["pickup_key_codes"], ())
         self.assertEqual(keyboard_state["empty_binding_count"], 86)
         self.assertEqual(
             sum(
@@ -7332,6 +7350,38 @@ class GameplayStateFoldTest(unittest.TestCase):
             keyboard_state["skill_bindings"],
             {29: 2_001_005, 71: 2_001_002},
         )
+
+    def test_folds_keyboard_pickup_action_binding(self) -> None:
+        original = fixture_variable_server_records()[2]
+        entries = list(original.entries)
+        entries[44] = VariableServerEntry(selector=5, value=50)
+        entries[45] = VariableServerEntry(selector=5, value=51)
+        entries[78] = VariableServerEntry(selector=5, value=50)
+        bound = replace(original, entries=tuple(entries))
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(bound.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        keyboard_state = analysis.safe_dict()["state"]["keyboard_bindings"]
+        self.assertEqual(
+            keyboard_state["action_bindings"],
+            {44: 50, 45: 51, 78: 50},
+        )
+        self.assertEqual(keyboard_state["pickup_action_id"], 50)
+        self.assertEqual(keyboard_state["pickup_key_codes"], (44, 78))
+        self.assertEqual(keyboard_state["validated_key_codes"]["z"], 44)
+        loaded = next(
+            event
+            for event in analysis.events
+            if event.kind == "keyboard_bindings_loaded"
+        )
+        self.assertEqual(loaded.details["action_binding_count"], 3)
+        self.assertEqual(loaded.details["pickup_binding_count"], 2)
+        self.assertEqual(loaded.details["pickup_key_codes"], (44, 78))
 
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(

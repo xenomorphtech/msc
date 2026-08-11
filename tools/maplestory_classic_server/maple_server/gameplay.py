@@ -1185,6 +1185,10 @@ class GameplayGameState:
         default_factory=dict, repr=False
     )
     keyboard_known_skill_bindings: int = 0
+    keyboard_action_bindings: dict[int, int] = field(
+        default_factory=dict
+    )
+    pickup_key_codes: tuple[int, ...] = ()
     left_ctrl_skill_id: int | None = None
     left_ctrl_skill_known: bool = False
     pending_movements: int = 0
@@ -1390,6 +1394,11 @@ class VariableServerReplayFrame:
             "skill_binding_count": len(
                 self.record.keyboard_skill_bindings
             ),
+            "action_binding_count": len(
+                self.record.keyboard_action_bindings
+            ),
+            "pickup_binding_count": len(self.record.pickup_key_codes),
+            "pickup_key_codes": self.record.pickup_key_codes,
             "left_ctrl_skill_id": self.record.left_ctrl_skill_id,
             "compact": (
                 bool(self.record.variant)
@@ -4748,6 +4757,7 @@ class GameplayAnalysis:
                     "key_code_space": "linux_evdev",
                     "validated_key_codes": {
                         "left_ctrl": VariableServerRecord.LEFT_CTRL_KEY_CODE,
+                        "z": VariableServerRecord.Z_KEY_CODE,
                     },
                     "selector_counts": dict(
                         self.state.keyboard_binding_selector_counts
@@ -4761,6 +4771,13 @@ class GameplayAnalysis:
                     "skill_bindings": dict(
                         self.state.keyboard_skill_bindings
                     ),
+                    "action_bindings": dict(
+                        self.state.keyboard_action_bindings
+                    ),
+                    "pickup_action_id": (
+                        VariableServerRecord.PICKUP_ACTION_ID
+                    ),
+                    "pickup_key_codes": self.state.pickup_key_codes,
                     "known_skill_binding_count": (
                         self.state.keyboard_known_skill_bindings
                     ),
@@ -8649,6 +8666,10 @@ class GameplayStateFold:
                     skill_id in self.state.skill_levels
                     for skill_id in self.state.keyboard_skill_bindings.values()
                 )
+                self.state.keyboard_action_bindings = (
+                    variable_record.keyboard_action_bindings
+                )
+                self.state.pickup_key_codes = variable_record.pickup_key_codes
                 self.state.left_ctrl_skill_id = (
                     variable_record.left_ctrl_skill_id
                 )
@@ -8678,6 +8699,13 @@ class GameplayStateFold:
                 "skill_binding_count": len(
                     variable_record.keyboard_skill_bindings
                 ),
+                "action_binding_count": len(
+                    variable_record.keyboard_action_bindings
+                ),
+                "pickup_binding_count": len(
+                    variable_record.pickup_key_codes
+                ),
+                "pickup_key_codes": variable_record.pickup_key_codes,
                 "known_skill_binding_count": (
                     self.state.keyboard_known_skill_bindings
                     if opcode == 385 and not variable_record.variant
@@ -13090,6 +13118,8 @@ def render_gameplay_analysis(
             f"empty_bindings:{empty_keyboard_binding_count} "
             f"skills:{dict(state.keyboard_skill_bindings)} "
             f"known_skills:{state.keyboard_known_skill_bindings} "
+            f"actions:{dict(state.keyboard_action_bindings)} "
+            f"pickup_keys:{state.pickup_key_codes} "
             f"left_ctrl_skill:{state.left_ctrl_skill_id}"
         ),
         (

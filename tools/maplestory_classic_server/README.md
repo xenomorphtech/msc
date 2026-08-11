@@ -200,10 +200,12 @@ and `385` variants. Both begin with a one-byte discriminator. The level-1
 variants end there. Expanded opcode `156` contains a packet UTF-16 string,
 bool, and three int32 values; expanded opcode `385` contains 89 keyboard
 bindings whose tuple index is the key code. Selector `1` binds a skill id, and
-selector `0` is an empty binding. Key code `29` is the validated evdev Left
-Ctrl binding. The emitter round-trips and replaces the complete records; other
-selector meanings and opcode-`156` field meanings remain neutral. Safe output
-reports the empty-binding count but not unproven values.
+selector `0` is an empty binding. Selector `5` binds an action id; live control
+identifies action `50` as pickup. Key code `29` is validated evdev Left Ctrl
+and key code `44` is evdev Z. The emitter round-trips and replaces the complete
+records; selectors `2/4/6`, action ids `51..54`, and opcode-`156` field meanings
+remain neutral. Safe output reports empty, skill, action, and pickup bindings
+without naming the other action ids.
 
 Use `?keyboard-skill=KEY_CODE:SKILL_ID` on an expanded opcode-`385` PCAP
 reference to replace only the value of an existing selector-`1` binding. For
@@ -221,6 +223,16 @@ emitted no skill request despite an ordinary client opcode-`13` packet, and
 restoring selector `1` restored opcode `104`. The final fold was active, valid, and
 warning-free with selector counts `45 -> 46 -> 45`, skill-binding counts
 `2 -> 1 -> 2`, and 437/437 matched heartbeats.
+
+A second one-field control identifies the selector-`5` family. The official
+map has six selector-`5` entries with action ids `50,51,53,54,50,52`; action
+`50` is bound to evdev key codes `44` and `78`. Replacing only key `44`'s
+`5/50` entry with selector `1`/skill `2001002` changed physical Z from pickup
+to an authentic opcode-`104` skill request. Restoring the exact `5/50` entry
+and presenting an admitted nearby drop produced authentic opcode `185`. The
+folded snapshot sequence reports pickup keys `(44,78) -> (78) -> (44,78)`.
+This names selector `5` as an action binding and value `50` as pickup while
+leaving values `51..54` as neutral action ids.
 
 The second captured selector-`1` binding is also causal. Physical evdev key
 code `71` under `71 -> 2001002` emitted client opcode `104` as the exact
@@ -2178,3 +2190,8 @@ preserve distinct Unity scan codes in this setup.
     record ended at command `(633,-2693)` but trailer `(633,-2677)`, prove an
     immediate authentic opcode-`185` request and `74 -> 75` completion with no
     movement, key-map, or skill preflight, closing the false readiness boundary.
+92. Promote opcode-`385` selector `5` to an action binding and value `50` to
+    pickup from a one-entry live Z-key control: `5/50 -> 1/2001002` emitted
+    opcode `104`, exact restoration plus a nearby admitted drop emitted opcode
+    `185`, and folded pickup keys changed `(44,78) -> (78) -> (44,78)` while
+    selector-`5` values `51..54` remain unnamed action ids.

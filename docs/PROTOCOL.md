@@ -1960,8 +1960,10 @@ The opcode-`385` tuple index is a keyboard key code: index `29` is the Linux
 evdev Left Ctrl code. Selector `1` is a skill binding and its value is the
 skill id. The capture binds key `29` to learned skill `2001005` and key `71`
 to learned skill `2001002`. Selector `0` is an empty binding; selector meanings
-`2/4/5/6`, and all opcode-`156` field meanings, remain neutral. No security
-meaning is inferred.
+`2/4/6`, selector-`5` action ids other than `50`, and all opcode-`156` field
+meanings remain neutral. Selector `5` is a keyboard action binding, and action
+id `50` is pickup, as established by the live control below. No security meaning
+is inferred.
 
 All four forms now have full shape coverage and exact typed round trips. The
 fold records opcode/variant counts, 89 selector/value entries per expanded
@@ -1969,9 +1971,9 @@ opcode `385`, three typed int32 values per expanded opcode `156`, zero opaque
 bytes, field epoch, and `variable_server_record_received` events. Safe output
 retains only text length, flag, value/entry counts, and never the opcode-`156`
 text or raw values. Expanded opcode `385` additionally updates the current
-keyboard selector distribution and skill-binding map, validates bound skill ids
-against initial progression, exposes the proven Left Ctrl binding, and emits a
-`keyboard_bindings_loaded` event.
+keyboard selector distribution plus skill- and action-binding maps, validates
+bound skill ids against initial progression, exposes the proven Left Ctrl, Z,
+and pickup bindings, and emits a `keyboard_bindings_loaded` event.
 
 The empty-binding role comes from a one-byte live A/B/A, not the zero value.
 The typed `keyboard-selector-zero=71` transform changed only key `71`'s
@@ -1982,7 +1984,20 @@ followed the input; restoring the exact original record restored opcode
 `104`. Folded selector counts changed `45 -> 46 -> 45`, skill-binding counts
 `2 -> 1 -> 2`, and the warning-free active snapshot retained 437/437 matched
 heartbeats with none pending. Safe state/events expose `empty_binding_count`
-and never surface unproven selector values.
+while selector-`2/4/6` values remain suppressed; selector-`5` action ids are
+exposed numerically without assigning the roles not proven below.
+
+Selector `5` has a separate one-entry causal control. The expanded official map
+contains six selector-`5` entries with values `50,51,53,54,50,52`; value `50`
+is present at evdev key codes `44` and `78`. Physical Z at key `44` emitted no
+skill request under captured `5/50`. Replacing only that entry with selector
+`1` and learned skill `2001002` produced an authentic opcode-`104` request.
+Restoring the exact `5/50` entry and presenting an admitted nearby drop
+produced authentic pickup opcode `185`. Folded snapshots show action-binding
+counts `6 -> 5 -> 6`, skill-binding counts `2 -> 3 -> 2`, and pickup keys
+`(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
+and value `50` as pickup; the fold exposes the numeric `51..54` action ids but
+does not assign them roles.
 
 `--generate-variable-server-records` re-emits every bounded observation at its
 original frame index after length/reparse/uniqueness/conflict validation.

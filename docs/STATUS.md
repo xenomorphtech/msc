@@ -451,8 +451,13 @@
   selector `0` is an empty binding: preserving value `2001002` while changing
   only `1 -> 0` suppressed opcode `104`, and exact restoration restored it.
   Selector counts moved `45 -> 46 -> 45`, binding counts `2 -> 1 -> 2`, and
-  the warning-free active fold kept 437/437 matched heartbeats. Selectors
-  `2/4/5/6` remain neutral.
+  the warning-free active fold kept 437/437 matched heartbeats. A later
+  one-entry Z-key control identifies selector `5` as an action binding and
+  value `50` as pickup: replacing key `44`'s `5/50` with selector `1`/skill
+  `2001002` produced authentic opcode `104`, while exact restoration plus an
+  admitted nearby drop produced opcode `185`. Folded action/skill counts moved
+  `6/2 -> 5/3 -> 6/2`, and pickup keys moved `(44,78) -> (78) -> (44,78)`.
+  Selector-`5` values `51..54` and selectors `2/4/6` remain neutral.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -1225,9 +1230,10 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
    additional item/request shapes only from independently admitted evidence,
    and continue serving `[39,49,312]` only after an authentic opcode-`185` or
    compact opcode-`222` request.
-2. Keep opcode-`385` selectors `2/4/5/6` neutral until an independently
-   identifiable input/action permits another one-field control; selector `0`
-   is now the bounded empty binding and selector `1` the skill binding.
+2. Keep opcode-`385` selectors `2/4/6` and selector-`5` action ids `51..54`
+   neutral until an independently identifiable input/action permits another
+   one-field control. Selector `0` is the bounded empty binding, selector `1`
+   the skill binding, selector `5` the action binding, and action `50` pickup.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Keep packet injection an explicit loopback-only opt-in while expanding

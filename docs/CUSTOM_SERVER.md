@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 292 tests.
+The last run passed all 293 tests.
 
 ## Inspect and compare captures
 
@@ -948,15 +948,16 @@ round-trip exactly. The field names remain neutral; no security or gameplay
 role is assigned from shape alone. A later controlled A/B/A establishes that
 opcode-`385` entry indices are keyboard key codes and selector `1` carries a
 skill id. Index `29` is the evdev Left Ctrl key. A later selector-only A/B/A
-establishes selector `0` as an empty binding; selectors `2/4/5/6` remain
-neutral.
+establishes selector `0` as an empty binding. A subsequent one-entry Z-key
+control establishes selector `5` as an action binding and value `50` as
+pickup; selectors `2/4/6` and selector-`5` action ids `51..54` remain unnamed.
 
 The option performs the same valid-fold, exact-length, reparse, unique-index,
 and patch-conflict checks as the fixed emitter. Runtime status exposes only
 opcode, variant, text length, flag, value/entry counts, field epoch, and frame
 index under `protocol.variable_server_record_emitter`. Opcode-`156` text/raw
-values and unproven opcode-`385` selector values are not included; the proven
-skill-binding count and Left Ctrl skill id are included.
+values and selector-`2/4/6` values are not included; the proven skill/action/
+pickup counts, pickup key codes, and Left Ctrl skill id are included.
 
 The 2026-08-09 browser-free live run regenerated expanded server frames `9`
 and `11` together with one initial snapshot, 11 fixed records, and nine NPC
@@ -985,7 +986,18 @@ opcode-`13` packet followed the physical input; restoring the original
 record restored opcode `104`. The warning-free active snapshot reports three
 keyboard snapshots, selector counts `45 -> 46 -> 45`, skill-binding counts
 `2 -> 1 -> 2`, final request count `4`, and 437/437 matched heartbeats. The
-result names only selector `0` as empty and leaves `2/4/5/6` unresolved.
+result names only selector `0` as empty; the separate control below is required
+to resolve selector `5`.
+
+The selector-`5` control used the expanded stream-`114` map, where its six
+entries carry action ids `50,51,53,54,50,52`. Key codes `44` and `78` both
+carry `5/50`. Replacing only key `44` with selector `1` and learned skill
+`2001002` changed physical evdev Z into an authentic opcode-`104` request;
+restoring the exact `5/50` entry and presenting an admitted nearby drop
+produced authentic opcode `185`. The three folded snapshots report action
+counts `6 -> 5 -> 6`, skill counts `2 -> 3 -> 2`, and pickup key codes
+`(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
+and action `50` as pickup without assigning roles to `51..54`.
 
 ## Opt-in live server-packet injection
 
@@ -1168,7 +1180,7 @@ frame restored variant `18`, two hits, damage `[29,25]`. The frozen transcript
 folds validly with no issues/warnings, three `keyboard_bindings_loaded` events,
 two injection events, final Left Ctrl skill `2001005`, active map `101000000`,
 HP `50`, and 91/91 matched heartbeats. This is a causal key-binding result;
-the other selector families remain unnamed.
+selectors `2/4/6` remain unnamed.
 
 A second browser-free A/B/A exercised physical evdev key code `71`. Under the
 captured `71 -> 2001002` binding, the client emitted the exact 13-byte skill-use
