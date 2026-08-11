@@ -414,7 +414,12 @@
   traces and exact capture round trips close both former opaque tails without
   assigning security semantics. A controlled A/B/A further proves opcode-`385`
   tuple indices are keyboard key codes, selector `1` is a skill binding, and
-  index `29` is evdev Left Ctrl.
+  index `29` is evdev Left Ctrl. A fresh selector-only key-`71` A/B/A now proves
+  selector `0` is an empty binding: preserving value `2001002` while changing
+  only `1 -> 0` suppressed opcode `104`, and exact restoration restored it.
+  Selector counts moved `45 -> 46 -> 45`, binding counts `2 -> 1 -> 2`, and
+  the warning-free active fold kept 437/437 matched heartbeats. Selectors
+  `2/4/5/6` remain neutral.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -1039,10 +1044,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 1. Use the owner/proximity/source-lifecycle negative controls to test the
    captured combat/reward neighborhood; serve a reactive pickup only after
    observing an authentic opcode-`185` or compact opcode-`222` request.
-2. Use one-field controls to test whether opcode-`385` selector `0` is an empty
-   binding without assigning meanings to selectors `2/4/5/6`; opcode `104`
-   now has a response-free repeat/liveness bound, while its effect remains
-   unproven.
+2. Keep opcode-`385` selectors `2/4/5/6` neutral until an independently
+   identifiable input/action permits another one-field control; selector `0`
+   is now the bounded empty binding and selector `1` the skill binding.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Keep packet injection an explicit loopback-only opt-in while expanding

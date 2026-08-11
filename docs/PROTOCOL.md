@@ -1785,8 +1785,9 @@ packet has one text code unit, a false flag, and values `(2001004, 0, 0)`.
 The opcode-`385` tuple index is a keyboard key code: index `29` is the Linux
 evdev Left Ctrl code. Selector `1` is a skill binding and its value is the
 skill id. The capture binds key `29` to learned skill `2001005` and key `71`
-to learned skill `2001002`. Other selector meanings, and all opcode-`156`
-field meanings, remain neutral; no security meaning is inferred.
+to learned skill `2001002`. Selector `0` is an empty binding; selector meanings
+`2/4/5/6`, and all opcode-`156` field meanings, remain neutral. No security
+meaning is inferred.
 
 All four forms now have full shape coverage and exact typed round trips. The
 fold records opcode/variant counts, 89 selector/value entries per expanded
@@ -1797,6 +1798,17 @@ text or raw values. Expanded opcode `385` additionally updates the current
 keyboard selector distribution and skill-binding map, validates bound skill ids
 against initial progression, exposes the proven Left Ctrl binding, and emits a
 `keyboard_bindings_loaded` event.
+
+The empty-binding role comes from a one-byte live A/B/A, not the zero value.
+The typed `keyboard-selector-zero=71` transform changed only key `71`'s
+selector from captured `1` to `0` while preserving value `2001002` and all
+other 88 entries. Physical key `71` first emitted opcode `104`; under selector
+`0` it emitted no skill request while an ordinary client opcode-`13` packet
+followed the input; restoring the exact original record restored opcode
+`104`. Folded selector counts changed `45 -> 46 -> 45`, skill-binding counts
+`2 -> 1 -> 2`, and the warning-free active snapshot retained 437/437 matched
+heartbeats with none pending. Safe state/events expose `empty_binding_count`
+and never surface unproven selector values.
 
 `--generate-variable-server-records` re-emits every bounded observation at its
 original frame index after length/reparse/uniqueness/conflict validation.

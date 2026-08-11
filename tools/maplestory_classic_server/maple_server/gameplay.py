@@ -1335,6 +1335,9 @@ class VariableServerReplayFrame:
             "nonzero_keyboard_selector_count": (
                 self.record.nonzero_keyboard_selector_count
             ),
+            "empty_binding_count": (
+                self.record.empty_keyboard_binding_count
+            ),
             "skill_binding_count": len(
                 self.record.keyboard_skill_bindings
             ),
@@ -4653,6 +4656,12 @@ class GameplayAnalysis:
                     },
                     "selector_counts": dict(
                         self.state.keyboard_binding_selector_counts
+                    ),
+                    "empty_binding_count": (
+                        self.state.keyboard_binding_selector_counts.get(
+                            VariableServerRecord.EMPTY_BINDING_SELECTOR,
+                            0,
+                        )
                     ),
                     "skill_bindings": dict(
                         self.state.keyboard_skill_bindings
@@ -8283,6 +8292,9 @@ class GameplayStateFold:
                 "value_count": len(variable_record.values),
                 "nonzero_keyboard_selector_count": (
                     variable_record.nonzero_keyboard_selector_count
+                ),
+                "empty_binding_count": (
+                    variable_record.empty_keyboard_binding_count
                 ),
                 "skill_binding_count": len(
                     variable_record.keyboard_skill_bindings
@@ -12294,6 +12306,12 @@ def render_gameplay_analysis(
     )
     event_counts = Counter(event.kind for event in analysis.events)
     state = analysis.state
+    empty_keyboard_binding_count = (
+        state.keyboard_binding_selector_counts.get(
+            VariableServerRecord.EMPTY_BINDING_SELECTOR,
+            0,
+        )
+    )
     movement_command_types = json.dumps(
         dict(sorted(state.movement_commands_by_type.items()))
     )
@@ -12639,6 +12657,7 @@ def render_gameplay_analysis(
         (
             f"keyboard_bindings=snapshots:{state.keyboard_binding_snapshots} "
             f"selectors:{dict(state.keyboard_binding_selector_counts)} "
+            f"empty_bindings:{empty_keyboard_binding_count} "
             f"skills:{dict(state.keyboard_skill_bindings)} "
             f"known_skills:{state.keyboard_known_skill_bindings} "
             f"left_ctrl_skill:{state.left_ctrl_skill_id}"

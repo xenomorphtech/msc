@@ -10015,6 +10015,7 @@ class VariableServerRecord:
     values: tuple[int, ...] = ()
 
     KEYBOARD_BINDING_COUNT = 89
+    EMPTY_BINDING_SELECTOR = 0
     SKILL_BINDING_SELECTOR = 1
     LEFT_CTRL_KEY_CODE = 29
 
@@ -10037,6 +10038,15 @@ class VariableServerRecord:
         if self.opcode != 385 or self.variant:
             return 0
         return sum(entry.selector != 0 for entry in self.entries)
+
+    @property
+    def empty_keyboard_binding_count(self) -> int:
+        if self.opcode != 385 or self.variant:
+            return 0
+        return sum(
+            entry.selector == self.EMPTY_BINDING_SELECTOR
+            for entry in self.entries
+        )
 
     @classmethod
     def parse(cls, payload: bytes) -> "VariableServerRecord":

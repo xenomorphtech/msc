@@ -933,7 +933,9 @@ and three int32 values; opcode `385` variant `0` carries exactly 89 repeated
 round-trip exactly. The field names remain neutral; no security or gameplay
 role is assigned from shape alone. A later controlled A/B/A establishes that
 opcode-`385` entry indices are keyboard key codes and selector `1` carries a
-skill id. Index `29` is the evdev Left Ctrl key.
+skill id. Index `29` is the evdev Left Ctrl key. A later selector-only A/B/A
+establishes selector `0` as an empty binding; selectors `2/4/5/6` remain
+neutral.
 
 The option performs the same valid-fold, exact-length, reparse, unique-index,
 and patch-conflict checks as the fixed emitter. Runtime status exposes only
@@ -958,6 +960,18 @@ it preserves the selector and all other bindings. For example:
 ```text
 111.pcapng@114:9?keyboard-skill=29:2001004
 ```
+
+For the selector-only control, use
+`?keyboard-selector-zero=KEY_CODE`. It accepts only an expanded opcode-`385`
+record whose target is a captured selector-`1` skill binding, changes that one
+selector byte to `0`, and preserves the int32 value plus all other entries.
+The current key-`71` A/B/A kept value `2001002`: captured selector `1` emitted
+opcode `104`; selector `0` emitted no skill request while an ordinary client
+opcode-`13` packet followed the physical input; restoring the original
+record restored opcode `104`. The warning-free active snapshot reports three
+keyboard snapshots, selector counts `45 -> 46 -> 45`, skill-binding counts
+`2 -> 1 -> 2`, final request count `4`, and 437/437 matched heartbeats. The
+result names only selector `0` as empty and leaves `2/4/5/6` unresolved.
 
 ## Opt-in live server-packet injection
 

@@ -1050,6 +1050,34 @@ class TranscriptTest(unittest.TestCase):
                     "keyboard-skill=28:2001004"
                 )
 
+    def test_pcap_plaintext_reference_can_zero_one_skill_selector(
+        self,
+    ) -> None:
+        bindings = [
+            VariableServerEntry(selector=0, value=0) for _ in range(89)
+        ]
+        bindings[71] = VariableServerEntry(selector=1, value=2_001_002)
+        original = VariableServerRecord(
+            opcode=385,
+            variant=0,
+            entries=tuple(bindings),
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@114:0?"
+                "keyboard-selector-zero=71"
+            )
+
+        parsed = VariableServerRecord.parse(payload)
+        self.assertEqual(parsed.entries[71].selector, 0)
+        self.assertEqual(parsed.entries[71].value, 2_001_002)
+        self.assertEqual(parsed.keyboard_skill_bindings.get(71), None)
+        self.assertEqual(parsed.entries[:71], tuple(bindings[:71]))
+        self.assertEqual(parsed.entries[72:], tuple(bindings[72:]))
+
     def test_pcap_plaintext_reference_can_rewrite_typed_mob_spawn(self) -> None:
         original = MobEnterField(
             object_id=20_001,

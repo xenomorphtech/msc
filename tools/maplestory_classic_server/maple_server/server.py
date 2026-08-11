@@ -2565,6 +2565,40 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
         entries = list(record.entries)
         entries[key_code] = replace(original, value=skill_id)
         return replace(record, entries=tuple(entries)).to_bytes()
+    if transform.startswith("keyboard-selector-zero="):
+        key_code_text = transform.removeprefix(
+            "keyboard-selector-zero="
+        )
+        try:
+            key_code = int(key_code_text, 0)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero key code must be an integer"
+            ) from error
+        if not 0 <= key_code < VariableServerRecord.KEYBOARD_BINDING_COUNT:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero key code must be between 0 and 88"
+            )
+        try:
+            record = VariableServerRecord.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero transform requires an expanded "
+                "opcode-385 keyboard-binding packet"
+            ) from error
+        if record.opcode != 385 or record.variant:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero transform requires an expanded "
+                "opcode-385 keyboard-binding packet"
+            )
+        original = record.entries[key_code]
+        if original.selector != VariableServerRecord.SKILL_BINDING_SELECTOR:
+            raise argparse.ArgumentTypeError(
+                f"keyboard key code {key_code} is not a captured skill binding"
+            )
+        entries = list(record.entries)
+        entries[key_code] = replace(original, selector=0)
+        return replace(record, entries=tuple(entries)).to_bytes()
     if transform.startswith("mob-spawn="):
         fields = transform.removeprefix("mob-spawn=").split(":")
         if len(fields) not in {2, 4}:
@@ -2627,7 +2661,8 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
         return replace(controller, spawn=rewritten_spawn).to_bytes()
     raise argparse.ArgumentTypeError(
         "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
-        "character-list, keyboard-skill=KEY_CODE:SKILL_ID, or "
+        "character-list, keyboard-skill=KEY_CODE:SKILL_ID, "
+        "keyboard-selector-zero=KEY_CODE, or "
         "mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
     )
 
