@@ -437,7 +437,7 @@ its request follows by 1,591.279 ms. Replaying only that exact pair at the
 player plus the release—without a source-mob spawn, attack, death, reward
 records, or fresh pickup input—produced the first live request in 1,584.485 ms.
 The source mob was unknown to the live fold, so the earlier combat/reward
-prefix is not required once the client's prior pickup-action state is active.
+prefix is not required for this admitted pair.
 A reason-`1` cleanup interrupted the intentionally unanswered ten-attempt
 chain; reinjecting the same pair produced another request in 1,595.243 ms and
 one guarded response advanced the stack `75 -> 76`. The warning-free fold now
@@ -445,7 +445,8 @@ contains 76 raw requests, three admitted chains, 73 retries, two completed
 effect/result/removal chains, one interrupted chain, no pending pickup, and
 1,064/1,064 heartbeats at the second snapshot.
 
-A cold client/world connection then tested the missing neutral-state boundary.
+A cold client/world connection initially appeared to test a neutral-state
+boundary.
 The same second admitted pair received its release after 394.575 ms and
 capture-timed physical pickup input, but emitted no request. The first admitted
 combat/death/reward family was also replayed in that fresh connection. After a
@@ -455,19 +456,20 @@ drop release after 450.850 ms, and scheduled pickup input at the previously
 successful 1,517.335-ms drop age. It still emitted neither opcode `185` nor
 `222`. The warning-free active transcript has zero pickup requests, zero
 pending pickup chains, one baseline field-load drop after cleanup, and 180/180
-heartbeats at the bounded snapshot. Thus matching pair/release timing and
-near-reference attack-response timing do not independently initialize pickup
-admission; the positive drop-only replay still depended on pickup-action state
-already active in that client session.
+heartbeats at the bounded snapshot. A later coordinate audit invalidated the
+state interpretation of these negative controls: they used the global folded
+movement trailer `(633,-2677)`, while the same client movement record's final
+absolute command was `(633,-2693)`.
 
-`inject-item-pickup` makes that boundary repeatable without reusing stale
-coordinates. It selects a proven admitted chain from an evidence PCAP,
-retargets its typed mode-`1`/mode-`0` pair to the latest folded player
-position while preserving the animated-source offset and capture timing,
-allocates collision-free runtime ids, sends physical pickup input, and waits
-for an authentic opcode `185` or `222`. Only then does it emit `[39,49,312]`
-and verify the inventory, effect, result, removal, field, player, and
-progression invariants. A timeout sends a reason-`1` cleanup.
+`inject-item-pickup` selects a proven admitted chain from an evidence PCAP and
+retargets its typed mode-`1`/mode-`0` pair to the latest same-field client
+movement command's `final_x/final_y`. It retains the folded trailer endpoint
+in the report and uses it only as a fallback when no same-epoch movement
+observation is available. The command preserves the animated-source offset and
+capture timing, allocates collision-free runtime ids, sends physical pickup
+input, and waits for an authentic opcode `185` or `222`. Only then does it emit
+`[39,49,312]` and verify the inventory, effect, result, removal, field, player,
+and progression invariants. A timeout sends a reason-`1` cleanup.
 
 ```sh
 sudo ip netns exec mapleproxy sudo -u sdancer env \
@@ -483,15 +485,16 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
 ```
 
 In the already-active session, earlier controls had placed drops at stale
-`(633,-2677)` after the player had moved to `(675,-2693)`. The command sampled
-`(675,-2693)`, reproduced the evidence release at 398.819 ms, received an
-authentic opcode-`185` request at 1,607.298 ms on its first attempt, and
-verified Etc slot `7` changing `75 -> 76` with no pending pickup. A separate
-fresh client, before any post-bootstrap key-map action, ran the same command
-at its latest position `(633,-2677)` twice and produced no request; both
-timeouts removed their injected drops. Latest-position placement therefore
-removes a real confound from the positive run, but does not replace the
-remaining pickup-readiness boundary.
+`(633,-2677)` after the player had moved to `(675,-2693)`. The first live-fold
+command sampled `(675,-2693)`, received opcode `185` after 1,607.298 ms, and
+completed `75 -> 76`. The apparently fresh failures still used the trailer
+coordinate. On a separate untouched client, the only opcode-`182` record
+reported command-final `(633,-2693)` and trailer `(633,-2677)`. The corrected
+command selected the former without any movement, key-map, or skill preflight,
+received authentic opcode `185` after 1,572.761 ms at request position
+`(633,-2694)`, and completed Etc slot `7` `74 -> 75`. The earlier suspected
+pickup-readiness transition was therefore a coordinate-source bug, not hidden
+client state.
 
 PCAP references support `?character-stat=FIELD:VALUE` for a packet's sole
 captured stat and
@@ -2163,9 +2166,15 @@ preserve distinct Unity scan codes in this setup.
     `307` and counted/redacted UTF-16 opcode-`310` records, validating 30 and
     three samples respectively without assigning purpose.
 90. Add an evidence-derived `inject-item-pickup` workflow that samples the
-    latest folded player position, waits for authentic opcode `185`/`222`
+    current modeled player position, waits for authentic opcode `185`/`222`
     admission before serving `[39,49,312]`, verifies the complete state delta,
     and cleans up on timeout. Prove one primed `75 -> 76` success at the actual
     moved position and two clean fresh-session failures, then re-run strict
     analysis to confirm zero unknown packets in gameplay streams `92`, `114`,
     and `126`.
+91. Correct pickup placement to prefer the latest same-field opcode-`182`
+    command-final coordinate while retaining the folded trailer as fallback
+    and auditable output. On an untouched fresh client whose sole movement
+    record ended at command `(633,-2693)` but trailer `(633,-2677)`, prove an
+    immediate authentic opcode-`185` request and `74 -> 75` completion with no
+    movement, key-map, or skill preflight, closing the false readiness boundary.

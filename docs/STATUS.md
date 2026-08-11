@@ -777,26 +777,28 @@
   distinguishes interrupted from malformed expected removals and is
   warning-free with 76 requests, three admitted chains, 73 retries, two
   completions, one interruption, no pending pickup, and 1,064/1,064
-  heartbeats. This proves the admitted pair plus already-active pickup state
-  does not require the combat/reward prefix; a fresh neutral-input connection
-  remained the next boundary. A subsequent cold client/world connection now
-  tests it directly: the same second pair was released at 394.575 ms and the
-  full first admitted family was calibrated to a 64.085-ms first HP response
+  heartbeats. This proves the admitted pair does not require the combat/reward
+  prefix. A subsequent cold client/world connection used the same second pair
+  released at 394.575 ms, while the full first admitted family was calibrated
+  to a 64.085-ms first HP response
   plus a 450.850-ms release, but capture-timed physical input produced zero
   opcode-`185`/`222` requests in both cases. After cleanup, the fold is active,
   valid, and warning-free with no pickup chains/pending work, one baseline
-  field-load drop, and 180/180 heartbeats. The positive drop-only result
-  therefore depended on already-active pickup-action state; pair/release and
-  near-reference combat-response timing do not initialize it alone. A new
-  `inject-item-pickup` workflow now derives the admitted pair and timing from
-  stream `92`, allocates safe runtime ids, samples the latest folded player
-  position, sends physical input, withholds `[39,49,312]` until a matching
-  authentic request, verifies all state invariants, and cleans up on timeout.
-  It exposed a stale-position confound in the primed session: using the actual
-  `(675,-2693)` position produced opcode `185` in 1,607.298 ms and completed
-  Etc slot `7` `75 -> 76`. A separate fresh client with no post-bootstrap
-  key-map action failed the same latest-position control twice at
-  `(633,-2677)` and cleaned up both drops, so the readiness boundary remains.
+  field-load drop, and 180/180 heartbeats. A later coordinate audit invalidated
+  the hidden-state interpretation: those negative controls used the global
+  folded trailer `(633,-2677)`, not the same movement record's command-final
+  `(633,-2693)`. `inject-item-pickup` now derives the admitted pair and timing
+  from stream `92`, allocates safe runtime ids, prefers the latest same-field
+  opcode-`182` command-final position, exposes the folded trailer separately,
+  sends physical input, withholds `[39,49,312]` until a matching authentic
+  request, verifies all state invariants, and cleans up on timeout. The primed
+  session's actual `(675,-2693)` placement produced opcode `185` in 1,607.298
+  ms and completed Etc slot `7` `75 -> 76`. The decisive untouched client had
+  only one movement record—command-final `(633,-2693)`, trailer
+  `(633,-2677)`—and needed no movement, key-map, or skill preflight: corrected
+  placement produced authentic opcode `185` in 1,572.761 ms at `(633,-2694)`
+  and completed `74 -> 75`. The suspected readiness boundary was a
+  coordinate-source bug.
   Request events now report first-spawn and source-release ages, and release
   events report aliased source-drop delays. Official `4000004` admission ages
   are 1,591.279-4,124.092 ms and the primed live ages are
@@ -1218,12 +1220,11 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Use the latest-position `inject-item-pickup` control to isolate the
-   client-side transition that initializes pickup admission. The fresh exact
-   pair, calibrated full family, and two fresh command attempts exclude stale
-   position, pair/release timing, and near-reference attack-response timing as
-   sufficient conditions. Continue serving `[39,49,312]` only after an
-   authentic opcode-`185` or compact opcode-`222` request.
+1. Preserve the pickup-specific command-final coordinate selector and its
+   folded-trailer fallback as a regression boundary. Extend pickup handling to
+   additional item/request shapes only from independently admitted evidence,
+   and continue serving `[39,49,312]` only after an authentic opcode-`185` or
+   compact opcode-`222` request.
 2. Keep opcode-`385` selectors `2/4/5/6` neutral until an independently
    identifiable input/action permits another one-field control; selector `0`
    is now the bounded empty binding and selector `1` the skill binding.
@@ -1238,6 +1239,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 /home/sdancer/ms/downloads/maple_custom_server_replay.png
 /home/sdancer/ms/downloads/maple_direct_current_screen.png
 /home/sdancer/ms/downloads/maple_tw_postgate_screen.png
+/home/sdancer/ms/downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/login/1786477737308800256_replay_12082.jsonl
+/home/sdancer/ms/downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786477769036931470_replay_12857.jsonl
 /home/sdancer/ms/downloads/maple_protocol_captures/
 /home/sdancer/ms/downloads/maple_protocol_captures/hk_official_reference_20260808/
 /home/sdancer/ms/downloads/maple_custom_server_observed/

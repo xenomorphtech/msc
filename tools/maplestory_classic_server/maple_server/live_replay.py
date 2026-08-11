@@ -97,6 +97,9 @@ class ItemPickupLiveReplayPlan:
     quantity_after: int
     player_x: int
     player_y: int
+    player_position_source: str
+    folded_trailer_x: int
+    folded_trailer_y: int
     source_offset_x: int
     source_offset_y: int
     evidence_tcp_stream: int
@@ -135,6 +138,11 @@ class ItemPickupLiveReplayPlan:
             "latest_player_position": {
                 "x": self.player_x,
                 "y": self.player_y,
+            },
+            "player_position_source": self.player_position_source,
+            "folded_trailer_position": {
+                "x": self.folded_trailer_x,
+                "y": self.folded_trailer_y,
             },
             "drop_position": {
                 "x": self.drop_spawn.position_x,
@@ -658,6 +666,28 @@ def _allocate_runtime_object_ids(
     raise ValueError("could not allocate collision-free runtime object ids")
 
 
+def _item_pickup_player_position(
+    analysis: GameplayAnalysis,
+) -> tuple[int, int, str]:
+    """Prefer the latest movement command endpoint for proximity admission."""
+    state = analysis.state
+    for observation in reversed(analysis.observations):
+        if (
+            observation.direction != "client_to_server"
+            or observation.opcode != 182
+            or observation.kind != "player_movement_submission"
+            or observation.details.get("field_epoch") != state.field_epoch
+        ):
+            continue
+        final_x = observation.details.get("final_x")
+        final_y = observation.details.get("final_y")
+        if type(final_x) is int and type(final_y) is int:
+            return final_x, final_y, "movement_command_final"
+    if state.player_x is None or state.player_y is None:
+        raise ValueError("live world state has no modeled player position")
+    return state.player_x, state.player_y, "folded_trailer_endpoint"
+
+
 def plan_item_pickup_live_replay(
     analysis: GameplayAnalysis,
     evidence_transcript: Transcript,
@@ -666,7 +696,7 @@ def plan_item_pickup_live_replay(
     item_id: int = 4_000_004,
     admission_index: int = 1,
 ) -> ItemPickupLiveReplayPlan:
-    """Retarget one admitted item-drop pair to the latest folded player position."""
+    """Retarget an admitted drop to the latest proximity-relevant position."""
     if not analysis.valid:
         raise ValueError("live world transcript failed packet/state validation")
     state = analysis.state
@@ -692,8 +722,11 @@ def plan_item_pickup_live_replay(
         or captured.drop_spawn.source_y is None
     ):
         raise ValueError("item-pickup evidence has no animated source position")
-    player_x = state.player_x
-    player_y = state.player_y
+    folded_trailer_x = state.player_x
+    folded_trailer_y = state.player_y
+    player_x, player_y, player_position_source = _item_pickup_player_position(
+        analysis
+    )
     if not -0x8000 <= player_x <= 0x7FFF or not -0x8000 <= player_y <= 0x7FFF:
         raise ValueError("latest player position exceeds int16 range")
     source_offset_x = (
@@ -781,6 +814,9 @@ def plan_item_pickup_live_replay(
         quantity_after=quantity_after,
         player_x=player_x,
         player_y=player_y,
+        player_position_source=player_position_source,
+        folded_trailer_x=folded_trailer_x,
+        folded_trailer_y=folded_trailer_y,
         source_offset_x=source_offset_x,
         source_offset_y=source_offset_y,
         evidence_tcp_stream=evidence_tcp_stream,
@@ -2239,7 +2275,13 @@ def render_item_pickup_live_replay(result: ItemPickupLiveReplayResult) -> str:
             (
                 "  placement: latest player position "
                 f"({plan['latest_player_position']['x']},"
-                f"{plan['latest_player_position']['y']})"
+                f"{plan['latest_player_position']['y']}) from "
+                f"{plan['player_position_source']}"
+            ),
+            (
+                "  folded trailer: "
+                f"({plan['folded_trailer_position']['x']},"
+                f"{plan['folded_trailer_position']['y']})"
             ),
             (
                 "  observed: "

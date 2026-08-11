@@ -3725,9 +3725,9 @@ def build_parser() -> argparse.ArgumentParser:
     live_item_pickup_parser = subparsers.add_parser(
         "inject-item-pickup",
         help=(
-            "retarget one capture-admitted item-drop pair to the latest folded "
-            "player position, send physical pickup input, serve the authentic "
-            "request, and verify the completed gameplay fold"
+            "retarget one capture-admitted item-drop pair to the latest "
+            "same-field movement-command position, send physical pickup input, "
+            "serve the authentic request, and verify the completed gameplay fold"
         ),
     )
     live_item_pickup_parser.add_argument(

@@ -2530,41 +2530,53 @@ retargeted it to the current player while preserving the offset, and sent the
 same controller release in 394.459 ms. No mob spawn, attack, health, leave,
 reward record, or fresh input preceded the first opcode-`185` request, which
 arrived in 1,584.485 ms; the fold consequently marks the source mob unknown.
-This establishes that the admitted pair plus the client's already-active
-pickup-action state is sufficient, while it does not claim the pair initiates
-pickup from a neutral input state. A reason-`1` cleanup interrupted that
-deliberately unanswered ten-attempt chain. Reinjecting the same pair produced
+This establishes that the admitted pair does not require the combat/reward
+prefix. A reason-`1` cleanup interrupted that deliberately unanswered
+ten-attempt chain. Reinjecting the same pair produced
 another request in 1,595.243 ms before the deliberately delayed new input and
 one `[39,49,312]` response changed `75 -> 76`. The aggregate live fold is
 warning-free with 76 raw requests, three admitted chains, 73 retries, two
 matched completions, one interruption, zero pending pickups, and 1,064/1,064
 heartbeats.
 
-A cold-client control then exercised the neutral-state boundary. The exact
-second admitted pair received a controller release 394.575 ms after spawn and
-capture-timed physical pickup input but generated no request. The first
+A cold-client control initially appeared to exercise a neutral-state boundary.
+The exact second admitted pair received a controller release 394.575 ms after
+spawn and capture-timed physical pickup input but generated no request. The first
 admitted combat/death/reward family was replayed next. A calibrated repeat
 delivered its first HP update 64.085 ms after the real opcode-`52` attack,
 released control 450.850 ms after spawn, and scheduled pickup input at the
 previously successful live drop age of 1,517.335 ms; it also generated no
 opcode `185` or `222`. After removing the injected object, the fresh fold is
 active, valid, and warning-free with zero pickup requests/chains/pending work,
-one baseline field-load drop, and 180/180 heartbeats. Exact admitted bytes plus
-matching release timing and near-reference combat-response timing are not
-sufficient to initialize admission from a neutral client session.
+one baseline field-load drop, and 180/180 heartbeats. A later coordinate audit
+showed that these controls used the global folded trailer `(633,-2677)` rather
+than the same movement record's final absolute command `(633,-2693)`, so the
+negative result is not evidence of a missing client-side admission state.
 
-The typed live injector now prevents another experimental ambiguity: it reads
-`player_x/player_y` from the latest valid fold immediately before injection,
-retargets both opcode-`311` records and their animated source offset, allocates
-new drop/source ids, reproduces the 398.819-ms release and 1,591.279-ms input
-schedule, and waits for the matching aliased request before sending
-`[39,49,312]`. The primed live client had moved to `(675,-2693)` while earlier
-manual probes still used `(633,-2677)`; latest-position injection produced
-opcode `185` after 1,607.298 ms and completed `75 -> 76`. On a second fresh
-client with no post-bootstrap key-map action, two latest-position attempts at
-`(633,-2677)` still produced no request and were removed by reason-`1`
-cleanup. Thus stale placement weakened the earlier comparison, but it was not
-the missing neutral-to-admitted transition.
+The typed live injector now prevents that ambiguity. It scans backward for the
+latest same-field client opcode-`182` observation and retargets both
+opcode-`311` records to its last absolute command `final_x/final_y`, while
+preserving the global folded trailer as fallback and exposing both positions in
+safe output. It retains the animated-source offset, allocates new drop/source
+ids, reproduces the 398.819-ms release and 1,591.279-ms input schedule, and
+waits for the matching aliased request before sending `[39,49,312]`.
+
+The selector is capture-supported rather than specific to one live failure.
+Across 54 stream-`92` pickup requests, the preceding movement command-final
+has mean absolute X/Y deltas `35.815/6.296`, maxima `140/28`, and three exact
+matches; the trailer has `77.093/12.167`, maxima `229/39`, and no exact match.
+Across 197 stream-`126` requests, command-final has mean deltas
+`28.695/3.249`, maxima `120/69`, and 17 exact matches, versus trailer
+`41.878/5.756`, maxima `240/79`, and 13 exact matches.
+
+The primed live client had moved to `(675,-2693)` while earlier probes still
+used `(633,-2677)`; the first live-fold injection produced opcode `185` after
+1,607.298 ms and completed `75 -> 76`. The decisive control used another
+untouched client whose sole opcode-`182` record reported command-final
+`(633,-2693)` and trailer `(633,-2677)`. With no movement, key-map, or skill
+preflight, command-final placement produced authentic opcode `185` after
+1,572.761 ms at request position `(633,-2694)` and completed `74 -> 75`. The
+suspected readiness transition was therefore a coordinate-source bug.
 
 ## Item pickup (`client 185/222` -> `server 39/41`, `server 49`, `server 312`)
 
@@ -3404,10 +3416,13 @@ Stream `92` contains 531 client submissions with 3,606 commands
 (`0:646, 1:18, 3:4, 5:7`). All 644 packets and 4,281 commands round-trip
 byte-for-byte. All client control values are zero in that stream; the two
 stream-`114` broadcasts demonstrate values zero and one, so the field remains
-neutrally named. The fold uses the client trailer endpoint for local position
-and the last absolute command for each observed remote player, emitting typed
-events for both directions. Stream `114` ends at local path endpoint
-`(633,-2677)` with two identifier-safe remote-player aliases.
+neutrally named. The fold uses the client trailer endpoint for general local
+position and the last absolute command for each observed remote player,
+emitting typed events for both directions. Proximity-sensitive live pickup
+placement is deliberately narrower: it prefers the latest same-field client
+command-final coordinate and falls back to the trailer only when no such
+observation exists. Stream `114` ends at local path endpoint `(633,-2677)` with
+two identifier-safe remote-player aliases.
 
 ## Life movement relay (`client 47`, `server 217`)
 

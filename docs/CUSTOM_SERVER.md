@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 291 tests.
+The last run passed all 292 tests.
 
 ## Inspect and compare captures
 
@@ -1491,14 +1491,12 @@ official pair has source offset `(+10,-3)`, controller release at 398.819 ms,
 and request at 1,591.279 ms. The live control sent only that pair at the player
 and its release at 394.459 ms. It deliberately omitted source-mob entry,
 attack, HP, leave, and reward packets, and the fold marked the referenced mob
-unknown. Even before any fresh key input, the client's pickup-action state
-emitted opcode `185` in 1,584.485 ms and then every three seconds. A reason-`1`
-cleanup closed the intentionally unanswered ten-attempt chain. The same pair
+unknown. Even before any fresh key input, the client emitted opcode `185` in
+1,584.485 ms and then every three seconds. A reason-`1` cleanup closed the
+intentionally unanswered ten-attempt chain. The same pair
 was then reinjected and requested in 1,595.243 ms, again before the delayed
 fresh input; one guarded response changed `75 -> 76` and removed it. This
-proves the admitted pair and an already-active pickup action do not need the
-combat/reward prefix, but does not yet prove the pair initiates pickup from a
-fresh neutral input state.
+proves the admitted pair does not need the combat/reward prefix.
 
 The next control started a new client and world connection, re-entered map
 `101000000`, and established an active zero-request baseline. The exact second
@@ -1511,19 +1509,21 @@ controller 450.850 ms after the pair, and scheduled pickup input at the prior
 positive live age of 1,517.335 ms. No opcode `185` or `222` followed. After
 reason-`1` cleanup, the fresh transcript remains active, valid, and
 warning-free with zero pickup requests/chains/pending work, one baseline
-field-load drop, and 180/180 heartbeat pairs. Pair/release timing and
-near-reference combat-response timing therefore do not initialize admission
-from neutral state by themselves; the earlier drop-only success relied on
-pickup-action state already active in that session.
+field-load drop, and 180/180 heartbeat pairs. A later coordinate audit showed
+that these negative controls used the global folded movement trailer
+`(633,-2677)` rather than the same client record's final absolute movement
+command `(633,-2693)`; they do not establish a hidden admission state.
 
 The reusable `inject-item-pickup` command now performs this experiment from
 the live fold instead of a hand-copied position. It derives the selected
-admitted chain from an evidence PCAP, places the pair at the latest player
-coordinates, preserves its source offset and release/input timing, sends a
-physical key through the nested Wayland seat, and refuses to serve
-`[39,49,312]` until the transcript contains a matching authentic opcode `185`
-or `222`. Success verifies the exact stack delta and unchanged field/player/
-progression state; failure removes the injected drop.
+admitted chain from an evidence PCAP, places the pair at the latest same-field
+client movement command's `final_x/final_y`, preserves its source offset and
+release/input timing, sends a physical key through the nested Wayland seat,
+and refuses to serve `[39,49,312]` until the transcript contains a matching
+authentic opcode `185` or `222`. Success verifies the exact stack delta and
+unchanged field/player/progression state; failure removes the injected drop.
+The safe plan also reports the folded trailer coordinate and uses it as
+fallback only when no same-epoch movement observation exists.
 
 ```sh
 sudo ip netns exec mapleproxy sudo -u sdancer env \
@@ -1538,15 +1538,20 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
   --verify-timeout-seconds 10 --json
 ```
 
-This exposed one genuine stale-position confound without closing the neutral
-state question. In the active transcript, the folded player had moved from
-`(633,-2677)` to `(675,-2693)`; the command used the latter position, observed
-opcode `185` after 1,607.298 ms, and completed Etc slot `7` `75 -> 76`. A
-newly connected client with no post-bootstrap key-map action then ran the same
-latest-position command twice at `(633,-2677)`. Neither attempt emitted
-opcode `185`/`222`, and both reason-`1` cleanups left the fold valid with no
-pending pickup. Position freshness is now enforced, while an additional
-client-side readiness transition remains unmodeled.
+This exposed a coordinate-source confound. In the active transcript, the
+folded trailer had moved from `(633,-2677)` to `(675,-2693)`; using the latter
+produced opcode `185` after 1,607.298 ms and completed Etc slot `7` `75 -> 76`.
+The next fresh failures still used trailer `(633,-2677)`. On a separate
+untouched client, the sole opcode-`182` movement record contained final command
+`(633,-2693)` and trailer `(633,-2677)`. With no movement, key-map, or skill
+preflight, the corrected command used command-final, observed authentic opcode
+`185` after 1,572.761 ms at `(633,-2694)`, and completed `74 -> 75`. The
+suspected readiness boundary was therefore a placement bug.
+
+The decisive fresh proof is recorded in
+`downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786477769036931470_replay_12857.jsonl`;
+its paired login transcript is
+`downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/login/1786477737308800256_replay_12082.jsonl`.
 
 Two reusable PCAP transforms encode those bounded rewrites.
 `?character-stat=FIELD:VALUE` accepts only an opcode-`41` packet whose sole

@@ -21,6 +21,7 @@ from maple_server.gameplay import (  # noqa: E402
 from maple_server.live_replay import (  # noqa: E402
     DEFAULT_PACKET_API_URL,
     _CapturedItemPickupAdmission,
+    _item_pickup_player_position,
     inject_current_hp_live,
     inject_item_pickup_live,
     inject_skill_record_live,
@@ -226,7 +227,9 @@ class LiveReplayTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not present"):
             plan_skill_record_update_live(analysis, skill_id=9_999_999)
 
-    def test_item_pickup_plan_uses_latest_player_position(self) -> None:
+    def test_item_pickup_plan_prefers_latest_movement_command_position(
+        self,
+    ) -> None:
         captured_drop = FieldDropSpawn(
             spawn_mode=1,
             drop_object_id=1234,
@@ -264,6 +267,7 @@ class LiveReplayTest(unittest.TestCase):
             phase=GameplayPhase.ACTIVE,
             pending_item_pickups=0,
             pending_item_use_requests=0,
+            field_epoch=1,
             player_x=675,
             player_y=-2693,
             entry_character_id=42,
@@ -285,7 +289,23 @@ class LiveReplayTest(unittest.TestCase):
             field_drops={},
             positioned_effect_entities={},
         )
-        analysis = SimpleNamespace(valid=True, state=plan_state)
+        movement_observation = SimpleNamespace(
+            direction="client_to_server",
+            opcode=182,
+            kind="player_movement_submission",
+            details={
+                "field_epoch": 1,
+                "final_x": 676,
+                "final_y": -2695,
+                "path_end_x": 675,
+                "path_end_y": -2693,
+            },
+        )
+        analysis = SimpleNamespace(
+            valid=True,
+            state=plan_state,
+            observations=(movement_observation,),
+        )
 
         with patch(
             "maple_server.live_replay._captured_item_pickup_admission",
@@ -298,14 +318,22 @@ class LiveReplayTest(unittest.TestCase):
             )
 
         report = plan.safe_dict()
-        self.assertEqual(report["latest_player_position"], {"x": 675, "y": -2693})
-        self.assertEqual(report["drop_position"], {"x": 675, "y": -2693})
+        self.assertEqual(
+            report["latest_player_position"],
+            {"x": 676, "y": -2695},
+        )
+        self.assertEqual(report["drop_position"], {"x": 676, "y": -2695})
+        self.assertEqual(report["player_position_source"], "movement_command_final")
+        self.assertEqual(
+            report["folded_trailer_position"],
+            {"x": 675, "y": -2693},
+        )
         self.assertEqual(
             report["animated_source_offset"],
             {"x": 10, "y": -3},
         )
-        self.assertEqual(plan.drop_spawn.source_x, 685)
-        self.assertEqual(plan.drop_spawn.source_y, -2696)
+        self.assertEqual(plan.drop_spawn.source_x, 686)
+        self.assertEqual(plan.drop_spawn.source_y, -2698)
         self.assertEqual(plan.drop_spawn.owner_value_1, 42)
         self.assertEqual(plan.drop_spawn.owner_value_2, 42)
         self.assertEqual(
@@ -321,6 +349,32 @@ class LiveReplayTest(unittest.TestCase):
                 for packet in plan.response_packets(185)
             ],
             [39, 49, 312],
+        )
+
+    def test_item_pickup_position_falls_back_to_folded_trailer(self) -> None:
+        analysis = SimpleNamespace(
+            state=SimpleNamespace(
+                field_epoch=2,
+                player_x=10,
+                player_y=20,
+            ),
+            observations=(
+                SimpleNamespace(
+                    direction="client_to_server",
+                    opcode=182,
+                    kind="player_movement_submission",
+                    details={
+                        "field_epoch": 1,
+                        "final_x": 30,
+                        "final_y": 40,
+                    },
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            _item_pickup_player_position(analysis),
+            (10, 20, "folded_trailer_endpoint"),
         )
 
     def test_item_pickup_timeout_removes_the_injected_drop(self) -> None:
