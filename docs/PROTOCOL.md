@@ -3682,13 +3682,27 @@ Python and isolated native validation consume and re-emit all 219 records
 exactly. Promoting the family to full coverage moves stream `126` to
 `26,810/44,290/0/0` and stream `92` to `13,493/21,714/0/0`.
 
-The active local client supplies an independent no-response control. At the
-validation checkpoint it had automatically emitted 178 HP-`10` and 274 MP-`5`
-requests alongside the visible recovery cadence. The custom replay does not
-serve opcode-`41` recovery updates, so all 452 stay explicitly pending without
+An earlier active local run supplies an independent no-response control. At
+that checkpoint it had automatically emitted 178 HP-`10` and 274 MP-`5`
+requests alongside the visible recovery cadence. Because that replay did not
+serve opcode-`41` recovery updates, all 452 stay explicitly pending without
 being treated as malformed. The same cadence was already running before the
 controlled keypad-zero/action-`52` input; neither the packets nor the blue
 recovery number are evidence for that still-unnamed action.
+
+The opt-in `--reactive-client-recovery-responses` policy derives current/max HP
+and MP from a validated world transcript. For each exact opcode-`101` request
+it emits one typed opcode-`41` current-stat update whose value is
+`min(maximum, current + requested)`. It cannot share opcode `101` with a
+captured-reply rule. Runtime/HTTP telemetry reports source correlation counts,
+observed/served/packet totals, the last safe response, and mutable HP/MP state.
+
+A fresh browser-free stream-`114` login validated the generated direction and
+cap behavior against the real client. The server served `39/39` requests with
+one opcode-`41` response each; the independently folded live transcript has
+`38` exact increments, one capped HP `220 -> 222` increment, zero pending
+requests, no issues or warnings, and phase `active` on map `101000000`. The HUD
+reached HP `222/222`, while heartbeat status remained matched at `42/42`.
 
 The fold emits full `client_recovery_request` observations, HP/MP amount
 distributions, authoritative stat-update matches, exact/capped/unverified

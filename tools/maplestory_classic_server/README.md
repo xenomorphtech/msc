@@ -438,6 +438,34 @@ the intentionally unsupported last-item boundary. The transcript folds validly
 without warnings, with one explicit rejection, no pending item uses, and 90/90
 heartbeats.
 
+`--reactive-client-recovery-responses` answers the client's automatic
+opcode-`101` HP/MP recovery requests during hold-open. The policy derives the
+current and maximum HP/MP values from the validated replay, adds the requested
+amount with maximum-stat capping, and emits one typed opcode-`41` update. It
+requires `--keep-world-open` and a positive hold duration and cannot be
+combined with a captured opcode-`101` reply:
+
+```sh
+python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --no-strict \
+  --pcap /path/to/reference.pcapng \
+  --tcp-stream 114 \
+  --keep-world-open \
+  --reactive-client-recovery-responses \
+  --world-heartbeat-interval-seconds 5 \
+  --hold-open-seconds 300
+```
+
+With `--transcript-dir`, the responder records bounded request/completion
+events. A fresh browser-free stream-`114` login served `39/39` natural
+requests with one opcode-`41` packet each. The independent fold matched `38`
+exact increments plus the live HP `220 -> 222` cap, left zero pending requests,
+and stayed warning-free and active with `42/42` heartbeats. HTTP status exposes
+the source evidence, observed/served/packet counts, last response, and mutable
+identifier-free HP/MP state under `protocol.client_recovery_responses`.
+
 `--rewrite-final-field-drop-position X:Y` changes only the typed position in
 the final field's sole active mode-`2` item-drop packet.
 `--rewrite-final-field-drop-owner-to-player` independently rewrites only its
@@ -1506,10 +1534,12 @@ non-zero. Stream `126` has 33 HP-`10` and 113 MP-`3` requests. All `146/146`
 match following same-field opcode-`41` updates: `136` exact, `6` max-HP
 capped, and `4` before a prior baseline is known. Stream `92` has seven HP-`10`
 and 66 MP-`5` requests, all `73/73` exact. Neither reference leaves a request
-pending. The active local client independently emits HP-`10`/MP-`5` on its
-automatic recovery cadence; the custom replay serves no stat response, so
-those remain explicitly pending without a warning. Python/native codecs exact-
-consume all 219 reference requests at full coverage.
+pending. An earlier active local control independently emitted HP-`10`/MP-`5`
+without a server response, leaving those requests explicitly pending without a
+warning. The current opt-in responder serves the same cadence with typed
+opcode-`41` updates; its fresh live proof matched `39/39` requests (`38` exact,
+one capped) and left none pending. Python/native codecs exact-consume all 219
+reference requests at full coverage.
 
 Client opcodes `50`, `52`, and `54` are a capture-correlated attack-action
 family. Stream `126` contains 552 opcode-`50`, 130 opcode-`52`, and 120
@@ -1731,6 +1761,10 @@ When reactive item-use responses are enabled, `protocol.item_use_responses`
 reports modeled potion slots and stats, observed/served/rejected request
 counts, response packet count, last response, and the current predicted
 inventory/stat state.
+When reactive client-recovery responses are enabled,
+`protocol.client_recovery_responses` reports the capture evidence, modeled
+HP/MP bounds, observed/served request counts, response packet count, last
+response, and current maximum-capped stat state.
 When the final drop position is rewritten,
 `protocol.final_field_drop_position_rewrite` reports its alias/template,
 original and rewritten coordinates, field epoch, server-frame index, patch
@@ -2238,3 +2272,7 @@ preserve distinct Unity scan codes in this setup.
     fields, correlate all `219/219` reference requests with authoritative
     opcode-`41` stat updates, distinguish exact/capped/baseline-unverified
     effects, and keep active no-response requests visible but non-warning.
+96. Add an opt-in opcode-`101` recovery responder derived from validated replay
+    HP/MP bounds, publish safe HTTP/runtime telemetry, and validate a fresh
+    local login with `39/39` responses, one live HP cap, zero pending requests,
+    and `42/42` heartbeats.

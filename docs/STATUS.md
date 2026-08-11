@@ -612,8 +612,15 @@
   Stream `92` contains seven HP-`10` and 66 MP-`5` requests, all `73/73` exact.
   No reference request remains pending. Full coverage is now
   `26,810/44,290/0/0` for stream `126` and `13,493/21,714/0/0` for stream `92`.
-  At the active no-response checkpoint, 178 HP-`10` and 274 MP-`5` requests
-  remain explicitly pending without adding a warning.
+  At the earlier no-response checkpoint, 178 HP-`10` and 274 MP-`5` requests
+  remain explicitly pending without adding a warning. The current opt-in
+  responder derives the validated replay's HP/MP bounds and emits one typed
+  opcode-`41` update per request with maximum-stat capping. A fresh local
+  login/world proof served `39/39` requests; its independent fold matched `38`
+  exact increments plus one capped HP `220 -> 222` update, left zero pending,
+  and remained active with `42/42` matched heartbeats. HTTP/runtime status
+  exposes only source evidence, counters, the last safe response, and mutable
+  identifier-free HP/MP state.
 - Client opcodes `50`/`52`/`54` now fold as one attack-action family. Stream
   `126` contributes 552/130/120 packets and stream `92` contributes 0/128/31.
   Extended `50`/`52` variants and every opcode-`54` action carry a mob object

@@ -23,6 +23,7 @@ from .gamestate import (
 from .gameplay import (
     MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     MAX_PLAYER_MOB_PROXIMITY_RADIUS,
+    ClientRecoveryResponsePolicy,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
@@ -35,6 +36,7 @@ from .gameplay import (
     PlayerMobProximityPredicate,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
+    derive_client_recovery_response_policy,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_health_response_policy,
@@ -73,6 +75,7 @@ from .packets import (
     ChannelTransitionResponse,
     CharacterListEnvelope,
     CharacterStatUpdate,
+    ClientRecoveryRequest,
     ClientAttackAction,
     FieldDropSpawn,
     HeartbeatProbe,
@@ -429,6 +432,9 @@ async def replay_connection(
     mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
     item_use_response_policy: ItemUseResponsePolicy | None = None,
+    client_recovery_response_policy: (
+        ClientRecoveryResponsePolicy | None
+    ) = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
     ) = None,
@@ -463,6 +469,11 @@ async def replay_connection(
     if item_use_response_policy is not None and hold_open_seconds <= 0:
         raise ValueError(
             "reactive item-use responses require a positive hold_open_seconds"
+        )
+    if client_recovery_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive client-recovery responses require a positive "
+            "hold_open_seconds"
         )
     if item_pickup_response_policy is not None and hold_open_seconds <= 0:
         raise ValueError(
@@ -625,6 +636,13 @@ async def replay_connection(
             "client opcode 80 cannot use both captured and modeled replies"
         )
     if (
+        client_recovery_response_policy is not None
+        and 101 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 101 cannot use both captured and modeled replies"
+        )
+    if (
         item_pickup_response_policy is not None
         and any(
             opcode in (client_opcode_replies or {}) for opcode in (185, 222)
@@ -771,6 +789,17 @@ async def replay_connection(
     )
     if item_use_metrics is not None and not isinstance(item_use_metrics, dict):
         raise TypeError("runtime item_use_responses telemetry must be a dictionary")
+    client_recovery_metrics = (
+        runtime_protocol.get("client_recovery_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if client_recovery_metrics is not None and not isinstance(
+        client_recovery_metrics, dict
+    ):
+        raise TypeError(
+            "runtime client_recovery_responses telemetry must be a dictionary"
+        )
     item_pickup_metrics = (
         runtime_protocol.get("item_pickup_responses")
         if runtime_protocol is not None
@@ -865,6 +894,7 @@ async def replay_connection(
             or world_heartbeat_interval_seconds is not None
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
+            or client_recovery_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
             or player_proximity_predicate is not None
@@ -958,6 +988,9 @@ async def replay_connection(
                 ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
+                ),
+                "reactive_client_recovery_responses": (
+                    client_recovery_response_policy is not None
                 ),
                 "reactive_mob_movement_acknowledgements": (
                     mob_movement_acknowledgement_policy is not None
@@ -1074,6 +1107,7 @@ async def replay_connection(
             or world_heartbeat_interval_seconds is not None
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
+            or client_recovery_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
             or (
@@ -1115,6 +1149,12 @@ async def replay_connection(
                 if item_use_metrics is not None:
                     item_use_metrics["state"] = (
                         item_use_response_policy.safe_dict()
+                    )
+            if client_recovery_response_policy is not None:
+                client_recovery_response_policy.apply_server_packet(plaintext)
+                if client_recovery_metrics is not None:
+                    client_recovery_metrics["state"] = (
+                        client_recovery_response_policy.safe_dict()
                     )
             if mob_health_response_policy is not None:
                 mob_health_response_policy.apply_server_packet(plaintext)
@@ -1698,6 +1738,10 @@ async def replay_connection(
                             item_use_response_policy.apply_server_packet(
                                 plaintext
                             )
+                        if client_recovery_response_policy is not None:
+                            client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
                     if item_pickup_metrics is not None:
                         item_pickup_metrics["requests_served"] = (
                             int(
@@ -1766,6 +1810,10 @@ async def replay_connection(
                             item_pickup_response_policy.apply_server_packet(
                                 plaintext
                             )
+                        if client_recovery_response_policy is not None:
+                            client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
                     if item_use_metrics is not None:
                         item_use_metrics["requests_served"] = (
                             int(item_use_metrics.get("requests_served", 0)) + 1
@@ -1786,6 +1834,60 @@ async def replay_connection(
                         )
                     record_runtime_event(
                         "item_use_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode == 101
+                    and client_recovery_response_policy is not None
+                ):
+                    request = ClientRecoveryRequest.parse(client_plaintext)
+                    if client_recovery_metrics is not None:
+                        client_recovery_metrics["requests_observed"] = (
+                            int(
+                                client_recovery_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "client_recovery_request_observed",
+                        request.safe_dict(),
+                    )
+                    response_plan = client_recovery_response_policy.respond(
+                        request
+                    )
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if client_recovery_metrics is not None:
+                        client_recovery_metrics["requests_served"] = (
+                            int(
+                                client_recovery_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        client_recovery_metrics["response_packets_sent"] = (
+                            int(
+                                client_recovery_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        client_recovery_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        client_recovery_metrics["state"] = (
+                            client_recovery_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "client_recovery_response_completed",
                         response_plan.safe_dict(),
                     )
                 if (
@@ -3315,6 +3417,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reactive-client-recovery-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer validated opcode-101 natural HP/MP "
+            "recovery requests with a typed, maximum-capped opcode-41 stat "
+            "update; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--reactive-item-pickup-responses",
         action="store_true",
         help=(
@@ -4189,6 +4300,23 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "last_response": None,
                 "last_rejection": None,
             }
+        client_recovery_response_policy = None
+        if arguments.reactive_client_recovery_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-client-recovery-responses requires "
+                    "--keep-world-open"
+                )
+            client_recovery_response_policy = (
+                derive_client_recovery_response_policy(transcript)
+            )
+            runtime_protocol["client_recovery_responses"] = {
+                **client_recovery_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+            }
         if (
             arguments.item_pickup_evidence_transcript is not None
             or arguments.item_pickup_evidence_tcp_stream is not None
@@ -4967,6 +5095,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             item_pickup_response_policy=item_pickup_response_policy,
             item_use_response_policy=item_use_response_policy,
+            client_recovery_response_policy=(
+                client_recovery_response_policy
+            ),
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
             ),
@@ -5012,6 +5143,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "reactive_item_use_responses": (
                 arguments.reactive_item_use_responses
+            ),
+            "reactive_client_recovery_responses": (
+                arguments.reactive_client_recovery_responses
             ),
             "reactive_item_pickup_responses": (
                 arguments.reactive_item_pickup_responses

@@ -1838,6 +1838,122 @@ class ItemUseResponsePolicy:
 
 
 @dataclass(frozen=True)
+class ClientRecoveryResponsePlan:
+    request: ClientRecoveryRequest
+    stat_update: CharacterStatUpdate = field(repr=False)
+    stat_name: str
+    value_before: int
+    value_after: int
+    maximum_value: int
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.stat_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "value_before": self.value_before,
+            "value_after": self.value_after,
+            "maximum_value": self.maximum_value,
+            "actual_increment": self.value_after - self.value_before,
+            "maximum_cap_applied": (
+                self.value_after - self.value_before
+                < self.request.recovery_amount
+            ),
+            "server_opcodes": [self.stat_update.opcode],
+        }
+
+
+@dataclass
+class ClientRecoveryResponsePolicy:
+    current_hp: int
+    max_hp: int
+    current_mp: int
+    max_mp: int
+    field_epoch: int
+    source_requests: int = 0
+    source_stat_update_matches: int = 0
+    source_exact_amount_matches: int = 0
+    source_capped_amount_matches: int = 0
+    source_unverified_amount_matches: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "current_hp": self.current_hp,
+            "max_hp": self.max_hp,
+            "current_mp": self.current_mp,
+            "max_mp": self.max_mp,
+            "source_evidence": {
+                "requests": self.source_requests,
+                "stat_update_matches": self.source_stat_update_matches,
+                "exact_amount_matches": self.source_exact_amount_matches,
+                "capped_amount_matches": self.source_capped_amount_matches,
+                "unverified_amount_matches": (
+                    self.source_unverified_amount_matches
+                ),
+            },
+            "prediction": {
+                "server_opcodes": [41],
+                "stat_effect": "requested_increment_with_maximum_cap",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 41:
+            return
+        update = CharacterStatUpdate.parse(plaintext)
+        for field_name, value in update.values.items():
+            if field_name in {
+                "current_hp",
+                "max_hp",
+                "current_mp",
+                "max_mp",
+            }:
+                setattr(self, field_name, value)
+
+    def respond(
+        self, request: ClientRecoveryRequest
+    ) -> ClientRecoveryResponsePlan:
+        stat_name = request.stat_name
+        maximum_name = "max_hp" if stat_name == "current_hp" else "max_mp"
+        value_before = getattr(self, stat_name)
+        maximum_value = getattr(self, maximum_name)
+        if value_before > maximum_value:
+            raise ValueError(
+                f"client-recovery {stat_name} {value_before} exceeds "
+                f"modeled maximum {maximum_value}"
+            )
+        value_after = min(
+            maximum_value,
+            value_before + request.recovery_amount,
+        )
+        stat_mask = (
+            CharacterStatUpdate.CURRENT_HP
+            if stat_name == "current_hp"
+            else CharacterStatUpdate.CURRENT_MP
+        )
+        stat_update = CharacterStatUpdate(
+            request_flag=1,
+            stat_mask=stat_mask,
+            **{stat_name: value_after},
+        )
+        plan = ClientRecoveryResponsePlan(
+            request=request,
+            stat_update=stat_update,
+            stat_name=stat_name,
+            value_before=value_before,
+            value_after=value_after,
+            maximum_value=maximum_value,
+        )
+        self.apply_server_packet(stat_update.to_bytes())
+        return plan
+
+
+@dataclass(frozen=True)
 class ItemPickupResponsePlan:
     request: ItemPickupRequest = field(repr=False)
     drop_alias: str
@@ -11568,6 +11684,49 @@ def derive_item_use_response_policy(
         source_item_use_requests=state.item_use_requests,
         source_inventory_matches=state.item_use_inventory_matches,
         source_effect_matches=state.item_use_effect_matches,
+    )
+
+
+def derive_client_recovery_response_policy(
+    transcript: Transcript,
+) -> ClientRecoveryResponsePolicy:
+    """Build mutable natural-recovery state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_client_recovery_requests:
+        raise ValueError(
+            "world transcript has unresolved client-recovery correlations"
+        )
+    stats = (state.current_hp, state.max_hp, state.current_mp, state.max_mp)
+    if any(value is None for value in stats):
+        raise ValueError("world transcript has incomplete HP/MP state")
+    current_hp, max_hp, current_mp, max_mp = stats
+    assert current_hp is not None
+    assert max_hp is not None
+    assert current_mp is not None
+    assert max_mp is not None
+    return ClientRecoveryResponsePolicy(
+        current_hp=current_hp,
+        max_hp=max_hp,
+        current_mp=current_mp,
+        max_mp=max_mp,
+        field_epoch=state.field_epoch,
+        source_requests=state.client_recovery_requests,
+        source_stat_update_matches=(
+            state.client_recovery_stat_update_matches
+        ),
+        source_exact_amount_matches=(
+            state.client_recovery_exact_amount_matches
+        ),
+        source_capped_amount_matches=(
+            state.client_recovery_capped_amount_matches
+        ),
+        source_unverified_amount_matches=(
+            state.client_recovery_unverified_amount_matches
+        ),
     )
 
 

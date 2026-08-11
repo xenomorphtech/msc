@@ -1424,6 +1424,37 @@ The frozen transcript
 folds validly with no issues or warnings: two requests, one inventory/effect
 match, one policy rejection, zero pending requests, and 90/90 heartbeat pairs.
 
+## Reactive natural-recovery validation
+
+`--reactive-client-recovery-responses` turns the fully correlated client
+opcode-`101` family into a bounded custom-server behavior. The policy derives
+current/max HP and MP from the validated world replay, applies the requested
+HP or MP amount with maximum-stat capping, and sends one typed opcode-`41`
+update. It is opt-in, requires `--keep-world-open`, and is mutually exclusive
+with a captured reply for client opcode `101`.
+
+The live world command adds only:
+
+```text
+--reactive-client-recovery-responses
+```
+
+HTTP status publishes the source evidence and prediction plus
+observed/served/packet counters, the last identifier-free response, and mutable
+HP/MP state at `protocol.client_recovery_responses`. Bounded transcript events
+name each request and completed response without exposing packet bytes.
+
+For the fresh browser-free proof, the local launcher traversed world, channel,
+and character selection and re-entered map `101000000` through the unchanged
+login replay. The world listener served `39/39` automatic HP-`10`/MP-`5`
+requests with one opcode-`41` packet each. The independently decoded live
+transcript
+`downloads/maple_custom_server_observed/client_recovery_live_20260811/world/1786487078285137941_replay_12857.jsonl`
+folded validly and warning-free with `38` exact increments, one capped HP
+`220 -> 222` response, and zero pending requests. The HUD reached HP `222/222`,
+the client remained active, and runtime status had `42/42` heartbeat responses
+with no failed connection.
+
 ## Pickup request/effect validation
 
 The gameplay analyzer now decodes the complete capture-observed pickup chain:
@@ -2390,8 +2421,10 @@ project's own `README.md` for all options.
 - Client opcode `101` now folds all 219 sustained-capture packets as full
   HP/MP recovery requests. Stream `126` matches all `146/146` authoritative
   stat updates (`136` exact, `6` capped, `4` baseline-unverified), and stream
-  `92` matches all `73/73` exactly. The active no-response replay independently
-  emits HP-`10`/MP-`5`; those requests remain pending without a warning.
+  `92` matches all `73/73` exactly. The earlier no-response control retains its
+  pending HP-`10`/MP-`5` requests without a warning. The current opt-in
+  responder served `39/39` live requests, including one HP cap, with zero
+  pending and `42/42` matched heartbeats.
 - Client opcodes `50`/`52`/`54` now fold 961 sustained-capture attack actions
   with aliased mob targets where present; server opcodes `218`/`219` fold 183
   attack relays with packed target/hit counts, 194 typed target records, and

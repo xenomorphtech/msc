@@ -22,6 +22,7 @@ from maple_server.gameplay import (  # noqa: E402
     PlayerMobProximityPredicate,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
+    derive_client_recovery_response_policy,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
@@ -8090,51 +8091,50 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
 
     def test_correlates_client_recovery_with_stat_updates(self) -> None:
-        analysis = analyze_gameplay_transcript(
-            fixture_gameplay_transcript(
-                initial_snapshot=True,
-                extra_directional_plaintexts=(
-                    (
-                        "server_to_client",
-                        CharacterStatUpdate(
-                            request_flag=0,
-                            stat_mask=CharacterStatUpdate.CURRENT_HP,
-                            current_hp=218,
-                        ).to_bytes(),
-                    ),
-                    (
-                        "client_to_server",
-                        ClientRecoveryRequest(
-                            hp_recovery=10,
-                            mp_recovery=0,
-                        ).to_bytes(),
-                    ),
-                    (
-                        "server_to_client",
-                        CharacterStatUpdate(
-                            request_flag=0,
-                            stat_mask=CharacterStatUpdate.CURRENT_HP,
-                            current_hp=222,
-                        ).to_bytes(),
-                    ),
-                    (
-                        "client_to_server",
-                        ClientRecoveryRequest(
-                            hp_recovery=0,
-                            mp_recovery=3,
-                        ).to_bytes(),
-                    ),
-                    (
-                        "server_to_client",
-                        CharacterStatUpdate(
-                            request_flag=0,
-                            stat_mask=CharacterStatUpdate.CURRENT_MP,
-                            current_mp=139,
-                        ).to_bytes(),
-                    ),
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_directional_plaintexts=(
+                (
+                    "server_to_client",
+                    CharacterStatUpdate(
+                        request_flag=0,
+                        stat_mask=CharacterStatUpdate.CURRENT_HP,
+                        current_hp=218,
+                    ).to_bytes(),
                 ),
-            )
+                (
+                    "client_to_server",
+                    ClientRecoveryRequest(
+                        hp_recovery=10,
+                        mp_recovery=0,
+                    ).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    CharacterStatUpdate(
+                        request_flag=0,
+                        stat_mask=CharacterStatUpdate.CURRENT_HP,
+                        current_hp=222,
+                    ).to_bytes(),
+                ),
+                (
+                    "client_to_server",
+                    ClientRecoveryRequest(
+                        hp_recovery=0,
+                        mp_recovery=3,
+                    ).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    CharacterStatUpdate(
+                        request_flag=0,
+                        stat_mask=CharacterStatUpdate.CURRENT_MP,
+                        current_mp=139,
+                    ).to_bytes(),
+                ),
+            ),
         )
+        analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(analysis.warnings, ())
@@ -8179,6 +8179,27 @@ class GameplayStateFoldTest(unittest.TestCase):
             [response["amount_match"] for response in responses],
             ["capped", "exact"],
         )
+        policy = derive_client_recovery_response_policy(transcript)
+        mp_response = policy.respond(
+            ClientRecoveryRequest(hp_recovery=0, mp_recovery=3)
+        )
+        self.assertEqual(mp_response.stat_name, "current_mp")
+        self.assertEqual(mp_response.value_before, 139)
+        self.assertEqual(mp_response.value_after, 142)
+        self.assertFalse(mp_response.safe_dict()["maximum_cap_applied"])
+        self.assertEqual(
+            CharacterStatUpdate.parse(mp_response.plaintexts[0]).current_mp,
+            142,
+        )
+        hp_response = policy.respond(
+            ClientRecoveryRequest(hp_recovery=10, mp_recovery=0)
+        )
+        self.assertEqual(hp_response.value_before, 222)
+        self.assertEqual(hp_response.value_after, 222)
+        self.assertTrue(hp_response.safe_dict()["maximum_cap_applied"])
+        self.assertEqual(policy.current_hp, 222)
+        self.assertEqual(policy.current_mp, 142)
+        self.assertEqual(policy.safe_dict()["source_evidence"]["requests"], 2)
 
     def test_folds_inventory_changes_into_item_state(self) -> None:
         analysis = analyze_gameplay_transcript(
