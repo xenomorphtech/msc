@@ -2963,7 +2963,7 @@ The capture-validated prefix and conditional-value grammar is:
 
 ```text
 uint16 opcode = 41
-uint8  request_flag                  # observed 0 or 1; role remains neutral
+bool   request_flag                  # role remains neutral
 uint32 stat_mask
 if stat_mask & 0x00000010: uint8  character_level
 if stat_mask & 0x00000020: uint16 job_id
@@ -2979,13 +2979,17 @@ if stat_mask & 0x00004000: uint16 ability_points
 if stat_mask & 0x00008000: uint16 skill_points
 if stat_mask & 0x00010000: uint32 experience
 if stat_mask & 0x00040000: uint64 mesos
-byte[] bounded_tail
+bool   trailing_flag                 # role remains neutral
+if trailing_flag: uint8 trailing_value
 ```
 
-Conditional values occur in ascending mask-bit order. Every nonzero-mask
-packet ends with one zero byte. A zero mask has either a single-zero tail (one
-packet) or a two-byte `01 xx` tail; these variants remain semantic unknowns
-rather than being assigned a guessed result meaning.
+Conditional values occur in ascending mask-bit order. The pinned opcode-`41`
+handler reads `request_flag` as a boolean, delegates the full mask/value body to
+parser `0x1812ED210`, then reads `trailing_flag` as a boolean and one additional
+u8 only when that flag is true. This types the former bounded tail without
+assigning either trailing field a behavioral role. Both capture corpora
+exercise false and true flags; true trailing values are
+`1,2,3,5,7,9,11,13,15,17`.
 
 Stream `92` contains 333 packets. Their masks/counts are `0x0:14`,
 `0x400:35`, `0x1000:207`, `0x4300:1`, `0x10000:44`, `0x10400:3`, and
@@ -3002,13 +3006,19 @@ max-HP/max-MP updates, ten SP updates, AP updates, EXP, and mesos. All packets
 round-trip; the final fold reaches level `10`, HP `114/194`, MP `158/285`,
 STR `4`, DEX `4`, INT `49`, LUK `13`, EXP `980`, and mesos `1472`.
 
-The state-driven replay emitter uses request flag `0`, current-HP mask
-`0x00000400`, a bounded HP value, and the one-zero tail. A real stream-`114`
+With the handler-proven booleans and conditional tail, all 333 stream-`92`, 841
+stream-`126`, and one stream-`114` stat packets are full structural coverage.
+The independent manifest validates all 841 stream-`126` packets and all 334
+opcode-`41` packets in its stream-`83/92/114` corpus with exact byte
+consumption and no failures.
+
+The state-driven replay emitter uses request flag `false`, current-HP mask
+`0x00000400`, a bounded HP value, and trailing flag `false`. A real stream-`114`
 client accepted generated plaintext `29000000040000010000`: its HUD changed
 from `50/222` to `1/222`, the observed transcript folded the event as
 `previous:50 -> current:1`, MP/EXP/map/inventory/progression stayed unchanged,
 and heartbeat responses continued. This validates the predicted effect without
-assigning semantics to the flag or tail marker.
+assigning behavioral semantics to the two flags.
 
 The later live typed-injection validator repeated the smaller reversible
 experiment against an already active browser-free client. Its plan predicted

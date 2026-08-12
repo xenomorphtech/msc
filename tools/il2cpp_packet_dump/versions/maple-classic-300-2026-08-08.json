@@ -732,40 +732,31 @@
       ]
     },
     {
-      "name":"character_stat_update_zero_mask","direction":"server_to_client","opcode":41,"length":8,
-      "source":"IL2CPP opcode-41 handler b383d354... delegates to parser 0x1812ED210; CharacterStatUpdate; capture 111",
-      "operations":[
-        {"op":"read","name":"opcode","kind":"u16","equals":41},
-        {"op":"read","name":"request_flag","kind":"u8"},
-        {"op":"read","name":"stat_mask","kind":"u32","equals":0},
-        {"op":"read","name":"tail","kind":"u8","equals":0}
-      ]
-    },
-    {
-      "name":"character_stat_update_zero_mask_extended","direction":"server_to_client","opcode":41,"length":9,
-      "source":"IL2CPP opcode-41 handler b383d354... delegates to parser 0x1812ED210; CharacterStatUpdate; capture 111",
-      "operations":[
-        {"op":"read","name":"opcode","kind":"u16","equals":41},
-        {"op":"read","name":"request_flag","kind":"u8"},
-        {"op":"read","name":"stat_mask","kind":"u32","equals":0},
-        {"op":"bytes","name":"tail","length":2,"equals_hex":"0101"}
-      ]
-    },
-    {
       "name":"character_stat_update","direction":"server_to_client","opcode":41,
-      "source":"IL2CPP opcode-41 handler b383d354... delegates to parser 0x1812ED210; mask branches verified against CharacterStatUpdate and capture 111",
+      "source":"IL2CPP opcode-41 handler b383d354... reads bool, delegates all mask fields to parser 0x1812ED210, then reads bool plus a conditional u8; CharacterStatUpdate; both reference captures",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":41},
-        {"op":"read","name":"request_flag","kind":"u8"},
+        {"op":"read","name":"request_flag","kind":"bool"},
         {"op":"read","name":"stat_mask","kind":"u32"},
+        {"op":"if_mask","field":"stat_mask","mask":16,"operations":[{"op":"read","name":"character_level","kind":"u8"}]},
+        {"op":"if_mask","field":"stat_mask","mask":32,"operations":[{"op":"read","name":"job_id","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":64,"operations":[{"op":"read","name":"strength","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":128,"operations":[{"op":"read","name":"dexterity","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":256,"operations":[{"op":"read","name":"intelligence","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":512,"operations":[{"op":"read","name":"luck","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":1024,"operations":[{"op":"read","name":"current_hp","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":2048,"operations":[{"op":"read","name":"max_hp","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":4096,"operations":[{"op":"read","name":"current_mp","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":8192,"operations":[{"op":"read","name":"max_mp","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":16384,"operations":[{"op":"read","name":"ability_points","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":32768,"operations":[{"op":"read","name":"skill_points","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":65536,"operations":[{"op":"read","name":"experience","kind":"u32"}]},
         {"op":"if_mask","field":"stat_mask","mask":262144,"operations":[{"op":"read","name":"mesos","kind":"u64"}]},
-        {"op":"read","name":"tail","kind":"u8","equals":0}
+        {"op":"read","name":"trailing_flag","kind":"bool"},
+        {"op":"switch","field":"trailing_flag","cases":[
+          {"equals":0,"operations":[]},
+          {"equals":1,"operations":[{"op":"read","name":"trailing_value","kind":"u8"}]}
+        ]}
       ]
     },
     {

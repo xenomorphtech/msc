@@ -900,8 +900,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
   to local pickup requests by the exact aliased drop id,
 - server opcode `41`: masked player-stat deltas for level, job, STR, DEX, INT,
-  LUK, current/max HP and MP, AP, SP, EXP, and 64-bit mesos, plus bounded
-  neutral flag/tail values,
+  LUK, current/max HP and MP, AP, SP, EXP, and 64-bit mesos, preceded by a
+  neutral boolean request flag and followed by a neutral boolean plus its
+  conditional u8 value,
 - client opcode `13`: neutral fixed type-`1` and length-prefixed type-`6`/`13`
   envelopes whose bodies remain opaque and are omitted from safe reports,
 - server opcode `13`: the same handler-confirmed discriminator followed by a

@@ -885,7 +885,7 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=(
                     CharacterStatUpdate.CURRENT_HP
                     | CharacterStatUpdate.EXPERIENCE
@@ -897,7 +897,7 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=1,
+                request_flag=True,
                 stat_mask=CharacterStatUpdate.MESOS,
                 mesos=9_001,
             ).to_bytes(),
@@ -1050,7 +1050,7 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=1,
+                request_flag=True,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
                 current_hp=120,
             ).to_bytes(),
@@ -1164,7 +1164,7 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=1,
+                request_flag=True,
                 stat_mask=CharacterStatUpdate.MESOS,
                 mesos=16,
             ).to_bytes(),
@@ -2201,7 +2201,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
     def test_character_stat_update_round_trip(self) -> None:
         combined = CharacterStatUpdate(
-            request_flag=1,
+            request_flag=True,
             stat_mask=(
                 CharacterStatUpdate.INTELLIGENCE
                 | CharacterStatUpdate.LUCK
@@ -2212,9 +2212,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ability_points=0,
         )
         zero_mask = CharacterStatUpdate(
-            request_flag=0,
+            request_flag=False,
             stat_mask=0,
-            opaque_tail=b"\x01\x01",
+            trailing_flag=True,
+            trailing_value=1,
         )
 
         self.assertEqual(
@@ -2227,6 +2228,12 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             CharacterStatUpdate.parse(zero_mask.to_bytes()), zero_mask
         )
+        self.assertTrue(zero_mask.trailing_flag)
+        self.assertEqual(zero_mask.trailing_value, 1)
+        with self.assertRaisesRegex(PacketShapeError, "presence mismatch"):
+            replace(zero_mask, trailing_flag=False).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be a boolean"):
+            replace(combined, request_flag=1).to_bytes()
         level_up_payload = bytes.fromhex(
             "290000d03c0100071c000b009000b10060007b004101000000"
         )
@@ -2256,14 +2263,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(PacketShapeError, "requires current_hp"):
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "unsupported bits"):
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=1,
-                opaque_tail=b"\x00",
             ).to_bytes()
 
     def test_initial_field_snapshot_typed_prefix_round_trip(self) -> None:
@@ -7470,12 +7476,12 @@ class GameplayStateFoldTest(unittest.TestCase):
             ),
         )
         initial_ap = CharacterStatUpdate(
-            request_flag=0,
+            request_flag=False,
             stat_mask=CharacterStatUpdate.ABILITY_POINTS,
             ability_points=5,
         )
         response = CharacterStatUpdate(
-            request_flag=1,
+            request_flag=True,
             stat_mask=(
                 CharacterStatUpdate.INTELLIGENCE
                 | CharacterStatUpdate.LUCK
@@ -8088,7 +8094,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             plan.update,
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
                 current_hp=1,
             ),
@@ -8735,7 +8741,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 (
                     "server_to_client",
                     CharacterStatUpdate(
-                        request_flag=0,
+                        request_flag=False,
                         stat_mask=CharacterStatUpdate.CURRENT_HP,
                         current_hp=218,
                     ).to_bytes(),
@@ -8750,7 +8756,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 (
                     "server_to_client",
                     CharacterStatUpdate(
-                        request_flag=0,
+                        request_flag=False,
                         stat_mask=CharacterStatUpdate.CURRENT_HP,
                         current_hp=222,
                     ).to_bytes(),
@@ -8765,7 +8771,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 (
                     "server_to_client",
                     CharacterStatUpdate(
-                        request_flag=0,
+                        request_flag=False,
                         stat_mask=CharacterStatUpdate.CURRENT_MP,
                         current_mp=139,
                     ).to_bytes(),
@@ -8997,7 +9003,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             initial_snapshot=True,
             extra_server_plaintexts=(
                 CharacterStatUpdate(
-                    request_flag=0,
+                    request_flag=False,
                     stat_mask=CharacterStatUpdate.ABILITY_POINTS,
                     ability_points=5,
                 ).to_bytes(),
@@ -9054,7 +9060,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             skill_record_lifecycle=True,
             extra_server_plaintexts=(
                 CharacterStatUpdate(
-                    request_flag=0,
+                    request_flag=False,
                     stat_mask=CharacterStatUpdate.SKILL_POINTS,
                     skill_points=5,
                 ).to_bytes(),

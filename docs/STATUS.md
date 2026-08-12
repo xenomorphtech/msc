@@ -816,7 +816,13 @@
 - Server opcode `41` is now a typed masked stat delta. All 333 stream-`92`
   packets and 324 conditional values round-trip across observed INT, LUK, HP,
   MP, AP, EXP, and 64-bit mesos bits; combined masks preserve bit-order field
-  layout. Request-flag and zero-mask tail roles remain neutral. The fold ends
+  layout. Its pinned receive path proves the request flag and trailing flag as
+  booleans, with a conditional trailing u8 only when the latter is true; their
+  behavioral roles remain neutral. All 333 stream-`92`, 841 stream-`126`, and
+  one stream-`114` packets are therefore full coverage, and independent
+  manifest validation consumes every opcode-`41` packet exactly. This moves
+  stream `92` to 33,151 full / 2,056 partial, stream `126` to 65,640 full /
+  5,460 partial, and stream `114` to 59 full / 17 partial. The fold ends
   at HP `50`, MP `97`, EXP `1464`, mesos `4567`, and emits previous/current
   field changes. A generated stream-`114` HP packet changed the real HUD and
   independently observed active fold from `50/222` to `1/222`, kept MP/EXP and

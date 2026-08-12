@@ -2563,7 +2563,10 @@ project's own `README.md` for all options.
   their inferred damage deltas are `{-1: 1, +1: 5}`. Unresolved semantic roles
   and the delayed differences remain out of generation and replay.
 - All 333 long-stream opcode-`41` stat packets now round-trip and fold into
-  player state. A generated HP-mask packet produced the predicted live
+  player state. The pinned handler proves the neutral request/trailing bytes as
+  booleans and reads one conditional u8 only for a true trailing flag, promoting
+  all 1,175 reference-corpus stat packets to full coverage. A generated HP-mask
+  packet produced the predicted live
   `50/222 -> 1/222` HUD and event-state change without disturbing liveness.
 - All 69 stream-`92` opcode-`39` packets now round-trip and fold 71 inventory
   modifications. A generated Use-slot quantity update produced the predicted

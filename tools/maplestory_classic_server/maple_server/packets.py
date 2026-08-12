@@ -4092,7 +4092,7 @@ class SkillRecordUpdate:
 
 @dataclass(frozen=True)
 class CharacterStatUpdate:
-    request_flag: int
+    request_flag: bool
     stat_mask: int
     character_level: int | None = None
     job_id: int | None = None
@@ -4108,7 +4108,14 @@ class CharacterStatUpdate:
     skill_points: int | None = None
     experience: int | None = None
     mesos: int | None = None
-    opaque_tail: bytes = b"\x00"
+    trailing_flag: bool = False
+    trailing_value: int | None = None
+    raw_request_flag: int | None = field(
+        default=None, repr=False, compare=False
+    )
+    raw_trailing_flag: int | None = field(
+        default=None, repr=False, compare=False
+    )
     opcode: int = 41
 
     CHARACTER_LEVEL = 0x0000_0010
@@ -4157,7 +4164,7 @@ class CharacterStatUpdate:
     def parse(cls, payload: bytes) -> "CharacterStatUpdate":
         reader = PacketReader(payload, packet_name="character_stat_update")
         _expect_opcode(reader, 41)
-        request_flag = reader.u8("request_flag")
+        raw_request_flag = reader.u8("request_flag")
         stat_mask = reader.u32("stat_mask")
         unknown_mask = stat_mask & ~cls._KNOWN_MASK
         if unknown_mask:
@@ -4171,23 +4178,19 @@ class CharacterStatUpdate:
                 values[field_name] = int.from_bytes(
                     reader.bytes(width, field_name), "little"
                 )
-        opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
-        if stat_mask:
-            if opaque_tail != b"\x00":
-                raise PacketShapeError(
-                    "character stat update with values must end in one zero byte"
-                )
-        elif not (
-            opaque_tail == b"\x00"
-            or (len(opaque_tail) == 2 and opaque_tail[0] == 1)
-        ):
-            raise PacketShapeError(
-                "zero-mask character stat update tail must be 00 or 01xx"
-            )
+        raw_trailing_flag = reader.u8("trailing_flag")
+        trailing_flag = bool(raw_trailing_flag)
+        trailing_value = (
+            reader.u8("trailing_value") if trailing_flag else None
+        )
+        reader.finish()
         return cls(
-            request_flag=request_flag,
+            request_flag=bool(raw_request_flag),
             stat_mask=stat_mask,
-            opaque_tail=opaque_tail,
+            trailing_flag=trailing_flag,
+            trailing_value=trailing_value,
+            raw_request_flag=raw_request_flag,
+            raw_trailing_flag=raw_trailing_flag,
             **values,
         )
 
@@ -4209,23 +4212,37 @@ class CharacterStatUpdate:
                 )
             if value is not None:
                 encoded_values.append(struct.pack(format_string, value))
-        if self.stat_mask:
-            if self.opaque_tail != b"\x00":
-                raise PacketShapeError(
-                    "character stat update with values must end in one zero byte"
-                )
-        elif not (
-            self.opaque_tail == b"\x00"
-            or (len(self.opaque_tail) == 2 and self.opaque_tail[0] == 1)
-        ):
-            raise PacketShapeError(
-                "zero-mask character stat update tail must be 00 or 01xx"
-            )
-        return (
-            struct.pack("<HBI", self.opcode, self.request_flag, self.stat_mask)
-            + b"".join(encoded_values)
-            + self.opaque_tail
+        encoded_request_flag = _il2cpp_boolean_byte(
+            self.request_flag,
+            self.raw_request_flag,
+            field_name="character stat update request_flag",
         )
+        encoded_trailing_flag = _il2cpp_boolean_byte(
+            self.trailing_flag,
+            self.raw_trailing_flag,
+            field_name="character stat update trailing_flag",
+        )
+        if self.trailing_flag != (self.trailing_value is not None):
+            raise PacketShapeError(
+                "character stat update trailing flag/value presence mismatch"
+            )
+        try:
+            return (
+                struct.pack(
+                    "<HBI", self.opcode, encoded_request_flag, self.stat_mask
+                )
+                + b"".join(encoded_values)
+                + struct.pack("<B", encoded_trailing_flag)
+                + (
+                    struct.pack("<B", self.trailing_value)
+                    if self.trailing_value is not None
+                    else b""
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"character stat update value is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)

@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 135 semantic/manual shapes and 88 explicitly
+manifest currently declares 136 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -102,8 +102,9 @@ The final four stream-`116` login layouts add four more. Typed opcode-`307`,
 opcode-`308`, opcode-`311`, and ability-point opcode-`100` layouts suppress four
 opaque pins without increasing the effective shape count. Live selector-`5`
 action-`51` controls add non-overlapping client chair sit/recovery/stand shapes
-for opcodes `49`, `82`, and `48`. This leaves 198 active shapes and 63 active
-opaque pins.
+for opcodes `49`, `82`, and `48`. Typed opcode `41` consolidates its three
+capture variants into one handler-exact conditional shape. This leaves 199
+active shapes and 63 active opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
 re-emits the sole 3,725-byte stream-`114` packet exactly; the checked-in shape

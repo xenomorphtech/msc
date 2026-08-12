@@ -1213,10 +1213,9 @@ class TranscriptTest(unittest.TestCase):
         self,
     ) -> None:
         original = CharacterStatUpdate(
-            request_flag=0,
+            request_flag=False,
             stat_mask=CharacterStatUpdate.EXPERIENCE,
             experience=1_615,
-            opaque_tail=b"\x00",
         ).to_bytes()
         with patch(
             "maple_server.server._load_pcap_plaintexts",
@@ -1230,8 +1229,9 @@ class TranscriptTest(unittest.TestCase):
         parsed = CharacterStatUpdate.parse(payload)
         self.assertEqual(parsed.experience, 1_474)
         self.assertEqual(parsed.stat_mask, CharacterStatUpdate.EXPERIENCE)
-        self.assertEqual(parsed.request_flag, 0)
-        self.assertEqual(parsed.opaque_tail, b"\x00")
+        self.assertFalse(parsed.request_flag)
+        self.assertFalse(parsed.trailing_flag)
+        self.assertIsNone(parsed.trailing_value)
 
         with patch(
             "maple_server.server._load_pcap_plaintexts",
@@ -1926,7 +1926,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.close()
             source = Transcript.load(source_writer.path)
             update = CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
                 current_hp=1,
             ).to_bytes()
@@ -2225,7 +2225,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 + b"\x08"
             )
             captured_plaintext = CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=(
                     CharacterStatUpdate.CURRENT_HP
                     | CharacterStatUpdate.MAX_HP
@@ -2478,7 +2478,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 + b"\x08"
             )
             captured_plaintext = CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=(
                     CharacterStatUpdate.INTELLIGENCE
                     | CharacterStatUpdate.LUCK
@@ -2624,7 +2624,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 + b"\x08"
             )
             captured_plaintext = CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=CharacterStatUpdate.SKILL_POINTS,
                 skill_points=1,
             ).to_bytes()

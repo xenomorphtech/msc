@@ -17,9 +17,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 138);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 136);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
-    assert_eq!(shapes.len(), 201);
+    assert_eq!(shapes.len(), 199);
 
     let life_submission = shapes
         .iter()

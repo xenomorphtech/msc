@@ -1909,7 +1909,7 @@ class ItemUseResponsePolicy:
             else CharacterStatUpdate.CURRENT_MP
         )
         stat_update = CharacterStatUpdate(
-            request_flag=1,
+            request_flag=True,
             stat_mask=stat_mask,
             **{effect_field: effect_after},
         )
@@ -2029,7 +2029,7 @@ class ClientRecoveryResponsePolicy:
             else CharacterStatUpdate.CURRENT_MP
         )
         stat_update = CharacterStatUpdate(
-            request_flag=1,
+            request_flag=True,
             stat_mask=stat_mask,
             **{stat_name: value_after},
         )
@@ -2166,7 +2166,7 @@ class AbilityPointAllocationResponsePolicy:
         for allocation in request.allocations:
             stat_mask |= allocation.stat_mask
         stat_update = CharacterStatUpdate(
-            request_flag=1,
+            request_flag=True,
             stat_mask=stat_mask,
             ability_points=ability_points_after,
             **stat_values_after,
@@ -2299,7 +2299,7 @@ class SkillLevelChangeResponsePolicy:
             )
         skill_points_after = self.skill_points - 1
         stat_update = CharacterStatUpdate(
-            request_flag=0,
+            request_flag=False,
             stat_mask=CharacterStatUpdate.SKILL_POINTS,
             skill_points=skill_points_after,
         )
@@ -9286,11 +9286,8 @@ class GameplayStateFold:
                 "stat_mask": f"0x{update.stat_mask:08x}",
                 "changes": changes,
                 "changed_field_count": len(changes),
-                "tail_variant": (
-                    "single_zero"
-                    if update.opaque_tail == b"\x00"
-                    else "double_one"
-                ),
+                "trailing_flag": update.trailing_flag,
+                "trailing_value": update.trailing_value,
                 "field_epoch": self.state.field_epoch,
             }
             if item_use_effect is not None:
@@ -9306,20 +9303,12 @@ class GameplayStateFold:
                     client_recovery_responses
                 )
             self._event(frame, "player_stats_updated", details=details)
-            issues = [
-                "stat update request flag and final marker semantics remain neutral"
-            ]
-            if update.stat_mask == 0:
-                issues.append(
-                    "zero-mask single-zero/double-one variant remains opaque"
-                )
             return self._observation(
                 frame,
                 kind="character_stat_update",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=update,
                 details=details,
-                issues=tuple(issues),
             )
         if opcode == 49 and len(payload) > 2 and payload[2] == 0:
             notice = PickupGainNotice.parse(payload)
@@ -14425,7 +14414,7 @@ def plan_current_hp_stat_update(
             f"emitted current HP must be between 0 and {analysis.state.max_hp}"
         )
     update = CharacterStatUpdate(
-        request_flag=0,
+        request_flag=False,
         stat_mask=CharacterStatUpdate.CURRENT_HP,
         current_hp=current_hp,
     )
