@@ -9596,6 +9596,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.field_drop_removals_for_unknown_drop, 0)
         self.assertEqual(analysis.state.field_drops, {})
         self.assertEqual(analysis.state.mesos, 16)
+        drop_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind in {"field_drop_spawn", "field_drop_removal"}
+        ]
+        self.assertEqual(len(drop_observations), 8)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                for observation in drop_observations
+            )
+        )
         picked_item = next(
             item
             for item in analysis.state.inventory_items["etc"]

@@ -867,9 +867,12 @@
 - Server opcode `311` is typed across animated item/mesos, field-load item,
   and field-load mesos variants. Stream `92` has 125 packets/66 drop
   lifecycles; the level-1-to-10 corpus adds four exact 30-byte mode-`2` mesos
-  records. A guarded stream-`114` rewrite can change the final drop position
-  and/or make both neutral owner words equal the initial player id without
-  exposing identifiers through the runtime API.
+  records. Pinned-handler control flow and exact independent validation now
+  promote all 562 reference-corpus spawn packets to full structural coverage;
+  owner/flag/expiration roles remain deliberately neutral. A guarded
+  stream-`114` rewrite can change the final drop position and/or make both
+  neutral owner words equal the initial player id without exposing identifiers
+  through the runtime API.
 - The corresponding real-client owner/proximity hypothesis was falsified:
   neither a mode-`2` owner rewrite nor a captured-shaped mode-`1`/mode-`0`
   pair at the player position caused opcode `185`, despite verified pickup-key

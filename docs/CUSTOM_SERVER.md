@@ -2578,7 +2578,10 @@ project's own `README.md` for all options.
 - All 125 stream-`92` opcode-`311` packets round-trip and fold into 66 drop
   lifecycles. All 54 pickup requests, gain values, effects, and local removals
   correlate with an active spawn; stream `114` ends with one modeled active
-  item drop rather than none.
+  item drop rather than none. Across both reference gameplay streams and stream
+  `114`, all 562 spawns and 545 removals now have full structural coverage and
+  pass the independent manifest validator; still-neutral field roles remain
+  labeled neutrally.
 - The typed stream-`114` pickup plan resolves `drop:1`, item `4000004`, Etc
   slot `7`, quantity `74`, and the four matching stream-`92` effects. Its
   position rewrite round-trips at the same 38-byte width, and encrypted replay

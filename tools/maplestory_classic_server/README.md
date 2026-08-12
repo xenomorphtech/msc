@@ -889,7 +889,8 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `311`: 44-byte animated item, 36-byte animated mesos, 38-byte
   field-load item, and 30-byte field-load mesos drop spawns; the fold tracks
   mode-`1`/mode-`0` refresh pairs, source mobs, ownership-neutral fields, and
-  active lifecycle,
+  active lifecycle; all four branches have full structural coverage even where
+  field roles remain neutral,
 - server opcode `49`: the three pickup-result variants for item quantity, mesos
   amount, and a still-neutral special value,
 - server opcode `77`: redacted variants `3`/`4`/`5` fully bound one to three
@@ -898,7 +899,8 @@ The gameplay fold currently models these capture-backed boundaries:
   JSON, text output, and HTTP status expose lengths/distributions but never
   captured text,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
-  to local pickup requests by the exact aliased drop id,
+  to local pickup requests by the exact aliased drop id, with full structural
+  coverage for all three reason-selected branches,
 - server opcode `41`: masked player-stat deltas for level, job, STR, DEX, INT,
   LUK, current/max HP and MP, AP, SP, EXP, and 64-bit mesos, preceded by a
   neutral boolean request flag and followed by a neutral boolean plus its

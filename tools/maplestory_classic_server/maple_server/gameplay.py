@@ -9584,13 +9584,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="field_drop_spawn",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=spawn,
                 details=details,
-                issues=(
-                    "drop spawn-mode, ownership values/flag, expiration, and "
-                    "final-flag roles remain neutral",
-                ),
             )
         if opcode == 312 and len(payload) in {7, 11, 15}:
             removal = FieldDropRemoval.parse(payload)
@@ -9688,13 +9684,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="field_drop_removal",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=removal,
                 details=details,
-                issues=(
-                    "drop-removal reason, actor role, and trailing value "
-                    "semantics remain neutral",
-                ),
             )
         if opcode == 9:
             termination = WorldSessionTermination.parse(payload)

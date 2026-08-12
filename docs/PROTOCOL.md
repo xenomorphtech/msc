@@ -2703,6 +2703,12 @@ record, retains active drops by field epoch, removes them on opcode `312`, and
 clears them on a field reset.
 Spawn mode, owner values/flag, expiration, and final-flag semantics remain
 neutral even though their packet boundaries are exact.
+The pinned opcode-`311` handler independently confirms every direct read and
+both conditionals. The analyzer therefore reports full structural coverage for
+all four capture-modeled mode/kind branches while retaining those neutral field
+names. Across the two reference gameplay streams plus terminal stream `114`,
+all 562 server opcode-`311` packets also pass the independent manifest validator
+with exact byte consumption.
 
 All 54 stream-`92` opcode-`185` requests reference a currently active modeled
 drop. The following opcode-`49` value matches the spawn value in all 54 cases:
@@ -2941,6 +2947,10 @@ actors. All 54 local removals follow a matching opcode-`49` result and leave no
 pending pickup. Request-to-removal latency is 27.829-111.964 ms, averaging
 79.723 ms. The behavioral meaning of the reason, actor, validation-token, and
 optional-proof fields remains deliberately neutral.
+The pinned opcode-`312` handler confirms the reason-selected 7/11/15-byte
+branches, so neutral role names no longer make these structurally complete
+records partial. All 545 reference-corpus removals now report full coverage and
+pass the independent manifest validator with exact byte consumption.
 
 For state-driven replay, a separate validated evidence transcript supplies the
 deterministic item effect. Stream `92` proves template `4000004` four times as
