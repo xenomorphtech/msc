@@ -3712,7 +3712,7 @@ repeat command_count:
   uint8 command_type
   byte[command_payload_length(command_type)] command_payload
 uint8  tail_type
-byte[tail_payload_length(tail_type)] opaque_tail_state
+uint8 tail_state_values[tail_payload_length(tail_type)]  # neutral per-byte state
 uint8  tail_marker                  # neutral role
 int16  path_start_x
 int16  path_start_y
@@ -3759,17 +3759,19 @@ teleport-like. It disagrees with the other parser about some middle/trailing
 labels, so the codec intentionally does not promote those disputed words.
 
 Client tail types `17`, `18`, `21`, and `24` carry `8`, `8`, `10`, and `11`
-opaque bytes respectively. Stream `92` validates 963 client packets with 3,869
-commands and 305 server packets with 1,441 commands; it observes every tail
-type and command tags `0/1/2/3/4/10/11/14/15`. Stream `126` validates another
-2,585 client packets with 8,189 commands and 347 server packets with 1,399
-commands. In the long corpus, all 347 server object ids name players already
-active when the packet arrives. The fold
+neutral byte-sized state values respectively. Stream `92` validates 963 client
+packets with 3,869 commands and 305 server packets with 1,441 commands; it
+observes every tail type and command tags `0/1/2/3/4/10/11/14/15`. Stream `126`
+validates another 2,585 client packets with 8,189 commands and 347 server
+packets with 1,399 commands. In the long corpus, all 347 server object ids name
+players already active when the packet arrives. The fold
 records that correlation and advances an already known remote-player alias to
 the last positioned command. It emits redacted submission/broadcast events and
-tracks decoded command, tail-type, and tail-marker distributions. The shape is
-exact, but disputed command words, unobserved tags `18..22`, and control/tail
-roles remain semantically partial.
+tracks decoded command, tail-type, tail-state-value, and tail-marker
+distributions. All captured packets contain typed command tags and therefore
+receive full structural coverage. Disputed command words, tail/control roles,
+and unobserved tags `18..22` deliberately retain neutral names; a future packet
+using one of those opaque tags remains partial.
 
 ## NPC state submission and echo (`client 217`, `server 303`)
 

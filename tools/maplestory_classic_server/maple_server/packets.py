@@ -7654,6 +7654,19 @@ class LifeMovementCommand:
         return 1 + len(self.opaque_payload)
 
     @property
+    def is_typed(self) -> bool:
+        return self.command_type in (
+            self._ABSOLUTE_TYPES
+            | self._RELATIVE_TYPES
+            | self._TELEPORT_TYPES
+            | {
+                self._EQUIPMENT_CHANGE_TYPE,
+                self._CHAIR_TYPE,
+                self._JUMP_DOWN_TYPE,
+            }
+        )
+
+    @property
     def position(self) -> tuple[int, int] | None:
         if self.command_type not in (
             self._ABSOLUTE_TYPES
@@ -7873,7 +7886,7 @@ class LifeMovementSubmission:
     control_value: int
     movement: LifeMovementPath
     tail_type: int
-    opaque_tail_state: bytes
+    tail_state_values: tuple[int, ...]
     tail_marker: int
     path_start_x: int
     path_start_y: int
@@ -7899,7 +7912,10 @@ class LifeMovementSubmission:
                 f"life movement tail type is {tail_type}, expected one of "
                 f"{expected}"
             )
-        opaque_tail_state = reader.bytes(tail_length, "opaque_tail_state")
+        tail_state_values = tuple(
+            reader.u8(f"tail_state_values[{index}]")
+            for index in range(tail_length)
+        )
         tail_marker = reader.u8("tail_marker")
         path_start_x = reader.i16("path_start_x")
         path_start_y = reader.i16("path_start_y")
@@ -7912,7 +7928,7 @@ class LifeMovementSubmission:
             control_value=control_value,
             movement=movement,
             tail_type=tail_type,
-            opaque_tail_state=opaque_tail_state,
+            tail_state_values=tail_state_values,
             tail_marker=tail_marker,
             path_start_x=path_start_x,
             path_start_y=path_start_y,
@@ -7932,10 +7948,14 @@ class LifeMovementSubmission:
                 f"life movement tail type is {self.tail_type}, expected one of "
                 f"{expected}"
             )
-        if len(self.opaque_tail_state) != tail_length:
+        if len(self.tail_state_values) != tail_length:
             raise PacketShapeError(
                 f"life movement tail type {self.tail_type} needs "
-                f"{tail_length} opaque bytes"
+                f"{tail_length} state values"
+            )
+        if any(not 0 <= value <= 0xFF for value in self.tail_state_values):
+            raise PacketShapeError(
+                "life movement tail state values must fit in one byte"
             )
         if not 0 <= self.tail_marker <= 0xFF:
             raise PacketShapeError(
@@ -7951,7 +7971,7 @@ class LifeMovementSubmission:
             )
             + self.movement.to_bytes()
             + bytes((self.tail_type,))
-            + self.opaque_tail_state
+            + bytes(self.tail_state_values)
             + struct.pack(
                 "<Bhhhh",
                 self.tail_marker,

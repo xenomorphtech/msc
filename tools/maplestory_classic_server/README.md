@@ -847,13 +847,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 53,785 full,
-17,315 partial, zero unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 56,717 full,
+14,383 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 26,266 full, 8,941 partial,
-zero unknown, and zero invalid observations; short stream `114` reaches 57 full,
-19 partial, zero unknown, and zero invalid.
+metadata. Stream `92` independently passes with 27,534 full, 7,673 partial,
+zero unknown, and zero invalid observations; short stream `114` reaches 58 full,
+18 partial, zero unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -938,8 +938,9 @@ The gameplay fold currently models these capture-backed boundaries:
   stream, capture-bounded tail variant, marker, and start/end coordinates;
   command types `0/5/17`, `1/2/6/12/13/16`, `10`, `11`, and `15` expose
   independently sourced absolute, relative, equipment-change, chair, and
-  jump-down fields, while teleport-like and unobserved bodies retain neutral
-  trailing/unknown values,
+  jump-down fields, while teleport-like fields retain neutral trailing values;
+  all four tail variants are tuples of neutral byte-sized values, captured
+  typed commands are full coverage, and unobserved tags `18..22` remain partial,
 - client opcode `182`: local-player movement with a neutral 32-bit control
   value, signed reference position, typed command stream, and zero-marked
   start/end-position trailer; command tags `3` and `4` share the parser-proven
@@ -1238,9 +1239,11 @@ position, last-position/vector, foothold, stance, and duration fields where
 that parser names them. Guida's v83 parser independently bounds the nine-byte
 teleport-like command family `3/4/7/8/9/14`, but conflicting higher-level
 field labels keep its middle/trailing values neutral. Command tags `18..22`,
-the client control/tail values, and the tail marker also remain neutral, so
-reports classify the family as partial semantic coverage and omit the token
-value.
+the client control/tail roles, and the tail marker also remain neutral. Reports
+classify every captured packet as full structural coverage because those
+captures use only typed command tags and all four fixed tail variants are
+exposed as byte-sized state values. A future packet containing an opaque tag
+remains partial, and reports continue to omit the token value.
 
 Opcode `13` also continues in both directions on the world connection. The
 fixed client type-`1`

@@ -53,9 +53,9 @@
   epochs. NPC-state movement paths and opcode-`158` mode-`0` keymap changes are
   fully typed. Strict decoding now
   succeeds across all 71,100 frames:
-  53,785 full, 17,315 partial, zero unknown, and zero invalid
-  packet observations. Stream `92` now reports 26,266 full, 8,941 partial,
-  zero unknown, and zero invalid; stream `114` reports 57/19/0/0. One
+  56,717 full, 14,383 partial, zero unknown, and zero invalid
+  packet observations. Stream `92` now reports 27,534 full, 7,673 partial,
+  zero unknown, and zero invalid; stream `114` reports 58/18/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
   one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -635,13 +635,13 @@
   life-movement relay/broadcast packets. Stream `126` validates 2,585 client
   submissions with 8,189 commands and 347 server broadcasts with 1,399
   commands; all 347 broadcasts name an already active player. Stream `92`
-  independently validates all four observed
-  client-tail variants and additional command tags. Independent v83 movement
-  parsers now name the absolute, relative, equipment-change, chair,
-  teleport-like, and jump-down layouts. The fold emits their safe fields and
-  advances known remote-player aliases to the last positioned command; neutral
-  control/tail values, conflicting teleport labels, and unobserved tags keep the
-  family at partial semantic coverage.
+  independently validates all four observed client-tail variants and
+  additional command tags. Independent v83 movement parsers now name the
+  absolute, relative, equipment-change, chair, teleport-like, and jump-down
+  layouts. The tail variants are fixed tuples of neutral byte-sized state
+  values. Every captured packet uses a typed command tag and is now full
+  structural coverage; disputed higher-level roles stay neutral, while a
+  future use of opaque tags `18..22` remains partial.
 - Client opcode `13` is now decoded on world connections using the same neutral
   family as login. Stream `126` has 970 exact 11-byte type-`1` envelopes;
   stream `92` has 446 type-`1`, 104 length-prefixed type-`6`, and five
@@ -671,7 +671,9 @@
   promoting all 937 requests and 1,279 updates to full coverage while
   action/parameter intent remains neutral. Coverage is now
   `53,785/17,315/0/0` for stream `126`; streams `92` and `114` remain
-  `26,266/8,941/0/0` and `57/19/0/0`.
+  `26,266/8,941/0/0` and `57/19/0/0` at that checkpoint. Typed life movement
+  subsequently raises the current totals to `56,717/14,383/0/0`,
+  `27,534/7,673/0/0`, and `58/18/0/0` respectively.
 - Empty server opcode `426` and empty client opcode `309` are now a fully typed,
   temporally correlated notification/acknowledgement pair. Stream `126` has
   299 matches, stream `92` has 61, and stream `114` has one; all 361 server

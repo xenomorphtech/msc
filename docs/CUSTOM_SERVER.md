@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 203 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 53,785 observations are full, 17,315 partial, none are
+`--fail-on-invalid`: 56,717 observations are full, 14,383 partial, none are
 unknown or invalid. One state-correlation warning remains,
 not a shape failure: the aggregate warning for six delayed combat predictions
 that differ by one HP.
@@ -236,8 +236,10 @@ movement parsers now type the supported absolute, relative, equipment-change,
 chair, teleport-like, and jump-down command layouts. Safe events expose
 position, last/vector, foothold, stance, and duration fields where independently
 named, and a known remote-player alias advances to the last positioned command.
-Conflicting teleport labels plus neutral control/tail fields keep these packets
-partial rather than full.
+The four client-tail variants are fixed tuples of neutral byte-sized state
+values. Every captured packet uses typed command tags and now has full
+structural coverage; disputed higher-level roles remain neutral, and a future
+use of opaque tags `18..22` remains partial.
 
 Client opcode `13` is shared with the login protocol but persists in gameplay.
 The analyzer now accepts the exact 11-byte type-`1` shape and the existing
@@ -2528,7 +2530,7 @@ project's own `README.md` for all options.
   either PCAP world stream.
 - The analyzer now structurally decodes life movement opcodes `47`/`217`,
   folds command and client-tail distributions, redacts the client token, and
-  validates all 2,932 packets from stream `126` without a shape failure.
+  validates all 2,932 packets from stream `126` as full structural coverage.
 - World-session opcode `13` now uses the neutral fixed/length-prefixed envelope
   decoder, accounting for all 970 long-corpus packets without exposing bodies.
 - Client opcode `217` now has bounded compact and counted-record envelopes,

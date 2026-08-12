@@ -7214,6 +7214,7 @@ class GameplayStateFold:
         if opcode == 47:
             submission = LifeMovementSubmission.parse(payload)
             path = submission.movement
+            commands_typed = all(command.is_typed for command in path.commands)
             self._last_client_life_movement_position = (
                 self.state.field_epoch,
                 submission.path_end_x,
@@ -7232,7 +7233,7 @@ class GameplayStateFold:
                 "control_value": submission.control_value,
                 **path.safe_dict(),
                 "tail_type": submission.tail_type,
-                "opaque_tail_state_bytes": len(submission.opaque_tail_state),
+                "tail_state_values": list(submission.tail_state_values),
                 "tail_marker": submission.tail_marker,
                 "path_start_x": submission.path_start_x,
                 "path_start_y": submission.path_start_y,
@@ -7244,12 +7245,17 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="life_movement_submission",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.FULL
+                    if commands_typed
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=submission,
                 details=details,
                 issues=(
-                    "life movement control/tail and command-specific unknown "
-                    "roles remain neutral",
+                    ()
+                    if commands_typed
+                    else ("life movement contains opaque command types",)
                 ),
             )
         if opcode == 182:
@@ -11453,6 +11459,7 @@ class GameplayStateFold:
         if opcode == 217:
             broadcast = LifeMovementBroadcast.parse(payload)
             path = broadcast.movement
+            commands_typed = all(command.is_typed for command in path.commands)
             alias = self._alias(
                 self._player_aliases, broadcast.object_id, "player"
             )
@@ -11486,12 +11493,17 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="life_movement_broadcast",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.FULL
+                    if commands_typed
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=broadcast,
                 details=details,
                 issues=(
-                    "life movement command-specific unknown roles remain "
-                    "neutral",
+                    ()
+                    if commands_typed
+                    else ("life movement contains opaque command types",)
                 ),
             )
         if opcode == 202:

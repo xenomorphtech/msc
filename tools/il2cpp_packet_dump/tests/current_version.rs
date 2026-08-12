@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use maple_il2cpp_packet_dump::il2cpp::{build_dump, deterministic_json};
 use maple_il2cpp_packet_dump::manifest::LoadedManifest;
+use maple_il2cpp_packet_dump::shape::ShapeOp;
 
 fn manifest() -> LoadedManifest {
     let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -19,6 +20,58 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(loaded.manifest.manual_shapes.len(), 138);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
     assert_eq!(shapes.len(), 201);
+
+    let life_submission = shapes
+        .iter()
+        .find(|shape| shape.name == "client_life_movement_relay")
+        .unwrap();
+    let command_repeat = life_submission
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            ShapeOp::Repeat { operations, .. } => Some(operations),
+            _ => None,
+        })
+        .unwrap();
+    let command_cases = command_repeat
+        .iter()
+        .find_map(|operation| match operation {
+            ShapeOp::Switch { cases, .. } => Some(cases),
+            _ => None,
+        })
+        .unwrap();
+    for command_type in 0..=17 {
+        let command_case = command_cases
+            .iter()
+            .find(|case| case.equals == command_type)
+            .unwrap();
+        assert!(
+            command_case
+                .operations
+                .iter()
+                .all(|operation| matches!(operation, ShapeOp::Read { .. }))
+        );
+    }
+    let tail_cases = life_submission
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            ShapeOp::Switch { field, cases } if field == "tail_type" => Some(cases),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        tail_cases
+            .iter()
+            .map(|case| (case.equals, case.operations.len()))
+            .collect::<Vec<_>>(),
+        [(17, 8), (18, 8), (21, 10), (24, 11)]
+    );
+    assert!(tail_cases.iter().all(|case| {
+        case.operations
+            .iter()
+            .all(|operation| matches!(operation, ShapeOp::Read { .. }))
+    }));
 
     let chair_sit = shapes
         .iter()

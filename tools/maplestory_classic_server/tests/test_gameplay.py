@@ -1274,7 +1274,7 @@ def fixture_gameplay_transcript(
                 control_value=0,
                 movement=fixture_life_movement_path(),
                 tail_type=17,
-                opaque_tail_state=b"\x00" * 8,
+                tail_state_values=(0,) * 8,
                 tail_marker=4,
                 path_start_x=90,
                 path_start_y=-205,
@@ -4002,7 +4002,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             control_value=0,
             movement=life_path,
             tail_type=17,
-            opaque_tail_state=b"\x00" * 8,
+            tail_state_values=(0,) * 8,
             tail_marker=4,
             path_start_x=90,
             path_start_y=-205,
@@ -4039,6 +4039,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             [14, 8, 2, 10, 16],
         )
         self.assertEqual(life_path.final_position, (130, -170))
+        self.assertTrue(all(command.is_typed for command in life_path.commands))
         self.assertEqual(
             life_path.commands[0].safe_dict(),
             {
@@ -4107,6 +4108,11 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 command_type=21, opaque_payload=b"\x01\x02\x03"
             ).safe_dict(),
             {"type": 21, "kind": "opaque", "opaque_payload_bytes": 3},
+        )
+        self.assertFalse(
+            LifeMovementCommand(
+                command_type=21, opaque_payload=b"\x01\x02\x03"
+            ).is_typed
         )
         self.assertEqual(
             [command.byte_length for command in path.commands],
@@ -4182,7 +4188,21 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 control_value=0,
                 movement=life_path,
                 tail_type=17,
-                opaque_tail_state=b"short",
+                tail_state_values=(0,) * 5,
+                tail_marker=0,
+                path_start_x=0,
+                path_start_y=0,
+                path_end_x=0,
+                path_end_y=0,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must fit in one byte"):
+            LifeMovementSubmission(
+                local_object_index=0,
+                client_token=0,
+                control_value=0,
+                movement=life_path,
+                tail_type=17,
+                tail_state_values=(0, 0, 0, 0, 0, 0, 0, 256),
                 tail_marker=0,
                 path_start_x=0,
                 path_start_y=0,
@@ -8575,6 +8595,19 @@ class GameplayStateFoldTest(unittest.TestCase):
                 for observation in player_movement_observations
             )
         )
+        life_movement_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"life_movement_submission", "life_movement_broadcast"}
+        ]
+        self.assertEqual(len(life_movement_observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in life_movement_observations
+            )
+        )
         life_submission_event = next(
             event
             for event in analysis.events
@@ -8582,11 +8615,56 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertNotIn("client_token", life_submission_event.details)
         self.assertTrue(life_submission_event.details["client_token_present"])
+        self.assertEqual(
+            life_submission_event.details["tail_state_values"], [0] * 8
+        )
         report = analysis.safe_dict()
         self.assertEqual(report["state"]["player"]["x"], 132)
         self.assertEqual(report["state"]["observed_remote_player_count"], 1)
         self.assertNotIn(
             "object_id", report["state"]["observed_remote_players"][0]
+        )
+
+    def test_opaque_life_movement_command_remains_partial(self) -> None:
+        payload = LifeMovementSubmission(
+            local_object_index=1,
+            client_token=0,
+            control_value=0,
+            movement=LifeMovementPath(
+                reference_x=0,
+                reference_y=0,
+                commands=(
+                    LifeMovementCommand(
+                        command_type=21,
+                        opaque_payload=b"\x01\x02\x03",
+                    ),
+                ),
+            ),
+            tail_type=17,
+            tail_state_values=(0,) * 8,
+            tail_marker=0,
+            path_start_x=0,
+            path_start_y=0,
+            path_end_x=0,
+            path_end_y=0,
+        ).to_bytes()
+
+        observation = GameplayStateFold().consume(
+            PlainFrame(
+                index=0,
+                direction_index=0,
+                timestamp_ns=1_000_000_000,
+                direction="client_to_server",
+                wire_offset=0,
+                wire_length=len(payload),
+                plaintext=payload,
+            )
+        )
+
+        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(
+            observation.issues,
+            ("life movement contains opaque command types",),
         )
 
     def test_folds_character_stat_updates_into_player_state(self) -> None:
@@ -10124,7 +10202,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertIn(
-            "opcode=47 kind=life_movement_submission coverage=partial",
+            "opcode=47 kind=life_movement_submission coverage=full",
             report,
         )
         self.assertEqual(analysis.state.client_opcode_13_messages, 3)
