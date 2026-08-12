@@ -366,5 +366,12 @@ Client opcode `301` is the identical six-byte first client gameplay packet in
 all three reference sessions and one active custom-server login. Its manual
 shape constrains the body to `reserved_zero u32 = 0`; Python round-trips the
 same grammar at full coverage without assigning a narrower subsystem role.
+Server opcode `9` replaces its nine-byte opaque pin with an observed control
+byte `1`, four IPv4 address bytes, and a little-endian `u16` port. The two
+terminating world sessions advertise different endpoints, and in each case the
+client's next TCP stream connects to exactly that address and port. Targeted
+native validation exact-consumes both packets; the generated dump contains the
+opcode enum member but no managed handler row, so the leading control's
+narrower enum role remains unclaimed.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

@@ -507,6 +507,16 @@
   `70,074/1,026/0/0`, `34,570/637/0/0`, and `66/10/0/0`, while the active
   saved transcript advances to `2,982/52/0/0`. The fold exposes only the field
   epoch and validated-zero invariant.
+- Server opcode `9` is now a typed terminal endpoint handoff rather than a
+  seven-byte opaque reason. Both terminating sessions carry control byte `1`,
+  an IPv4 address, and a little-endian port. The client opens its next TCP
+  stream to the exact advertised endpoint after `1.757` and `16.125` ms,
+  independently confirming the field roles. The codec round-trips both
+  packets, the manifest exact-consumes `2/2`, and safe folds redact the address
+  and port while promoting the observations to full coverage. Current totals
+  are `34,571/636/0/0`, `67/9/0/0`, and `70,074/1,026/0/0` for streams
+  `92`, `114`, and `126`; the active saved transcript remains
+  `2,982/52/0/0` because it contains no terminal handoff.
 - The 35 stream-`126` opcode-`157` records with width 59 are now the second
   fully typed `CompactFieldTransition` branch. Marker `26` uses the same
   transition/map/portal/HP/FILETIME grammar as the existing 95-byte marker-`23`

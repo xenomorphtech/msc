@@ -1147,8 +1147,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `426`: an exact empty notification followed one-for-one by the
   exact empty client opcode-`309` acknowledgement; the fold tracks ordering and
   round-trip time without assigning a broader gameplay role,
-- server opcode `9`: the exact nine-byte world-session termination envelope;
-  its seven-byte reason body remains opaque.
+- server opcode `9`: the exact nine-byte terminal endpoint handoff: observed
+  control byte `1`, IPv4 address, and little-endian port. In both terminating
+  sessions the client's next TCP stream connects to exactly the advertised
+  endpoint. Safe reports redact the address and port.
 
 Unknown opcodes remain lossless frame observations and do not acquire semantic
 names from frequency or adjacency alone. Default reports replace character and

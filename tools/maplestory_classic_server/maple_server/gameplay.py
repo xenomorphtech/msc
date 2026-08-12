@@ -9727,7 +9727,9 @@ class GameplayStateFold:
             self.state.termination_received = True
             self.state.phase = GameplayPhase.TERMINATED
             details: dict[str, object] = {
-                "opaque_reason_bytes": 7,
+                "endpoint_flag": termination.endpoint_flag,
+                "destination_endpoint_present": True,
+                "destination_endpoint_redacted": True,
                 "correlated_exit_request": correlated_exit_request,
                 "pending_exit_requests": self.state.pending_world_exit_requests,
             }
@@ -9741,10 +9743,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="world_session_termination",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=termination,
                 details=details,
-                issues=("world-session termination reason remains opaque",),
             )
         if opcode == 157:
             snapshot = FieldSnapshotEnvelope.parse(payload)

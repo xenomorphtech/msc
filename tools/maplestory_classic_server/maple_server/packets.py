@@ -14441,22 +14441,47 @@ class HeartbeatProbe:
 
 @dataclass(frozen=True)
 class WorldSessionTermination:
-    """Observed terminal world-session envelope; the reason body is opaque."""
+    """Terminal world-session handoff carrying the next IPv4 endpoint."""
 
-    opaque_reason: bytes
+    endpoint_flag: int
+    address: IPv4Address
+    port: int
     opcode: int = 9
 
     @classmethod
     def parse(cls, payload: bytes) -> "WorldSessionTermination":
         reader = PacketReader(payload, packet_name="world_session_termination")
         _expect_opcode(reader, 9)
-        opaque_reason = reader.bytes(7, "opaque_reason")
+        endpoint_flag = reader.u8("endpoint_flag")
+        address = IPv4Address(reader.bytes(4, "address"))
+        port = reader.u16("port")
         reader.finish()
-        return cls(opaque_reason=opaque_reason)
+        termination = cls(
+            endpoint_flag=endpoint_flag,
+            address=address,
+            port=port,
+        )
+        termination._validate()
+        return termination
+
+    def _validate(self) -> None:
+        if self.opcode != 9:
+            raise PacketShapeError("world-session termination opcode must be 9")
+        if self.endpoint_flag != 1:
+            raise PacketShapeError(
+                "world-session termination endpoint flag must be 1"
+            )
+        if not 0 <= self.port <= 0xFFFF:
+            raise PacketShapeError(
+                f"world-session termination port is out of range: {self.port}"
+            )
 
     def to_bytes(self) -> bytes:
-        if len(self.opaque_reason) != 7:
-            raise PacketShapeError(
-                "world session termination reason must contain exactly 7 bytes"
+        self._validate()
+        return b"".join(
+            (
+                struct.pack("<HB", self.opcode, self.endpoint_flag),
+                self.address.packed,
+                struct.pack("<H", self.port),
             )
-        return struct.pack("<H", self.opcode) + self.opaque_reason
+        )

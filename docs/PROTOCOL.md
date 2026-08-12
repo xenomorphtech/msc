@@ -1802,7 +1802,9 @@ uint16 opcode = 45 or 46               # stream 114 or 92
 uint32 value                            # redacted status value
 
 uint16 opcode = 9
-byte[7] opaque_reason                   # existing terminal server packet
+uint8  endpoint_flag = 1                # observed control; narrower role neutral
+byte[4] destination_ipv4                # network-order address; redacted
+uint16 destination_port                 # little-endian; redacted
 ```
 
 The request is emitted from `active`. Status opcode `46` follows by 64.396 ms
@@ -1810,9 +1812,20 @@ in stream `92`; status opcode `45` follows by 66.699 ms in stream `114`. The
 final server packet follows the request by 165.073 and 167.004 ms respectively.
 The fold enters `exit_requested`, reports the status value only as redacted,
 then enters `terminated` and records FIFO correlation plus round-trip timing on
-opcode `9`. Exact packet observations promote all three client boundaries to
+opcode `9`. The endpoint fields are not an inference from byte appearance:
+stream `92` advertises `43.142.194.134:10283`, and the client begins TCP stream
+`113` to that exact endpoint `1.757` ms after opcode `9`; stream `114`
+advertises `43.142.194.127:10284`, followed by TCP stream `115` to that exact
+endpoint after `16.125` ms. Safe analysis reports only that a destination is
+present and redacted. Exact packet observations promote all three client boundaries to
 full coverage. Stream `92` reaches `13,417/21,782/8/0`, stream `114` reaches
 `54/22/0/0`, and stream `126` reaches `26,661/44,381/58/0`.
+
+With the endpoint handoff itself promoted from partial to full, current strict
+totals become `34,571/636/0/0` for stream `92` and `67/9/0/0` for stream
+`114`. Stream `126` contains no opcode `9` and remains
+`70,074/1,026/0/0`; the active saved transcript likewise contains no terminal
+handoff and remains `2,982/52/0/0`.
 
 The current local client's game-menu confirmation did not emit opcode `241`,
 so a terminal injection was intentionally not attempted. Three controlled

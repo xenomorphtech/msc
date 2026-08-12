@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
+from ipaddress import IPv4Address
 from pathlib import Path
 import struct
 import sys
@@ -1730,7 +1731,11 @@ def fixture_gameplay_transcript(
     if terminate:
         append(
             "server_to_client",
-            WorldSessionTermination(opaque_reason=b"ended!!").to_bytes(),
+            WorldSessionTermination(
+                endpoint_flag=1,
+                address=IPv4Address("203.0.113.10"),
+                port=10_283,
+            ).to_bytes(),
         )
     if close:
         events.append(TranscriptEvent(event="close", timestamp_ns=timestamp_ns))
@@ -4794,12 +4799,23 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(health, health_percentage=101).to_bytes()
 
     def test_world_session_termination_round_trip(self) -> None:
-        termination = WorldSessionTermination(opaque_reason=b"ended!!")
+        observed = bytes.fromhex("0900012b8ec2862b28")
+        termination = WorldSessionTermination.parse(observed)
 
-        self.assertEqual(len(termination.to_bytes()), 9)
+        self.assertEqual(termination.endpoint_flag, 1)
+        self.assertEqual(termination.address, IPv4Address("43.142.194.134"))
+        self.assertEqual(termination.port, 10_283)
+        self.assertEqual(termination.to_bytes(), observed)
         self.assertEqual(
-            WorldSessionTermination.parse(termination.to_bytes()), termination
+            WorldSessionTermination.parse(
+                bytes.fromhex("0900012b8ec27f2c28")
+            ).address,
+            IPv4Address("43.142.194.127"),
         )
+        with self.assertRaisesRegex(PacketShapeError, "endpoint flag"):
+            WorldSessionTermination.parse(
+                bytes.fromhex("0900002b8ec2862b28")
+            )
 
     def test_transport_envelopes_and_heartbeat_round_trip(self) -> None:
         probe = HeartbeatProbe()
@@ -7700,6 +7716,23 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(analysis.state.matched_world_exit_terminations, 1)
         self.assertEqual(analysis.state.pending_world_exit_requests, 0)
+        termination_observation = next(
+            packet
+            for packet in analysis.observations
+            if packet.kind == "world_session_termination"
+        )
+        self.assertEqual(termination_observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(
+            termination_observation.details,
+            {
+                "endpoint_flag": 1,
+                "destination_endpoint_present": True,
+                "destination_endpoint_redacted": True,
+                "correlated_exit_request": True,
+                "pending_exit_requests": 0,
+                "round_trip_ms": 0.0,
+            },
+        )
         self.assertEqual(
             [
                 event.kind
@@ -7720,6 +7753,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             ],
         )
         self.assertNotIn(str(status_value), str(analysis.safe_dict()))
+        self.assertNotIn("203.0.113.10", str(analysis.safe_dict()))
         self.assertIn(
             "world_exit=bootstrap_markers:1 requests:1 active_requests:1",
             render_gameplay_analysis(analysis),
