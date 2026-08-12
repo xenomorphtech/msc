@@ -17,9 +17,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 136);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 140);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
-    assert_eq!(shapes.len(), 199);
+    assert_eq!(shapes.len(), 195);
 
     let life_submission = shapes
         .iter()
@@ -326,6 +326,29 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_158.length, None);
     assert_eq!(opcode_158.operations.len(), 4);
 
+    let ranged_attack = shapes
+        .iter()
+        .find(|shape| shape.name == "server_ranged_attack_relay")
+        .unwrap();
+    assert_eq!(ranged_attack.opcode, 219);
+    assert_eq!(ranged_attack.length, None);
+    assert!(ranged_attack.operations.iter().any(|operation| {
+        matches!(
+            operation,
+            ShapeOp::BitField {
+                name,
+                field,
+                shift: 4,
+                mask: 15,
+            } if name == "target_count" && field == "packed_counts"
+        )
+    }));
+    assert!(!shapes.iter().any(|shape| {
+        shape
+            .name
+            .starts_with("observed_server_to_client_opcode_219_")
+    }));
+
     for (name, opcode, length) in [
         ("server_opcode_228_u32_opaque_tail", 228, 10),
         ("server_opcode_230_u32_short_tail", 230, 7),
@@ -402,7 +425,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 201);
+    assert_eq!(dump.packet_shapes.len(), 195);
     assert_eq!(
         dump.handlers
             .iter()

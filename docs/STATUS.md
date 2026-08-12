@@ -761,6 +761,14 @@
   high-bit marker, client target prefix/tail fields, and the source of six
   delayed one-HP prediction differences remain neutral, so captured attack-
   relay generation and official authority-adjustment replay stay disabled.
+- The same 183 server attack relays now store their metadata, target records,
+  damage arrays, and ranged positions directly instead of retaining an opaque
+  body. The manifest independently derives target/hit counts from the packed
+  nibbles and validates every repeated record. Stream `126` advances to
+  `68,667/2,433/0/0`, stream `92` to `34,263/944/0/0`, and stream `114`
+  remains `61/15/0/0`. A fresh active client accepted injected typed opcode
+  `218`/`219` packets at full coverage with zero unknown or invalid packets and
+  preserved all `3,031/3,031` heartbeat pairs.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

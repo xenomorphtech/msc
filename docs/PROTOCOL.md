@@ -4153,7 +4153,9 @@ and 42. Every outer player object id is observed somewhere in the
 same capture. The nibble split is supported by the manifest's packed
 attack-count prefix and by body-length scaling. Given those counts, every body
 decomposes exactly into the typed attack metadata, repeated target records, and
-the opcode-`219` signed position.
+the opcode-`219` signed position. The codec now stores those components
+directly as typed metadata and target records; it no longer retains an opaque
+relay body.
 
 All 42 close-range relays share the same typed six-byte metadata prefix. Stream
 `126` has 36 full forms and five short forms; stream `92` adds one full form.
@@ -4196,9 +4198,15 @@ The fold emits `server_attack_relay_received`, aliases the actor, records the
 packed target/hit distributions, aliases each nonzero mob, and reports damage
 magnitudes plus a neutral high-bit marker. Active mob entities accumulate the
 observed relay hit/damage totals without replacing the authoritative opcode-
-`293` health percentage. Raw ids and raw body bytes remain hidden. These
-captures validate action-to-health/leave correlations and damage array
-boundaries. Client-side max HP now predicts 364/370 testable percentage
+`293` health percentage. Raw ids remain hidden. The neutral relay-tag/unknown/
+auxiliary/high-bit names do not obscure any bytes or prevent full structural
+coverage. Promoting all 183 relays moves stream `126` to
+`68,667/2,433/0/0` and stream `92` to `34,263/944/0/0`; stream `114` remains
+`61/15/0/0`. An active local transcript also accepted one typed opcode-`218`
+and one typed opcode-`219` packet at full coverage with zero unknown or invalid
+observations. These captures validate action-to-health/leave correlations and
+damage array boundaries. Client-side max HP now predicts 364/370 testable
+percentage
 transitions exactly and bounds the remaining six to a one-HP difference.
 Relay-tag/unknown/auxiliary roles, the damage high bit, client target
 prefix/tail fields, and the cause of those delayed one-HP differences remain

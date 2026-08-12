@@ -17,7 +17,15 @@ pub struct VersionManifest {
     pub il2cpp: Il2CppInputs,
     pub manual_shapes: Vec<ShapeSpec>,
     #[serde(default)]
+    pub superseded_opaque_opcodes: Vec<OpcodeKey>,
+    #[serde(default)]
     pub observed_opaque_shapes: Vec<ObservedOpaqueShape>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct OpcodeKey {
+    pub direction: Direction,
+    pub opcode: u16,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -93,7 +101,14 @@ impl LoadedManifest {
                 shape.direction == observed.direction
                     && shape.opcode == observed.opcode
                     && shape.length == Some(observed.length)
-            }) {
+            }) || self
+                .manifest
+                .superseded_opaque_opcodes
+                .contains(&OpcodeKey {
+                    direction: observed.direction,
+                    opcode: observed.opcode,
+                })
+            {
                 continue;
             }
             shapes.push(ShapeSpec {

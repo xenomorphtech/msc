@@ -1123,7 +1123,8 @@ The gameplay fold currently models these capture-backed boundaries:
   opcode `219` additionally exposes its conditional skill id, display/facing/
   speed/mastery bytes, projectile id, and signed attack position, while the
   opcode-`218` branch types the same first six metadata bytes plus the full
-  form's mastery/auxiliary fields and validates its short zero-target form,
+  form's mastery/auxiliary fields and validates its short zero-target form;
+  both codecs store typed metadata and target records without an opaque body,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: a response with an opaque eight-byte token,
@@ -2485,3 +2486,7 @@ preserve distinct Unity scan codes in this setup.
     appear-type/team/effect-item suffix fields. Promote all 1,884 spawn-bearing
     reference packets to full coverage, validate both corpora independently,
     and accept both widths in the active local client.
+105. Replace the opcode-`218`/`219` attack-relay body container with directly
+    typed metadata and target records, add manifest bit-field derivation for
+    the packed target/hit nibbles, promote all 183 relays to full coverage, and
+    validate one packet from each family in the active local client.

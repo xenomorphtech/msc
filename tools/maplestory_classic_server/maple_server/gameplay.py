@@ -12095,20 +12095,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="server_attack_relay",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=relay,
                 details=details,
-                issues=(
-                    (
-                        "target/damage arrays are capture-bounded; ranged "
-                        "relay tag/unknown byte and damage high-bit marker "
-                        "roles remain uninterpreted"
-                        if relay.opcode == 219
-                        else "target/damage arrays are capture-bounded; "
-                        "melee relay tag/unknown/auxiliary roles and damage "
-                        "high-bit marker remain uninterpreted"
-                    ),
-                ),
             )
         if opcode == 285 and MobTemporaryStatSet.is_captured_shape(payload):
             record = MobTemporaryStatSet.parse(payload)

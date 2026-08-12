@@ -6367,6 +6367,54 @@ class ServerAttackRelayTarget:
             "high_bit_markers": list(self.high_bit_markers),
         }
 
+    @classmethod
+    def parse_from(
+        cls,
+        reader: PacketReader,
+        *,
+        target_index: int,
+        hit_count: int,
+    ) -> "ServerAttackRelayTarget":
+        return cls(
+            object_id=reader.u32(f"targets[{target_index}].object_id"),
+            hit_action=reader.u8(f"targets[{target_index}].hit_action"),
+            raw_damage_values=tuple(
+                reader.u32(
+                    f"targets[{target_index}].damage_values[{hit_index}]"
+                )
+                for hit_index in range(hit_count)
+            ),
+        )
+
+    def _validate(self, *, hit_count: int) -> None:
+        if not 0 <= self.object_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "server attack relay target object id must fit in u32"
+            )
+        if not 0 <= self.hit_action <= 0xFF:
+            raise PacketShapeError(
+                "server attack relay target hit action must fit in u8"
+            )
+        if len(self.raw_damage_values) != hit_count:
+            raise PacketShapeError(
+                "server attack relay target needs "
+                f"{hit_count} damage values, got "
+                f"{len(self.raw_damage_values)}"
+            )
+        if any(not 0 <= value <= 0xFFFF_FFFF for value in self.raw_damage_values):
+            raise PacketShapeError(
+                "server attack relay raw damage values must fit in u32"
+            )
+
+    def to_bytes(self, *, hit_count: int) -> bytes:
+        self._validate(hit_count=hit_count)
+        return (
+            struct.pack("<IB", self.object_id, self.hit_action)
+            + b"".join(
+                struct.pack("<I", value) for value in self.raw_damage_values
+            )
+        )
+
 
 @dataclass(frozen=True)
 class ServerMeleeAttackRelayMetadata:
@@ -6392,6 +6440,62 @@ class ServerMeleeAttackRelayMetadata:
             "auxiliary_value": self.auxiliary_value,
             "short_zero_target_form": self.short_zero_target_form,
         }
+
+    def _validate(self) -> None:
+        for name, value in (
+            ("relay_tag", self.relay_tag),
+            ("skill_level", self.skill_level),
+            ("unknown_value", self.unknown_value),
+            ("display", self.display),
+            ("facing_flags", self.facing_flags),
+            ("attack_speed", self.attack_speed),
+        ):
+            if not 0 <= value <= 0xFF:
+                raise PacketShapeError(
+                    f"server melee attack relay {name} must fit in u8"
+                )
+        if self.skill_level != 0:
+            raise PacketShapeError(
+                "server opcode-218 attack relay skill level is "
+                f"{self.skill_level}, expected captured value 0"
+            )
+        if self.short_zero_target_form:
+            if self.mastery is not None or self.auxiliary_value is not None:
+                raise PacketShapeError(
+                    "server opcode-218 short attack relay cannot carry "
+                    "mastery or auxiliary fields"
+                )
+            return
+        if self.mastery is None or self.auxiliary_value is None:
+            raise PacketShapeError(
+                "server opcode-218 full attack relay requires mastery and "
+                "auxiliary fields"
+            )
+        if not 0 <= self.mastery <= 0xFF:
+            raise PacketShapeError(
+                "server melee attack relay mastery must fit in u8"
+            )
+        if not 0 <= self.auxiliary_value <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "server melee attack relay auxiliary value must fit in u32"
+            )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        body = struct.pack(
+            "<BBBBBB",
+            self.relay_tag,
+            self.skill_level,
+            self.unknown_value,
+            self.display,
+            self.facing_flags,
+            self.attack_speed,
+        )
+        if self.short_zero_target_form:
+            return body
+        return body + struct.pack(
+            "<BI", self.mastery, self.auxiliary_value
+        )
 
 
 @dataclass(frozen=True)
@@ -6423,12 +6527,68 @@ class ServerRangedAttackRelayMetadata:
             "position_y": self.position_y,
         }
 
+    def _validate(self) -> None:
+        for name, value in (
+            ("relay_tag", self.relay_tag),
+            ("skill_level", self.skill_level),
+            ("unknown_value", self.unknown_value),
+            ("display", self.display),
+            ("facing_flags", self.facing_flags),
+            ("attack_speed", self.attack_speed),
+            ("mastery", self.mastery),
+        ):
+            if not 0 <= value <= 0xFF:
+                raise PacketShapeError(
+                    f"server ranged attack relay {name} must fit in u8"
+                )
+        if (self.skill_id is None) != (self.skill_level == 0):
+            raise PacketShapeError(
+                "server opcode-219 skill id must be present exactly when "
+                "skill level is nonzero"
+            )
+        if self.skill_id is not None and not 0 <= self.skill_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "server ranged attack relay skill id must fit in u32"
+            )
+        if not 0 <= self.projectile_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "server ranged attack relay projectile id must fit in u32"
+            )
+        for name, value in (
+            ("position_x", self.position_x),
+            ("position_y", self.position_y),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(
+                    f"server ranged attack relay {name} must fit in i16"
+                )
+
+    def prefix_bytes(self) -> bytes:
+        self._validate()
+        body = struct.pack("<BB", self.relay_tag, self.skill_level)
+        if self.skill_id is not None:
+            body += struct.pack("<I", self.skill_id)
+        return body + struct.pack(
+            "<BBBBBI",
+            self.unknown_value,
+            self.display,
+            self.facing_flags,
+            self.attack_speed,
+            self.mastery,
+            self.projectile_id,
+        )
+
+    def position_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack("<hh", self.position_x, self.position_y)
+
 
 @dataclass(frozen=True)
 class ServerAttackRelay:
     object_id: int
-    packed_counts: int
-    opaque_body: bytes
+    hit_count: int
+    metadata: ServerMeleeAttackRelayMetadata | ServerRangedAttackRelayMetadata
+    targets: tuple[ServerAttackRelayTarget, ...]
     opcode: int
 
     _TOTAL_LENGTHS = {
@@ -6438,169 +6598,26 @@ class ServerAttackRelay:
 
     @property
     def target_count(self) -> int:
-        return self.packed_counts >> 4
+        return len(self.targets)
 
     @property
-    def hit_count(self) -> int:
-        return self.packed_counts & 0x0F
-
-    def _split_body(
-        self,
-    ) -> tuple[bytes, tuple[ServerAttackRelayTarget, ...], bytes]:
-        tail_length = 4 if self.opcode == 219 else 0
-        target_record_length = 5 + 4 * self.hit_count
-        prefix_length = (
-            len(self.opaque_body)
-            - tail_length
-            - self.target_count * target_record_length
-        )
-        expected_prefix_lengths = {218: {6, 11}, 219: {11, 15}}.get(
-            self.opcode
-        )
-        if expected_prefix_lengths is None:
-            raise PacketShapeError(
-                f"server attack relay opcode is {self.opcode}, "
-                "expected 218 or 219"
-            )
-        if prefix_length not in expected_prefix_lengths:
-            expected = ", ".join(
-                str(value) for value in sorted(expected_prefix_lengths)
-            )
-            raise PacketShapeError(
-                f"server opcode-{self.opcode} attack relay packed counts "
-                f"0x{self.packed_counts:02x} imply a {prefix_length}-byte "
-                f"prefix, expected one of {expected}"
-            )
-
-        reader = PacketReader(
-            self.opaque_body, packet_name="server_attack_relay_body"
-        )
-        opaque_prefix = reader.bytes(prefix_length, "opaque_prefix")
-        targets: list[ServerAttackRelayTarget] = []
-        for target_index in range(self.target_count):
-            targets.append(
-                ServerAttackRelayTarget(
-                    object_id=reader.u32(f"targets[{target_index}].object_id"),
-                    hit_action=reader.u8(f"targets[{target_index}].hit_action"),
-                    raw_damage_values=tuple(
-                        reader.u32(
-                            f"targets[{target_index}].damage_values[{hit_index}]"
-                        )
-                        for hit_index in range(self.hit_count)
-                    ),
-                )
-            )
-        opaque_tail = reader.bytes(tail_length, "opaque_tail")
-        reader.finish()
-        return opaque_prefix, tuple(targets), opaque_tail
-
-    @property
-    def opaque_prefix(self) -> bytes:
-        return self._split_body()[0]
-
-    @property
-    def targets(self) -> tuple[ServerAttackRelayTarget, ...]:
-        return self._split_body()[1]
-
-    @property
-    def opaque_tail(self) -> bytes:
-        return self._split_body()[2]
+    def packed_counts(self) -> int:
+        return (self.target_count << 4) | self.hit_count
 
     @property
     def melee_metadata(self) -> ServerMeleeAttackRelayMetadata | None:
-        if self.opcode != 218:
-            return None
-        opaque_prefix, targets, _ = self._split_body()
-        reader = PacketReader(
-            opaque_prefix, packet_name="server_melee_attack_relay_prefix"
-        )
-        relay_tag = reader.u8("relay_tag")
-        skill_level = reader.u8("skill_level")
-        if skill_level != 0:
-            raise PacketShapeError(
-                "server opcode-218 attack relay skill level is "
-                f"{skill_level}, expected captured value 0"
-            )
-        unknown_value = reader.u8("unknown_value")
-        display = reader.u8("display")
-        facing_flags = reader.u8("facing_flags")
-        attack_speed = reader.u8("attack_speed")
-        short_zero_target_form = len(opaque_prefix) == 6
-        mastery = None
-        auxiliary_value = None
-        if short_zero_target_form:
-            zero_target = targets[0] if len(targets) == 1 else None
-            if not (
-                self.target_count == 1
-                and self.hit_count == 1
-                and zero_target is not None
-                and zero_target.object_id == 0
-                and zero_target.hit_action == 0
-                and zero_target.raw_damage_values == (0,)
-            ):
-                raise PacketShapeError(
-                    "server opcode-218 short attack relay requires exactly "
-                    "one all-zero target with one zero damage value"
-                )
-        else:
-            mastery = reader.u8("mastery")
-            auxiliary_value = reader.u32("auxiliary_value")
-        reader.finish()
-        return ServerMeleeAttackRelayMetadata(
-            relay_tag=relay_tag,
-            skill_level=skill_level,
-            unknown_value=unknown_value,
-            display=display,
-            facing_flags=facing_flags,
-            attack_speed=attack_speed,
-            mastery=mastery,
-            auxiliary_value=auxiliary_value,
-            short_zero_target_form=short_zero_target_form,
+        return (
+            self.metadata
+            if isinstance(self.metadata, ServerMeleeAttackRelayMetadata)
+            else None
         )
 
     @property
     def ranged_metadata(self) -> ServerRangedAttackRelayMetadata | None:
-        if self.opcode != 219:
-            return None
-        opaque_prefix, _, opaque_tail = self._split_body()
-        reader = PacketReader(
-            opaque_prefix, packet_name="server_ranged_attack_relay_prefix"
-        )
-        relay_tag = reader.u8("relay_tag")
-        skill_level = reader.u8("skill_level")
-        expected_prefix_length = 15 if skill_level else 11
-        if len(opaque_prefix) != expected_prefix_length:
-            raise PacketShapeError(
-                "server opcode-219 attack relay skill level "
-                f"{skill_level} requires a {expected_prefix_length}-byte "
-                f"prefix, got {len(opaque_prefix)}"
-            )
-        skill_id = reader.u32("skill_id") if skill_level else None
-        unknown_value = reader.u8("unknown_value")
-        display = reader.u8("display")
-        facing_flags = reader.u8("facing_flags")
-        attack_speed = reader.u8("attack_speed")
-        mastery = reader.u8("mastery")
-        projectile_id = reader.u32("projectile_id")
-        reader.finish()
-        position_reader = PacketReader(
-            opaque_tail, packet_name="server_ranged_attack_relay_position"
-        )
-        position_x = position_reader.i16("x")
-        position_y = position_reader.i16("y")
-        position_reader.finish()
-        return ServerRangedAttackRelayMetadata(
-            relay_tag=relay_tag,
-            skill_level=skill_level,
-            skill_id=skill_id,
-            unknown_value=unknown_value,
-            display=display,
-            facing_flags=facing_flags,
-            attack_speed=attack_speed,
-            mastery=mastery,
-            projectile_id=projectile_id,
-            position_x=position_x,
-            position_y=position_y,
+        return (
+            self.metadata
+            if isinstance(self.metadata, ServerRangedAttackRelayMetadata)
+            else None
         )
 
     @classmethod
@@ -6618,69 +6635,174 @@ class ServerAttackRelay:
                 f"server opcode-{opcode} attack relay has {len(payload)} bytes, "
                 f"expected one of {expected}"
             )
+        object_id = reader.u32("object_id")
+        packed_counts = reader.u8("packed_counts")
+        target_count = packed_counts >> 4
+        hit_count = packed_counts & 0x0F
+        target_bytes = target_count * (5 + 4 * hit_count)
+        if opcode == 218:
+            if target_bytes > reader.remaining:
+                raise PacketShapeError(
+                    "server opcode-218 attack relay target records exceed "
+                    "the packet body"
+                )
+            prefix_length = reader.remaining - target_bytes
+            if prefix_length not in {6, 11}:
+                raise PacketShapeError(
+                    "server opcode-218 attack relay packed counts "
+                    f"0x{packed_counts:02x} imply a {prefix_length}-byte "
+                    "metadata prefix, expected 6 or 11"
+                )
+            metadata: (
+                ServerMeleeAttackRelayMetadata
+                | ServerRangedAttackRelayMetadata
+            ) = ServerMeleeAttackRelayMetadata(
+                relay_tag=reader.u8("relay_tag"),
+                skill_level=reader.u8("skill_level"),
+                unknown_value=reader.u8("unknown_value"),
+                display=reader.u8("display"),
+                facing_flags=reader.u8("facing_flags"),
+                attack_speed=reader.u8("attack_speed"),
+                mastery=(reader.u8("mastery") if prefix_length == 11 else None),
+                auxiliary_value=(
+                    reader.u32("auxiliary_value")
+                    if prefix_length == 11
+                    else None
+                ),
+                short_zero_target_form=prefix_length == 6,
+            )
+        else:
+            relay_tag = reader.u8("relay_tag")
+            skill_level = reader.u8("skill_level")
+            skill_id = reader.u32("skill_id") if skill_level else None
+            unknown_value = reader.u8("unknown_value")
+            display = reader.u8("display")
+            facing_flags = reader.u8("facing_flags")
+            attack_speed = reader.u8("attack_speed")
+            mastery = reader.u8("mastery")
+            projectile_id = reader.u32("projectile_id")
+
+        targets = tuple(
+            ServerAttackRelayTarget.parse_from(
+                reader,
+                target_index=target_index,
+                hit_count=hit_count,
+            )
+            for target_index in range(target_count)
+        )
+        if opcode == 219:
+            metadata = ServerRangedAttackRelayMetadata(
+                relay_tag=relay_tag,
+                skill_level=skill_level,
+                skill_id=skill_id,
+                unknown_value=unknown_value,
+                display=display,
+                facing_flags=facing_flags,
+                attack_speed=attack_speed,
+                mastery=mastery,
+                projectile_id=projectile_id,
+                position_x=reader.i16("position_x"),
+                position_y=reader.i16("position_y"),
+            )
         relay = cls(
             opcode=opcode,
-            object_id=reader.u32("object_id"),
-            packed_counts=reader.u8("packed_counts"),
-            opaque_body=reader.bytes(reader.remaining, "opaque_body"),
+            object_id=object_id,
+            hit_count=hit_count,
+            metadata=metadata,
+            targets=targets,
         )
         reader.finish()
-        relay._split_body()
-        _ = relay.melee_metadata
-        _ = relay.ranged_metadata
+        relay._validate()
         return relay
 
     def safe_dict(self) -> dict[str, object]:
-        opaque_prefix, targets, opaque_tail = self._split_body()
         details: dict[str, object] = {
             "target_count": self.target_count,
             "hit_count": self.hit_count,
-            "opaque_body_bytes": len(self.opaque_body),
-            "opaque_prefix_bytes": len(opaque_prefix),
-            "target_records": len(targets),
+            "target_records": len(self.targets),
             "damage_values": sum(
-                len(target.raw_damage_values) for target in targets
+                len(target.raw_damage_values) for target in self.targets
             ),
             "high_bit_markers": sum(
-                sum(target.high_bit_markers) for target in targets
+                sum(target.high_bit_markers) for target in self.targets
             ),
-            "opaque_tail_bytes": len(opaque_tail),
         }
-        attack_metadata = self.melee_metadata or self.ranged_metadata
-        if attack_metadata is not None:
-            details.update(attack_metadata.safe_dict())
+        details.update(self.metadata.safe_dict())
         return details
 
-    def to_bytes(self) -> bytes:
-        total_lengths = self._TOTAL_LENGTHS.get(self.opcode)
-        if total_lengths is None:
+    def _validate(self) -> None:
+        if self.opcode not in self._TOTAL_LENGTHS:
             raise PacketShapeError(
                 f"server attack relay opcode is {self.opcode}, "
                 "expected 218 or 219"
             )
-        total_length = 7 + len(self.opaque_body)
+        if not 0 <= self.object_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "server attack relay object id must fit in u32"
+            )
+        if not 0 <= self.target_count <= 0x0F:
+            raise PacketShapeError(
+                "server attack relay target count must fit in a nibble"
+            )
+        if not 0 <= self.hit_count <= 0x0F:
+            raise PacketShapeError(
+                "server attack relay hit count must fit in a nibble"
+            )
+        for target in self.targets:
+            target._validate(hit_count=self.hit_count)
+        if self.opcode == 218:
+            if not isinstance(self.metadata, ServerMeleeAttackRelayMetadata):
+                raise PacketShapeError(
+                    "server opcode-218 requires melee relay metadata"
+                )
+            self.metadata._validate()
+            if self.metadata.short_zero_target_form:
+                zero_target = self.targets[0] if len(self.targets) == 1 else None
+                if not (
+                    self.target_count == 1
+                    and self.hit_count == 1
+                    and zero_target is not None
+                    and zero_target.object_id == 0
+                    and zero_target.hit_action == 0
+                    and zero_target.raw_damage_values == (0,)
+                ):
+                    raise PacketShapeError(
+                        "server opcode-218 short attack relay requires exactly "
+                        "one all-zero target with one zero damage value"
+                    )
+        else:
+            if not isinstance(self.metadata, ServerRangedAttackRelayMetadata):
+                raise PacketShapeError(
+                    "server opcode-219 requires ranged relay metadata"
+                )
+            self.metadata._validate()
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        metadata_prefix = (
+            self.metadata.to_bytes()
+            if isinstance(self.metadata, ServerMeleeAttackRelayMetadata)
+            else self.metadata.prefix_bytes()
+        )
+        body = (
+            struct.pack("<HIB", self.opcode, self.object_id, self.packed_counts)
+            + metadata_prefix
+            + b"".join(
+                target.to_bytes(hit_count=self.hit_count)
+                for target in self.targets
+            )
+        )
+        if isinstance(self.metadata, ServerRangedAttackRelayMetadata):
+            body += self.metadata.position_bytes()
+        total_length = len(body)
+        total_lengths = self._TOTAL_LENGTHS[self.opcode]
         if total_length not in total_lengths:
             expected = ", ".join(str(value) for value in sorted(total_lengths))
             raise PacketShapeError(
                 f"server opcode-{self.opcode} attack relay has {total_length} "
                 f"bytes, expected one of {expected}"
             )
-        for name, value, maximum in (
-            ("object_id", self.object_id, 0xFFFF_FFFF),
-            ("packed_counts", self.packed_counts, 0xFF),
-        ):
-            if not 0 <= value <= maximum:
-                raise PacketShapeError(
-                    f"server attack relay {name} must fit in "
-                    f"u{maximum.bit_length()}"
-                )
-        self._split_body()
-        _ = self.melee_metadata
-        _ = self.ranged_metadata
-        return (
-            struct.pack("<HIB", self.opcode, self.object_id, self.packed_counts)
-            + self.opaque_body
-        )
+        return body
 
 
 @dataclass(frozen=True)

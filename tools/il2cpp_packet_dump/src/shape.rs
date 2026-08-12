@@ -54,6 +54,12 @@ pub enum ShapeOp {
         mask: u64,
         operations: Vec<ShapeOp>,
     },
+    BitField {
+        name: String,
+        field: String,
+        shift: u8,
+        mask: u64,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -236,8 +242,37 @@ impl<'a> Cursor<'a> {
                     mask,
                     operations,
                 } => self.execute_if_mask(field, *mask, operations)?,
+                ShapeOp::BitField {
+                    name,
+                    field,
+                    shift,
+                    mask,
+                } => self.execute_bit_field(name, field, *shift, *mask)?,
             }
         }
+        Ok(())
+    }
+
+    fn execute_bit_field(
+        &mut self,
+        name: &str,
+        field: &str,
+        shift: u8,
+        mask: u64,
+    ) -> std::result::Result<(), String> {
+        let value = *self
+            .values
+            .get(field)
+            .ok_or_else(|| format!("bit_field references unread field {field}"))?;
+        if value < 0 {
+            return Err(format!("bit_field source {field} is negative: {value}"));
+        }
+        if shift >= 64 {
+            return Err(format!("bit_field shift must be below 64, got {shift}"));
+        }
+        let shifted = value >> shift;
+        self.values
+            .insert(name.to_owned(), shifted & i128::from(mask));
         Ok(())
     }
 
@@ -628,6 +663,55 @@ mod tests {
         assert_eq!(cursor.offset, payload.len());
         assert_eq!(cursor.values.get("intelligence"), Some(&0x1234));
         assert_eq!(cursor.values.get("hp"), Some(&0x5678));
+    }
+
+    #[test]
+    fn bit_field_derives_repeat_counts() {
+        let shape = ShapeSpec {
+            name: "bit_field".into(),
+            direction: Direction::ServerToClient,
+            opcode: 0,
+            length: None,
+            source: "test".into(),
+            operations: vec![
+                ShapeOp::Read {
+                    name: "packed_counts".into(),
+                    kind: ReadKind::U8,
+                    equals: None,
+                },
+                ShapeOp::BitField {
+                    name: "target_count".into(),
+                    field: "packed_counts".into(),
+                    shift: 4,
+                    mask: 0x0f,
+                },
+                ShapeOp::BitField {
+                    name: "hit_count".into(),
+                    field: "packed_counts".into(),
+                    shift: 0,
+                    mask: 0x0f,
+                },
+                ShapeOp::Repeat {
+                    count_from: "target_count".into(),
+                    operations: vec![
+                        ShapeOp::Read {
+                            name: "target".into(),
+                            kind: ReadKind::U8,
+                            equals: None,
+                        },
+                        ShapeOp::Repeat {
+                            count_from: "hit_count".into(),
+                            operations: vec![ShapeOp::Read {
+                                name: "damage".into(),
+                                kind: ReadKind::U8,
+                                equals: None,
+                            }],
+                        },
+                    ],
+                },
+            ],
+        };
+        assert_eq!(validate_raw(&[0x12, 0xaa, 0x01, 0x02], &shape), "ok");
     }
 
     #[test]

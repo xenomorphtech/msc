@@ -1409,30 +1409,26 @@ def fixture_gameplay_transcript(
         )
         append(
             "server_to_client",
-            ServerAttackRelay(
-                opcode=218,
-                object_id=PLAYER_OBJECT_ID,
-                packed_counts=0x11,
-                opaque_body=fixture_attack_relay_body(
+            ServerAttackRelay.parse(
+                struct.pack("<HIB", 218, PLAYER_OBJECT_ID, 0x11)
+                + fixture_attack_relay_body(
                     prefix_length=11,
                     target_count=1,
                     hit_count=1,
                     tail_length=0,
-                ),
+                )
             ).to_bytes(),
         )
         append(
             "server_to_client",
-            ServerAttackRelay(
-                opcode=219,
-                object_id=PLAYER_OBJECT_ID,
-                packed_counts=0x12,
-                opaque_body=fixture_attack_relay_body(
+            ServerAttackRelay.parse(
+                struct.pack("<HIB", 219, PLAYER_OBJECT_ID, 0x12)
+                + fixture_attack_relay_body(
                     prefix_length=15,
                     target_count=1,
                     hit_count=2,
                     tail_length=4,
-                ),
+                )
             ).to_bytes(),
         )
     if recovery_requests:
@@ -4557,17 +4553,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         ]
         server_attack_relays = [
-            ServerAttackRelay(
-                opcode=opcode,
-                object_id=PLAYER_OBJECT_ID,
-                packed_counts=packed_counts,
-                opaque_body=fixture_attack_relay_body(
+            ServerAttackRelay.parse(
+                struct.pack(
+                    "<HIB", opcode, PLAYER_OBJECT_ID, packed_counts
+                )
+                + fixture_attack_relay_body(
                     prefix_length=prefix_length,
                     target_count=packed_counts >> 4,
                     hit_count=packed_counts & 0x0F,
                     tail_length=4 if opcode == 219 else 0,
                     zero_targets=opcode == 218 and prefix_length == 6,
-                ),
+                )
             )
             for opcode, packed_counts, prefix_length in (
                 (218, 0x01, 11),
@@ -4711,33 +4707,28 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 client_attack_actions[1], opaque_suffix=b"\x00" * 25
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "expected one of"):
-            replace(server_attack_relays[0], opaque_body=b"\x00" * 12).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "imply a 7-byte prefix"):
-            replace(server_attack_relays[2], packed_counts=0x12).to_bytes()
-        invalid_skill_prefix = bytearray(server_attack_relays[6].opaque_body)
-        invalid_skill_prefix[1] = 0
-        with self.assertRaisesRegex(
-            PacketShapeError, "skill level 0 requires a 11-byte prefix"
-        ):
             replace(
-                server_attack_relays[6],
-                opaque_body=bytes(invalid_skill_prefix),
+                server_attack_relays[0],
+                targets=server_attack_relays[2].targets * 2,
             ).to_bytes()
-        invalid_melee_skill = bytearray(server_attack_relays[2].opaque_body)
-        invalid_melee_skill[1] = 1
+        with self.assertRaisesRegex(PacketShapeError, "needs 2 damage values"):
+            replace(server_attack_relays[2], hit_count=2).to_bytes()
         with self.assertRaisesRegex(
             PacketShapeError, "expected captured value 0"
         ):
             replace(
                 server_attack_relays[2],
-                opaque_body=bytes(invalid_melee_skill),
+                metadata=replace(
+                    server_attack_relays[2].metadata,
+                    skill_level=1,
+                ),
             ).to_bytes()
-        invalid_short_target = bytearray(server_attack_relays[1].opaque_body)
-        invalid_short_target[6] = 1
         with self.assertRaisesRegex(PacketShapeError, "one all-zero target"):
             replace(
                 server_attack_relays[1],
-                opaque_body=bytes(invalid_short_target),
+                targets=(
+                    replace(server_attack_relays[1].targets[0], object_id=1),
+                ),
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "flag_1 must fit"):
             ClientOpcode54AttackAction(
@@ -8376,16 +8367,14 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(event_kinds.count("remote_player_left_field"), 2)
 
     def test_folds_mob_temporary_stat_set_reset_lifecycle(self) -> None:
-        relay = ServerAttackRelay(
-            object_id=PLAYER_OBJECT_ID,
-            packed_counts=0x11,
-            opaque_body=fixture_attack_relay_body(
+        relay = ServerAttackRelay.parse(
+            struct.pack("<HIB", 219, PLAYER_OBJECT_ID, 0x11)
+            + fixture_attack_relay_body(
                 prefix_length=15,
                 target_count=1,
                 hit_count=1,
                 tail_length=4,
             ),
-            opcode=219,
         )
         first_set = MobTemporaryStatSet(
             object_id=MOB_OBJECT_ID,
@@ -8564,16 +8553,14 @@ class GameplayStateFoldTest(unittest.TestCase):
             name="Player",
             opaque_body=b"\x00",
         ).to_bytes()
-        relay_payload = ServerAttackRelay(
-            opcode=219,
-            object_id=PLAYER_OBJECT_ID,
-            packed_counts=0x12,
-            opaque_body=fixture_attack_relay_body(
+        relay_payload = ServerAttackRelay.parse(
+            struct.pack("<HIB", 219, PLAYER_OBJECT_ID, 0x12)
+            + fixture_attack_relay_body(
                 prefix_length=15,
                 target_count=1,
                 hit_count=2,
                 tail_length=4,
-            ),
+            )
         ).to_bytes()
         fold = GameplayStateFold()
         frames = (
@@ -10669,11 +10656,11 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertIn(
-            "opcode=218 kind=server_attack_relay coverage=partial",
+            "opcode=218 kind=server_attack_relay coverage=full",
             report,
         )
         self.assertIn(
-            "opcode=219 kind=server_attack_relay coverage=partial",
+            "opcode=219 kind=server_attack_relay coverage=full",
             report,
         )
         self.assertIn("kind=client_attack_submitted", report)
