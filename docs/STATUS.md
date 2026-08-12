@@ -298,15 +298,15 @@
   `1302000`/`1002053`. Its transcript folds warning-free at `342/323/0/0`,
   with one matched move, none pending, active map `101000000`, `67/67`
   recovery replies, and `222/222` heartbeat pairs at the proof sample.
-- Client opcode `225` now models all 15 fixed 16-byte positioned-effect
-  actions. Each redacted signed primary key resolves to an active effect alias
-  in the same field epoch, and each packet immediately follows targetless
-  opcode `50` in client direction order. The two u32 roles and zero u16 trailer
-  remain neutral. The fold emits `positioned_effect_action_submitted`, records
-  all 15 known-entity/after-attack correlations, and exposes only aliases and
-  aggregate value distributions. Native validation consumes every packet
-  exactly, bringing stream `126` to `26,661/44,417/22/0` while leaving streams
-  `92` and `114` unchanged.
+- Client opcode `225` and server opcodes `322`/`320`/`323` are now modeled as
+  the field-reactor hit and spawn/update/removal lifecycle. All 15 requests
+  target active same-epoch reactors and FIFO-match 12 state updates plus three
+  removals in `388.463..1,102.698` ms; every update echoes the request stance.
+  The 82 lifecycle packets remain exact full observations, removals now delete
+  the active reactor, no request targets an inactive reactor, and safe output
+  uses redacted `reactor:N` aliases. Native validation consumes every request
+  exactly. Stream `126` reaches
+  `27,203/43,897/0/0`; streams `92` and `114` remain unchanged.
 - Client opcode `298` now models all 12 exact 76-byte item-acquisition
   requests. Request kinds `1`/`2` correlate with Use/Cash additions, and every
   request matches the next same-epoch server opcode-`39` addition by inventory
@@ -416,10 +416,10 @@
   one exact `instructional_dialogue_requested` event, stays active on map
   `101000000`, and matches all 11 heartbeat pairs without assigning meanings
   to the three numeric values.
-- Server opcodes `320`/`322`/`323` are exact positioned-effect records with an
-  aliased primary key, typed i16 coordinates, and neutral controls. All 82
-  stream-`126` packets round-trip at full coverage, producing 36 field-scoped
-  aliases and 46 updates with no unknown opcode-`323` update. In the live A/B,
+- Server opcodes `320`/`322`/`323` are exact field-reactor state-update/spawn/
+  removal records with an aliased object id, typed template/state/coordinates,
+  and bounded control bytes. All 82 stream-`126` packets round-trip at full
+  coverage with no update/removal for an inactive reactor. In the live A/B,
   an exact off-screen opcode-`322` had no visible effect; changing only its
   coordinates to the folded player position produced a transient blue `10`
   over the sprite at 100 ms, gone by one second. The pair folded as one alias

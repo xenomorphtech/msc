@@ -641,7 +641,7 @@ def _occupied_runtime_object_ids(analysis: GameplayAnalysis) -> set[int]:
         *state.mobs,
         *state.observed_players,
         *state.field_drops,
-        *state.positioned_effect_entities,
+        *state.reactors,
     }
     if state.entry_character_id is not None:
         occupied.add(state.entry_character_id)

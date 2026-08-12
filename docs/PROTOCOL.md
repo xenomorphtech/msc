@@ -1010,81 +1010,81 @@ matched, and runtime reported no connection failure. This validates the
 dialogue-request effect while deliberately leaving its numeric value roles
 unnamed.
 
-## Positioned visual effects (`320`, `322`, `323`)
+## Field reactors (`225`, `320`, `322`, `323`)
 
-The pinned version-300 handlers for opcodes `320`, `322`, and `323` live in the
-same dictionary/list-backed manager. Each reads a primary int32 key plus signed
-16-bit coordinates. The remaining value roles stay neutral:
+Server opcodes `322`, `320`, and `323` are the reactor spawn, state-update, and
+removal lifecycle. This is supported by the pinned handler grouping, the exact
+wire shapes, the `Reactor/{0:D7}` and `reactorState` strings in the build, and
+the matching roles in the independent Cosmic
+[reactor-hit handler](https://github.com/P0nk/Cosmic/blob/master/src/main/java/net/server/channel/handlers/ReactorHitHandler.java)
+and [reactor packet builders](https://github.com/P0nk/Cosmic/blob/master/src/main/java/tools/PacketCreator.java).
+The version-300 layouts are:
 
 ```text
 opcode 320:
     uint16 opcode
-    int32 primary_value              # aliased/redacted
-    uint8 control_value
+    int32 reactor_object_id          # aliased/redacted
+    uint8 state
     int16 x
     int16 y
-    int16 numeric_value
-    uint8 secondary_control_value
-    uint8 trailing_value
+    uint16 stance
+    uint8 reserved_value = 0
+    uint8 frame_delay
 
 opcode 322:
     uint16 opcode
-    int32 primary_value              # aliased/redacted
-    int32 numeric_value
-    uint8 control_value
+    int32 reactor_object_id          # aliased/redacted
+    int32 reactor_id
+    uint8 state
     int16 x
     int16 y
-    uint8 trailing_value
+    uint8 spawn_flag
 
 opcode 323:
     uint16 opcode
-    int32 primary_value              # aliased/redacted
-    uint8 control_value
+    int32 reactor_object_id          # aliased/redacted
+    uint8 state
     int16 x
     int16 y
 ```
 
 Stream `126` contains 12/50/20 packets respectively, all exactly 15/16/11
-bytes and all exact full-coverage round trips. The field-scoped fold creates 36
-aliased effect entities and applies 46 updates. Every opcode-`323` record
-references an entity already observed in its current field epoch; field
-snapshots clear the active effect map. State and `positioned_effect_observed`
-events expose only aliases, coordinates, opcode/control distributions, and
-whether a record created or updated the alias. Raw primary values are omitted.
+bytes and all exact full-coverage round trips. Every state update/removal
+references an active same-field reactor; removals delete the entity and field
+snapshots clear the active reactor map. State/events expose only `reactor:N`
+aliases, reactor template, coordinates, state/flag distributions, and the
+request/response correlation. Raw runtime object ids are omitted.
 
 A live exact opcode-`322` record at captured coordinates `(2609,-372)` was
 accepted without a visible in-view change. A second typed record changed only
 the i16 coordinates to the folded local-player position `(633,-2677)`. At 100
 ms the client showed a transient blue `10` directly above the player; it was
 gone at one second, HP remained `50/222`, and the connection stayed active.
-The transcript folds the pair exactly as `effect:1` creation then update,
+The transcript folds the pair exactly as `reactor:1` creation then update,
 ending at `(633,-2677)` with zero unknown updates and 131/131 matched heartbeat
-pairs. This validates the coordinate/effect interpretation, but not the
-meaning of the displayed number or any neutral numeric/control field.
+pairs. The blue `10` is consistent with reactor template `2000`; the live check
+validates placement/acceptance, not gameplay policy for that reactor.
 
-Client opcode `225` is an exact capture-bounded action referencing the same
-primary-key space:
+Client opcode `225` is the corresponding reactor-hit request:
 
 ```text
 uint16 opcode = 225
-int32  primary_value                 # aliased/redacted
-uint32 value_1                       # observed 2 or 3; role remains neutral
-uint32 value_2                       # observed 305 or 393; role remains neutral
-uint16 trailing_value                # observed 0; role remains neutral
+int32  reactor_object_id             # aliased/redacted
+int32  character_position            # observed 2 or 3
+uint16 stance                        # observed 305 or 393
+uint32 reserved_value = 0
 ```
 
-All 15 stream-`126` records are 16 bytes. Their five primary keys each resolve
-to a positioned-effect entity already active in the same field epoch, and
-every record immediately follows a targetless opcode-`50` attack in client
-direction order. This repeated key equality and ordering justify only the
-`positioned_effect_action` boundary; they do not establish the two u32 roles,
-the zero trailer's role, or a request/response direction. The fold emits
-`positioned_effect_action_submitted`, counts all 15 as known-entity and
-after-attack actions, reports `value_1={2:8,3:7}`,
-`value_2={305:6,393:9}`, and `trailing={0:15}`, and exposes the primary only as
-the existing `effect:N` alias. Python and native codecs both consume and
-re-emit every record exactly. Coverage moves from the opcode-`79` checkpoint
-`26,661/44,402/37/0` to `26,661/44,417/22/0`.
+All 15 stream-`126` requests are 16 bytes. Their five object ids resolve to
+active same-epoch reactors and every request follows targetless opcode `50`.
+FIFO correlation by reactor id matches every request to the next opcode-`320`
+state update (12) or opcode-`323` removal (3) in `388.463..1,102.698` ms
+(median `406.749` ms). All 12 updates echo the request stance exactly; no
+request remains pending. The `character_position` label is supported by the
+independent reactor-hit handler but remains build-specific telemetry here.
+Python and native codecs consume/re-emit every request exactly. Promoting the
+15 requests while reclassifying the already-full 82 lifecycle packets moves
+stream `126` from `27,188/43,912/0/0` to `27,203/43,897/0/0`.
 
 ## Redacted selector envelope (`276`)
 

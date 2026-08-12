@@ -959,14 +959,13 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `247`: a fully bounded tutorial-UI instruction containing
   redacted terminated counted UTF-16 text, two signed 16-bit values, a control
   byte, and a handler-confirmed optional pair of signed 32-bit values,
-- server opcodes `320`/`322`/`323`: exact positioned-effect records with an
-  aliased primary key, signed coordinates, neutral controls, and current-field
-  update correlation,
-- client opcode `225`: exact 16-byte positioned-effect actions with a redacted
-  primary key, two neutral u32 values, and one neutral u16 trailer; all 15
-  long-corpus keys resolve to a current-field effect alias and all 15 packets
-  immediately follow opcode `50` in client direction order, while safe output
-  exposes aliases and aggregate distributions rather than primary keys,
+- server opcodes `322`/`320`/`323`: exact field-reactor spawn/state-update/
+  removal records with an aliased object id, template/state, signed coordinates,
+  and current-field lifecycle correlation,
+- client opcode `225`: exact 16-byte reactor-hit requests with redacted object
+  id, character-position value, stance, and reserved zero; all 15 requests
+  target active reactors, immediately follow opcode `50`, and match the next
+  same-reactor state update/removal,
 - client opcode `276`: a live nine-byte selector-`17` compact form with three
   reserved zero bytes and a 210-byte stream-`126` selector-`24` form with two
   redacted headers, five counted groups, and 19 redacted u32 pairs; safe output
@@ -2153,10 +2152,10 @@ preserve distinct Unity scan codes in this setup.
 46. Decode opcode-`244` selector `8`, round-trip all 54 reference packets, and
     reproduce its instructional NPC dialogue on the live client while keeping
     the three signed 32-bit value roles neutral.
-47. Decode all 82 opcode-`320`/`322`/`323` positioned-effect records, correlate
-    every update within its field epoch, and live-validate that changing only
-    typed coordinates moves a transient visual effect to the predicted player
-    position without changing HP.
+47. Decode all 82 opcode-`320`/`322`/`323` records under their initially
+    neutral positioned-effect boundary, correlate every update within its
+    field epoch, and live-validate that changing only typed coordinates moves a
+    transient visual effect to the predicted player position without changing HP.
 48. Decode all 36 opcode-`302` NPC lifecycle spawns, reuse the exact typed
     opcode-`300` body, fold later NPC updates against the new entities, and
     live-validate client acceptance of a position-composed spawn. Keep the
@@ -2244,11 +2243,10 @@ preserve distinct Unity scan codes in this setup.
     move, validate the 13-byte shape natively and in Python, expose safe
     request/match/pending/latency telemetry, and reduce stream `126` to 37
     unknown packets without assigning a meaning to the trailing signed count.
-67. Decode all 15 fixed client opcode-`225` positioned-effect actions, redact
-    their primary keys behind the existing effect aliases, prove that every key
-    is current-field-known and every packet follows opcode `50` in client order,
-    validate the 16-byte shape natively, and reduce stream `126` to 22 unknown
-    packets without naming the two u32 values or u16 trailer.
+67. Decode all 15 fixed client opcode-`225` packets under their initial neutral
+    positioned-effect-action boundary, redact primary keys, prove every key is
+    current-field-known and every packet follows opcode `50`, validate the
+    16-byte shape natively, and reduce stream `126` to 22 unknown packets.
 68. Decode all 12 client opcode-`298` item-acquisition requests, redact their
     serial values, correlate each request with the next same-epoch opcode-`39`
     additions by kind-derived inventory and item template, retain Cash quantity
@@ -2399,3 +2397,7 @@ preserve distinct Unity scan codes in this setup.
     position, and reserved zero, plus three HP-zero-linked death respawns.
     Correlate every request to the next opcode-`157` field snapshot and retain
     server opcode `43` as a separate neutral family.
+99. Reclassify server opcodes `322`/`320`/`323` as the reactor spawn/update/
+    removal lifecycle and client opcode `225` as the reactor-hit request. Match
+    all 15 requests to 12 authoritative state updates and three removals, prove
+    exact stance continuity, and promote the requests to full coverage.

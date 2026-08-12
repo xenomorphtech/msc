@@ -363,6 +363,21 @@ The response boundary is server opcode `157`, not server opcode `43`: all 45
 transactions match, with `28.125..940.035` ms latency and no pending request.
 The fixed server opcode-`43` family remains separately neutral.
 
+Cross-corpus chronology also resolves the earlier neutral positioned-effect
+family as the field-reactor lifecycle. The pinned handler grouping and client
+strings (`Reactor/{0:D7}`, `reactorState`) identify the subsystem; the exact
+server shapes make opcode `322` spawn, `320` state update, and `323` removal.
+All 82 stream-`126` lifecycle records round-trip, and every update/removal
+references an active same-field object.
+
+Client opcode `225` closes the transaction. All 15 exact 16-byte requests
+reference an active reactor immediately after opcode-`50` attack, then
+FIFO-match the next same-object state update (12) or removal (3). The 12
+updates echo the request stance, every response arrives within
+`388.463..1,102.698` ms, and no request is left pending. This correlation
+supports typed reactor roles while keeping runtime object ids aliased and the
+character-position value build-specific.
+
 Client opcode `114` is bounded directly from all 44 long-corpus packets rather
 than from a server handler. Offsets `3..4` are a little-endian UTF-16 code-unit
 count, followed by exactly that many code units, a required zero byte, and one

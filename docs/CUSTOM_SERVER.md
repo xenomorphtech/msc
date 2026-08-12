@@ -121,27 +121,27 @@ complete at one second. The packet folded back exactly at full coverage, the
 client stayed active on map `101000000`, and all 11 transcript heartbeats were
 matched.
 
-Server opcodes `320`, `322`, and `323` form a handler-backed positioned-effect
-family. Their exact 15/16/11-byte records retain an aliased primary identifier,
-typed i16 coordinates, and neutral numeric/control values. All 82 stream-`126`
-packets round-trip at full coverage; every opcode-`323` update resolves to a
-current-field entity. A live exact opcode-`322` packet at its captured
-off-screen position made no visible change. Replaying the same typed packet
-with only its position changed to the folded player coordinate `(633,-2677)`
-produced a transient blue `10` over the sprite, gone by one second, while HP
-remained `50/222`. The transcript folded both packets as one aliased entity
-plus one update and matched all 131 heartbeat pairs.
+Server opcodes `322`, `320`, and `323` are the field-reactor spawn, state-
+update, and removal lifecycle. Their exact 16/15/11-byte records use a redacted
+runtime object id, typed reactor template/state/coordinates, and bounded
+flags. All 82 stream-`126` packets round-trip at full coverage; every update or
+removal resolves to an active current-field reactor. A live exact opcode-`322`
+packet at its captured off-screen position made no visible change. Replaying
+the same typed packet with only its position changed to the folded player
+coordinate `(633,-2677)` produced a transient blue `10` over the sprite, gone
+by one second, while HP remained `50/222`. The transcript folded both packets
+as one aliased reactor plus one update and matched all 131 heartbeat pairs.
 
-Client opcode `225` is the corresponding capture-bounded action family. All 15
-stream-`126` packets are exactly 16 bytes: one signed primary key, two neutral
-u32 values, and one neutral u16 trailer. Every key resolves to an active
-positioned-effect alias in its field epoch, and every packet immediately
-follows the targetless opcode-`50` attack form in client direction order. The
-fold emits `positioned_effect_action_submitted`, exposes only aliases plus
-aggregate `2/3`, `305/393`, and zero-trailer distributions, and never copies
-the primary key into safe output. Native validation exact-consumes all 15
-records. This moves the long corpus to `26,661/44,417/22/0` without assigning
-higher-level meanings to the remaining values.
+Client opcode `225` is the reactor-hit request: redacted reactor object id,
+signed character-position value, u16 stance, and a zero u32. Every one of the
+15 requests targets an active same-epoch reactor, follows targetless opcode
+`50`, and FIFO-matches the next same-reactor opcode-`320` update (12) or
+opcode-`323` removal (3). All 12 state updates echo the request stance, latency
+is `388.463..1,102.698` ms, and none remain pending. The fold emits
+`reactor_hit_requested`, exposes reactor aliases and aggregate telemetry, and
+never copies object ids into safe output. Promoting the 15 requests and
+reclassifying the 82 lifecycle packets moves stream `126` to
+`27,203/43,897/0/0`.
 
 Client opcode `298` now forms a typed item-acquisition transaction with server
 opcode `39`. All 12 stream-`126` requests are exact 76-byte records carrying a

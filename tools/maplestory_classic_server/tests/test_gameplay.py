@@ -69,7 +69,7 @@ from maple_server.packets import (  # noqa: E402
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientNpcStateSubmission,
-    ClientOpcode225PositionedEffectAction,
+    ClientReactorHitRequest,
     ClientOpcode276Envelope,
     ClientOpcode276RecordGroup,
     ClientOpcode279TextEnvelope,
@@ -176,9 +176,9 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode272Ledger,
     ServerOpcode272LedgerEntry,
     ServerOpcode276BooleanFlag,
-    ServerOpcode320PositionedEffectRecord,
-    ServerOpcode322PositionedEffectRecord,
-    ServerOpcode323PositionedEffectRecord,
+    ServerReactorRemoval,
+    ServerReactorSpawn,
+    ServerReactorStateUpdate,
     ServerOpcode348TextEnvelope,
     ServerOpcode394TextEnvelope,
     ServerOpcode379Record,
@@ -2983,35 +2983,35 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode348TextEnvelope.parse(simple[0].to_bytes() + b"\x00")
 
-    def test_positioned_effect_records_round_trip_and_redact_primary(self) -> None:
+    def test_reactor_packets_round_trip_and_redact_object_id(self) -> None:
         records = (
             (
-                ServerOpcode320PositionedEffectRecord(
-                    primary_value=2_357_555,
-                    control_value=1,
+                ServerReactorStateUpdate(
+                    reactor_object_id=2_357_555,
+                    state=1,
                     x=1412,
                     y=435,
-                    numeric_value=305,
-                    secondary_control_value=0,
-                    trailing_value=5,
+                    stance=305,
+                    reserved_value=0,
+                    frame_delay=5,
                 ),
                 "400133f92300018405b30131010005",
             ),
             (
-                ServerOpcode322PositionedEffectRecord(
-                    primary_value=12_597,
-                    numeric_value=2000,
-                    control_value=0,
+                ServerReactorSpawn(
+                    reactor_object_id=12_597,
+                    reactor_id=2000,
+                    state=0,
                     x=2609,
                     y=-372,
-                    trailing_value=0,
+                    spawn_flag=0,
                 ),
                 "420135310000d007000000310a8cfe00",
             ),
             (
-                ServerOpcode323PositionedEffectRecord(
-                    primary_value=12_597,
-                    control_value=0,
+                ServerReactorRemoval(
+                    reactor_object_id=12_597,
+                    state=0,
                     x=2609,
                     y=-372,
                 ),
@@ -3023,30 +3023,30 @@ class GameplayPacketShapeTest(unittest.TestCase):
             encoded = record.to_bytes()
             self.assertEqual(encoded.hex(), expected_hex)
             self.assertEqual(type(record).parse(encoded), record)
-            self.assertNotIn(str(record.primary_value), str(record.safe_dict()))
+            self.assertNotIn(
+                str(record.reactor_object_id), str(record.safe_dict())
+            )
 
-        client_action = ClientOpcode225PositionedEffectAction(
-            primary_value=2_357_555,
-            value_1=2,
-            value_2=305,
-            trailing_value=0,
+        hit = ClientReactorHitRequest(
+            reactor_object_id=2_357_555,
+            character_position=2,
+            stance=305,
+            reserved_value=0,
         )
         self.assertEqual(
-            client_action.to_bytes().hex(),
+            hit.to_bytes().hex(),
             "e10033f9230002000000310100000000",
         )
         self.assertEqual(
-            ClientOpcode225PositionedEffectAction.parse(
-                client_action.to_bytes()
-            ),
-            client_action,
+            ClientReactorHitRequest.parse(hit.to_bytes()),
+            hit,
         )
-        self.assertNotIn("2357555", str(client_action.safe_dict()))
-        with self.assertRaisesRegex(PacketShapeError, "out of range"):
-            replace(client_action, trailing_value=65_536).to_bytes()
+        self.assertNotIn("2357555", str(hit.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "reserved value"):
+            replace(hit, reserved_value=1).to_bytes()
 
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
-            ServerOpcode323PositionedEffectRecord.parse(
+            ServerReactorRemoval.parse(
                 records[-1][0].to_bytes() + b"\x00"
             )
 
@@ -7216,34 +7216,34 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.warnings,
         )
 
-    def test_folds_positioned_effect_records(self) -> None:
+    def test_folds_reactor_hit_into_state_update_and_removal(self) -> None:
         records = (
-            ServerOpcode322PositionedEffectRecord(
-                primary_value=12_597,
-                numeric_value=2000,
-                control_value=0,
+            ServerReactorSpawn(
+                reactor_object_id=12_597,
+                reactor_id=2000,
+                state=0,
                 x=2609,
                 y=-372,
-                trailing_value=0,
+                spawn_flag=0,
             ),
-            ServerOpcode320PositionedEffectRecord(
-                primary_value=12_597,
-                control_value=1,
+            ServerReactorStateUpdate(
+                reactor_object_id=12_597,
+                state=1,
                 x=2600,
                 y=-370,
-                numeric_value=305,
-                secondary_control_value=0,
-                trailing_value=5,
+                stance=305,
+                reserved_value=0,
+                frame_delay=5,
             ),
-            ServerOpcode323PositionedEffectRecord(
-                primary_value=12_597,
-                control_value=2,
+            ServerReactorRemoval(
+                reactor_object_id=12_597,
+                state=2,
                 x=2590,
                 y=-368,
             ),
-            ServerOpcode323PositionedEffectRecord(
-                primary_value=99_999,
-                control_value=3,
+            ServerReactorRemoval(
+                reactor_object_id=99_999,
+                state=3,
                 x=10,
                 y=20,
             ),
@@ -7260,60 +7260,61 @@ class GameplayStateFoldTest(unittest.TestCase):
                 value_2=2_000,
                 opaque_suffix=b"",
             ),
-            ClientOpcode225PositionedEffectAction(
-                primary_value=12_597,
-                value_1=2,
-                value_2=305,
-                trailing_value=0,
+            ClientReactorHitRequest(
+                reactor_object_id=12_597,
+                character_position=2,
+                stance=305,
+                reserved_value=0,
             ),
         )
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
-            extra_server_plaintexts=tuple(record.to_bytes() for record in records),
-            extra_client_plaintexts=tuple(
-                packet.to_bytes() for packet in client_packets
+            extra_directional_plaintexts=(
+                ("server_to_client", records[0].to_bytes()),
+                ("client_to_server", client_packets[0].to_bytes()),
+                ("client_to_server", client_packets[1].to_bytes()),
+                ("server_to_client", records[1].to_bytes()),
+                ("client_to_server", client_packets[0].to_bytes()),
+                (
+                    "client_to_server",
+                    replace(client_packets[1], stance=393).to_bytes(),
+                ),
+                ("server_to_client", records[2].to_bytes()),
+                ("server_to_client", records[3].to_bytes()),
             ),
         )
 
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.positioned_effect_records, 4)
+        self.assertEqual(analysis.state.reactor_packets, 4)
         self.assertEqual(
-            analysis.state.positioned_effect_records_by_opcode,
+            analysis.state.reactor_packets_by_opcode,
             {322: 1, 320: 1, 323: 2},
         )
-        self.assertEqual(analysis.state.positioned_effect_new_entities, 2)
-        self.assertEqual(analysis.state.positioned_effect_updates, 2)
-        self.assertEqual(analysis.state.positioned_effect_unknown_updates, 1)
-        self.assertEqual(len(analysis.state.positioned_effect_entities), 2)
-        self.assertEqual(analysis.state.client_positioned_effect_actions, 1)
+        self.assertEqual(analysis.state.reactor_spawns, 1)
+        self.assertEqual(analysis.state.reactor_state_updates, 1)
+        self.assertEqual(analysis.state.reactor_removals, 2)
+        self.assertEqual(analysis.state.reactor_unknown_updates, 1)
+        self.assertEqual(len(analysis.state.reactors), 0)
+        self.assertEqual(analysis.state.reactor_hit_requests, 2)
         self.assertEqual(
-            analysis.state.client_effect_actions_known_entities,
-            1,
+            analysis.state.reactor_hit_requests_for_active_reactors, 2
         )
-        self.assertEqual(
-            analysis.state.client_effect_actions_after_attack,
-            1,
-        )
-        self.assertEqual(
-            analysis.state.client_effect_action_values_1,
-            {2: 1},
-        )
-        self.assertEqual(
-            analysis.state.client_effect_action_values_2,
-            {305: 1},
-        )
-        self.assertEqual(
-            analysis.state.client_effect_action_trailing_values,
-            {0: 1},
-        )
-        entity = analysis.state.positioned_effect_entities[12_597]
-        self.assertEqual((entity.x, entity.y, entity.last_opcode), (2590, -368, 323))
+        self.assertEqual(analysis.state.reactor_hit_requests_after_attack, 2)
+        self.assertEqual(analysis.state.reactor_hit_character_positions, {2: 2})
+        self.assertEqual(analysis.state.reactor_hit_stances, {305: 1, 393: 1})
+        self.assertEqual(analysis.state.matched_reactor_hit_requests, 2)
+        self.assertEqual(analysis.state.matched_reactor_state_updates, 1)
+        self.assertEqual(analysis.state.matched_reactor_removals, 1)
+        self.assertEqual(analysis.state.reactor_hit_stance_matches, 1)
+        self.assertEqual(analysis.state.reactor_hit_stance_mismatches, 0)
+        self.assertEqual(analysis.state.pending_reactor_hit_requests, 0)
         observations = [
             observation
             for observation in analysis.observations
-            if observation.kind == "positioned_effect_record"
+            if observation.kind.startswith("reactor_")
+            and observation.kind != "client_reactor_hit_request"
         ]
         self.assertEqual(len(observations), 4)
         self.assertTrue(
@@ -7324,7 +7325,8 @@ class GameplayStateFoldTest(unittest.TestCase):
                 [
                     event
                     for event in analysis.events
-                    if event.kind == "positioned_effect_observed"
+                    if event.kind
+                    in {"reactor_spawned", "reactor_state_updated", "reactor_removed"}
                 ]
             ),
             4,
@@ -7332,34 +7334,127 @@ class GameplayStateFoldTest(unittest.TestCase):
         action_observation = next(
             observation
             for observation in analysis.observations
-            if observation.kind == "client_positioned_effect_action"
+            if observation.kind == "client_reactor_hit_request"
         )
-        self.assertEqual(action_observation.coverage.value, "partial")
-        self.assertEqual(action_observation.details["entity"], "effect:1")
-        self.assertTrue(action_observation.details["known_entity"])
+        self.assertEqual(action_observation.coverage.value, "full")
+        self.assertEqual(action_observation.details["reactor"], "reactor:1")
+        self.assertTrue(action_observation.details["active_reactor"])
         self.assertTrue(
             action_observation.details["preceding_client_attack"]
         )
         action_event = next(
             event
             for event in analysis.events
-            if event.kind == "positioned_effect_action_submitted"
+            if event.kind == "reactor_hit_requested"
         )
-        self.assertEqual(action_event.details["value_2"], 305)
+        self.assertEqual(action_event.details["stance"], 305)
         safe = analysis.safe_dict()
         self.assertNotIn("12597", str(safe))
         self.assertEqual(
-            safe["state"]["positioned_effect_entities"][0]["entity"],
-            "effect:1",
+            safe["state"]["reactors"],
+            [],
         )
         self.assertIn(
-            "positioned_effect_records=packets:4",
+            "reactors=packets:4",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(
-            "client_positioned_effect_actions=packets:1 known_entities:1 "
-            "after_attack:1",
+            "reactor_hits=requests:2 active:2 inactive:0 after_attack:2",
             render_gameplay_analysis(analysis),
+        )
+
+    def test_warns_for_mismatched_and_pending_reactor_hits(self) -> None:
+        spawn = ServerReactorSpawn(
+            reactor_object_id=12_597,
+            reactor_id=2000,
+            state=0,
+            x=2609,
+            y=-372,
+            spawn_flag=0,
+        )
+        attack = ClientAttackAction(
+            opcode=50,
+            local_object_index=7,
+            variant=1,
+            client_token=987_654_321,
+            control_value=0,
+            opaque_common_state=b"state",
+            value_1=1_000,
+            value_2=2_000,
+            opaque_suffix=b"",
+        )
+        hit = ClientReactorHitRequest(
+            reactor_object_id=12_597,
+            character_position=2,
+            stance=305,
+            reserved_value=0,
+        )
+        update = ServerReactorStateUpdate(
+            reactor_object_id=12_597,
+            state=1,
+            x=2600,
+            y=-370,
+            stance=393,
+            reserved_value=0,
+            frame_delay=6,
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_directional_plaintexts=(
+                    ("server_to_client", spawn.to_bytes()),
+                    ("client_to_server", attack.to_bytes()),
+                    ("client_to_server", hit.to_bytes()),
+                    ("server_to_client", update.to_bytes()),
+                    ("client_to_server", attack.to_bytes()),
+                    ("client_to_server", hit.to_bytes()),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.reactor_hit_stance_matches, 0)
+        self.assertEqual(analysis.state.reactor_hit_stance_mismatches, 1)
+        self.assertEqual(analysis.state.matched_reactor_hit_requests, 1)
+        self.assertEqual(analysis.state.pending_reactor_hit_requests, 1)
+        active_reactor = analysis.safe_dict()["state"]["reactors"][0]
+        self.assertEqual(active_reactor["reactor_id"], 2000)
+        self.assertEqual(active_reactor["state"], 1)
+        self.assertEqual(active_reactor["spawn_flag"], 0)
+        self.assertIn(
+            "1 reactor-hit requests did not match the authoritative reactor stance",
+            analysis.warnings,
+        )
+        self.assertIn(
+            "1 reactor-hit requests had no following state update or removal",
+            analysis.warnings,
+        )
+
+    def test_warns_for_reactor_hit_targeting_no_active_reactor(self) -> None:
+        hit = ClientReactorHitRequest(
+            reactor_object_id=12_597,
+            character_position=2,
+            stance=305,
+            reserved_value=0,
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_directional_plaintexts=(
+                    ("client_to_server", hit.to_bytes()),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.reactor_hit_requests, 1)
+        self.assertEqual(
+            analysis.state.reactor_hit_requests_for_inactive_reactors, 1
+        )
+        self.assertEqual(analysis.state.pending_reactor_hit_requests, 1)
+        self.assertIn(
+            "1 reactor-hit requests targeted no active reactor",
+            analysis.warnings,
         )
 
     def test_folds_neutral_server_records_with_bounded_opaque_tails(

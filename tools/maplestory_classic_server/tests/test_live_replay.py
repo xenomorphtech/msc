@@ -287,7 +287,7 @@ class LiveReplayTest(unittest.TestCase):
             mobs={},
             observed_players={},
             field_drops={},
-            positioned_effect_entities={},
+            reactors={},
         )
         movement_observation = SimpleNamespace(
             direction="client_to_server",
@@ -693,7 +693,7 @@ class LiveReplayTest(unittest.TestCase):
         plan_state.mobs = {}
         plan_state.observed_players = {}
         plan_state.field_drops = {}
-        plan_state.positioned_effect_entities = {}
+        plan_state.reactors = {}
         plan_state.entry_character_id = 42
         analysis = SimpleNamespace(
             valid=True,

@@ -236,7 +236,7 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         ("client_recovery_request", 101, 11, 7),
         ("client_opcode_111_cash_slot_action", 111, 8, 3),
         ("inventory_move_request", 79, 13, 6),
-        ("client_positioned_effect_action", 225, 16, 5),
+        ("client_reactor_hit_request", 225, 16, 5),
         ("compact_item_pickup_request", 222, 19, 7),
         ("client_opcode_276_compact", 276, 9, 4),
         ("client_opcode_276_grouped", 276, 210, 6),

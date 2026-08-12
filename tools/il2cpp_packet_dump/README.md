@@ -145,12 +145,12 @@ destination + i16 trailing count`. Each request is followed by a server
 opcode-`39` move with the exact same inventory/source/destination tuple. Native
 validation consumes both records; the trailing signed-count role remains
 neutral rather than being inferred from its captured value `-1`.
-Client opcode `225` adds one exact 16-byte shape for 15 stream-`126` records:
-signed primary key, two neutral u32 values, and one neutral u16 trailer. Every
-primary key exactly matches a current-field positioned-effect entity introduced
-by server opcode `320`/`322`/`323`, and every packet immediately follows client
-opcode `50` in client direction order. The native shape consumes all 15 records
-without assigning meanings to the remaining numeric fields.
+Client opcode `225` adds one exact 16-byte reactor-hit shape for 15 stream-`126`
+records: signed/redacted reactor object id, signed character-position value,
+u16 stance, and a zero u32. Every request targets an active reactor introduced
+by server opcode `322`, immediately follows client opcode `50`, and matches the
+next same-reactor opcode-`320` state update or opcode-`323` removal. Native
+validation consumes all 15 requests and all 12 updates echo the request stance.
 Client opcode `298` adds one exact 76-byte shape for 12 stream-`126` item-
 acquisition requests. The manifest consumes the selection, kind, item,
 quantity, neutral duration, expiration, redacted serial, five reserved zeros,

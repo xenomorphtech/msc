@@ -7416,56 +7416,63 @@ class ClientNpcStateSubmission:
 
 
 @dataclass(frozen=True)
-class ClientOpcode225PositionedEffectAction:
-    """Client action referencing a positioned-effect primary key."""
+class ClientReactorHitRequest:
+    """Client request to hit one field reactor (opcode 225)."""
 
-    primary_value: int = field(repr=False)
-    value_1: int
-    value_2: int
-    trailing_value: int
+    reactor_object_id: int = field(repr=False)
+    character_position: int
+    stance: int
+    reserved_value: int = 0
     opcode: int = 225
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ClientOpcode225PositionedEffectAction":
+    def parse(cls, payload: bytes) -> "ClientReactorHitRequest":
         reader = PacketReader(
-            payload, packet_name="client_opcode_225_positioned_effect_action"
+            payload, packet_name="client_reactor_hit_request"
         )
         _expect_opcode(reader, 225)
-        action = cls(
-            primary_value=reader.i32("primary_value"),
-            value_1=reader.u32("value_1"),
-            value_2=reader.u32("value_2"),
-            trailing_value=reader.u16("trailing_value"),
+        request = cls(
+            reactor_object_id=reader.i32("reactor_object_id"),
+            character_position=reader.i32("character_position"),
+            stance=reader.u16("stance"),
+            reserved_value=reader.u32("reserved_value"),
         )
         reader.finish()
-        return action
+        if request.reserved_value != 0:
+            raise PacketShapeError(
+                "client reactor-hit request reserved value must be zero"
+            )
+        return request
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
-            "primary_value_redacted": True,
-            "value_1": self.value_1,
-            "value_2": self.value_2,
-            "trailing_value": self.trailing_value,
+            "reactor_object_id_redacted": True,
+            "character_position": self.character_position,
+            "stance": self.stance,
+            "reserved_zero": self.reserved_value == 0,
         }
 
     def to_bytes(self) -> bytes:
         if self.opcode != 225:
             raise PacketShapeError(
-                "client opcode-225 positioned-effect action opcode must be 225"
+                "client reactor-hit request opcode must be 225"
+            )
+        if self.reserved_value != 0:
+            raise PacketShapeError(
+                "client reactor-hit request reserved value must be zero"
             )
         try:
             return struct.pack(
-                "<HiIIH",
+                "<HiiHI",
                 self.opcode,
-                self.primary_value,
-                self.value_1,
-                self.value_2,
-                self.trailing_value,
+                self.reactor_object_id,
+                self.character_position,
+                self.stance,
+                self.reserved_value,
             )
         except struct.error as error:
             raise PacketShapeError(
-                "client opcode-225 positioned-effect action value is out of "
-                f"range: {error}"
+                f"client reactor-hit request value is out of range: {error}"
             ) from error
 
 
@@ -8886,146 +8893,156 @@ class ServerOpcode244DialogueInstruction:
 
 
 @dataclass(frozen=True)
-class ServerOpcode320PositionedEffectRecord:
-    """Handler-bounded opcode-320 record for an aliased positioned effect."""
+class ServerReactorStateUpdate:
+    """Server reactor state/animation update (opcode 320)."""
 
-    primary_value: int = field(repr=False)
-    control_value: int
+    reactor_object_id: int = field(repr=False)
+    state: int
     x: int
     y: int
-    numeric_value: int
-    secondary_control_value: int
-    trailing_value: int
+    stance: int
+    reserved_value: int
+    frame_delay: int
     opcode: int = 320
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ServerOpcode320PositionedEffectRecord":
+    def parse(cls, payload: bytes) -> "ServerReactorStateUpdate":
         reader = PacketReader(
-            payload, packet_name="server_opcode_320_positioned_effect"
+            payload, packet_name="server_reactor_state_update"
         )
         _expect_opcode(reader, 320)
         record = cls(
-            primary_value=reader.i32("primary_value"),
-            control_value=reader.u8("control_value"),
+            reactor_object_id=reader.i32("reactor_object_id"),
+            state=reader.u8("state"),
             x=reader.i16("x"),
             y=reader.i16("y"),
-            numeric_value=reader.i16("numeric_value"),
-            secondary_control_value=reader.u8("secondary_control_value"),
-            trailing_value=reader.u8("trailing_value"),
+            stance=reader.u16("stance"),
+            reserved_value=reader.u8("reserved_value"),
+            frame_delay=reader.u8("frame_delay"),
         )
         reader.finish()
+        if record.reserved_value != 0:
+            raise PacketShapeError(
+                "server reactor state-update reserved value must be zero"
+            )
         return record
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
-            "primary_value_redacted": True,
-            "control_value": self.control_value,
+            "reactor_object_id_redacted": True,
+            "state": self.state,
             "x": self.x,
             "y": self.y,
-            "numeric_value": self.numeric_value,
-            "secondary_control_value": self.secondary_control_value,
-            "trailing_value": self.trailing_value,
+            "stance": self.stance,
+            "reserved_zero": self.reserved_value == 0,
+            "frame_delay": self.frame_delay,
         }
 
     def to_bytes(self) -> bytes:
         if self.opcode != 320:
-            raise PacketShapeError("server opcode-320 record opcode must be 320")
+            raise PacketShapeError(
+                "server reactor state-update opcode must be 320"
+            )
+        if self.reserved_value != 0:
+            raise PacketShapeError(
+                "server reactor state-update reserved value must be zero"
+            )
         try:
             return struct.pack(
-                "<HiBhhhBB",
+                "<HiBhhHBB",
                 self.opcode,
-                self.primary_value,
-                self.control_value,
+                self.reactor_object_id,
+                self.state,
                 self.x,
                 self.y,
-                self.numeric_value,
-                self.secondary_control_value,
-                self.trailing_value,
+                self.stance,
+                self.reserved_value,
+                self.frame_delay,
             )
         except struct.error as error:
             raise PacketShapeError(
-                f"server opcode-320 value is out of range: {error}"
+                f"server reactor state-update value is out of range: {error}"
             ) from error
 
 
 @dataclass(frozen=True)
-class ServerOpcode322PositionedEffectRecord:
-    """Handler-bounded opcode-322 record for an aliased positioned effect."""
+class ServerReactorSpawn:
+    """Server field-reactor spawn (opcode 322)."""
 
-    primary_value: int = field(repr=False)
-    numeric_value: int
-    control_value: int
+    reactor_object_id: int = field(repr=False)
+    reactor_id: int
+    state: int
     x: int
     y: int
-    trailing_value: int
+    spawn_flag: int
     opcode: int = 322
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ServerOpcode322PositionedEffectRecord":
+    def parse(cls, payload: bytes) -> "ServerReactorSpawn":
         reader = PacketReader(
-            payload, packet_name="server_opcode_322_positioned_effect"
+            payload, packet_name="server_reactor_spawn"
         )
         _expect_opcode(reader, 322)
         record = cls(
-            primary_value=reader.i32("primary_value"),
-            numeric_value=reader.i32("numeric_value"),
-            control_value=reader.u8("control_value"),
+            reactor_object_id=reader.i32("reactor_object_id"),
+            reactor_id=reader.i32("reactor_id"),
+            state=reader.u8("state"),
             x=reader.i16("x"),
             y=reader.i16("y"),
-            trailing_value=reader.u8("trailing_value"),
+            spawn_flag=reader.u8("spawn_flag"),
         )
         reader.finish()
         return record
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
-            "primary_value_redacted": True,
-            "numeric_value": self.numeric_value,
-            "control_value": self.control_value,
+            "reactor_object_id_redacted": True,
+            "reactor_id": self.reactor_id,
+            "state": self.state,
             "x": self.x,
             "y": self.y,
-            "trailing_value": self.trailing_value,
+            "spawn_flag": self.spawn_flag,
         }
 
     def to_bytes(self) -> bytes:
         if self.opcode != 322:
-            raise PacketShapeError("server opcode-322 record opcode must be 322")
+            raise PacketShapeError("server reactor spawn opcode must be 322")
         try:
             return struct.pack(
                 "<HiiBhhB",
                 self.opcode,
-                self.primary_value,
-                self.numeric_value,
-                self.control_value,
+                self.reactor_object_id,
+                self.reactor_id,
+                self.state,
                 self.x,
                 self.y,
-                self.trailing_value,
+                self.spawn_flag,
             )
         except struct.error as error:
             raise PacketShapeError(
-                f"server opcode-322 value is out of range: {error}"
+                f"server reactor spawn value is out of range: {error}"
             ) from error
 
 
 @dataclass(frozen=True)
-class ServerOpcode323PositionedEffectRecord:
-    """Handler-bounded opcode-323 position update for an aliased effect."""
+class ServerReactorRemoval:
+    """Server field-reactor removal (opcode 323)."""
 
-    primary_value: int = field(repr=False)
-    control_value: int
+    reactor_object_id: int = field(repr=False)
+    state: int
     x: int
     y: int
     opcode: int = 323
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ServerOpcode323PositionedEffectRecord":
+    def parse(cls, payload: bytes) -> "ServerReactorRemoval":
         reader = PacketReader(
-            payload, packet_name="server_opcode_323_positioned_effect"
+            payload, packet_name="server_reactor_removal"
         )
         _expect_opcode(reader, 323)
         record = cls(
-            primary_value=reader.i32("primary_value"),
-            control_value=reader.u8("control_value"),
+            reactor_object_id=reader.i32("reactor_object_id"),
+            state=reader.u8("state"),
             x=reader.i16("x"),
             y=reader.i16("y"),
         )
@@ -9034,27 +9051,27 @@ class ServerOpcode323PositionedEffectRecord:
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
-            "primary_value_redacted": True,
-            "control_value": self.control_value,
+            "reactor_object_id_redacted": True,
+            "state": self.state,
             "x": self.x,
             "y": self.y,
         }
 
     def to_bytes(self) -> bytes:
         if self.opcode != 323:
-            raise PacketShapeError("server opcode-323 record opcode must be 323")
+            raise PacketShapeError("server reactor removal opcode must be 323")
         try:
             return struct.pack(
                 "<HiBhh",
                 self.opcode,
-                self.primary_value,
-                self.control_value,
+                self.reactor_object_id,
+                self.state,
                 self.x,
                 self.y,
             )
         except struct.error as error:
             raise PacketShapeError(
-                f"server opcode-323 value is out of range: {error}"
+                f"server reactor removal value is out of range: {error}"
             ) from error
 
 

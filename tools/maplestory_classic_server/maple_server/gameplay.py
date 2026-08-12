@@ -30,7 +30,7 @@ from .packets import (
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
     ClientNpcStateSubmission,
-    ClientOpcode225PositionedEffectAction,
+    ClientReactorHitRequest,
     ClientOpcode276Envelope,
     ClientOpcode279TextEnvelope,
     ClientOpcode298ItemAcquisitionRequest,
@@ -118,9 +118,9 @@ from .packets import (
     ServerOpcode244DialogueInstruction,
     ServerOpcode272Ledger,
     ServerOpcode276BooleanFlag,
-    ServerOpcode320PositionedEffectRecord,
-    ServerOpcode322PositionedEffectRecord,
-    ServerOpcode323PositionedEffectRecord,
+    ServerReactorRemoval,
+    ServerReactorSpawn,
+    ServerReactorStateUpdate,
     ServerOpcode348TextEnvelope,
     ServerOpcode394TextEnvelope,
     ServerOpcode379Record,
@@ -248,11 +248,21 @@ class ObservedPlayerEntity:
 
 
 @dataclass
-class PositionedEffectEntity:
+class ReactorEntity:
     alias: str
     x: int
     y: int
     last_opcode: int
+    reactor_id: int | None = None
+    state: int = 0
+    spawn_flag: int | None = None
+
+
+@dataclass(frozen=True)
+class PendingReactorHit:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: ClientReactorHitRequest
 
 
 @dataclass
@@ -1133,31 +1143,31 @@ class GameplayGameState:
     instructional_dialogue_value_1: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_2: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_3: Counter[int] = field(default_factory=Counter)
-    positioned_effect_entities: dict[int, PositionedEffectEntity] = field(
+    reactors: dict[int, ReactorEntity] = field(
         default_factory=dict, repr=False
     )
-    positioned_effect_records: int = 0
-    positioned_effect_records_by_opcode: Counter[int] = field(
-        default_factory=Counter
-    )
-    positioned_effect_new_entities: int = 0
-    positioned_effect_updates: int = 0
-    positioned_effect_unknown_updates: int = 0
-    positioned_effect_control_values: Counter[str] = field(
-        default_factory=Counter
-    )
-    client_positioned_effect_actions: int = 0
-    client_effect_actions_known_entities: int = 0
-    client_effect_actions_after_attack: int = 0
-    client_effect_action_values_1: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_effect_action_values_2: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_effect_action_trailing_values: Counter[int] = field(
-        default_factory=Counter
-    )
+    reactor_packets: int = 0
+    reactor_packets_by_opcode: Counter[int] = field(default_factory=Counter)
+    reactor_spawns: int = 0
+    reactor_state_updates: int = 0
+    reactor_removals: int = 0
+    reactor_unknown_updates: int = 0
+    reactor_states: Counter[str] = field(default_factory=Counter)
+    reactor_hit_requests: int = 0
+    reactor_hit_requests_for_active_reactors: int = 0
+    reactor_hit_requests_for_inactive_reactors: int = 0
+    reactor_hit_requests_after_attack: int = 0
+    reactor_hit_character_positions: Counter[int] = field(default_factory=Counter)
+    reactor_hit_stances: Counter[int] = field(default_factory=Counter)
+    matched_reactor_hit_requests: int = 0
+    matched_reactor_state_updates: int = 0
+    matched_reactor_removals: int = 0
+    reactor_hit_stance_matches: int = 0
+    reactor_hit_stance_mismatches: int = 0
+    reactor_hits_cleared_on_field_change: int = 0
+    pending_reactor_hit_requests: int = 0
+    last_reactor_hit_response_ms: float | None = None
+    max_reactor_hit_response_ms: float | None = None
     server_opcode_169_packets: int = 0
     server_opcode_169_selectors: Counter[int] = field(default_factory=Counter)
     server_opcode_169_text_code_units: Counter[int] = field(
@@ -4109,20 +4119,23 @@ class GameplayAnalysis:
             if show_identifiers:
                 record["object_id"] = object_id
             observed_players.append(record)
-        positioned_effect_entities: list[dict[str, object]] = []
-        for primary_value, entity in sorted(
-            self.state.positioned_effect_entities.items(),
+        reactors: list[dict[str, object]] = []
+        for object_id, entity in sorted(
+            self.state.reactors.items(),
             key=lambda item: item[1].alias,
         ):
             record = {
                 "entity": entity.alias,
+                "reactor_id": entity.reactor_id,
+                "state": entity.state,
                 "x": entity.x,
                 "y": entity.y,
+                "spawn_flag": entity.spawn_flag,
                 "last_opcode": entity.last_opcode,
             }
             if show_identifiers:
-                record["primary_value"] = primary_value
-            positioned_effect_entities.append(record)
+                record["object_id"] = object_id
+            reactors.append(record)
         field_drops: list[dict[str, object]] = []
         for object_id, entity in sorted(
             self.state.field_drops.items(), key=lambda item: item[1].alias
@@ -4312,10 +4325,8 @@ class GameplayAnalysis:
                     self.state.observed_players
                 ),
                 "observed_remote_players": observed_players,
-                "positioned_effect_entity_count": len(
-                    self.state.positioned_effect_entities
-                ),
-                "positioned_effect_entities": positioned_effect_entities,
+                "active_reactor_count": len(self.state.reactors),
+                "reactors": reactors,
                 "active_field_drop_count": len(self.state.field_drops),
                 "field_drops": field_drops,
                 "active_npc_count": len(self.state.npcs),
@@ -5563,40 +5574,52 @@ class GameplayAnalysis:
                         self.state.server_opcode_272_trailer_values
                     ),
                 },
-                "positioned_effect_records": {
-                    "packet_count": self.state.positioned_effect_records,
-                    "by_opcode": dict(
-                        self.state.positioned_effect_records_by_opcode
-                    ),
-                    "new_entity_count": (
-                        self.state.positioned_effect_new_entities
-                    ),
-                    "update_count": self.state.positioned_effect_updates,
-                    "unknown_update_count": (
-                        self.state.positioned_effect_unknown_updates
-                    ),
-                    "control_values": dict(
-                        self.state.positioned_effect_control_values
-                    ),
+                "reactor_lifecycle": {
+                    "packet_count": self.state.reactor_packets,
+                    "by_opcode": dict(self.state.reactor_packets_by_opcode),
+                    "spawns": self.state.reactor_spawns,
+                    "state_updates": self.state.reactor_state_updates,
+                    "removals": self.state.reactor_removals,
+                    "unknown_updates": self.state.reactor_unknown_updates,
+                    "states": dict(self.state.reactor_states),
                 },
-                "client_positioned_effect_actions": {
-                    "packet_count": (
-                        self.state.client_positioned_effect_actions
+                "reactor_hits": {
+                    "request_count": self.state.reactor_hit_requests,
+                    "active_reactor_matches": (
+                        self.state.reactor_hit_requests_for_active_reactors
                     ),
-                    "known_entity_count": (
-                        self.state.client_effect_actions_known_entities
+                    "inactive_reactor_requests": (
+                        self.state.reactor_hit_requests_for_inactive_reactors
                     ),
                     "after_attack_count": (
-                        self.state.client_effect_actions_after_attack
+                        self.state.reactor_hit_requests_after_attack
                     ),
-                    "values_1": dict(
-                        self.state.client_effect_action_values_1
+                    "character_positions": dict(
+                        self.state.reactor_hit_character_positions
                     ),
-                    "values_2": dict(
-                        self.state.client_effect_action_values_2
+                    "stances": dict(self.state.reactor_hit_stances),
+                    "matched_requests": self.state.matched_reactor_hit_requests,
+                    "matched_state_updates": (
+                        self.state.matched_reactor_state_updates
                     ),
-                    "trailing_values": dict(
-                        self.state.client_effect_action_trailing_values
+                    "matched_removals": self.state.matched_reactor_removals,
+                    "stance_matches": self.state.reactor_hit_stance_matches,
+                    "stance_mismatches": (
+                        self.state.reactor_hit_stance_mismatches
+                    ),
+                    "cleared_on_field_change": (
+                        self.state.reactor_hits_cleared_on_field_change
+                    ),
+                    "pending_requests": self.state.pending_reactor_hit_requests,
+                    "last_response_ms": (
+                        None
+                        if self.state.last_reactor_hit_response_ms is None
+                        else round(self.state.last_reactor_hit_response_ms, 3)
+                    ),
+                    "max_response_ms": (
+                        None
+                        if self.state.max_reactor_hit_response_ms is None
+                        else round(self.state.max_reactor_hit_response_ms, 3)
                     ),
                 },
                 "server_opcode_169": {
@@ -5969,7 +5992,10 @@ class GameplayStateFold:
         self._mob_aliases: dict[int, str] = {}
         self._player_aliases: dict[int, str] = {}
         self._drop_aliases: dict[int, str] = {}
-        self._positioned_effect_aliases: dict[int, str] = {}
+        self._reactor_aliases: dict[int, str] = {}
+        self._pending_reactor_hits: dict[
+            int, deque[PendingReactorHit]
+        ] = {}
         self._pending_movements: dict[
             tuple[int, int], deque[PendingMobMovement]
         ] = {}
@@ -8097,55 +8123,61 @@ class GameplayStateFold:
                 ),
             )
         if opcode == 225:
-            action = ClientOpcode225PositionedEffectAction.parse(payload)
-            existing = self.state.positioned_effect_entities.get(
-                action.primary_value
-            )
+            request = ClientReactorHitRequest.parse(payload)
+            existing = self.state.reactors.get(request.reactor_object_id)
             alias = self._alias(
-                self._positioned_effect_aliases,
-                action.primary_value,
-                "effect",
+                self._reactor_aliases,
+                request.reactor_object_id,
+                "reactor",
             )
-            known_entity = existing is not None
+            active_reactor = existing is not None
             preceding_attack = (
                 previous_client_packet is not None
                 and previous_client_packet[1] == 50
                 and previous_client_packet[2] == self.state.field_epoch
             )
-            self.state.client_positioned_effect_actions += 1
-            if known_entity:
-                self.state.client_effect_actions_known_entities += 1
+            self._pending_reactor_hits.setdefault(
+                request.reactor_object_id, deque()
+            ).append(
+                PendingReactorHit(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                )
+            )
+            self.state.reactor_hit_requests += 1
+            self.state.pending_reactor_hit_requests += 1
+            if active_reactor:
+                self.state.reactor_hit_requests_for_active_reactors += 1
+            else:
+                self.state.reactor_hit_requests_for_inactive_reactors += 1
             if preceding_attack:
-                self.state.client_effect_actions_after_attack += 1
-            self.state.client_effect_action_values_1[action.value_1] += 1
-            self.state.client_effect_action_values_2[action.value_2] += 1
-            self.state.client_effect_action_trailing_values[
-                action.trailing_value
+                self.state.reactor_hit_requests_after_attack += 1
+            self.state.reactor_hit_character_positions[
+                request.character_position
             ] += 1
+            self.state.reactor_hit_stances[request.stance] += 1
             details: dict[str, object] = {
-                "entity": alias,
-                **action.safe_dict(),
-                "known_entity": known_entity,
+                "reactor": alias,
+                **request.safe_dict(),
+                "active_reactor": active_reactor,
                 "preceding_client_attack": preceding_attack,
+                "pending_requests": self.state.pending_reactor_hit_requests,
                 "field_epoch": self.state.field_epoch,
             }
             if preceding_attack and previous_client_packet is not None:
                 details["preceding_attack_frame"] = previous_client_packet[0]
             self._event(
                 frame,
-                "positioned_effect_action_submitted",
+                "reactor_hit_requested",
                 details=details,
             )
             return self._observation(
                 frame,
-                kind="client_positioned_effect_action",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=action,
+                kind="client_reactor_hit_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
-                issues=(
-                    "client opcode-225 values and higher-level action role "
-                    "remain neutral",
-                ),
             )
         return self._observation(
             frame,
@@ -9600,8 +9632,9 @@ class GameplayStateFold:
             )
             cleared_players = len(self.state.observed_players)
             cleared_drops = len(self.state.field_drops)
-            cleared_positioned_effects = len(
-                self.state.positioned_effect_entities
+            cleared_reactors = len(self.state.reactors)
+            cleared_reactor_hit_requests = sum(
+                len(pending) for pending in self._pending_reactor_hits.values()
             )
             cleared_chair_sit_intent = (
                 self.state.requested_chair_item_id is not None
@@ -9657,7 +9690,12 @@ class GameplayStateFold:
             self.state.mob_templates.clear()
             self.state.observed_players.clear()
             self.state.field_drops.clear()
-            self.state.positioned_effect_entities.clear()
+            self.state.reactors.clear()
+            self._pending_reactor_hits.clear()
+            self.state.pending_reactor_hit_requests = 0
+            self.state.reactor_hits_cleared_on_field_change += (
+                cleared_reactor_hit_requests
+            )
             self._last_mob_controller_releases.clear()
             self.state.player_x = None
             self.state.player_y = None
@@ -9699,7 +9737,8 @@ class GameplayStateFold:
                 ),
                 "cleared_players": cleared_players,
                 "cleared_drops": cleared_drops,
-                "cleared_positioned_effects": cleared_positioned_effects,
+                "cleared_reactors": cleared_reactors,
+                "cleared_reactor_hit_requests": cleared_reactor_hit_requests,
                 "cleared_chair_sit_intent": cleared_chair_sit_intent,
                 "cleared_npc_interaction_requests": (
                     cleared_npc_interaction_requests
@@ -10498,57 +10537,128 @@ class GameplayStateFold:
             )
         if opcode in {320, 322, 323}:
             if opcode == 320:
-                effect_record = ServerOpcode320PositionedEffectRecord.parse(payload)
+                reactor_packet = ServerReactorStateUpdate.parse(payload)
             elif opcode == 322:
-                effect_record = ServerOpcode322PositionedEffectRecord.parse(payload)
+                reactor_packet = ServerReactorSpawn.parse(payload)
             else:
-                effect_record = ServerOpcode323PositionedEffectRecord.parse(payload)
-            primary_value = effect_record.primary_value
-            existing = self.state.positioned_effect_entities.get(primary_value)
-            new_entity = existing is None
+                reactor_packet = ServerReactorRemoval.parse(payload)
+            object_id = reactor_packet.reactor_object_id
+            existing = self.state.reactors.get(object_id)
+            new_reactor = existing is None
             if existing is None:
                 alias = self._alias(
-                    self._positioned_effect_aliases,
-                    primary_value,
-                    "effect",
+                    self._reactor_aliases,
+                    object_id,
+                    "reactor",
                 )
-                existing = PositionedEffectEntity(
+                existing = ReactorEntity(
                     alias=alias,
-                    x=effect_record.x,
-                    y=effect_record.y,
+                    x=reactor_packet.x,
+                    y=reactor_packet.y,
                     last_opcode=opcode,
+                    reactor_id=(
+                        reactor_packet.reactor_id if opcode == 322 else None
+                    ),
+                    state=reactor_packet.state,
+                    spawn_flag=(
+                        reactor_packet.spawn_flag if opcode == 322 else None
+                    ),
                 )
-                self.state.positioned_effect_entities[primary_value] = existing
-                self.state.positioned_effect_new_entities += 1
-                if opcode == 323:
-                    self.state.positioned_effect_unknown_updates += 1
+                self.state.reactors[object_id] = existing
+                if opcode != 322:
+                    self.state.reactor_unknown_updates += 1
             else:
-                existing.x = effect_record.x
-                existing.y = effect_record.y
+                existing.x = reactor_packet.x
+                existing.y = reactor_packet.y
                 existing.last_opcode = opcode
-                self.state.positioned_effect_updates += 1
-            self.state.positioned_effect_records += 1
-            self.state.positioned_effect_records_by_opcode[opcode] += 1
-            self.state.positioned_effect_control_values[
-                f"{opcode}:{effect_record.control_value}"
-            ] += 1
-            details = {
-                "entity": existing.alias,
-                **effect_record.safe_dict(),
-                "new_entity": new_entity,
+                existing.state = reactor_packet.state
+                if opcode == 322:
+                    existing.reactor_id = reactor_packet.reactor_id
+                    existing.spawn_flag = reactor_packet.spawn_flag
+            if opcode == 322:
+                self.state.reactor_spawns += 1
+            elif opcode == 320:
+                self.state.reactor_state_updates += 1
+            else:
+                self.state.reactor_removals += 1
+            self.state.reactor_packets += 1
+            self.state.reactor_packets_by_opcode[opcode] += 1
+            self.state.reactor_states[f"{opcode}:{reactor_packet.state}"] += 1
+
+            pending_queue = (
+                self._pending_reactor_hits.get(object_id)
+                if opcode in {320, 323}
+                else None
+            )
+            pending_hit = pending_queue.popleft() if pending_queue else None
+            if pending_queue is not None and not pending_queue:
+                del self._pending_reactor_hits[object_id]
+            response_ms: float | None = None
+            stance_matches: bool | None = None
+            if pending_hit is not None:
+                response_ms = (
+                    frame.timestamp_ns - pending_hit.request_timestamp_ns
+                ) / 1e6
+                self.state.matched_reactor_hit_requests += 1
+                self.state.pending_reactor_hit_requests -= 1
+                self.state.last_reactor_hit_response_ms = response_ms
+                self.state.max_reactor_hit_response_ms = max(
+                    self.state.max_reactor_hit_response_ms or 0.0,
+                    response_ms,
+                )
+                if opcode == 320:
+                    self.state.matched_reactor_state_updates += 1
+                    stance_matches = (
+                        pending_hit.request.stance == reactor_packet.stance
+                    )
+                    if stance_matches:
+                        self.state.reactor_hit_stance_matches += 1
+                    else:
+                        self.state.reactor_hit_stance_mismatches += 1
+                else:
+                    self.state.matched_reactor_removals += 1
+
+            details: dict[str, object] = {
+                "reactor": existing.alias,
+                **reactor_packet.safe_dict(),
+                "new_reactor": new_reactor,
+                "matched_hit_request": pending_hit is not None,
                 "field_epoch": self.state.field_epoch,
             }
+            if pending_hit is not None:
+                details.update(
+                    {
+                        "hit_request_frame": pending_hit.request_frame_index,
+                        "hit_response_ms": round(response_ms or 0.0, 3),
+                    }
+                )
+            if stance_matches is not None:
+                details["hit_stance_matches"] = stance_matches
             self._event(
                 frame,
-                "positioned_effect_observed",
+                (
+                    "reactor_spawned"
+                    if opcode == 322
+                    else "reactor_state_updated"
+                    if opcode == 320
+                    else "reactor_removed"
+                ),
                 details=details,
-                identifiers={"primary_value": primary_value},
+                identifiers={"object_id": object_id},
             )
+            if opcode == 323:
+                self.state.reactors.pop(object_id, None)
             return self._observation(
                 frame,
-                kind="positioned_effect_record",
+                kind=(
+                    "reactor_spawn"
+                    if opcode == 322
+                    else "reactor_state_update"
+                    if opcode == 320
+                    else "reactor_removal"
+                ),
                 coverage=ShapeCoverage.FULL,
-                parsed=effect_record,
+                parsed=reactor_packet,
                 details=details,
             )
         if opcode == 169:
@@ -12382,6 +12492,21 @@ class GameplayStateFold:
                 f"{self.state.pending_client_field_transfers} client "
                 "field-transfer requests had no following field snapshot"
             )
+        if self.state.reactor_hit_stance_mismatches:
+            self.warnings.append(
+                f"{self.state.reactor_hit_stance_mismatches} reactor-hit "
+                "requests did not match the authoritative reactor stance"
+            )
+        if self.state.reactor_hit_requests_for_inactive_reactors:
+            self.warnings.append(
+                f"{self.state.reactor_hit_requests_for_inactive_reactors} "
+                "reactor-hit requests targeted no active reactor"
+            )
+        if self.state.pending_reactor_hit_requests:
+            self.warnings.append(
+                f"{self.state.pending_reactor_hit_requests} reactor-hit "
+                "requests had no following state update or removal"
+            )
         if self.state.pending_npc_interaction_requests:
             self.warnings.append(
                 f"{self.state.pending_npc_interaction_requests} NPC "
@@ -12509,6 +12634,9 @@ class GameplayStateFold:
                         self.state.pending_npc_state_submissions
                     ),
                     "pending_item_pickups": self.state.pending_item_pickups,
+                    "pending_reactor_hit_requests": (
+                        self.state.pending_reactor_hit_requests
+                    ),
                     "pending_client_attack_effects": (
                         self.state.pending_client_attack_effects
                     ),
@@ -14520,17 +14648,8 @@ def render_gameplay_analysis(
     tutorial_ui_control_values = json.dumps(
         dict(sorted(state.tutorial_ui_control_values.items()))
     )
-    positioned_effect_opcodes = json.dumps(
-        dict(sorted(state.positioned_effect_records_by_opcode.items()))
-    )
-    client_effect_action_values_1 = json.dumps(
-        dict(sorted(state.client_effect_action_values_1.items()))
-    )
-    client_effect_action_values_2 = json.dumps(
-        dict(sorted(state.client_effect_action_values_2.items()))
-    )
-    client_effect_action_trailing_values = json.dumps(
-        dict(sorted(state.client_effect_action_trailing_values.items()))
+    reactor_opcodes = json.dumps(
+        dict(sorted(state.reactor_packets_by_opcode.items()))
     )
     player_stat_masks = json.dumps(
         {
@@ -15217,25 +15336,33 @@ def render_gameplay_analysis(
             f"value_3:{dict(sorted(state.instructional_dialogue_value_3.items()))}"
         ),
         (
-            "positioned_effect_records="
-            f"packets:{state.positioned_effect_records} "
-            f"opcodes:{positioned_effect_opcodes} "
-            f"active:{len(state.positioned_effect_entities)} "
-            f"new:{state.positioned_effect_new_entities} "
-            f"updates:{state.positioned_effect_updates} "
-            f"unknown_updates:{state.positioned_effect_unknown_updates} "
-            f"controls:{dict(sorted(state.positioned_effect_control_values.items()))}"
+            "reactors="
+            f"packets:{state.reactor_packets} "
+            f"opcodes:{reactor_opcodes} "
+            f"active:{len(state.reactors)} "
+            f"spawns:{state.reactor_spawns} "
+            f"updates:{state.reactor_state_updates} "
+            f"removals:{state.reactor_removals} "
+            f"unknown_updates:{state.reactor_unknown_updates} "
+            f"states:{dict(sorted(state.reactor_states.items()))}"
         ),
         (
-            "client_positioned_effect_actions="
-            f"packets:{state.client_positioned_effect_actions} "
-            "known_entities:"
-            f"{state.client_effect_actions_known_entities} "
-            "after_attack:"
-            f"{state.client_effect_actions_after_attack} "
-            f"values_1:{client_effect_action_values_1} "
-            f"values_2:{client_effect_action_values_2} "
-            f"trailing_values:{client_effect_action_trailing_values}"
+            "reactor_hits="
+            f"requests:{state.reactor_hit_requests} "
+            f"active:{state.reactor_hit_requests_for_active_reactors} "
+            f"inactive:{state.reactor_hit_requests_for_inactive_reactors} "
+            f"after_attack:{state.reactor_hit_requests_after_attack} "
+            "character_positions:"
+            f"{dict(sorted(state.reactor_hit_character_positions.items()))} "
+            f"stances:{dict(sorted(state.reactor_hit_stances.items()))} "
+            f"matched:{state.matched_reactor_hit_requests} "
+            f"updates:{state.matched_reactor_state_updates} "
+            f"removals:{state.matched_reactor_removals} "
+            f"stance_matches:{state.reactor_hit_stance_matches} "
+            f"stance_mismatches:{state.reactor_hit_stance_mismatches} "
+            f"pending:{state.pending_reactor_hit_requests} "
+            f"last_ms:{state.last_reactor_hit_response_ms} "
+            f"max_ms:{state.max_reactor_hit_response_ms}"
         ),
         (
             "server_opcode_169="
