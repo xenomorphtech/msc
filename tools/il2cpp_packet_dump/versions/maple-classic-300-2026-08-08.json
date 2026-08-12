@@ -1677,13 +1677,68 @@
       ]
     },
     {
+      "name":"client_npc_state_submission_compact","direction":"client_to_server","opcode":217,"length":8,
+      "source":"packets.py:ClientNpcStateSubmission; 1-10FS stream 126 exact FIFO correlation with server opcode 303 (339 matched compact pairs)",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":217},
+        {"op":"read","name":"object_id","kind":"u32"},
+        {"op":"read","name":"action","kind":"u8"},
+        {"op":"read","name":"parameter","kind":"u8"}
+      ]
+    },
+    {
+      "name":"client_npc_state_submission_movement","direction":"client_to_server","opcode":217,
+      "source":"packets.py:ClientNpcStateSubmission; all 592 movement packets in 1-10FS stream 126 parse exactly and 591 match opcode-303 echoes after removal of the final nine-byte client trailer",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":217},
+        {"op":"read","name":"object_id","kind":"u32"},
+        {"op":"read","name":"action","kind":"u8"},
+        {"op":"read","name":"parameter","kind":"u8"},
+        {"op":"read","name":"reference_x","kind":"i16"},
+        {"op":"read","name":"reference_y","kind":"i16"},
+        {"op":"read","name":"command_count","kind":"u8"},
+        {"op":"repeat","count_from":"command_count","operations":[
+          {"op":"read","name":"command_type","kind":"u8"},
+          {"op":"switch","field":"command_type","cases":[
+            {"equals":0,"operations":[{"op":"bytes","name":"absolute_0","length":13}]},
+            {"equals":2,"operations":[{"op":"bytes","name":"relative_2","length":7}]}
+          ]}
+        ]},
+        {"op":"read","name":"trailer_marker","kind":"u8","equals":0},
+        {"op":"read","name":"path_start_x","kind":"i16"},
+        {"op":"read","name":"path_start_y","kind":"i16"},
+        {"op":"read","name":"path_end_x","kind":"i16"},
+        {"op":"read","name":"path_end_y","kind":"i16"}
+      ]
+    },
+    {
       "name":"npc_state_update","direction":"server_to_client","opcode":303,"length":8,
-      "source":"packets.py:NpcStateUpdate; capture 111 stream 92",
+      "source":"packets.py:NpcStateUpdate; compact capture-111 stream 92 and 1-10FS stream 126 forms",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":303},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"action","kind":"u8"},
         {"op":"read","name":"parameter","kind":"u8"}
+      ]
+    },
+    {
+      "name":"npc_state_update_movement","direction":"server_to_client","opcode":303,
+      "source":"packets.py:NpcStateUpdate; all 683 movement packets in 1-10FS stream 126 parse exactly, including 591 exact client opcode-217 echoes",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":303},
+        {"op":"read","name":"object_id","kind":"u32"},
+        {"op":"read","name":"action","kind":"u8"},
+        {"op":"read","name":"parameter","kind":"u8"},
+        {"op":"read","name":"reference_x","kind":"i16"},
+        {"op":"read","name":"reference_y","kind":"i16"},
+        {"op":"read","name":"command_count","kind":"u8"},
+        {"op":"repeat","count_from":"command_count","operations":[
+          {"op":"read","name":"command_type","kind":"u8"},
+          {"op":"switch","field":"command_type","cases":[
+            {"equals":0,"operations":[{"op":"bytes","name":"absolute_0","length":13}]},
+            {"equals":2,"operations":[{"op":"bytes","name":"relative_2","length":7}]}
+          ]}
+        ]}
       ]
     }
   ]

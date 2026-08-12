@@ -3661,43 +3661,72 @@ change coordinates. It emits redacted submission/broadcast events and tracks
 command, tail-type, and tail-marker distributions. The shape is exact, but the
 command fields and control/tail roles remain semantically partial.
 
-## Client opcode `217` neutral record envelope
+## NPC state submission and echo (`client 217`, `server 303`)
 
 The client-to-server opcode is a separate family from the server-to-client
-life-movement opcode `217` above. It has two capture-bounded variants:
+life-movement opcode `217` above. Stream `126` proves that it submits the same
+NPC state body later echoed by server opcode `303`. It has two variants:
 
 ```text
 compact:
   uint16 opcode = 217
-  byte[6] opaque_body
+  uint32 npc_object_id
+  uint8 action
+  uint8 parameter
 
-record set:
+movement:
   uint16 opcode = 217
-  byte[10] opaque_prefix
-  uint8 record_count                 # 1..255
-  uint8 record_format                # observed 0 or 2
-  repeat record_count:
-    byte[14] record                  # format 0
-    byte[11] record                  # format 2
-  byte[8] opaque_trailer
+  uint32 npc_object_id
+  uint8 action
+  uint8 parameter
+  int16 reference_x
+  int16 reference_y
+  uint8 command_count                # 1..255
+  repeat command_count:
+    uint8 command_type               # observed 0 or 2
+    byte[13] absolute_payload         # type 0
+    byte[7] relative_payload          # type 2
+  uint8 trailer_marker = 0
+  int16 path_start_x
+  int16 path_start_y
+  int16 path_end_x
+  int16 path_end_y
+
+server echo:
+  uint16 opcode = 303
+  byte[...] client_body_without_final_9_byte_movement_trailer
 ```
 
 Stream `126` contains 937 instances. Of these, 345 are compact and 592 are
-record sets. Format `0` contributes 535 sets and 1,539 records; format `2`
-contributes 57 sets and 114 records. Observed record counts per packet are:
+movement submissions. They carry 1,653 commands: 1,596 type `0` commands and
+57 type `2` commands. Observed command counts per packet are:
 
 ```text
 count:    1   2  3  4  5  6  7  8  9 10 11 12 13 14
 packets: 332  71 21 18 37 40 27 22 11  1  4  5  1  2
 ```
 
-Every packet parses to its exact end and re-encodes byte-for-byte. The fold
-reports compact/set totals plus format and count distributions without
-exposing opaque contents. No record-aligned little-endian 32-bit value matched
-an active mob object id, and the next server opcode `219` was always more than
-one second later. Those negative correlations are insufficient to identify an
-attack or any other effect. The custom server therefore validates this family
-but does not generate or replay it.
+Every client packet and all 1,279 server opcode-`303` packets parse to their
+exact end and re-encode byte-for-byte. Exact FIFO matching pairs 930 of the 937
+client submissions with later server updates: 339 compact and 591 movement
+pairs. For every pair, the server response changes only the opcode and, for the
+movement variant, removes the client-only final nine-byte marker/start/end
+trailer. The remaining seven requests have no same-epoch captured response and
+are cleared by later field changes; 349 server updates are independent of a
+client submission. The fold records exact matches, latency, active-NPC
+admission, command distributions, and final absolute positions. Higher-level
+action/parameter intent remains neutral.
+
+The opt-in `--reactive-npc-state-responses` policy admits only object ids active
+in the replay's final field, validates the two captured variants and command
+types, and emits the exact typed opcode-`303` transformation. NPC spawn and
+lifecycle packets keep the runtime admission set current.
+
+This semantic promotion changes stream `126` coverage from
+`26,810/44,290/0/0` to `27,155/43,945/0/0` (full/partial/unknown/invalid): the
+345 compact client submissions are now fully typed, while movement-bearing
+forms stay partial until every command's higher-level role is known. Streams
+`92` and `114` remain `13,493/21,714/0/0` and `54/22/0/0`.
 
 ## Client opcode `122` selector envelopes
 

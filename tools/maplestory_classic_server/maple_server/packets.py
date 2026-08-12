@@ -3481,11 +3481,95 @@ class NpcLifecycleControl:
 
 
 @dataclass(frozen=True)
+class NpcMovementPath:
+    reference_x: int
+    reference_y: int
+    commands: tuple[MobMovementCommand, ...]
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, field_prefix: str = "movement"
+    ) -> "NpcMovementPath":
+        reference_x = reader.i16(f"{field_prefix}.reference_x")
+        reference_y = reader.i16(f"{field_prefix}.reference_y")
+        command_count = reader.u8(f"{field_prefix}.command_count")
+        if command_count == 0:
+            raise PacketShapeError("NPC movement path has no commands")
+        commands = tuple(
+            MobMovementCommand.parse(reader, command_index=index)
+            for index in range(command_count)
+        )
+        unsupported_types = sorted(
+            {
+                command.command_type
+                for command in commands
+                if command.command_type not in {0, 2}
+            }
+        )
+        if unsupported_types:
+            raise PacketShapeError(
+                "NPC movement path command types are "
+                f"{unsupported_types}, expected capture-observed types 0 or 2"
+            )
+        return cls(
+            reference_x=reference_x,
+            reference_y=reference_y,
+            commands=commands,
+        )
+
+    @property
+    def final_position(self) -> tuple[int, int]:
+        for command in reversed(self.commands):
+            if command.position is not None:
+                return command.position
+        return self.reference_x, self.reference_y
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "reference_x": self.reference_x,
+            "reference_y": self.reference_y,
+            "command_count": len(self.commands),
+            "command_types": [
+                command.command_type for command in self.commands
+            ],
+            "commands": [command.safe_dict() for command in self.commands],
+            "final_x": self.final_position[0],
+            "final_y": self.final_position[1],
+        }
+
+    def to_bytes(self) -> bytes:
+        if not self.commands:
+            raise PacketShapeError("NPC movement path must contain a command")
+        if len(self.commands) > 255:
+            raise PacketShapeError(
+                "NPC movement path cannot contain more than 255 commands"
+            )
+        unsupported_types = sorted(
+            {
+                command.command_type
+                for command in self.commands
+                if command.command_type not in {0, 2}
+            }
+        )
+        if unsupported_types:
+            raise PacketShapeError(
+                "NPC movement path command types are "
+                f"{unsupported_types}, expected capture-observed types 0 or 2"
+            )
+        return (
+            struct.pack(
+                "<hhB", self.reference_x, self.reference_y, len(self.commands)
+            )
+            + b"".join(command.to_bytes() for command in self.commands)
+        )
+
+
+@dataclass(frozen=True)
 class NpcStateUpdate:
     object_id: int
     action: int
     parameter: int
-    opaque_tail: bytes = b""
+    movement: NpcMovementPath | None = None
     opcode: int = 303
 
     @classmethod
@@ -3495,19 +3579,40 @@ class NpcStateUpdate:
         object_id = reader.u32("object_id")
         action = reader.u8("action")
         parameter = reader.u8("parameter")
-        opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
+        movement = (
+            NpcMovementPath.parse_from(reader)
+            if reader.remaining
+            else None
+        )
         reader.finish()
         return cls(
             object_id=object_id,
             action=action,
             parameter=parameter,
-            opaque_tail=opaque_tail,
+            movement=movement,
         )
 
+    @property
+    def variant(self) -> str:
+        return "movement" if self.movement is not None else "compact"
+
+    def safe_dict(self) -> dict[str, object]:
+        details: dict[str, object] = {
+            "variant": self.variant,
+            "action": self.action,
+            "parameter": self.parameter,
+        }
+        if self.movement is not None:
+            details["movement"] = self.movement.safe_dict()
+        return details
+
     def to_bytes(self) -> bytes:
-        return struct.pack(
+        prefix = struct.pack(
             "<HIBB", self.opcode, self.object_id, self.action, self.parameter
-        ) + self.opaque_tail
+        )
+        return prefix + (
+            self.movement.to_bytes() if self.movement is not None else b""
+        )
 
 
 @dataclass(frozen=True)
@@ -7152,123 +7257,129 @@ class ClientOpcode122Envelope:
 
 
 @dataclass(frozen=True)
-class ClientOpcode217RecordSet:
-    opaque_prefix: bytes
-    record_format: int | None = None
-    records: tuple[bytes, ...] = ()
-    opaque_trailer: bytes = b""
+class ClientNpcStateSubmission:
+    object_id: int
+    action: int
+    parameter: int
+    movement: NpcMovementPath | None = None
+    trailer_marker: int | None = None
+    path_start_x: int | None = None
+    path_start_y: int | None = None
+    path_end_x: int | None = None
+    path_end_y: int | None = None
     opcode: int = 217
-
-    _RECORD_LENGTHS = {0: 14, 2: 11}
 
     @property
     def variant(self) -> str:
-        return "compact" if self.record_format is None else "record_set"
+        return "movement" if self.movement is not None else "compact"
 
     @property
-    def record_count(self) -> int:
-        return len(self.records)
+    def command_count(self) -> int:
+        return len(self.movement.commands) if self.movement is not None else 0
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ClientOpcode217RecordSet":
-        reader = PacketReader(payload, packet_name="client_opcode_217")
+    def parse(cls, payload: bytes) -> "ClientNpcStateSubmission":
+        reader = PacketReader(payload, packet_name="client_npc_state_submission")
         _expect_opcode(reader, 217)
-        if reader.remaining == 6:
-            opaque_prefix = reader.bytes(6, "opaque_compact_body")
+        object_id = reader.u32("object_id")
+        action = reader.u8("action")
+        parameter = reader.u8("parameter")
+        if not reader.remaining:
             reader.finish()
-            return cls(opaque_prefix=opaque_prefix)
+            return cls(
+                object_id=object_id,
+                action=action,
+                parameter=parameter,
+            )
 
-        opaque_prefix = reader.bytes(10, "opaque_prefix")
-        record_count = reader.u8("record_count")
-        if record_count == 0:
+        movement = NpcMovementPath.parse_from(reader)
+        trailer_marker = reader.u8("trailer_marker")
+        if trailer_marker != 0:
             raise PacketShapeError(
-                "client_opcode_217.record_count is zero, expected 1..255"
+                "client NPC state submission trailer marker is "
+                f"{trailer_marker}, expected 0"
             )
-        record_format = reader.u8("record_format")
-        record_length = cls._RECORD_LENGTHS.get(record_format)
-        if record_length is None:
-            expected = ", ".join(str(value) for value in cls._RECORD_LENGTHS)
-            raise PacketShapeError(
-                f"client_opcode_217.record_format is {record_format}, "
-                f"expected one of {expected}"
-            )
-        records = tuple(
-            reader.bytes(record_length, f"records[{index}]")
-            for index in range(record_count)
-        )
-        opaque_trailer = reader.bytes(8, "opaque_trailer")
+        path_start_x = reader.i16("path_start_x")
+        path_start_y = reader.i16("path_start_y")
+        path_end_x = reader.i16("path_end_x")
+        path_end_y = reader.i16("path_end_y")
         reader.finish()
         return cls(
-            opaque_prefix=opaque_prefix,
-            record_format=record_format,
-            records=records,
-            opaque_trailer=opaque_trailer,
+            object_id=object_id,
+            action=action,
+            parameter=parameter,
+            movement=movement,
+            trailer_marker=trailer_marker,
+            path_start_x=path_start_x,
+            path_start_y=path_start_y,
+            path_end_x=path_end_x,
+            path_end_y=path_end_y,
         )
 
     def safe_dict(self) -> dict[str, object]:
         details: dict[str, object] = {
             "variant": self.variant,
-            "opaque_prefix_bytes": len(self.opaque_prefix),
+            "action": self.action,
+            "parameter": self.parameter,
         }
-        if self.record_format is not None:
+        if self.movement is not None:
             details.update(
                 {
-                    "record_count": self.record_count,
-                    "record_format": self.record_format,
-                    "record_bytes": self._RECORD_LENGTHS[self.record_format],
-                    "opaque_trailer_bytes": len(self.opaque_trailer),
+                    "movement": self.movement.safe_dict(),
+                    "trailer_marker": self.trailer_marker,
+                    "path_start_x": self.path_start_x,
+                    "path_start_y": self.path_start_y,
+                    "path_end_x": self.path_end_x,
+                    "path_end_y": self.path_end_y,
                 }
             )
         return details
 
-    def to_bytes(self) -> bytes:
-        if self.record_format is None:
-            if len(self.opaque_prefix) != 6:
-                raise PacketShapeError(
-                    "client opcode-217 compact variant needs 6 opaque bytes"
-                )
-            if self.records or self.opaque_trailer:
-                raise PacketShapeError(
-                    "client opcode-217 compact variant cannot contain records "
-                    "or a trailer"
-                )
-            return struct.pack("<H", self.opcode) + self.opaque_prefix
+    def to_state_update(self) -> NpcStateUpdate:
+        return NpcStateUpdate(
+            object_id=self.object_id,
+            action=self.action,
+            parameter=self.parameter,
+            movement=self.movement,
+        )
 
-        if len(self.opaque_prefix) != 10:
-            raise PacketShapeError(
-                "client opcode-217 record-set prefix needs 10 opaque bytes"
-            )
-        if not self.records:
-            raise PacketShapeError(
-                "client opcode-217 record set must contain a record"
-            )
-        if len(self.records) > 255:
-            raise PacketShapeError(
-                "client opcode-217 record set cannot exceed 255 records"
-            )
-        record_length = self._RECORD_LENGTHS.get(self.record_format)
-        if record_length is None:
-            expected = ", ".join(str(value) for value in self._RECORD_LENGTHS)
-            raise PacketShapeError(
-                f"client opcode-217 record format is {self.record_format}, "
-                f"expected one of {expected}"
-            )
-        for index, record in enumerate(self.records):
-            if len(record) != record_length:
+    def to_bytes(self) -> bytes:
+        prefix = struct.pack(
+            "<HIBB", self.opcode, self.object_id, self.action, self.parameter
+        )
+        trailer_values = (
+            self.trailer_marker,
+            self.path_start_x,
+            self.path_start_y,
+            self.path_end_x,
+            self.path_end_y,
+        )
+        if self.movement is None:
+            if any(value is not None for value in trailer_values):
                 raise PacketShapeError(
-                    f"client opcode-217 format {self.record_format} record "
-                    f"{index} needs {record_length} bytes, got {len(record)}"
+                    "compact client NPC state submission cannot contain a trailer"
                 )
-        if len(self.opaque_trailer) != 8:
+            return prefix
+        if any(value is None for value in trailer_values):
             raise PacketShapeError(
-                "client opcode-217 record-set trailer needs 8 opaque bytes"
+                "movement-bearing client NPC state submission needs all trailer "
+                "values"
+            )
+        if self.trailer_marker != 0:
+            raise PacketShapeError(
+                "client NPC state submission trailer marker must be zero"
             )
         return (
-            struct.pack("<H", self.opcode)
-            + self.opaque_prefix
-            + bytes((len(self.records), self.record_format))
-            + b"".join(self.records)
-            + self.opaque_trailer
+            prefix
+            + self.movement.to_bytes()
+            + struct.pack(
+                "<Bhhhh",
+                self.trailer_marker,
+                self.path_start_x,
+                self.path_start_y,
+                self.path_end_x,
+                self.path_end_y,
+            )
         )
 
 

@@ -30,6 +30,7 @@ from maple_server.gameplay import (  # noqa: E402
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    derive_npc_state_response_policy,
     derive_skill_level_change_response_policy,
     logical_equip_inventory,
     plan_composed_mob_movement_broadcasts,
@@ -67,7 +68,7 @@ from maple_server.packets import (  # noqa: E402
     ClientRecoveryRequest,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
-    ClientOpcode217RecordSet,
+    ClientNpcStateSubmission,
     ClientOpcode225PositionedEffectAction,
     ClientOpcode276Envelope,
     ClientOpcode276RecordGroup,
@@ -132,6 +133,7 @@ from maple_server.packets import (  # noqa: E402
     MobTemporaryStatReset,
     MobTemporaryStatSet,
     NpcLifecycleControl,
+    NpcMovementPath,
     NpcSpawn,
     NpcStateUpdate,
     Opcode13Envelope,
@@ -1408,30 +1410,73 @@ def fixture_gameplay_transcript(
             ).to_bytes(),
         )
     if opcode_217_records:
-        append(
-            "client_to_server",
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"short!",
-            ).to_bytes(),
+        submissions = (
+            ClientNpcStateSubmission(
+                object_id=NPC_OBJECT_ID,
+                action=2,
+                parameter=1,
+            ),
+            ClientNpcStateSubmission(
+                object_id=NPC_OBJECT_ID,
+                action=5,
+                parameter=255,
+                movement=NpcMovementPath(
+                    reference_x=65,
+                    reference_y=65,
+                    commands=(
+                        MobMovementCommand.absolute(
+                            position_x=69,
+                            position_y=65,
+                            velocity_x=0,
+                            velocity_y=0,
+                            foothold_id=89,
+                            stance=5,
+                            duration_ms=1080,
+                        ),
+                    ),
+                ),
+                trailer_marker=0,
+                path_start_x=65,
+                path_start_y=65,
+                path_end_x=69,
+                path_end_y=65,
+            ),
+            ClientNpcStateSubmission(
+                object_id=NPC_OBJECT_ID,
+                action=5,
+                parameter=255,
+                movement=NpcMovementPath(
+                    reference_x=61,
+                    reference_y=65,
+                    commands=(
+                        MobMovementCommand.relative(
+                            command_type=2,
+                            velocity_x=0,
+                            velocity_y=0,
+                            stance=4,
+                            duration_ms=0,
+                        ),
+                        MobMovementCommand.absolute(
+                            position_x=61,
+                            position_y=65,
+                            velocity_x=0,
+                            velocity_y=0,
+                            foothold_id=89,
+                            stance=4,
+                            duration_ms=5000,
+                        ),
+                    ),
+                ),
+                trailer_marker=0,
+                path_start_x=61,
+                path_start_y=65,
+                path_end_x=61,
+                path_end_y=65,
+            ),
         )
-        append(
-            "client_to_server",
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"prefix-000",
-                record_format=0,
-                records=(b"a" * 14, b"b" * 14),
-                opaque_trailer=b"trailer!",
-            ).to_bytes(),
-        )
-        append(
-            "client_to_server",
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"prefix-002",
-                record_format=2,
-                records=(b"c" * 11, b"d" * 11),
-                opaque_trailer=b"trailer?",
-            ).to_bytes(),
-        )
+        for submission in submissions:
+            append("client_to_server", submission.to_bytes())
+            append("server_to_client", submission.to_state_update().to_bytes())
     if opcode_426_acknowledgement:
         append("server_to_client", ServerOpcode426Notification().to_bytes())
         append(
@@ -3630,55 +3675,36 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(records[3].npc_interaction_key_codes, ())
         self.assertEqual(records[3].empty_keyboard_binding_count, 0)
 
-    def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
+    def test_npc_state_submission_and_update_round_trip(self) -> None:
         stage = FieldLoadStage(
             stage=0,
             trailing=1,
             opaque_tail=b"nine-byte",
         )
-        update = NpcStateUpdate(
-            object_id=NPC_OBJECT_ID,
-            action=2,
-            parameter=3,
-            opaque_tail=b"capture-backed-tail",
+        compact = bytes.fromhex("d900b55b00000201")
+        absolute = bytes.fromhex(
+            "d900fd2b0000ffff45004100010045004100000000005900053804"
+            "004500410045004100"
         )
-        compact_records = ClientOpcode217RecordSet(
-            opaque_prefix=b"short!",
-        )
-        format_zero_records = ClientOpcode217RecordSet(
-            opaque_prefix=b"prefix-000",
-            record_format=0,
-            records=(b"a" * 14, b"b" * 14),
-            opaque_trailer=b"trailer!",
-        )
-        format_two_records = ClientOpcode217RecordSet(
-            opaque_prefix=b"prefix-002",
-            record_format=2,
-            records=(b"c" * 11, b"d" * 11),
-            opaque_trailer=b"trailer?",
+        mixed = bytes.fromhex(
+            "d900fd2b000005ff3d004100020200000000040000003d00410000"
+            "0000005900048813003d0041003d004100"
         )
 
         self.assertEqual(FieldLoadStage.parse(stage.to_bytes()), stage)
-        self.assertEqual(NpcStateUpdate.parse(update.to_bytes()), update)
-        for record_set in (
-            compact_records,
-            format_zero_records,
-            format_two_records,
-        ):
-            self.assertEqual(
-                ClientOpcode217RecordSet.parse(record_set.to_bytes()),
-                record_set,
+        for payload in (compact, absolute, mixed):
+            submission = ClientNpcStateSubmission.parse(payload)
+            self.assertEqual(submission.to_bytes(), payload)
+            update = submission.to_state_update()
+            self.assertEqual(NpcStateUpdate.parse(update.to_bytes()), update)
+            expected_response = (
+                b"\x2f\x01" + payload[2:-9]
+                if submission.movement is not None
+                else b"\x2f\x01" + payload[2:]
             )
-        self.assertEqual(len(compact_records.to_bytes()), 8)
-        self.assertEqual(len(format_zero_records.to_bytes()), 50)
-        self.assertEqual(len(format_two_records.to_bytes()), 44)
-        with self.assertRaisesRegex(PacketShapeError, "needs 14 bytes"):
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"prefix-000",
-                record_format=0,
-                records=(b"short",),
-                opaque_trailer=b"trailer!",
-            ).to_bytes()
+            self.assertEqual(update.to_bytes(), expected_response)
+        with self.assertRaisesRegex(PacketShapeError, "trailer marker"):
+            ClientNpcStateSubmission.parse(absolute[:-9] + b"\x01" + absolute[-8:])
         captured_stage = bytes.fromhex(
             "9e0000000000010000002a00000001e8030000"
         )
@@ -8553,6 +8579,28 @@ class GameplayStateFoldTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "permanent requests"):
             policy.respond(replace(request, duration_value=10_080))
 
+    def test_derives_active_npc_state_response(self) -> None:
+        policy = derive_npc_state_response_policy(fixture_gameplay_transcript())
+        request = ClientNpcStateSubmission(
+            object_id=NPC_OBJECT_ID,
+            action=2,
+            parameter=1,
+        )
+
+        plan = policy.respond(request)
+
+        self.assertEqual(plan.plaintexts, (b"\x2f\x01" + request.to_bytes()[2:],))
+        self.assertEqual(plan.safe_dict()["server_opcodes"], [303])
+        self.assertEqual(plan.safe_dict()["client_only_trailer_bytes_removed"], 0)
+        self.assertEqual(policy.safe_dict()["active_npc_count"], 1)
+        with self.assertRaisesRegex(ValueError, "active field NPC"):
+            policy.respond(replace(request, object_id=0xFFFF_FFFE))
+        policy.apply_server_packet(fixture_compact_field_transition().to_bytes())
+        self.assertEqual(policy.safe_dict()["active_npc_count"], 0)
+        self.assertEqual(policy.safe_dict()["field_epoch"], 2)
+        with self.assertRaisesRegex(ValueError, "active field NPC"):
+            policy.respond(request)
+
     def test_projects_initial_equipment_groups_into_signed_slots(self) -> None:
         equipped = InventoryItemEntity(
             slot=11,
@@ -9604,28 +9652,35 @@ class GameplayStateFoldTest(unittest.TestCase):
             "opcode=13 kind=client_opcode_13_message coverage=partial",
             report,
         )
-        self.assertEqual(analysis.state.client_opcode_217_packets, 3)
-        self.assertEqual(analysis.state.client_opcode_217_compact_packets, 1)
-        self.assertEqual(analysis.state.client_opcode_217_record_sets, 2)
-        self.assertEqual(analysis.state.client_opcode_217_records, 4)
+        self.assertEqual(analysis.state.client_npc_state_submissions, 3)
         self.assertEqual(
-            analysis.state.client_opcode_217_records_by_format,
-            {0: 2, 2: 2},
+            analysis.state.client_npc_state_compact_submissions, 1
         )
         self.assertEqual(
-            analysis.state.client_opcode_217_record_counts,
-            {2: 2},
+            analysis.state.client_npc_state_movement_submissions, 2
         )
+        self.assertEqual(analysis.state.client_npc_state_commands, 3)
+        self.assertEqual(
+            analysis.state.client_npc_state_commands_by_type,
+            {0: 2, 2: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_npc_state_command_counts,
+            {1: 1, 2: 1},
+        )
+        self.assertEqual(analysis.state.npc_state_submission_matches, 3)
+        self.assertEqual(analysis.state.pending_npc_state_submissions, 0)
         self.assertIn(
-            'client_opcode_217=packets:3 compact:1 record_sets:2 records:4 '
-            'records_by_format:{"0": 2, "2": 2} record_counts:{"2": 2}',
+            'npc_state_submissions=packets:3 compact:1 movement:2 '
+            'known_npcs:3 unknown_npcs:0 commands:3 commands_by_type:'
+            '{"0": 2, "2": 1} command_counts:{"1": 1, "2": 1} '
+            'matched:3 unmatched_updates:1 pending:0',
             report,
         )
         self.assertIn(
-            "opcode=217 kind=client_opcode_217_record_set coverage=partial",
+            "opcode=217 kind=npc_state_submission coverage=partial",
             report,
         )
-        self.assertNotIn("prefix-002", report)
         self.assertEqual(analysis.state.opcode_426_notifications, 1)
         self.assertEqual(analysis.state.opcode_309_acknowledgements, 1)
         self.assertEqual(

@@ -36,6 +36,7 @@ from .gameplay import (
     MobMovementBroadcastScheduler,
     MobMovementPlanningContext,
     MobMovementRelativeDecisionPolicy,
+    NpcStateResponsePolicy,
     PlayerMobProximityPredicate,
     SkillLevelChangeResponsePolicy,
     analyze_gameplay_transcript,
@@ -48,6 +49,7 @@ from .gameplay import (
     derive_item_use_response_policy,
     derive_mob_health_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    derive_npc_state_response_policy,
     derive_skill_level_change_response_policy,
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
@@ -85,6 +87,7 @@ from .packets import (
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientOpcode298ItemAcquisitionRequest,
+    ClientNpcStateSubmission,
     ClientRecoveryRequest,
     ClientAttackAction,
     FieldDropSpawn,
@@ -456,6 +459,7 @@ async def replay_connection(
     item_acquisition_response_policy: (
         ItemAcquisitionResponsePolicy | None
     ) = None,
+    npc_state_response_policy: NpcStateResponsePolicy | None = None,
     inventory_move_response_policy: InventoryMoveResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
@@ -517,6 +521,10 @@ async def replay_connection(
         raise ValueError(
             "reactive item-acquisition responses require a positive "
             "hold_open_seconds"
+        )
+    if npc_state_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive NPC-state responses require a positive hold_open_seconds"
         )
     if inventory_move_response_policy is not None and hold_open_seconds <= 0:
         raise ValueError(
@@ -910,6 +918,15 @@ async def replay_connection(
         raise TypeError(
             "runtime item_acquisition_responses telemetry must be a dictionary"
         )
+    npc_state_metrics = (
+        runtime_protocol.get("npc_state_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if npc_state_metrics is not None and not isinstance(npc_state_metrics, dict):
+        raise TypeError(
+            "runtime npc_state_responses telemetry must be a dictionary"
+        )
     inventory_move_metrics = (
         runtime_protocol.get("inventory_move_responses")
         if runtime_protocol is not None
@@ -1019,6 +1036,7 @@ async def replay_connection(
             or ability_point_allocation_response_policy is not None
             or skill_level_change_response_policy is not None
             or item_acquisition_response_policy is not None
+            or npc_state_response_policy is not None
             or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
@@ -1125,6 +1143,9 @@ async def replay_connection(
                 ),
                 "reactive_item_acquisition_responses": (
                     item_acquisition_response_policy is not None
+                ),
+                "reactive_npc_state_responses": (
+                    npc_state_response_policy is not None
                 ),
                 "reactive_inventory_move_responses": (
                     inventory_move_response_policy is not None
@@ -1248,6 +1269,7 @@ async def replay_connection(
             or ability_point_allocation_response_policy is not None
             or skill_level_change_response_policy is not None
             or item_acquisition_response_policy is not None
+            or npc_state_response_policy is not None
             or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
@@ -1316,6 +1338,12 @@ async def replay_connection(
                 if item_acquisition_metrics is not None:
                     item_acquisition_metrics["state"] = (
                         item_acquisition_response_policy.safe_dict()
+                    )
+            if npc_state_response_policy is not None:
+                npc_state_response_policy.apply_server_packet(plaintext)
+                if npc_state_metrics is not None:
+                    npc_state_metrics["state"] = (
+                        npc_state_response_policy.safe_dict()
                     )
             if inventory_move_response_policy is not None:
                 inventory_move_response_policy.apply_server_packet(plaintext)
@@ -2032,6 +2060,71 @@ async def replay_connection(
                         )
                     record_runtime_event(
                         "skill_level_change_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if opcode == 217 and npc_state_response_policy is not None:
+                    request = ClientNpcStateSubmission.parse(client_plaintext)
+                    if npc_state_metrics is not None:
+                        npc_state_metrics["requests_observed"] = (
+                            int(npc_state_metrics.get("requests_observed", 0))
+                            + 1
+                        )
+                    record_runtime_event(
+                        "npc_state_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "active_npc": (
+                                request.object_id
+                                in npc_state_response_policy.active_npc_ids
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = npc_state_response_policy.respond(request)
+                    except ValueError as error:
+                        if npc_state_metrics is not None:
+                            npc_state_metrics["requests_rejected"] = (
+                                int(
+                                    npc_state_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            npc_state_metrics["last_rejection"] = str(error)
+                            npc_state_metrics["state"] = (
+                                npc_state_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "npc_state_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                    if npc_state_metrics is not None:
+                        npc_state_metrics["requests_served"] = (
+                            int(npc_state_metrics.get("requests_served", 0)) + 1
+                        )
+                        npc_state_metrics["response_packets_sent"] = (
+                            int(
+                                npc_state_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        npc_state_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        npc_state_metrics["state"] = (
+                            npc_state_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "npc_state_response_completed",
                         response_plan.safe_dict(),
                     )
                 if (
@@ -4013,6 +4106,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reactive-npc-state-responses",
+        action="store_true",
+        help=(
+            "during hold-open, echo validated opcode-217 NPC state submissions "
+            "for active field NPCs as typed opcode-303 updates; requires "
+            "--keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--reactive-item-pickup-responses",
         action="store_true",
         help=(
@@ -4962,6 +5064,24 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "last_response": None,
                 "last_rejection": None,
             }
+        npc_state_response_policy = None
+        if arguments.reactive_npc_state_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-npc-state-responses requires --keep-world-open"
+                )
+            npc_state_response_policy = derive_npc_state_response_policy(
+                transcript
+            )
+            runtime_protocol["npc_state_responses"] = {
+                **npc_state_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
         if arguments.reactive_inventory_move_responses:
             if not arguments.keep_world_open:
                 raise ValueError(
@@ -5770,6 +5890,7 @@ async def async_main(arguments: argparse.Namespace) -> None:
             item_acquisition_response_policy=(
                 item_acquisition_response_policy
             ),
+            npc_state_response_policy=npc_state_response_policy,
             inventory_move_response_policy=inventory_move_response_policy,
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
@@ -5828,6 +5949,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "reactive_item_acquisition_responses": (
                 arguments.reactive_item_acquisition_responses
+            ),
+            "reactive_npc_state_responses": (
+                arguments.reactive_npc_state_responses
             ),
             "reactive_inventory_move_responses": (
                 arguments.reactive_inventory_move_responses

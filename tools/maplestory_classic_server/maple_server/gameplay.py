@@ -29,7 +29,7 @@ from .packets import (
     ClientRecoveryRequest,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
-    ClientOpcode217RecordSet,
+    ClientNpcStateSubmission,
     ClientOpcode225PositionedEffectAction,
     ClientOpcode276Envelope,
     ClientOpcode279TextEnvelope,
@@ -209,6 +209,8 @@ class NpcEntity:
     spawn: NpcSpawn = field(repr=False)
     action: int | None = None
     parameter: int | None = None
+    x: int | None = None
+    y: int | None = None
 
 
 @dataclass
@@ -348,6 +350,14 @@ class PendingItemAcquisition:
     request_timestamp_ns: int
     field_epoch: int
     request: ClientOpcode298ItemAcquisitionRequest
+
+
+@dataclass(frozen=True)
+class PendingNpcStateSubmission:
+    request_frame_index: int
+    request_timestamp_ns: int
+    field_epoch: int
+    request: ClientNpcStateSubmission
 
 
 @dataclass
@@ -500,6 +510,17 @@ class GameplayGameState:
     npc_lifecycle_removals: int = 0
     npc_lifecycle_unknown_removals: int = 0
     npc_state_updates: int = 0
+    npc_state_updates_with_movement: int = 0
+    npc_state_update_commands: int = 0
+    npc_state_update_commands_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    npc_state_submission_matches: int = 0
+    npc_state_updates_without_submission: int = 0
+    npc_state_submissions_cleared_on_field_change: int = 0
+    pending_npc_state_submissions: int = 0
+    last_npc_state_response_ms: float | None = None
+    max_npc_state_response_ms: float | None = None
     mob_entries: int = 0
     mob_leaves: int = 0
     mob_controller_changes: int = 0
@@ -967,14 +988,16 @@ class GameplayGameState:
     client_opcode_122_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_122_shapes: Counter[str] = field(default_factory=Counter)
     client_opcode_122_terminal_sentinels: int = 0
-    client_opcode_217_packets: int = 0
-    client_opcode_217_compact_packets: int = 0
-    client_opcode_217_record_sets: int = 0
-    client_opcode_217_records: int = 0
-    client_opcode_217_records_by_format: Counter[int] = field(
+    client_npc_state_submissions: int = 0
+    client_npc_state_compact_submissions: int = 0
+    client_npc_state_movement_submissions: int = 0
+    client_npc_state_submissions_for_known_npcs: int = 0
+    client_npc_state_submissions_for_unknown_npcs: int = 0
+    client_npc_state_commands: int = 0
+    client_npc_state_commands_by_type: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_217_record_counts: Counter[int] = field(
+    client_npc_state_command_counts: Counter[int] = field(
         default_factory=Counter
     )
     bootstrap_acknowledgements: int = 0
@@ -2472,6 +2495,98 @@ class ItemAcquisitionResponsePolicy:
 
 
 @dataclass(frozen=True)
+class NpcStateResponsePlan:
+    request: ClientNpcStateSubmission = field(repr=False)
+    update: NpcStateUpdate = field(repr=False)
+
+    @property
+    def plaintexts(self) -> tuple[bytes, ...]:
+        return (self.update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "active_npc_admitted": True,
+            "request_variant": self.request.variant,
+            "action": self.request.action,
+            "parameter": self.request.parameter,
+            "command_count": self.request.command_count,
+            "server_opcodes": [self.update.opcode],
+            "response_bytes": len(self.update.to_bytes()),
+            "client_only_trailer_bytes_removed": (
+                9 if self.request.movement is not None else 0
+            ),
+        }
+
+
+@dataclass
+class NpcStateResponsePolicy:
+    active_npc_ids: set[int] = field(repr=False)
+    field_epoch: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "active_npc_count": len(self.active_npc_ids),
+            "source_evidence": {
+                "exact_request_response_pairs": 930,
+                "compact_pairs": 339,
+                "movement_pairs": 591,
+                "client_requests": 937,
+                "server_updates": 1279,
+            },
+            "admission": {
+                "opcode": 217,
+                "object_id": "active_field_npc",
+                "variants": ["compact", "movement"],
+                "movement_command_types": [0, 2],
+                "trailer_marker": 0,
+            },
+            "prediction": {
+                "server_opcodes": [303],
+                "body": "exact client body",
+                "movement_trailer": "remove_client_only_final_9_bytes",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 157:
+            self.active_npc_ids.clear()
+            self.field_epoch += 1
+            return
+        if opcode == 300:
+            self.active_npc_ids.add(NpcSpawn.parse(plaintext).object_id)
+            return
+        if opcode != 302:
+            return
+        if not (
+            (len(plaintext) == 23 and plaintext[2] == NpcLifecycleControl.SPAWN)
+            or (
+                len(plaintext) == 7
+                and plaintext[2] == NpcLifecycleControl.REMOVE
+            )
+        ):
+            return
+        lifecycle = NpcLifecycleControl.parse(plaintext)
+        if lifecycle.spawn is None:
+            self.active_npc_ids.discard(lifecycle.object_id)
+        else:
+            self.active_npc_ids.add(lifecycle.object_id)
+
+    def respond(
+        self, request: ClientNpcStateSubmission
+    ) -> NpcStateResponsePlan:
+        if request.object_id not in self.active_npc_ids:
+            raise ValueError(
+                "NPC state responder requires an active field NPC object id"
+            )
+        update = request.to_state_update()
+        return NpcStateResponsePlan(request=request, update=update)
+
+
+@dataclass(frozen=True)
 class InventoryMoveResponsePlan:
     request: InventoryMoveRequest
     inventory_update: InventoryChangeSet = field(repr=False)
@@ -3921,6 +4036,8 @@ class GameplayAnalysis:
                 "hidden": spawn.hidden,
                 "action": entity.action,
                 "parameter": entity.parameter,
+                "state_x": entity.x,
+                "state_y": entity.y,
             }
             if show_identifiers:
                 record["object_id"] = spawn.object_id
@@ -4207,7 +4324,38 @@ class GameplayAnalysis:
                 "npc_lifecycle_unknown_removals": (
                     self.state.npc_lifecycle_unknown_removals
                 ),
-                "npc_state_updates": self.state.npc_state_updates,
+                "npc_state_updates": {
+                    "packet_count": self.state.npc_state_updates,
+                    "movement_packet_count": (
+                        self.state.npc_state_updates_with_movement
+                    ),
+                    "command_count": self.state.npc_state_update_commands,
+                    "commands_by_type": dict(
+                        self.state.npc_state_update_commands_by_type
+                    ),
+                    "matched_submissions": (
+                        self.state.npc_state_submission_matches
+                    ),
+                    "updates_without_submission": (
+                        self.state.npc_state_updates_without_submission
+                    ),
+                    "submissions_cleared_on_field_change": (
+                        self.state.npc_state_submissions_cleared_on_field_change
+                    ),
+                    "pending_submissions": (
+                        self.state.pending_npc_state_submissions
+                    ),
+                    "last_response_ms": (
+                        None
+                        if self.state.last_npc_state_response_ms is None
+                        else round(self.state.last_npc_state_response_ms, 3)
+                    ),
+                    "max_response_ms": (
+                        None
+                        if self.state.max_npc_state_response_ms is None
+                        else round(self.state.max_npc_state_response_ms, 3)
+                    ),
+                },
                 "mob_entries": self.state.mob_entries,
                 "mob_leaves": self.state.mob_leaves,
                 "mob_controller_changes": self.state.mob_controller_changes,
@@ -5168,24 +5316,28 @@ class GameplayAnalysis:
                         self.state.client_opcode_122_terminal_sentinels
                     ),
                 },
-                "client_opcode_217_packets": (
-                    self.state.client_opcode_217_packets
-                ),
-                "client_opcode_217_compact_packets": (
-                    self.state.client_opcode_217_compact_packets
-                ),
-                "client_opcode_217_record_sets": (
-                    self.state.client_opcode_217_record_sets
-                ),
-                "client_opcode_217_records": (
-                    self.state.client_opcode_217_records
-                ),
-                "client_opcode_217_records_by_format": dict(
-                    self.state.client_opcode_217_records_by_format
-                ),
-                "client_opcode_217_record_counts": dict(
-                    self.state.client_opcode_217_record_counts
-                ),
+                "client_npc_state_submissions": {
+                    "packet_count": self.state.client_npc_state_submissions,
+                    "compact_packet_count": (
+                        self.state.client_npc_state_compact_submissions
+                    ),
+                    "movement_packet_count": (
+                        self.state.client_npc_state_movement_submissions
+                    ),
+                    "known_npcs": (
+                        self.state.client_npc_state_submissions_for_known_npcs
+                    ),
+                    "unknown_npcs": (
+                        self.state.client_npc_state_submissions_for_unknown_npcs
+                    ),
+                    "command_count": self.state.client_npc_state_commands,
+                    "commands_by_type": dict(
+                        self.state.client_npc_state_commands_by_type
+                    ),
+                    "command_counts": dict(
+                        self.state.client_npc_state_command_counts
+                    ),
+                },
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
                 ),
@@ -5806,6 +5958,9 @@ class GameplayStateFold:
         self._pending_item_acquisitions: deque[
             PendingItemAcquisition
         ] = deque()
+        self._pending_npc_state_submissions: dict[
+            bytes, deque[PendingNpcStateSubmission]
+        ] = {}
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
         self._last_mob_controller_releases: dict[
             int, tuple[int, int]
@@ -7815,37 +7970,66 @@ class GameplayStateFold:
                 details=details,
             )
         if opcode == 217:
-            record_set = ClientOpcode217RecordSet.parse(payload)
-            self.state.client_opcode_217_packets += 1
-            if record_set.record_format is None:
-                self.state.client_opcode_217_compact_packets += 1
+            submission = ClientNpcStateSubmission.parse(payload)
+            alias = self._alias(
+                self._npc_aliases, submission.object_id, "npc"
+            )
+            known_npc = submission.object_id in self.state.npcs
+            self.state.client_npc_state_submissions += 1
+            if known_npc:
+                self.state.client_npc_state_submissions_for_known_npcs += 1
             else:
-                self.state.client_opcode_217_record_sets += 1
-                self.state.client_opcode_217_records += record_set.record_count
-                self.state.client_opcode_217_records_by_format[
-                    record_set.record_format
-                ] += record_set.record_count
-                self.state.client_opcode_217_record_counts[
-                    record_set.record_count
+                self.state.client_npc_state_submissions_for_unknown_npcs += 1
+            if submission.movement is None:
+                self.state.client_npc_state_compact_submissions += 1
+            else:
+                self.state.client_npc_state_movement_submissions += 1
+                self.state.client_npc_state_commands += submission.command_count
+                self.state.client_npc_state_commands_by_type.update(
+                    command.command_type
+                    for command in submission.movement.commands
+                )
+                self.state.client_npc_state_command_counts[
+                    submission.command_count
                 ] += 1
+            expected_update = submission.to_state_update().to_bytes()
+            self._pending_npc_state_submissions.setdefault(
+                expected_update, deque()
+            ).append(
+                PendingNpcStateSubmission(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    field_epoch=self.state.field_epoch,
+                    request=submission,
+                )
+            )
+            self.state.pending_npc_state_submissions += 1
             details = {
-                **record_set.safe_dict(),
+                "entity": alias,
+                "known_npc": known_npc,
+                **submission.safe_dict(),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
                 frame,
-                "client_opcode_217_submitted",
+                "npc_state_submitted",
                 details=details,
+                identifiers={"object_id": submission.object_id},
             )
             return self._observation(
                 frame,
-                kind="client_opcode_217_record_set",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=record_set,
+                kind="npc_state_submission",
+                coverage=(
+                    ShapeCoverage.PARTIAL
+                    if submission.movement is not None
+                    else ShapeCoverage.FULL
+                ),
+                parsed=submission,
                 details=details,
                 issues=(
-                    "client opcode-217 prefix, records, trailer, and effect "
-                    "semantics remain opaque",
+                    ("NPC movement command roles remain neutral",)
+                    if submission.movement is not None
+                    else ()
                 ),
             )
         if opcode == 225:
@@ -9361,6 +9545,10 @@ class GameplayStateFold:
             cleared_npc_interaction_requests = len(
                 self._pending_npc_interactions
             )
+            cleared_npc_state_submissions = sum(
+                len(pending)
+                for pending in self._pending_npc_state_submissions.values()
+            )
             cleared_client_recovery_requests = sum(
                 len(pending)
                 for pending in self._pending_client_recoveries.values()
@@ -9393,6 +9581,11 @@ class GameplayStateFold:
             self.state.pending_item_pickups = 0
             self._pending_npc_interactions.clear()
             self.state.pending_npc_interaction_requests = 0
+            self._pending_npc_state_submissions.clear()
+            self.state.pending_npc_state_submissions = 0
+            self.state.npc_state_submissions_cleared_on_field_change += (
+                cleared_npc_state_submissions
+            )
             for pending in self._pending_client_recoveries.values():
                 pending.clear()
             self.state.pending_client_recovery_requests = 0
@@ -9421,6 +9614,9 @@ class GameplayStateFold:
                 "cleared_chair_sit_intent": cleared_chair_sit_intent,
                 "cleared_npc_interaction_requests": (
                     cleared_npc_interaction_requests
+                ),
+                "cleared_npc_state_submissions": (
+                    cleared_npc_state_submissions
                 ),
                 "cleared_client_recovery_requests": (
                     cleared_client_recovery_requests
@@ -10591,7 +10787,12 @@ class GameplayStateFold:
                     f"{alias} was respawned with a different shape in field "
                     f"epoch {self.state.field_epoch}"
                 )
-            self.state.npcs[spawn.object_id] = NpcEntity(alias=alias, spawn=spawn)
+            self.state.npcs[spawn.object_id] = NpcEntity(
+                alias=alias,
+                spawn=spawn,
+                x=spawn.x,
+                y=spawn.cy,
+            )
             self.state.npc_spawns += 1
             details = {
                 "entity": alias,
@@ -10635,7 +10836,10 @@ class GameplayStateFold:
                         f"shape in field epoch {self.state.field_epoch}"
                     )
                 self.state.npcs[lifecycle.object_id] = NpcEntity(
-                    alias=alias, spawn=spawn
+                    alias=alias,
+                    spawn=spawn,
+                    x=spawn.x,
+                    y=spawn.cy,
                 )
                 self.state.npc_spawns += 1
                 self.state.npc_lifecycle_spawns += 1
@@ -10697,6 +10901,8 @@ class GameplayStateFold:
             if entity is not None:
                 entity.action = update.action
                 entity.parameter = update.parameter
+                if update.movement is not None:
+                    entity.x, entity.y = update.movement.final_position
             else:
                 warning_key = (self.state.field_epoch, update.object_id)
                 if warning_key not in self._unknown_npc_updates:
@@ -10706,14 +10912,43 @@ class GameplayStateFold:
                         f"epoch {self.state.field_epoch}"
                     )
             self.state.npc_state_updates += 1
+            if update.movement is not None:
+                self.state.npc_state_updates_with_movement += 1
+                self.state.npc_state_update_commands += len(
+                    update.movement.commands
+                )
+                self.state.npc_state_update_commands_by_type.update(
+                    command.command_type
+                    for command in update.movement.commands
+                )
+            pending_queue = self._pending_npc_state_submissions.get(payload)
+            pending = pending_queue.popleft() if pending_queue else None
+            if pending_queue is not None and not pending_queue:
+                self._pending_npc_state_submissions.pop(payload)
+            if pending is None:
+                self.state.npc_state_updates_without_submission += 1
+                response_ms = None
+            else:
+                self.state.npc_state_submission_matches += 1
+                self.state.pending_npc_state_submissions -= 1
+                response_ms = (
+                    frame.timestamp_ns - pending.request_timestamp_ns
+                ) / 1_000_000
+                self.state.last_npc_state_response_ms = response_ms
+                self.state.max_npc_state_response_ms = max(
+                    response_ms,
+                    self.state.max_npc_state_response_ms or response_ms,
+                )
             details = {
                 "entity": alias,
                 "known_entity": known_entity,
-                "action": update.action,
-                "parameter": update.parameter,
-                "opaque_tail_bytes": len(update.opaque_tail),
+                **update.safe_dict(),
+                "matched_client_submission": pending is not None,
+                "response_ms": response_ms,
                 "field_epoch": self.state.field_epoch,
             }
+            if pending is not None:
+                details["request_frame_index"] = pending.request_frame_index
             self._event(
                 frame,
                 "npc_state_updated",
@@ -10725,14 +10960,14 @@ class GameplayStateFold:
                 kind="npc_state_update",
                 coverage=(
                     ShapeCoverage.PARTIAL
-                    if update.opaque_tail
+                    if update.movement is not None
                     else ShapeCoverage.FULL
                 ),
                 parsed=update,
                 details=details,
                 issues=(
-                    ("NPC state-update tail remains opaque",)
-                    if update.opaque_tail
+                    ("NPC movement command roles remain neutral",)
+                    if update.movement is not None
                     else ()
                 ),
             )
@@ -12109,6 +12344,11 @@ class GameplayStateFold:
                 f"{self.state.pending_item_acquisition_requests} item-"
                 "acquisition requests had no matching captured inventory add"
             )
+        if self.state.pending_npc_state_submissions:
+            self.warnings.append(
+                f"{self.state.pending_npc_state_submissions} client NPC state "
+                "submissions had no exact captured server state update"
+            )
         if self.state.pending_item_pickups:
             self.warnings.append(
                 f"{self.state.pending_item_pickups} item-pickup requests had no "
@@ -12149,6 +12389,9 @@ class GameplayStateFold:
                     ),
                     "pending_item_acquisition_requests": (
                         self.state.pending_item_acquisition_requests
+                    ),
+                    "pending_npc_state_submissions": (
+                        self.state.pending_npc_state_submissions
                     ),
                     "pending_item_pickups": self.state.pending_item_pickups,
                     "pending_client_attack_effects": (
@@ -12527,6 +12770,20 @@ def derive_item_acquisition_response_policy(
     return ItemAcquisitionResponsePolicy(
         use_items=use_items,
         field_epoch=state.field_epoch,
+    )
+
+
+def derive_npc_state_response_policy(
+    transcript: Transcript,
+) -> NpcStateResponsePolicy:
+    """Build active-NPC admission state from a validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    return NpcStateResponsePolicy(
+        active_npc_ids=set(analysis.state.npcs),
+        field_epoch=analysis.state.field_epoch,
     )
 
 
@@ -14127,11 +14384,11 @@ def render_gameplay_analysis(
     server_opcode_77_control_patterns = json.dumps(
         dict(sorted(state.server_opcode_77_control_patterns.items()))
     )
-    client_opcode_217_record_formats = json.dumps(
-        dict(sorted(state.client_opcode_217_records_by_format.items()))
+    client_npc_state_command_types = json.dumps(
+        dict(sorted(state.client_npc_state_commands_by_type.items()))
     )
-    client_opcode_217_record_counts = json.dumps(
-        dict(sorted(state.client_opcode_217_record_counts.items()))
+    client_npc_state_command_counts = json.dumps(
+        dict(sorted(state.client_npc_state_command_counts.items()))
     )
     neutral_server_record_opcodes = json.dumps(
         dict(sorted(state.neutral_server_records_by_opcode.items()))
@@ -15043,12 +15300,18 @@ def render_gameplay_analysis(
             f"{state.client_opcode_122_terminal_sentinels}"
         ),
         (
-            f"client_opcode_217=packets:{state.client_opcode_217_packets} "
-            f"compact:{state.client_opcode_217_compact_packets} "
-            f"record_sets:{state.client_opcode_217_record_sets} "
-            f"records:{state.client_opcode_217_records} "
-            f"records_by_format:{client_opcode_217_record_formats} "
-            f"record_counts:{client_opcode_217_record_counts}"
+            "npc_state_submissions="
+            f"packets:{state.client_npc_state_submissions} "
+            f"compact:{state.client_npc_state_compact_submissions} "
+            f"movement:{state.client_npc_state_movement_submissions} "
+            f"known_npcs:{state.client_npc_state_submissions_for_known_npcs} "
+            f"unknown_npcs:{state.client_npc_state_submissions_for_unknown_npcs} "
+            f"commands:{state.client_npc_state_commands} "
+            f"commands_by_type:{client_npc_state_command_types} "
+            f"command_counts:{client_npc_state_command_counts} "
+            f"matched:{state.npc_state_submission_matches} "
+            f"unmatched_updates:{state.npc_state_updates_without_submission} "
+            f"pending:{state.pending_npc_state_submissions}"
         ),
         f"packet_shapes={json.dumps(dict(sorted(packet_counts.items())))}",
         f"events={json.dumps(dict(sorted(event_counts.items())))}",

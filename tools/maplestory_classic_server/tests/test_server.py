@@ -58,6 +58,7 @@ from maple_server.gameplay import (  # noqa: E402
     MobMovementBroadcastPlan,
     MobMovementBroadcastSequencePlan,
     MobMovementRelativeDecisionPolicy,
+    NpcStateResponsePolicy,
     ReactiveMobHealth,
     SkillLevelChangeResponsePolicy,
     analyze_gameplay_transcript,
@@ -76,6 +77,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientOpcode298ItemAcquisitionRequest,
+    ClientNpcStateSubmission,
     ClientRecoveryRequest,
     ClientAttackAction,
     FieldDropRemoval,
@@ -98,6 +100,7 @@ from maple_server.packets import (  # noqa: E402
     MobMovementPath,
     MobMovementSubmission,
     MobSpawnData,
+    NpcSpawn,
     NpcStateUpdate,
     PlayerMovementCommand,
     PlayerMovementPath,
@@ -703,6 +706,20 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertTrue(arguments.reactive_item_acquisition_responses)
+
+    def test_replay_parser_accepts_reactive_npc_state_responses(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-npc-state-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_npc_state_responses)
 
     def test_replay_parser_accepts_typed_item_pickup_options(self) -> None:
         arguments = build_parser().parse_args(
@@ -2729,6 +2746,128 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 [
                     "skill_level_change_request_observed",
                     "skill_level_change_response_completed",
+                ],
+            )
+
+    async def test_replay_responds_to_npc_state_during_hold_open(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            npc = NpcSpawn(
+                object_id=23_549,
+                template_id=1_001_000,
+                x=69,
+                cy=65,
+                facing_value=1,
+                foothold_id=89,
+                range_left=40,
+                range_right=120,
+                hidden=False,
+            )
+            captured_plaintext = npc.to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-npc-state", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = NpcStateResponsePolicy(
+                active_npc_ids={npc.object_id},
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "npc_state_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            npc_state_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = bytes.fromhex(
+                "d900fd5b000005ff3d004100020200000000040000003d00410000"
+                "0000005900048813003d0041003d004100"
+            )
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+
+            expected = b"\x2f\x01" + request[2:-9]
+            response_iv = shuffle_iv(server_iv)
+            response_wire = await reader.readexactly(4 + len(expected))
+            response = crypt_payload(response_wire[4:], response_iv)
+            self.assertEqual(response, expected)
+            self.assertEqual(
+                NpcStateUpdate.parse(response),
+                ClientNpcStateSubmission.parse(request).to_state_update(),
+            )
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            metrics = runtime_protocol["npc_state_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["server_opcodes"], [303])
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.npc_state_submission_matches, 1)
+            self.assertEqual(analysis.state.pending_npc_state_submissions, 0)
+            npc_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("npc_state_")
+            ]
+            self.assertEqual(
+                [event.kind for event in npc_events],
+                [
+                    "npc_state_request_observed",
+                    "npc_state_response_completed",
                 ],
             )
 

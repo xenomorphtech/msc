@@ -638,12 +638,18 @@
   control/value, and opaque-byte distributions; captured text is omitted from
   safe reports and HTTP status.
 - Client opcode `217`, separate from the same-numbered server life-movement
-  broadcast, now has exact compact and counted record-set boundaries. Stream
-  `126` contains 345 eight-byte compact packets and 592 record sets: format `0`
-  contributes 1,539 fixed 14-byte records, and format `2` contributes 114 fixed
-  11-byte records. All 937 packets round-trip. The fold exposes only redacted
-  structural distributions; absent mob-id and timely opcode-`219` correlations,
-  the family is neither attack-named nor replayed.
+  broadcast, is now modeled as an NPC state submission paired with server
+  opcode `303`. Stream `126` contains 345 compact and 592 movement-bearing
+  requests, all exact round-trips. The latter carry 1,596 absolute type-`0` and
+  57 relative type-`2` commands plus a nine-byte client-only path trailer. Exact
+  FIFO body matching correlates 930 request/update pairs (339 compact and 591
+  movement); each server packet changes only the opcode and removes that trailer.
+  The fold now tracks matches, latency, active NPCs, command distributions, and
+  final positions. The opt-in hold-open responder applies the same bounded
+  transformation only for active field NPCs; its encrypted integration test
+  verifies the emitted opcode `303` and independently folds the observed pair.
+  Coverage is now `27,155/43,945/0/0` for stream `126`; streams `92` and `114`
+  remain `13,493/21,714/0/0` and `54/22/0/0`.
 - Empty server opcode `426` and empty client opcode `309` are now a fully typed,
   temporally correlated notification/acknowledgement pair. Stream `126` has
   299 matches, stream `92` has 61, and stream `114` has one; all 361 server
