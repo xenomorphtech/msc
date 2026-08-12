@@ -720,13 +720,15 @@ Client opcodes `50`/`52`/`54` now fold into one attack-action model. Stream
 `126` has 802 actions and stream `92` has 159. Extended opcode-`50`/`52`
 variants and every opcode-`54` action carry a capture-correlated mob target;
 safe output aliases it and omits client tokens. Targeted `50`/`52` suffixes
-also expose 646 damage words across both captures after a fixed opaque prefix.
+also expose four scalar bytes, two signed coordinate pairs, a trailing u16,
+646 damage words across both captures, a zero u32, and a final signed position;
+opcode `52` adds one terminal zero byte.
 The state fold treats every nonzero word as one hit, matches all 607 opcode-
 `293` responses, clears 32 terminal hits at lifecycle boundaries, and skips
-seven zero-damage words while leaving no pending effects. The fixed-scalar
-opcode-`54` branch now reports full structural coverage for
-all 151 records and passes independent exact validation. Opcode `50`/`52`
-remain partial because their bounded target prefix/tail bytes are still opaque.
+seven zero-damage words while leaving no pending effects. All 961 client attack
+actions now report full structural coverage and pass independent exact
+validation. The still-neutral target-state field roles do not hide any bytes
+or prevent round-trip serialization.
 Server opcodes `218`/`219`
 likewise fold as 140 and 43 attack relays, with aliased actors and packed
 target/hit counts. Their bodies expose 194 target records and 254 damage words,
@@ -741,7 +743,7 @@ templates allows exact floor-percentage prediction for 364/370 testable hits;
 the other six differ by exactly one HP after delayed responses. All six have no
 intervening modeled relay hit and infer authoritative-minus-submitted damage
 `+1` five times and `-1` once. Relay tag/unknown/auxiliary roles, damage high
-bit, client target prefix/tail fields, and those delayed differences are still
+bit, neutral client target-state roles, and those delayed differences are still
 not established well enough for the custom server to reproduce captured attack
 relays or official authority adjustments. The narrower exact-HP responder
 documented below is restricted to custom-server-owned mob state.

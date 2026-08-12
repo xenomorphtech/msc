@@ -6094,20 +6094,212 @@ class FieldDropRemoval:
 
 
 @dataclass(frozen=True)
+class ClientAttackCommonState:
+    reserved_zero: int
+    value_1: int
+    value_2: int
+    value_3: int
+    value_4: int
+
+    @classmethod
+    def parse_from(cls, reader: PacketReader) -> "ClientAttackCommonState":
+        return cls(
+            reserved_zero=reader.u8("common_state.reserved_zero"),
+            value_1=reader.u8("common_state.value_1"),
+            value_2=reader.u8("common_state.value_2"),
+            value_3=reader.u8("common_state.value_3"),
+            value_4=reader.u8("common_state.value_4"),
+        )
+
+    def _validate(self) -> None:
+        if self.reserved_zero != 0:
+            raise PacketShapeError(
+                "client attack common-state reserved byte must be zero"
+            )
+        for name, value in (
+            ("value_1", self.value_1),
+            ("value_2", self.value_2),
+            ("value_3", self.value_3),
+            ("value_4", self.value_4),
+        ):
+            if not 0 <= value <= 0xFF:
+                raise PacketShapeError(
+                    f"client attack common-state {name} must fit in u8"
+                )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        return struct.pack(
+            "<BBBBB",
+            self.reserved_zero,
+            self.value_1,
+            self.value_2,
+            self.value_3,
+            self.value_4,
+        )
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "common_value_1": self.value_1,
+            "common_value_2": self.value_2,
+            "common_value_3": self.value_3,
+            "common_value_4": self.value_4,
+        }
+
+
+@dataclass(frozen=True)
+class ClientAttackTargetState:
+    value_1: int
+    value_2: int
+    value_3: int
+    value_4: int
+    position_1_x: int
+    position_1_y: int
+    position_2_x: int
+    position_2_y: int
+    trailing_value: int
+    raw_damage_values: tuple[int, ...]
+    reserved_zero: int
+    final_position_x: int
+    final_position_y: int
+    opcode_52_reserved_zero: int | None
+
+    @classmethod
+    def parse_from(
+        cls,
+        reader: PacketReader,
+        *,
+        opcode: int,
+        hit_count: int,
+    ) -> "ClientAttackTargetState":
+        return cls(
+            value_1=reader.u8("target_state.value_1"),
+            value_2=reader.u8("target_state.value_2"),
+            value_3=reader.u8("target_state.value_3"),
+            value_4=reader.u8("target_state.value_4"),
+            position_1_x=reader.i16("target_state.position_1_x"),
+            position_1_y=reader.i16("target_state.position_1_y"),
+            position_2_x=reader.i16("target_state.position_2_x"),
+            position_2_y=reader.i16("target_state.position_2_y"),
+            trailing_value=reader.u16("target_state.trailing_value"),
+            raw_damage_values=tuple(
+                reader.u32(f"damage_values[{hit_index}]")
+                for hit_index in range(hit_count)
+            ),
+            reserved_zero=reader.u32("target_state.reserved_zero"),
+            final_position_x=reader.i16("target_state.final_position_x"),
+            final_position_y=reader.i16("target_state.final_position_y"),
+            opcode_52_reserved_zero=(
+                reader.u8("target_state.opcode_52_reserved_zero")
+                if opcode == 52
+                else None
+            ),
+        )
+
+    def _validate(self, *, opcode: int, hit_count: int) -> None:
+        for name, value in (
+            ("value_1", self.value_1),
+            ("value_2", self.value_2),
+            ("value_3", self.value_3),
+            ("value_4", self.value_4),
+        ):
+            if not 0 <= value <= 0xFF:
+                raise PacketShapeError(
+                    f"client attack target-state {name} must fit in u8"
+                )
+        for name, value in (
+            ("position_1_x", self.position_1_x),
+            ("position_1_y", self.position_1_y),
+            ("position_2_x", self.position_2_x),
+            ("position_2_y", self.position_2_y),
+            ("final_position_x", self.final_position_x),
+            ("final_position_y", self.final_position_y),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(
+                    f"client attack target-state {name} must fit in i16"
+                )
+        if not 0 <= self.trailing_value <= 0xFFFF:
+            raise PacketShapeError(
+                "client attack target-state trailing value must fit in u16"
+            )
+        if len(self.raw_damage_values) != hit_count:
+            raise PacketShapeError(
+                f"client attack target-state needs {hit_count} damage values, "
+                f"got {len(self.raw_damage_values)}"
+            )
+        if any(not 0 <= value <= 0xFFFF_FFFF for value in self.raw_damage_values):
+            raise PacketShapeError(
+                "client attack raw damage values must fit in u32"
+            )
+        if self.reserved_zero != 0:
+            raise PacketShapeError(
+                "client attack target-state reserved u32 must be zero"
+            )
+        if opcode == 50:
+            if self.opcode_52_reserved_zero is not None:
+                raise PacketShapeError(
+                    "client opcode-50 target state cannot carry the "
+                    "opcode-52 reserved byte"
+                )
+        elif self.opcode_52_reserved_zero != 0:
+            raise PacketShapeError(
+                "client opcode-52 target-state reserved byte must be zero"
+            )
+
+    def to_bytes(self, *, opcode: int, hit_count: int) -> bytes:
+        self._validate(opcode=opcode, hit_count=hit_count)
+        body = struct.pack(
+            "<BBBBhhhhH",
+            self.value_1,
+            self.value_2,
+            self.value_3,
+            self.value_4,
+            self.position_1_x,
+            self.position_1_y,
+            self.position_2_x,
+            self.position_2_y,
+            self.trailing_value,
+        )
+        body += b"".join(
+            struct.pack("<I", value) for value in self.raw_damage_values
+        )
+        body += struct.pack(
+            "<Ihh", self.reserved_zero, self.final_position_x, self.final_position_y
+        )
+        if opcode == 52:
+            body += struct.pack("<B", self.opcode_52_reserved_zero)
+        return body
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "target_value_1": self.value_1,
+            "target_value_2": self.value_2,
+            "target_value_3": self.value_3,
+            "target_value_4": self.value_4,
+            "target_position_1": [self.position_1_x, self.position_1_y],
+            "target_position_2": [self.position_2_x, self.position_2_y],
+            "target_trailing_value": self.trailing_value,
+            "final_position": [self.final_position_x, self.final_position_y],
+        }
+
+
+@dataclass(frozen=True)
 class ClientAttackAction:
     opcode: int
     local_object_index: int
     variant: int
     client_token: int
     control_value: int
-    opaque_common_state: bytes
+    common_state: ClientAttackCommonState
     value_1: int
     value_2: int
-    opaque_suffix: bytes
+    target_state: ClientAttackTargetState | None
+    compact_reserved_zero: int | None
 
-    _SUFFIX_LENGTHS = {
-        50: {1: 0, 17: 26},
-        52: {1: 1, 2: 1, 17: 27, 18: 31},
+    _TOTAL_LENGTHS = {
+        50: {1: 25, 17: 51},
+        52: {1: 26, 2: 26, 17: 52, 18: 56},
     }
 
     @property
@@ -6120,44 +6312,11 @@ class ClientAttackAction:
 
     @property
     def target_object_id(self) -> int | None:
-        if (self.opcode, self.variant) in {
-            (50, 17),
-            (52, 17),
-            (52, 18),
-        }:
-            return self.value_2
-        return None
-
-    def _split_target_suffix(
-        self,
-    ) -> tuple[bytes, tuple[int, ...], bytes]:
-        if self.target_object_id is None:
-            return b"", (), self.opaque_suffix
-
-        prefix_length = 14
-        tail_length = 8 if self.opcode == 50 else 9
-        expected_length = prefix_length + 4 * self.hit_count + tail_length
-        if len(self.opaque_suffix) != expected_length:
-            raise PacketShapeError(
-                f"client opcode-{self.opcode} targeted attack variant "
-                f"{self.variant} needs {expected_length} suffix bytes for "
-                f"{self.hit_count} hits, got {len(self.opaque_suffix)}"
-            )
-        reader = PacketReader(
-            self.opaque_suffix, packet_name="client_attack_target_suffix"
-        )
-        opaque_prefix = reader.bytes(prefix_length, "opaque_target_prefix")
-        raw_damage_values = tuple(
-            reader.u32(f"damage_values[{hit_index}]")
-            for hit_index in range(self.hit_count)
-        )
-        opaque_tail = reader.bytes(tail_length, "opaque_target_tail")
-        reader.finish()
-        return opaque_prefix, raw_damage_values, opaque_tail
+        return self.value_2 if self.target_state is not None else None
 
     @property
     def raw_damage_values(self) -> tuple[int, ...]:
-        return self._split_target_suffix()[1]
+        return self.target_state.raw_damage_values if self.target_state else ()
 
     @property
     def damage_values(self) -> tuple[int, ...]:
@@ -6173,33 +6332,59 @@ class ClientAttackAction:
     def parse(cls, payload: bytes) -> "ClientAttackAction":
         reader = PacketReader(payload, packet_name="client_attack_action")
         opcode = reader.u16("opcode")
-        suffix_lengths = cls._SUFFIX_LENGTHS.get(opcode)
-        if suffix_lengths is None:
+        total_lengths = cls._TOTAL_LENGTHS.get(opcode)
+        if total_lengths is None:
             raise PacketShapeError(
                 f"client attack opcode is {opcode}, expected 50 or 52"
             )
         local_object_index = reader.u8("local_object_index")
         variant = reader.u8("variant")
-        suffix_length = suffix_lengths.get(variant)
-        if suffix_length is None:
-            expected = ", ".join(str(value) for value in suffix_lengths)
+        total_length = total_lengths.get(variant)
+        if total_length is None:
+            expected = ", ".join(str(value) for value in total_lengths)
             raise PacketShapeError(
                 f"client opcode-{opcode} variant is {variant}, "
                 f"expected one of {expected}"
             )
+        if len(payload) != total_length:
+            raise PacketShapeError(
+                f"client opcode-{opcode} variant {variant} has "
+                f"{len(payload)} bytes, expected {total_length}"
+            )
+        client_token = reader.u32("client_token")
+        control_value = reader.u32("control_value")
+        common_state = ClientAttackCommonState.parse_from(reader)
+        value_1 = reader.u32("value_1")
+        value_2 = reader.u32("value_2")
+        targeted = variant >> 4 == 1
+        target_state = (
+            ClientAttackTargetState.parse_from(
+                reader,
+                opcode=opcode,
+                hit_count=variant & 0x0F,
+            )
+            if targeted
+            else None
+        )
+        compact_reserved_zero = (
+            reader.u8("compact_reserved_zero")
+            if not targeted and opcode == 52
+            else None
+        )
         action = cls(
             opcode=opcode,
             local_object_index=local_object_index,
             variant=variant,
-            client_token=reader.u32("client_token"),
-            control_value=reader.u32("control_value"),
-            opaque_common_state=reader.bytes(5, "opaque_common_state"),
-            value_1=reader.u32("value_1"),
-            value_2=reader.u32("value_2"),
-            opaque_suffix=reader.bytes(suffix_length, "opaque_suffix"),
+            client_token=client_token,
+            control_value=control_value,
+            common_state=common_state,
+            value_1=value_1,
+            value_2=value_2,
+            target_state=target_state,
+            compact_reserved_zero=compact_reserved_zero,
         )
         reader.finish()
-        action._split_target_suffix()
+        action._validate()
         return action
 
     def safe_dict(self) -> dict[str, object]:
@@ -6210,48 +6395,34 @@ class ClientAttackAction:
             "hit_count": self.hit_count,
             "client_token_bytes": 4,
             "control_value": self.control_value,
-            "opaque_common_state_bytes": len(self.opaque_common_state),
             "value_1": self.value_1,
             "has_target": self.target_object_id is not None,
-            "opaque_suffix_bytes": len(self.opaque_suffix),
+            **self.common_state.safe_dict(),
         }
-        if self.target_object_id is None:
+        if self.target_state is None:
             details["value_2"] = self.value_2
         else:
-            opaque_prefix, _, opaque_tail = self._split_target_suffix()
+            details.update(self.target_state.safe_dict())
             details.update(
                 {
-                    "opaque_target_prefix_bytes": len(opaque_prefix),
                     "damage_values": list(self.damage_values),
                     "high_bit_markers": list(self.high_bit_markers),
-                    "opaque_target_tail_bytes": len(opaque_tail),
                 }
             )
         return details
 
-    def to_bytes(self) -> bytes:
-        suffix_lengths = self._SUFFIX_LENGTHS.get(self.opcode)
-        if suffix_lengths is None:
+    def _validate(self) -> None:
+        total_lengths = self._TOTAL_LENGTHS.get(self.opcode)
+        if total_lengths is None:
             raise PacketShapeError(
                 f"client attack opcode is {self.opcode}, expected 50 or 52"
             )
-        suffix_length = suffix_lengths.get(self.variant)
-        if suffix_length is None:
-            expected = ", ".join(str(value) for value in suffix_lengths)
+        if self.variant not in total_lengths:
+            expected = ", ".join(str(value) for value in total_lengths)
             raise PacketShapeError(
                 f"client opcode-{self.opcode} variant is {self.variant}, "
                 f"expected one of {expected}"
             )
-        if len(self.opaque_common_state) != 5:
-            raise PacketShapeError(
-                "client attack common state must contain exactly 5 bytes"
-            )
-        if len(self.opaque_suffix) != suffix_length:
-            raise PacketShapeError(
-                f"client opcode-{self.opcode} variant {self.variant} suffix "
-                f"needs {suffix_length} bytes, got {len(self.opaque_suffix)}"
-            )
-        self._split_target_suffix()
         for name, value, maximum in (
             ("local_object_index", self.local_object_index, 0xFF),
             ("client_token", self.client_token, 0xFFFF_FFFF),
@@ -6264,7 +6435,39 @@ class ClientAttackAction:
                     f"client attack {name} must fit in "
                     f"u{maximum.bit_length()}"
                 )
-        return (
+        self.common_state._validate()
+        targeted = self.variant >> 4 == 1
+        if targeted:
+            if self.target_state is None:
+                raise PacketShapeError(
+                    "client targeted attack requires typed target state"
+                )
+            if self.compact_reserved_zero is not None:
+                raise PacketShapeError(
+                    "client targeted attack cannot carry compact reserved state"
+                )
+            self.target_state._validate(
+                opcode=self.opcode,
+                hit_count=self.hit_count,
+            )
+        else:
+            if self.target_state is not None:
+                raise PacketShapeError(
+                    "client compact attack cannot carry target state"
+                )
+            if self.opcode == 50:
+                if self.compact_reserved_zero is not None:
+                    raise PacketShapeError(
+                        "client opcode-50 compact attack has no reserved suffix"
+                    )
+            elif self.compact_reserved_zero != 0:
+                raise PacketShapeError(
+                    "client opcode-52 compact reserved byte must be zero"
+                )
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        body = (
             struct.pack(
                 "<HBBII",
                 self.opcode,
@@ -6273,10 +6476,23 @@ class ClientAttackAction:
                 self.client_token,
                 self.control_value,
             )
-            + self.opaque_common_state
+            + self.common_state.to_bytes()
             + struct.pack("<II", self.value_1, self.value_2)
-            + self.opaque_suffix
         )
+        if self.target_state is not None:
+            body += self.target_state.to_bytes(
+                opcode=self.opcode,
+                hit_count=self.hit_count,
+            )
+        elif self.opcode == 52:
+            body += struct.pack("<B", self.compact_reserved_zero)
+        expected_length = self._TOTAL_LENGTHS[self.opcode][self.variant]
+        if len(body) != expected_length:
+            raise PacketShapeError(
+                f"client opcode-{self.opcode} variant {self.variant} has "
+                f"{len(body)} bytes, expected {expected_length}"
+            )
+        return body
 
 
 @dataclass(frozen=True)

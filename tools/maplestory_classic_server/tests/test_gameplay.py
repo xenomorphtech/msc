@@ -59,6 +59,8 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
+    ClientAttackCommonState,
+    ClientAttackTargetState,
     ClientFieldTransferRequest,
     ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
@@ -253,6 +255,53 @@ def fixture_attack_relay_body(
     else:
         body.extend(b"\x00" * tail_length)
     return bytes(body)
+
+
+def fixture_client_attack_action(
+    *,
+    opcode: int,
+    variant: int,
+    client_token: int = 987_654_321,
+    control_value: int = 364_201,
+    value_1: int = 1,
+    value_2: int = 0,
+    damage_values: tuple[int, ...] = (),
+) -> ClientAttackAction:
+    targeted = variant >> 4 == 1
+    hit_count = variant & 0x0F
+    if targeted and len(damage_values) != hit_count:
+        damage_values = (0,) * hit_count
+    return ClientAttackAction(
+        opcode=opcode,
+        local_object_index=7,
+        variant=variant,
+        client_token=client_token,
+        control_value=control_value,
+        common_state=ClientAttackCommonState(0, 5, 0, 1, 4),
+        value_1=value_1,
+        value_2=value_2,
+        target_state=(
+            ClientAttackTargetState(
+                value_1=6,
+                value_2=0,
+                value_3=0,
+                value_4=1,
+                position_1_x=10,
+                position_1_y=20,
+                position_2_x=11,
+                position_2_y=21,
+                trailing_value=393,
+                raw_damage_values=damage_values,
+                reserved_zero=0,
+                final_position_x=12,
+                final_position_y=22,
+                opcode_52_reserved_zero=0 if opcode == 52 else None,
+            )
+            if targeted
+            else None
+        ),
+        compact_reserved_zero=0 if opcode == 52 and not targeted else None,
+    )
 
 
 def fixture_npc() -> NpcSpawn:
@@ -1331,68 +1380,48 @@ def fixture_gameplay_transcript(
     if attack_actions:
         append(
             "client_to_server",
-            ClientAttackAction(
+            fixture_client_attack_action(
                 opcode=50,
-                local_object_index=7,
                 variant=1,
                 client_token=987_654_321,
                 control_value=364_200,
-                opaque_common_state=b"state",
                 value_1=1,
                 value_2=0,
-                opaque_suffix=b"",
             ).to_bytes(),
         )
         append(
             "client_to_server",
-            ClientAttackAction(
+            fixture_client_attack_action(
                 opcode=50,
-                local_object_index=7,
                 variant=17,
                 client_token=987_654_322,
                 control_value=364_201,
-                opaque_common_state=b"state",
                 value_1=1,
                 value_2=MOB_OBJECT_ID,
-                opaque_suffix=(
-                    b"\x06"
-                    + b"\x00" * 13
-                    + struct.pack("<I", 0x8000_0028)
-                    + b"\x00" * 8
-                ),
+                damage_values=(0x8000_0028,),
             ).to_bytes(),
         )
         append(
             "client_to_server",
-            ClientAttackAction(
+            fixture_client_attack_action(
                 opcode=52,
-                local_object_index=7,
                 variant=2,
                 client_token=987_654_323,
                 control_value=807_665,
-                opaque_common_state=b"state",
                 value_1=3,
                 value_2=0,
-                opaque_suffix=b"\x00",
             ).to_bytes(),
         )
         append(
             "client_to_server",
-            ClientAttackAction(
+            fixture_client_attack_action(
                 opcode=52,
-                local_object_index=7,
                 variant=18,
                 client_token=987_654_324,
                 control_value=807_666,
-                opaque_common_state=b"state",
                 value_1=3,
                 value_2=MOB_OBJECT_ID,
-                opaque_suffix=(
-                    b"\x06"
-                    + b"\x00" * 13
-                    + struct.pack("<II", 0x8000_0028, 41)
-                    + b"\x00" * 9
-                ),
+                damage_values=(0x8000_0028, 41),
             ).to_bytes(),
         )
         append(
@@ -4532,24 +4561,21 @@ class GameplayPacketShapeTest(unittest.TestCase):
             tail_value=1,
         )
         client_attack_actions = [
-            ClientAttackAction(
+            fixture_client_attack_action(
                 opcode=opcode,
-                local_object_index=7,
                 variant=variant,
                 client_token=987_654_321,
                 control_value=364_201,
-                opaque_common_state=b"state",
                 value_1=1,
                 value_2=MOB_OBJECT_ID if variant >= 17 else 0,
-                opaque_suffix=b"\x00" * suffix_length,
             )
-            for opcode, variant, suffix_length in (
-                (50, 1, 0),
-                (50, 17, 26),
-                (52, 1, 1),
-                (52, 2, 1),
-                (52, 17, 27),
-                (52, 18, 31),
+            for opcode, variant in (
+                (50, 1),
+                (50, 17),
+                (52, 1),
+                (52, 2),
+                (52, 17),
+                (52, 18),
             )
         ]
         server_attack_relays = [
@@ -4617,11 +4643,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(opcode_54_record.to_bytes()), 24)
         client_attack_actions[-1] = replace(
             client_attack_actions[-1],
-            opaque_suffix=(
-                b"\x06"
-                + b"\x00" * 13
-                + struct.pack("<II", 0x8000_0028, 41)
-                + b"\x00" * 9
+            target_state=replace(
+                client_attack_actions[-1].target_state,
+                raw_damage_values=(0x8000_0028, 41),
             ),
         )
         for attack_action in client_attack_actions:
@@ -4637,12 +4661,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             two_hit_client_attack.high_bit_markers, (True, False)
         )
         self.assertEqual(
-            two_hit_client_attack.safe_dict()["opaque_target_prefix_bytes"],
-            14,
-        )
-        self.assertEqual(
-            two_hit_client_attack.safe_dict()["opaque_target_tail_bytes"],
-            9,
+            two_hit_client_attack.safe_dict()["final_position"], [12, 22]
         )
         for attack_relay in server_attack_relays:
             self.assertEqual(
@@ -4702,9 +4721,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(two_hit_relay.safe_dict()["skill_id"], 4_001_344)
         self.assertNotIn("object_id", two_hit_relay.safe_dict())
         self.assertNotIn("object_id", two_hit_relay.targets[0].safe_dict())
-        with self.assertRaisesRegex(PacketShapeError, "suffix needs 26 bytes"):
+        with self.assertRaisesRegex(PacketShapeError, "requires typed target"):
+            replace(client_attack_actions[1], target_state=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "reserved u32 must be zero"):
             replace(
-                client_attack_actions[1], opaque_suffix=b"\x00" * 25
+                client_attack_actions[1],
+                target_state=replace(
+                    client_attack_actions[1].target_state,
+                    reserved_zero=1,
+                ),
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "expected one of"):
             replace(
@@ -4817,21 +4842,14 @@ class GameplayStateFoldTest(unittest.TestCase):
             object_id=MOB_OBJECT_ID,
             spawn=fixture_mob_spawn(),
         ).to_bytes()
-        attack_payload = ClientAttackAction(
+        attack_payload = fixture_client_attack_action(
             opcode=52,
-            local_object_index=7,
             variant=18,
             client_token=987_654_324,
             control_value=807_666,
-            opaque_common_state=b"state",
             value_1=3,
             value_2=MOB_OBJECT_ID,
-            opaque_suffix=(
-                b"\x06"
-                + b"\x00" * 13
-                + struct.pack("<II", 0x8000_0028, 41)
-                + b"\x00" * 9
-            ),
+            damage_values=(0x8000_0028, 41),
         ).to_bytes()
         initial_health_payload = MobHealthPercentageUpdate(
             object_id=MOB_OBJECT_ID,
@@ -5017,21 +5035,14 @@ class GameplayStateFoldTest(unittest.TestCase):
                 object_id=MOB_OBJECT_ID,
                 health_percentage=100,
             ).to_bytes(),
-            ClientAttackAction(
+            fixture_client_attack_action(
                 opcode=52,
-                local_object_index=7,
                 variant=18,
                 client_token=987_654_324,
                 control_value=807_666,
-                opaque_common_state=b"state",
                 value_1=3,
                 value_2=MOB_OBJECT_ID,
-                opaque_suffix=(
-                    b"\x06"
-                    + b"\x00" * 13
-                    + struct.pack("<II", 0, 19)
-                    + b"\x00" * 9
-                ),
+                damage_values=(0, 19),
             ).to_bytes(),
             MobHealthPercentageUpdate(
                 object_id=MOB_OBJECT_ID,
@@ -5103,21 +5114,14 @@ class GameplayStateFoldTest(unittest.TestCase):
                 spawn=replace(fixture_mob_spawn(), template_id=100_100),
             ).to_bytes()
         )
-        attack = ClientAttackAction(
+        attack = fixture_client_attack_action(
             opcode=52,
-            local_object_index=7,
             variant=18,
             client_token=987_654_324,
             control_value=807_666,
-            opaque_common_state=b"state",
             value_1=3,
             value_2=MOB_OBJECT_ID,
-            opaque_suffix=(
-                b"\x06"
-                + b"\x00" * 13
-                + struct.pack("<II", 27, 32)
-                + b"\x00" * 9
-            ),
+            damage_values=(27, 32),
         )
 
         response = policy.respond(attack)
@@ -7642,16 +7646,13 @@ class GameplayStateFoldTest(unittest.TestCase):
             ),
         )
         client_packets = (
-            ClientAttackAction(
+            fixture_client_attack_action(
                 opcode=50,
-                local_object_index=7,
                 variant=1,
                 client_token=987_654_321,
                 control_value=0,
-                opaque_common_state=b"state",
                 value_1=1_000,
                 value_2=2_000,
-                opaque_suffix=b"",
             ),
             ClientReactorHitRequest(
                 reactor_object_id=12_597,
@@ -7765,16 +7766,13 @@ class GameplayStateFoldTest(unittest.TestCase):
             y=-372,
             spawn_flag=0,
         )
-        attack = ClientAttackAction(
+        attack = fixture_client_attack_action(
             opcode=50,
-            local_object_index=7,
             variant=1,
             client_token=987_654_321,
             control_value=0,
-            opaque_common_state=b"state",
             value_1=1_000,
             value_2=2_000,
-            opaque_suffix=b"",
         )
         hit = ClientReactorHitRequest(
             reactor_object_id=12_597,
@@ -10480,8 +10478,8 @@ class GameplayStateFoldTest(unittest.TestCase):
             for observation in analysis.observations
             if observation.kind == "client_attack_action"
         }
-        self.assertEqual(attack_observations[50].coverage, ShapeCoverage.PARTIAL)
-        self.assertEqual(attack_observations[52].coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(attack_observations[50].coverage, ShapeCoverage.FULL)
+        self.assertEqual(attack_observations[52].coverage, ShapeCoverage.FULL)
         self.assertEqual(attack_observations[54].coverage, ShapeCoverage.FULL)
         self.assertEqual(attack_observations[54].issues, ())
         self.assertEqual(analysis.state.client_attack_targeted_actions, 3)
@@ -10644,11 +10642,11 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertIn(
-            "opcode=50 kind=client_attack_action coverage=partial",
+            "opcode=50 kind=client_attack_action coverage=full",
             report,
         )
         self.assertIn(
-            "opcode=52 kind=client_attack_action coverage=partial",
+            "opcode=52 kind=client_attack_action coverage=full",
             report,
         )
         self.assertIn(

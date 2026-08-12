@@ -932,9 +932,10 @@ The gameplay fold currently models these capture-backed boundaries:
   `0xffffffff`, and every unobserved selector/count combination remains
   unknown,
 - client opcodes `50`/`52`: capture-bounded attack-action envelopes with exact
-  variant/suffix lengths, redacted client tokens, and an aliased mob target in
-  extended variants, plus typed per-hit damage words between bounded opaque
-  target prefix/tail regions; each nonzero word becomes one pending hit effect,
+  variants, redacted client tokens, and an aliased mob target in extended
+  variants, plus typed scalar state, signed coordinate pairs, per-hit damage
+  words, and reserved-zero boundaries; each nonzero word becomes one pending
+  hit effect,
 - client opcode `54`: exact 24-byte attack action whose third trailing u32 is
   an aliased mob target; all 151 records have full structural coverage while
   the other numeric roles remain neutral,
@@ -1701,12 +1702,13 @@ actions. The extended `50`/`52` variants place a known mob object id at offset
 21, and every opcode-`54` packet places one at offset 16. The fold aliases that
 target, distinguishes active/previously-known/unknown mobs, redacts client
 tokens, and emits one `client_attack_submitted` event per action. In a targeted
-`50`/`52` suffix, a 14-byte opaque target prefix is followed by one u32 damage
-word per hit and an opcode-specific 8/9-byte opaque tail. Stream `126` exposes
+`50`/`52` target state contains four u8 fields, two signed coordinate pairs, a
+trailing u16, one u32 damage word per hit, a zero u32, and a final signed
+coordinate pair; opcode `52` adds one terminal zero byte. Stream `126` exposes
 420 client damage words (`1..42`, total `6964`) and stream `92` exposes 226
-(`0..49`, total `4864`); no client damage word sets the high bit. Exact variant
-and suffix boundaries round-trip, while control/value and target prefix/tail
-roles remain neutral.
+(`0..49`, total `4864`); no client damage word sets the high bit. Exact typed
+boundaries round-trip all 810 opcode-`50`/`52` actions and promote them to full
+coverage, while control/value and target-state roles remain neutral.
 
 The fold queues each nonzero damage word from targeted `50`/`52` submissions
 as an individual hit effect for that mob. Each opcode-`293` update consumes one
@@ -1763,7 +1765,7 @@ all 99 stream-`126` positions and 30 of 42 stream-`92` positions can be compared
 with a previously observed remote-player position; common vertical deltas are
 roughly 22-28 pixels, while larger deltas follow stale movement broadcasts.
 The fold emits both positions and their deltas as validation evidence. Relay-
-tag/unknown/auxiliary roles, the damage high bit, client target prefix/tail
+tag/unknown/auxiliary roles, the damage high bit, neutral client target-state
 fields, and the six delayed one-HP prediction differences still prevent a
 claim that captured official combat relays or authority adjustments can be
 reproduced exactly.
@@ -2490,3 +2492,6 @@ preserve distinct Unity scan codes in this setup.
     typed metadata and target records, add manifest bit-field derivation for
     the packed target/hit nibbles, promote all 183 relays to full coverage, and
     validate one packet from each family in the active local client.
+106. Replace all client opcode-`50`/`52` opaque state regions with typed scalar,
+    coordinate, damage-array, and reserved-zero fields; independently validate
+    all 810 reference actions and promote both branches to full coverage.

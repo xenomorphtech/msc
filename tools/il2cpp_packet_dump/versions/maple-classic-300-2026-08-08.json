@@ -651,17 +651,40 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":293},{"op":"read","name":"object_id","kind":"u32"},{"op":"read","name":"state","kind":"u8"}]
     },
     {
+      "name":"client_action_50","direction":"client_to_server","opcode":50,
+      "source":"packets.py:ClientAttackAction; all 552 stream-126 records type the shared state, accepted variants, packed target/hit counts, target coordinates, damage array, zero u32, and final position",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":50},{"op":"read","name":"local_object_index","kind":"u8"},
+        {"op":"read","name":"variant","kind":"u8"},{"op":"switch","field":"variant","cases":[{"equals":1,"operations":[]},{"equals":17,"operations":[]}]},
+        {"op":"bit_field","name":"target_count","field":"variant","shift":4,"mask":15},{"op":"bit_field","name":"hit_count","field":"variant","shift":0,"mask":15},
+        {"op":"read","name":"client_token","kind":"u32"},{"op":"read","name":"control_value","kind":"u32"},
+        {"op":"read","name":"common_reserved_zero","kind":"u8","equals":0},{"op":"read","name":"common_value_1","kind":"u8"},{"op":"read","name":"common_value_2","kind":"u8"},{"op":"read","name":"common_value_3","kind":"u8"},{"op":"read","name":"common_value_4","kind":"u8"},
+        {"op":"read","name":"value_1","kind":"u32"},{"op":"read","name":"value_2","kind":"u32"},
+        {"op":"repeat","count_from":"target_count","operations":[
+          {"op":"read","name":"target_value_1","kind":"u8"},{"op":"read","name":"target_value_2","kind":"u8"},{"op":"read","name":"target_value_3","kind":"u8"},{"op":"read","name":"target_value_4","kind":"u8"},
+          {"op":"read","name":"position_1_x","kind":"i16"},{"op":"read","name":"position_1_y","kind":"i16"},{"op":"read","name":"position_2_x","kind":"i16"},{"op":"read","name":"position_2_y","kind":"i16"},{"op":"read","name":"trailing_value","kind":"u16"},
+          {"op":"repeat","count_from":"hit_count","operations":[{"op":"read","name":"raw_damage","kind":"u32"}]},
+          {"op":"read","name":"reserved_zero","kind":"u32","equals":0},{"op":"read","name":"final_position_x","kind":"i16"},{"op":"read","name":"final_position_y","kind":"i16"}
+        ]}
+      ]
+    },
+    {
       "name":"client_action_52","direction":"client_to_server","opcode":52,
-      "source":"capture-111 two discriminator widths compared across 128 frames; opcode-52 IL2CPP handler b87d681c... is opposite-direction notice parser",
+      "source":"packets.py:ClientAttackAction; all 258 stream-92/126 records type the shared state, accepted variants, packed target/hit counts, target coordinates, damage array, zero u32, final position, and terminal zero byte",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":52},{"op":"read","name":"local_object_index","kind":"u8"},
-        {"op":"read","name":"variant","kind":"u8"},{"op":"read","name":"client_token","kind":"u32"},
-        {"op":"read","name":"control_value","kind":"u32"},{"op":"bytes","name":"common_state","length":5},
+        {"op":"read","name":"variant","kind":"u8"},{"op":"switch","field":"variant","cases":[{"equals":1,"operations":[]},{"equals":2,"operations":[]},{"equals":17,"operations":[]},{"equals":18,"operations":[]}]},
+        {"op":"bit_field","name":"target_count","field":"variant","shift":4,"mask":15},{"op":"bit_field","name":"hit_count","field":"variant","shift":0,"mask":15},
+        {"op":"read","name":"client_token","kind":"u32"},{"op":"read","name":"control_value","kind":"u32"},
+        {"op":"read","name":"common_reserved_zero","kind":"u8","equals":0},{"op":"read","name":"common_value_1","kind":"u8"},{"op":"read","name":"common_value_2","kind":"u8"},{"op":"read","name":"common_value_3","kind":"u8"},{"op":"read","name":"common_value_4","kind":"u8"},
         {"op":"read","name":"value_1","kind":"u32"},{"op":"read","name":"value_2","kind":"u32"},
-        {"op":"switch","field":"variant","cases":[
-          {"equals":2,"operations":[{"op":"read","name":"tail","kind":"u8"}]},
-          {"equals":18,"operations":[{"op":"bytes","name":"extended_state","length":31}]}
-        ]}
+        {"op":"repeat","count_from":"target_count","operations":[
+          {"op":"read","name":"target_value_1","kind":"u8"},{"op":"read","name":"target_value_2","kind":"u8"},{"op":"read","name":"target_value_3","kind":"u8"},{"op":"read","name":"target_value_4","kind":"u8"},
+          {"op":"read","name":"position_1_x","kind":"i16"},{"op":"read","name":"position_1_y","kind":"i16"},{"op":"read","name":"position_2_x","kind":"i16"},{"op":"read","name":"position_2_y","kind":"i16"},{"op":"read","name":"trailing_value","kind":"u16"},
+          {"op":"repeat","count_from":"hit_count","operations":[{"op":"read","name":"raw_damage","kind":"u32"}]},
+          {"op":"read","name":"reserved_zero","kind":"u32","equals":0},{"op":"read","name":"final_position_x","kind":"i16"},{"op":"read","name":"final_position_y","kind":"i16"}
+        ]},
+        {"op":"read","name":"terminal_reserved_zero","kind":"u8","equals":0}
       ]
     },
     {

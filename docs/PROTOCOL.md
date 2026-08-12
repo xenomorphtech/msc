@@ -4034,19 +4034,32 @@ uint8  local_object_index
 uint8  variant
 uint32 client_token                 # redacted from safe reports
 uint32 control_value                # neutral role
-byte[5] opaque_common_state
+uint8  common_reserved_zero = 0
+uint8  common_value_1              # neutral role
+uint8  common_value_2              # neutral role
+uint8  common_value_3              # neutral role
+uint8  common_value_4              # neutral role
 uint32 value_1                      # neutral role
 uint32 value_2                      # mob object id in extended variants
 if variant >> 4 == 1:
-  byte[14] opaque_target_prefix
+  uint8  target_value_1             # neutral role
+  uint8  target_value_2             # neutral role
+  uint8  target_value_3             # neutral role
+  uint8  target_value_4             # neutral role
+  int16  position_1_x
+  int16  position_1_y
+  int16  position_2_x
+  int16  position_2_y
+  uint16 trailing_value             # neutral role
   repeat (variant & 0x0f):
     uint32 raw_damage
       damage_value = raw_damage & 0x7fffffff
       high_bit_marker = raw_damage >> 31
-  byte[8] opaque_target_tail        # opcode 50
-  byte[9] opaque_target_tail        # opcode 52
-else:
-  byte[variant_suffix_length] opaque_suffix
+  uint32 reserved_zero = 0
+  int16  final_position_x
+  int16  final_position_y
+if opcode == 52:
+  uint8  terminal_reserved_zero = 0
 ```
 
 The accepted capture-bounded variants are:
@@ -4069,7 +4082,10 @@ decomposes exactly into the 14-byte prefix, one damage word per low-nibble hit,
 and the opcode-specific tail above. Stream `126` contains 420 damage words with
 low-31-bit magnitudes `1..42`, total `6964`, and stream `92` contains 226 with
 magnitudes `0..49`, total `4864`. No client damage word in either capture sets
-the high bit. Prefix and tail field roles remain neutral.
+the high bit. The two coordinate pairs and final coordinate pair use signed
+little-endian values; the four target bytes and trailing u16 retain neutral
+names. Every target tail carries an exact zero u32, and every opcode-`52` form
+ends in an exact zero byte.
 
 Opcode `54` is an exact 24-byte member of the same action family:
 
@@ -4091,10 +4107,10 @@ opcode-`54` actions are followed by same-mob health or leave traffic often
 enough to establish the attack-action family; stream `92` independently
 confirms the targeted opcode-`52` shape. All 961 actions consume exactly and
 round-trip byte-for-byte.
-The fixed scalar opcode-`54` branch now reports full structural coverage for all
-151 records and passes independent manifest validation. Opcode `50`/`52`
-actions remain partial because their target prefix/tail bytes are still opaque;
-the shared fold does not promote them.
+All three branches now report full structural coverage and pass independent
+manifest validation. Promoting all 810 opcode-`50`/`52` actions moves stream
+`126` to `69,349/1,751/0/0` and stream `92` to `34,391/816/0/0`; stream `114`
+remains `61/15/0/0`.
 
 The fold emits `client_attack_submitted`, aliases the mob target, distinguishes
 currently active from previously known targets, and records per-mob damage/hit

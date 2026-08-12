@@ -732,10 +732,9 @@
   responses, clears 21 and 11 terminal hits at lifecycle boundaries, skips the
   seven zero-damage stream-`92` entries, and finishes with zero pending effects.
   Reports alias targets and redact client tokens while keeping control/value
-  and target prefix/tail roles neutral. The 151 fixed-scalar opcode-`54`
-  records now have full structural coverage and pass independent exact
-  validation; opcodes `50`/`52` stay partial because their target prefix/tail
-  bytes remain opaque.
+  and neutral target-state roles explicit. The 151 fixed-scalar opcode-`54`
+  records and all 810 opcode-`50`/`52` records now have full structural
+  coverage and pass independent exact validation.
 - The official client's WZJS-v5 mob records provide `info/maxHP` for all 11
   templates attacked in the references. Opcode `293` is modeled as floor
   integer percentage, yielding an authoritative current-HP interval and a
@@ -758,7 +757,7 @@
   facing flags, speed, mastery, and projectile id; their four-byte tails decode
   as signed attack positions and are compared with prior remote-player
   positions in fold telemetry. Relay-tag/unknown/auxiliary roles, the damage
-  high-bit marker, client target prefix/tail fields, and the source of six
+  high-bit marker, neutral client target-state roles, and the source of six
   delayed one-HP prediction differences remain neutral, so captured attack-
   relay generation and official authority-adjustment replay stay disabled.
 - The same 183 server attack relays now store their metadata, target records,
@@ -769,6 +768,13 @@
   remains `61/15/0/0`. A fresh active client accepted injected typed opcode
   `218`/`219` packets at full coverage with zero unknown or invalid packets and
   preserved all `3,031/3,031` heartbeat pairs.
+- Client opcodes `50` and `52` now store their shared five scalar state bytes,
+  four target-state bytes, two signed coordinate pairs, trailing u16, repeated
+  damage words, zero u32, final signed position, and opcode-`52` terminal zero
+  directly instead of retaining opaque regions. All 810 reference actions
+  round-trip and pass the independent manifest: stream `126` advances to
+  `69,349/1,751/0/0`, stream `92` to `34,391/816/0/0`, and stream `114`
+  remains `61/15/0/0`.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

@@ -80,6 +80,8 @@ from maple_server.packets import (  # noqa: E402
     ClientNpcStateSubmission,
     ClientRecoveryRequest,
     ClientAttackAction,
+    ClientAttackCommonState,
+    ClientAttackTargetState,
     FieldDropRemoval,
     FieldDropSpawn,
     HeartbeatProbe,
@@ -3553,15 +3555,26 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 variant=18,
                 client_token=987_654_321,
                 control_value=0,
-                opaque_common_state=b"state",
+                common_state=ClientAttackCommonState(0, 5, 0, 1, 4),
                 value_1=3,
                 value_2=object_id,
-                opaque_suffix=(
-                    b"\x06"
-                    + b"\x00" * 13
-                    + struct.pack("<II", 40, 10)
-                    + b"\x00" * 9
+                target_state=ClientAttackTargetState(
+                    value_1=6,
+                    value_2=0,
+                    value_3=0,
+                    value_4=1,
+                    position_1_x=10,
+                    position_1_y=20,
+                    position_2_x=11,
+                    position_2_y=21,
+                    trailing_value=393,
+                    raw_damage_values=(40, 10),
+                    reserved_zero=0,
+                    final_position_x=12,
+                    final_position_y=22,
+                    opcode_52_reserved_zero=0,
                 ),
+                compact_reserved_zero=None,
             ).to_bytes()
             writer.write(
                 encode_frame_header(len(attack), client_iv, 300)
@@ -3596,10 +3609,11 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 variant=2,
                 client_token=987_654_322,
                 control_value=0,
-                opaque_common_state=b"state",
+                common_state=ClientAttackCommonState(0, 5, 0, 1, 4),
                 value_1=3,
                 value_2=0,
-                opaque_suffix=b"\x00",
+                target_state=None,
+                compact_reserved_zero=0,
             ).to_bytes()
             next_client_iv = shuffle_iv(client_iv)
             writer.write(
