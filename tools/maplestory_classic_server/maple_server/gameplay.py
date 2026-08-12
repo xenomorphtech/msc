@@ -14,18 +14,31 @@ from .gamestate import (
     decode_transcript,
 )
 from .packets import (
+    ChairRecoveryRequest,
+    ChairSitRequest,
+    ChairStandRequest,
     CharacterStatUpdate,
+    ClientAbilityPointAllocationRequest,
     ClientAttackAction,
-    ClientFixedOpaqueRecord,
-    ClientOpcode43Envelope,
+    ClientFieldTransferRequest,
+    ClientInnerPortalRequest,
+    ClientOpcode111CashSlotAction,
+    ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
-    ClientOpcode101Record,
+    ClientRecoveryRequest,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
-    ClientOpcode217RecordSet,
+    ClientNpcStateSubmission,
+    ClientReactorHitRequest,
+    ClientOpcode276Envelope,
     ClientOpcode279TextEnvelope,
+    ClientOpcode298ItemAcquisitionRequest,
+    ClientOpcode307NeutralRecord,
+    ClientOpcode308PeriodicRecord,
     ClientOpcode309Acknowledgement,
+    ClientOpcode310TextRecord,
+    ClientOpcode311PeriodicRecord,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
     ClientWorldExitRequest,
@@ -43,7 +56,7 @@ from .packets import (
     FixedServerU32Record,
     FixedServerU64Record,
     FixedServerU8Record,
-    FieldLoadStage,
+    ClientOpcode158Request,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
@@ -55,6 +68,7 @@ from .packets import (
     VariableServerRecord,
     InventoryChangeSet,
     InventoryModification,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     LifeMovementBroadcast,
@@ -104,9 +118,9 @@ from .packets import (
     ServerOpcode244DialogueInstruction,
     ServerOpcode272Ledger,
     ServerOpcode276BooleanFlag,
-    ServerOpcode320PositionedEffectRecord,
-    ServerOpcode322PositionedEffectRecord,
-    ServerOpcode323PositionedEffectRecord,
+    ServerReactorRemoval,
+    ServerReactorSpawn,
+    ServerReactorStateUpdate,
     ServerOpcode348TextEnvelope,
     ServerOpcode394TextEnvelope,
     ServerOpcode379Record,
@@ -116,6 +130,7 @@ from .packets import (
     ServerOpcode426Notification,
     ServerU32OpaqueTailEnvelope,
     SkillLevelChangeRequest,
+    SkillRecordEntry,
     SkillRecordUpdate,
     SkillRecordUpdateAcknowledgement,
     TutorialUiInstruction,
@@ -194,6 +209,8 @@ class NpcEntity:
     spawn: NpcSpawn = field(repr=False)
     action: int | None = None
     parameter: int | None = None
+    x: int | None = None
+    y: int | None = None
 
 
 @dataclass
@@ -231,17 +248,29 @@ class ObservedPlayerEntity:
 
 
 @dataclass
-class PositionedEffectEntity:
+class ReactorEntity:
     alias: str
     x: int
     y: int
     last_opcode: int
+    reactor_id: int | None = None
+    state: int = 0
+    spawn_flag: int | None = None
+
+
+@dataclass(frozen=True)
+class PendingReactorHit:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: ClientReactorHitRequest
 
 
 @dataclass
 class FieldDropEntity:
     alias: str
     spawn: FieldDropSpawn = field(repr=False)
+    first_spawn_frame_index: int | None = None
+    first_spawn_timestamp_ns: int | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -267,6 +296,29 @@ class InventoryItemEntity:
         )
 
 
+def logical_equip_inventory(
+    inventory_items: dict[str, tuple[InventoryItemEntity, ...]],
+) -> dict[int, InventoryItemEntity]:
+    """Project raw initial equipment groups into signed Equip slots."""
+
+    equip_items: dict[int, InventoryItemEntity] = {}
+    for item in inventory_items.get("equipment_group_3", ()):
+        equip_items[item.slot] = item
+    for item in inventory_items.get("equipment_group_1", ()):
+        signed_item = replace(item, slot=-item.slot)
+        equip_items[signed_item.slot] = signed_item
+    for item in inventory_items.get("equip", ()):
+        duplicate_slots = tuple(
+            slot
+            for slot, candidate in equip_items.items()
+            if candidate.item_id == item.item_id
+        )
+        for slot in duplicate_slots:
+            equip_items.pop(slot)
+        equip_items[item.slot] = item
+    return equip_items
+
+
 CAPTURED_ITEM_USE_EFFECTS: dict[int, tuple[str, str, int]] = {
     2_000_000: ("current_hp", "max_hp", 50),
     2_000_014: ("current_mp", "max_mp", 80),
@@ -286,13 +338,55 @@ class PendingItemUse:
     inventory_confirmed: bool = False
 
 
-@dataclass
-class PendingItemPickup:
+@dataclass(frozen=True)
+class PendingAbilityPointAllocation:
     request_frame_index: int
     request_timestamp_ns: int
+    request: ClientAbilityPointAllocationRequest
+    previous_ability_points: int | None
+    previous_stat_values: tuple[tuple[str, int | None], ...]
+
+
+@dataclass(frozen=True)
+class PendingInventoryMove:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: InventoryMoveRequest
+
+
+@dataclass(frozen=True)
+class PendingItemAcquisition:
+    request_frame_index: int
+    request_timestamp_ns: int
+    field_epoch: int
+    request: ClientOpcode298ItemAcquisitionRequest
+
+
+@dataclass(frozen=True)
+class PendingNpcStateSubmission:
+    request_frame_index: int
+    request_timestamp_ns: int
+    field_epoch: int
+    request: ClientNpcStateSubmission
+
+
+@dataclass(frozen=True)
+class PendingFieldTransfer:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: ClientFieldTransferRequest
+
+
+@dataclass
+class PendingItemPickup:
+    first_request_frame_index: int
+    first_request_timestamp_ns: int
+    last_request_frame_index: int
+    last_request_timestamp_ns: int
     request: ItemPickupRequest
     expected_drop_kind: str | None
     expected_value: int | None
+    attempts: int = 1
     effect: dict[str, object] | None = None
     result_confirmed: bool = False
 
@@ -433,6 +527,17 @@ class GameplayGameState:
     npc_lifecycle_removals: int = 0
     npc_lifecycle_unknown_removals: int = 0
     npc_state_updates: int = 0
+    npc_state_updates_with_movement: int = 0
+    npc_state_update_commands: int = 0
+    npc_state_update_commands_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    npc_state_submission_matches: int = 0
+    npc_state_updates_without_submission: int = 0
+    npc_state_submissions_cleared_on_field_change: int = 0
+    pending_npc_state_submissions: int = 0
+    last_npc_state_response_ms: float | None = None
+    max_npc_state_response_ms: float | None = None
     mob_entries: int = 0
     mob_leaves: int = 0
     mob_controller_changes: int = 0
@@ -521,6 +626,19 @@ class GameplayGameState:
     player_stat_fields_updated: Counter[str] = field(default_factory=Counter)
     player_stat_request_flags: Counter[int] = field(default_factory=Counter)
     player_stat_zero_mask_updates: int = 0
+    ability_point_allocation_requests: int = 0
+    ability_point_allocation_entries: int = 0
+    ability_points_requested: int = 0
+    ability_points_requested_by_stat: Counter[str] = field(
+        default_factory=Counter
+    )
+    ability_point_allocation_responses: int = 0
+    ability_point_allocation_response_matches: int = 0
+    ability_point_allocation_response_mismatches: int = 0
+    ability_point_allocation_response_unverified: int = 0
+    pending_ability_point_allocations: int = 0
+    last_ability_point_allocation_response_ms: float | None = None
+    max_ability_point_allocation_response_ms: float | None = None
     inventory_change_packets: int = 0
     inventory_modifications: int = 0
     inventory_modifications_by_operation: Counter[str] = field(
@@ -529,6 +647,44 @@ class GameplayGameState:
     inventory_update_flags: Counter[int] = field(default_factory=Counter)
     inventory_empty_change_packets: int = 0
     inventory_unknown_slot_modifications: int = 0
+    inventory_move_requests: int = 0
+    inventory_move_requests_by_inventory: Counter[str] = field(
+        default_factory=Counter
+    )
+    inventory_move_request_matches: int = 0
+    inventory_move_updates_without_request: int = 0
+    pending_inventory_move_requests: int = 0
+    last_inventory_move_response_ms: float | None = None
+    max_inventory_move_response_ms: float | None = None
+    client_item_acquisition_requests: int = 0
+    client_item_acquisition_requests_by_inventory: Counter[str] = field(
+        default_factory=Counter
+    )
+    client_item_acquisition_requests_by_kind: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_item_acquisition_duration_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_item_acquisition_serial_values_present: int = 0
+    item_acquisition_matches: int = 0
+    item_acquisition_quantity_matches: int = 0
+    item_acquisition_quantity_mismatches: int = 0
+    item_acquisition_quantity_unavailable: int = 0
+    pending_item_acquisition_requests: int = 0
+    last_item_acquisition_response_ms: float | None = None
+    max_item_acquisition_response_ms: float | None = None
+    chair_sit_requests: int = 0
+    chair_sit_requests_by_item: Counter[int] = field(default_factory=Counter)
+    chair_sit_setup_matches: int = 0
+    chair_sit_setup_mismatches: int = 0
+    chair_stand_requests: int = 0
+    chair_stand_requests_with_open_sit: int = 0
+    chair_stand_requests_without_open_sit: int = 0
+    chair_recovery_requests: int = 0
+    chair_recovery_requests_with_open_sit: int = 0
+    chair_recovery_requests_without_open_sit: int = 0
+    requested_chair_item_id: int | None = None
     item_use_requests: int = 0
     item_use_requests_by_item: Counter[int] = field(default_factory=Counter)
     item_use_unknown_slots: int = 0
@@ -540,6 +696,7 @@ class GameplayGameState:
     item_use_policy_rejections: int = 0
     pending_item_uses: int = 0
     item_pickup_requests: int = 0
+    item_pickup_compact_requests: int = 0
     item_pickup_base_requests: int = 0
     item_pickup_extended_requests: int = 0
     item_pickup_field_epoch_matches: int = 0
@@ -551,10 +708,20 @@ class GameplayGameState:
     item_pickup_inferred_mesos_baselines: int = 0
     item_pickup_removal_matches: int = 0
     item_pickup_removal_mismatches: int = 0
+    item_pickup_interrupted_chains: int = 0
     item_pickup_policy_rejections: int = 0
     pending_item_pickups: int = 0
+    item_pickup_request_chains: int = 0
+    item_pickup_request_retries: int = 0
     item_pickup_known_drops: int = 0
     item_pickup_unknown_drops: int = 0
+    item_pickup_admitted_drops: int = 0
+    item_pickup_admitted_drops_by_kind: Counter[str] = field(
+        default_factory=Counter
+    )
+    item_pickup_admitted_item_templates: Counter[int] = field(
+        default_factory=Counter
+    )
     item_pickup_spawn_result_matches: int = 0
     item_pickup_spawn_result_mismatches: int = 0
     item_pickup_item_effects_by_template: dict[
@@ -722,22 +889,19 @@ class GameplayGameState:
     server_attack_damage_min: int | None = None
     server_attack_damage_max: int | None = None
     server_attack_damage_high_bit_markers: int = 0
-    client_opcode_101_packets: int = 0
-    client_opcode_101_header_values: Counter[int] = field(
+    client_recovery_requests: int = 0
+    client_recovery_requests_by_stat: Counter[str] = field(
         default_factory=Counter
     )
-    client_opcode_101_primary_values: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_opcode_101_flag_values: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_opcode_101_secondary_values: Counter[int] = field(
-        default_factory=Counter
-    )
-    client_opcode_101_tail_values: Counter[int] = field(
-        default_factory=Counter
-    )
+    client_hp_recovery_amounts: Counter[int] = field(default_factory=Counter)
+    client_mp_recovery_amounts: Counter[int] = field(default_factory=Counter)
+    client_recovery_stat_update_matches: int = 0
+    client_recovery_exact_amount_matches: int = 0
+    client_recovery_capped_amount_matches: int = 0
+    client_recovery_unverified_amount_matches: int = 0
+    pending_client_recovery_requests: int = 0
+    last_client_recovery_response_ms: float | None = None
+    max_client_recovery_response_ms: float | None = None
     client_skill_use_requests: int = 0
     client_skill_use_requests_by_skill_id: Counter[int] = field(
         default_factory=Counter
@@ -754,6 +918,8 @@ class GameplayGameState:
     client_skill_use_level_mismatches: int = 0
     client_skill_use_binding_matches: int = 0
     client_skill_use_binding_mismatches: int = 0
+    client_skill_use_same_skill_repeats: int = 0
+    client_skill_use_response_free_same_skill_repeats: int = 0
     last_client_skill_tick: int | None = None
     client_skill_tick_decreases: int = 0
     local_temporary_stat_sets: int = 0
@@ -806,13 +972,21 @@ class GameplayGameState:
     server_opcode_13_opaque_lengths: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_43_packets: int = 0
-    client_opcode_43_sequences: Counter[int] = field(default_factory=Counter)
-    client_opcode_43_variants: Counter[str] = field(default_factory=Counter)
-    client_opcode_43_text_code_units: Counter[int] = field(
+    client_field_transfer_requests: int = 0
+    client_field_transfer_variants: Counter[str] = field(
         default_factory=Counter
     )
-    client_opcode_43_opaque_bytes: int = 0
+    client_field_transfer_epoch_matches: int = 0
+    client_field_transfer_epoch_mismatches: int = 0
+    client_field_transfer_portal_name_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_field_transfer_redacted_portal_names: int = 0
+    matched_client_field_transfers: int = 0
+    client_field_transfers_cleared_on_field_change: int = 0
+    pending_client_field_transfers: int = 0
+    last_client_field_transfer_response_ms: float | None = None
+    max_client_field_transfer_response_ms: float | None = None
     server_opcode_43_packets: int = 0
     server_opcode_43_message_types: Counter[int] = field(
         default_factory=Counter
@@ -826,18 +1000,29 @@ class GameplayGameState:
         default_factory=Counter
     )
     client_opcode_114_redacted_values: int = 0
+    client_inner_portal_requests: int = 0
+    client_inner_portal_field_epoch_matches: int = 0
+    client_inner_portal_field_epoch_mismatches: int = 0
+    client_inner_portal_name_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_inner_portal_redacted_names: int = 0
+    client_inner_portal_same_epoch_chains: int = 0
+    client_inner_portal_chained_sources_within_one_pixel: int = 0
     client_opcode_122_packets: int = 0
     client_opcode_122_selectors: Counter[int] = field(default_factory=Counter)
     client_opcode_122_shapes: Counter[str] = field(default_factory=Counter)
     client_opcode_122_terminal_sentinels: int = 0
-    client_opcode_217_packets: int = 0
-    client_opcode_217_compact_packets: int = 0
-    client_opcode_217_record_sets: int = 0
-    client_opcode_217_records: int = 0
-    client_opcode_217_records_by_format: Counter[int] = field(
+    client_npc_state_submissions: int = 0
+    client_npc_state_compact_submissions: int = 0
+    client_npc_state_movement_submissions: int = 0
+    client_npc_state_submissions_for_known_npcs: int = 0
+    client_npc_state_submissions_for_unknown_npcs: int = 0
+    client_npc_state_commands: int = 0
+    client_npc_state_commands_by_type: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_217_record_counts: Counter[int] = field(
+    client_npc_state_command_counts: Counter[int] = field(
         default_factory=Counter
     )
     bootstrap_acknowledgements: int = 0
@@ -958,19 +1143,31 @@ class GameplayGameState:
     instructional_dialogue_value_1: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_2: Counter[int] = field(default_factory=Counter)
     instructional_dialogue_value_3: Counter[int] = field(default_factory=Counter)
-    positioned_effect_entities: dict[int, PositionedEffectEntity] = field(
+    reactors: dict[int, ReactorEntity] = field(
         default_factory=dict, repr=False
     )
-    positioned_effect_records: int = 0
-    positioned_effect_records_by_opcode: Counter[int] = field(
-        default_factory=Counter
-    )
-    positioned_effect_new_entities: int = 0
-    positioned_effect_updates: int = 0
-    positioned_effect_unknown_updates: int = 0
-    positioned_effect_control_values: Counter[str] = field(
-        default_factory=Counter
-    )
+    reactor_packets: int = 0
+    reactor_packets_by_opcode: Counter[int] = field(default_factory=Counter)
+    reactor_spawns: int = 0
+    reactor_state_updates: int = 0
+    reactor_removals: int = 0
+    reactor_unknown_updates: int = 0
+    reactor_states: Counter[str] = field(default_factory=Counter)
+    reactor_hit_requests: int = 0
+    reactor_hit_requests_for_active_reactors: int = 0
+    reactor_hit_requests_for_inactive_reactors: int = 0
+    reactor_hit_requests_after_attack: int = 0
+    reactor_hit_character_positions: Counter[int] = field(default_factory=Counter)
+    reactor_hit_stances: Counter[int] = field(default_factory=Counter)
+    matched_reactor_hit_requests: int = 0
+    matched_reactor_state_updates: int = 0
+    matched_reactor_removals: int = 0
+    reactor_hit_stance_matches: int = 0
+    reactor_hit_stance_mismatches: int = 0
+    reactor_hits_cleared_on_field_change: int = 0
+    pending_reactor_hit_requests: int = 0
+    last_reactor_hit_response_ms: float | None = None
+    max_reactor_hit_response_ms: float | None = None
     server_opcode_169_packets: int = 0
     server_opcode_169_selectors: Counter[int] = field(default_factory=Counter)
     server_opcode_169_text_code_units: Counter[int] = field(
@@ -986,8 +1183,38 @@ class GameplayGameState:
     server_opcode_348_control_pairs: Counter[str] = field(
         default_factory=Counter
     )
+    npc_interaction_requests: int = 0
+    npc_interaction_requests_for_active_npcs: int = 0
+    npc_interaction_requests_for_unknown_npcs: int = 0
+    npc_interaction_target_templates: Counter[int] = field(
+        default_factory=Counter
+    )
+    npc_interaction_position_matches: int = 0
+    npc_interaction_position_mismatches: int = 0
+    npc_interaction_server_348_matches: int = 0
+    pending_npc_interaction_requests: int = 0
+    last_npc_interaction_response_ms: float | None = None
+    max_npc_interaction_response_ms: float | None = None
+    client_opcode_111_packets: int = 0
+    client_opcode_111_neutral_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_111_slots: Counter[int] = field(default_factory=Counter)
+    client_opcode_111_cash_slot_matches: int = 0
+    pending_client_opcode_111_actions: int = 0
+    last_opcode_111_cash_slot_response_ms: float | None = None
+    max_opcode_111_cash_slot_response_ms: float | None = None
     server_opcode_394_packets: int = 0
     server_opcode_394_text_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_276_packets: int = 0
+    client_opcode_276_selectors: Counter[int] = field(default_factory=Counter)
+    client_opcode_276_shapes: Counter[str] = field(default_factory=Counter)
+    client_opcode_276_group_counts: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_276_pair_counts: Counter[int] = field(
         default_factory=Counter
     )
     client_opcode_279_text_packets: int = 0
@@ -1039,20 +1266,43 @@ class GameplayGameState:
     keyboard_binding_selector_counts: Counter[int] = field(
         default_factory=Counter
     )
+    keyboard_binding_types: dict[int, int] = field(default_factory=dict)
     keyboard_skill_bindings: dict[int, int] = field(
         default_factory=dict, repr=False
     )
+    keyboard_item_bindings: dict[int, int] = field(default_factory=dict)
+    keyboard_menu_bindings: dict[int, int] = field(default_factory=dict)
+    keyboard_face_expression_bindings: dict[int, int] = field(
+        default_factory=dict
+    )
     keyboard_known_skill_bindings: int = 0
+    keyboard_action_bindings: dict[int, int] = field(
+        default_factory=dict
+    )
+    keyboard_binding_changes: int = 0
+    keyboard_binding_changes_by_type: Counter[int] = field(
+        default_factory=Counter
+    )
+    keyboard_binding_removals: int = 0
+    pickup_key_codes: tuple[int, ...] = ()
     left_ctrl_skill_id: int | None = None
     left_ctrl_skill_known: bool = False
     pending_movements: int = 0
     client_opcode_75_empty_records: int = 0
-    client_fixed_opaque_records_by_opcode: Counter[int] = field(
+    client_neutral_records_by_opcode: Counter[int] = field(
         default_factory=Counter
     )
-    client_fixed_opaque_bytes_by_opcode: Counter[int] = field(
+    client_opcode_307_nonzero_redacted_values: int = 0
+    client_opcode_310_text_code_units: Counter[int] = field(
         default_factory=Counter
     )
+    client_periodic_records_by_opcode: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_308_mirrored_values: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_opcode_308_variants: Counter[int] = field(default_factory=Counter)
     client_periodic_report_last_interval_ms: dict[int, float] = field(
         default_factory=dict
     )
@@ -1234,9 +1484,26 @@ class VariableServerReplayFrame:
             "nonzero_keyboard_selector_count": (
                 self.record.nonzero_keyboard_selector_count
             ),
+            "empty_binding_count": (
+                self.record.empty_keyboard_binding_count
+            ),
             "skill_binding_count": len(
                 self.record.keyboard_skill_bindings
             ),
+            "item_binding_count": len(self.record.keyboard_item_bindings),
+            "menu_binding_count": len(self.record.keyboard_menu_bindings),
+            "action_binding_count": len(
+                self.record.keyboard_action_bindings
+            ),
+            "face_expression_binding_count": len(
+                self.record.keyboard_face_expression_bindings
+            ),
+            "pickup_binding_count": len(self.record.pickup_key_codes),
+            "pickup_key_codes": self.record.pickup_key_codes,
+            "sit_binding_count": len(self.record.sit_key_codes),
+            "sit_key_codes": self.record.sit_key_codes,
+            "attack_binding_count": len(self.record.attack_key_codes),
+            "attack_key_codes": self.record.attack_key_codes,
             "left_ctrl_skill_id": self.record.left_ctrl_skill_id,
             "compact": (
                 bool(self.record.variant)
@@ -1642,7 +1909,7 @@ class ItemUseResponsePolicy:
             else CharacterStatUpdate.CURRENT_MP
         )
         stat_update = CharacterStatUpdate(
-            request_flag=1,
+            request_flag=True,
             stat_mask=stat_mask,
             **{effect_field: effect_after},
         )
@@ -1659,6 +1926,844 @@ class ItemUseResponsePolicy:
         )
         for plaintext in plan.plaintexts:
             self.apply_server_packet(plaintext)
+        return plan
+
+
+@dataclass(frozen=True)
+class ClientRecoveryResponsePlan:
+    request: ClientRecoveryRequest
+    stat_update: CharacterStatUpdate = field(repr=False)
+    stat_name: str
+    value_before: int
+    value_after: int
+    maximum_value: int
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.stat_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "value_before": self.value_before,
+            "value_after": self.value_after,
+            "maximum_value": self.maximum_value,
+            "actual_increment": self.value_after - self.value_before,
+            "maximum_cap_applied": (
+                self.value_after - self.value_before
+                < self.request.recovery_amount
+            ),
+            "server_opcodes": [self.stat_update.opcode],
+        }
+
+
+@dataclass
+class ClientRecoveryResponsePolicy:
+    current_hp: int
+    max_hp: int
+    current_mp: int
+    max_mp: int
+    field_epoch: int
+    source_requests: int = 0
+    source_stat_update_matches: int = 0
+    source_exact_amount_matches: int = 0
+    source_capped_amount_matches: int = 0
+    source_unverified_amount_matches: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "current_hp": self.current_hp,
+            "max_hp": self.max_hp,
+            "current_mp": self.current_mp,
+            "max_mp": self.max_mp,
+            "source_evidence": {
+                "requests": self.source_requests,
+                "stat_update_matches": self.source_stat_update_matches,
+                "exact_amount_matches": self.source_exact_amount_matches,
+                "capped_amount_matches": self.source_capped_amount_matches,
+                "unverified_amount_matches": (
+                    self.source_unverified_amount_matches
+                ),
+            },
+            "prediction": {
+                "server_opcodes": [41],
+                "stat_effect": "requested_increment_with_maximum_cap",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 41:
+            return
+        update = CharacterStatUpdate.parse(plaintext)
+        for field_name, value in update.values.items():
+            if field_name in {
+                "current_hp",
+                "max_hp",
+                "current_mp",
+                "max_mp",
+            }:
+                setattr(self, field_name, value)
+
+    def respond(
+        self, request: ClientRecoveryRequest
+    ) -> ClientRecoveryResponsePlan:
+        stat_name = request.stat_name
+        maximum_name = "max_hp" if stat_name == "current_hp" else "max_mp"
+        value_before = getattr(self, stat_name)
+        maximum_value = getattr(self, maximum_name)
+        if value_before > maximum_value:
+            raise ValueError(
+                f"client-recovery {stat_name} {value_before} exceeds "
+                f"modeled maximum {maximum_value}"
+            )
+        value_after = min(
+            maximum_value,
+            value_before + request.recovery_amount,
+        )
+        stat_mask = (
+            CharacterStatUpdate.CURRENT_HP
+            if stat_name == "current_hp"
+            else CharacterStatUpdate.CURRENT_MP
+        )
+        stat_update = CharacterStatUpdate(
+            request_flag=True,
+            stat_mask=stat_mask,
+            **{stat_name: value_after},
+        )
+        plan = ClientRecoveryResponsePlan(
+            request=request,
+            stat_update=stat_update,
+            stat_name=stat_name,
+            value_before=value_before,
+            value_after=value_after,
+            maximum_value=maximum_value,
+        )
+        self.apply_server_packet(stat_update.to_bytes())
+        return plan
+
+
+@dataclass(frozen=True)
+class AbilityPointAllocationResponsePlan:
+    request: ClientAbilityPointAllocationRequest = field(repr=False)
+    stat_update: CharacterStatUpdate = field(repr=False)
+    ability_points_before: int
+    ability_points_after: int
+    stat_values_before: dict[str, int]
+    stat_values_after: dict[str, int]
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.stat_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "ability_points_before": self.ability_points_before,
+            "ability_points_after": self.ability_points_after,
+            "stat_values_before": self.stat_values_before,
+            "stat_values_after": self.stat_values_after,
+            "request_flag": self.stat_update.request_flag,
+            "stat_mask": f"0x{self.stat_update.stat_mask:08x}",
+            "server_opcodes": [self.stat_update.opcode],
+        }
+
+
+@dataclass
+class AbilityPointAllocationResponsePolicy:
+    strength: int
+    dexterity: int
+    intelligence: int
+    luck: int
+    ability_points: int
+    field_epoch: int
+    source_requests: int = 0
+    source_matches: int = 0
+    source_points: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "stats": {
+                "strength": self.strength,
+                "dexterity": self.dexterity,
+                "intelligence": self.intelligence,
+                "luck": self.luck,
+                "ability_points": self.ability_points,
+            },
+            "source_evidence": {
+                "requests": self.source_requests,
+                "matches": self.source_matches,
+                "points": self.source_points,
+            },
+            "admission": {
+                "stats": [
+                    "strength",
+                    "dexterity",
+                    "intelligence",
+                    "luck",
+                ],
+                "points": "modeled_available",
+                "result": "u16",
+            },
+            "prediction": {
+                "server_opcodes": [41],
+                "request_flag": 1,
+                "stat_mask": "requested_stats_plus_ability_points",
+                "tail": "00",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 41:
+            return
+        update = CharacterStatUpdate.parse(plaintext)
+        for field_name in (
+            "strength",
+            "dexterity",
+            "intelligence",
+            "luck",
+            "ability_points",
+        ):
+            value = update.values.get(field_name)
+            if value is not None:
+                setattr(self, field_name, value)
+
+    def respond(
+        self, request: ClientAbilityPointAllocationRequest
+    ) -> AbilityPointAllocationResponsePlan:
+        if request.total_increment > self.ability_points:
+            raise ValueError(
+                "ability-point allocation exceeds modeled available points"
+            )
+        stat_values_before = {
+            allocation.stat_name: getattr(self, allocation.stat_name)
+            for allocation in request.allocations
+        }
+        stat_values_after = {
+            allocation.stat_name: (
+                stat_values_before[allocation.stat_name]
+                + allocation.increment
+            )
+            for allocation in request.allocations
+        }
+        overflowing = {
+            name: value
+            for name, value in stat_values_after.items()
+            if value > 0xFFFF
+        }
+        if overflowing:
+            raise ValueError(
+                "ability-point allocation result does not fit modeled u16 "
+                "stat fields"
+            )
+        ability_points_after = self.ability_points - request.total_increment
+        stat_mask = CharacterStatUpdate.ABILITY_POINTS
+        for allocation in request.allocations:
+            stat_mask |= allocation.stat_mask
+        stat_update = CharacterStatUpdate(
+            request_flag=True,
+            stat_mask=stat_mask,
+            ability_points=ability_points_after,
+            **stat_values_after,
+        )
+        plan = AbilityPointAllocationResponsePlan(
+            request=request,
+            stat_update=stat_update,
+            ability_points_before=self.ability_points,
+            ability_points_after=ability_points_after,
+            stat_values_before=stat_values_before,
+            stat_values_after=stat_values_after,
+        )
+        self.apply_server_packet(stat_update.to_bytes())
+        return plan
+
+
+@dataclass(frozen=True)
+class SkillLevelChangeResponsePlan:
+    request: SkillLevelChangeRequest = field(repr=False)
+    stat_update: CharacterStatUpdate = field(repr=False)
+    skill_update: SkillRecordUpdate = field(repr=False)
+    skill_points_before: int
+    skill_points_after: int
+    level_before: int
+    level_after: int
+
+    @property
+    def plaintexts(self) -> tuple[bytes, bytes]:
+        return (self.stat_update.to_bytes(), self.skill_update.to_bytes())
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "skill_points_before": self.skill_points_before,
+            "skill_points_after": self.skill_points_after,
+            "level_before": self.level_before,
+            "level_after": self.level_after,
+            "stat_request_flag": self.stat_update.request_flag,
+            "stat_mask": f"0x{self.stat_update.stat_mask:08x}",
+            "skill_flags": (
+                f"{int(self.skill_update.flag_a)}:"
+                f"{int(self.skill_update.flag_b)}"
+            ),
+            "auxiliary_value": self.skill_update.records[0].auxiliary_value,
+            "trailing_value": self.skill_update.trailing_value,
+            "server_opcodes": [
+                self.stat_update.opcode,
+                self.skill_update.opcode,
+            ],
+        }
+
+
+@dataclass
+class SkillLevelChangeResponsePolicy:
+    skill_points: int
+    skill_levels: dict[int, int] = field(repr=False)
+    field_epoch: int = 0
+    source_requests: int = 0
+    source_matches: int = 0
+    source_acknowledgements: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "skill_points": self.skill_points,
+            "modeled_skill_count": len(self.skill_levels),
+            "modeled_level_sum": sum(self.skill_levels.values()),
+            "skill_levels": dict(sorted(self.skill_levels.items())),
+            "source_evidence": {
+                "requests": self.source_requests,
+                "matches": self.source_matches,
+                "acknowledgements": self.source_acknowledgements,
+            },
+            "admission": {
+                "points": "one_modeled_point",
+                "skill_id": "non_negative_int32",
+                "result_level": "int32",
+                "trailing_value": "twice_modeled_level_sum_fits_uint8",
+                "zero_point_beginner_exception": "not_served",
+            },
+            "prediction": {
+                "server_opcodes": [41, 46],
+                "stat_request_flag": 0,
+                "stat_mask": "skill_points",
+                "stat_tail": "00",
+                "skill_flags": "1:0",
+                "auxiliary_value": 0,
+                "trailing_value": "twice_modeled_level_sum",
+                "client_acknowledgement_opcode": 293,
+                "client_acknowledgement_control_value": 346,
+                "client_acknowledgement_trailing_value": 0,
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 41:
+            update = CharacterStatUpdate.parse(plaintext)
+            skill_points = update.values.get("skill_points")
+            if skill_points is not None:
+                self.skill_points = skill_points
+            return
+        if opcode == 46:
+            update = SkillRecordUpdate.parse(plaintext)
+            for record in update.records:
+                self.skill_levels[record.skill_id] = record.level
+
+    def respond(
+        self, request: SkillLevelChangeRequest
+    ) -> SkillLevelChangeResponsePlan:
+        if request.skill_id > 0x7FFF_FFFF:
+            raise ValueError("skill id does not fit a non-negative int32")
+        if self.skill_points < 1:
+            raise ValueError(
+                "skill-level change requires one modeled available skill point"
+            )
+        level_before = self.skill_levels.get(request.skill_id, 0)
+        level_after = level_before + 1
+        if level_after > 0x7FFF_FFFF:
+            raise ValueError("skill-level change result does not fit int32")
+        modeled_level_sum_after = (
+            sum(self.skill_levels.values()) - level_before + level_after
+        )
+        trailing_value = modeled_level_sum_after * 2
+        if trailing_value > 0xFF:
+            raise ValueError(
+                "skill-level change trailing value does not fit uint8"
+            )
+        skill_points_after = self.skill_points - 1
+        stat_update = CharacterStatUpdate(
+            request_flag=False,
+            stat_mask=CharacterStatUpdate.SKILL_POINTS,
+            skill_points=skill_points_after,
+        )
+        skill_update = SkillRecordUpdate(
+            flag_a=True,
+            flag_b=False,
+            records=(
+                SkillRecordEntry(
+                    skill_id=request.skill_id,
+                    level=level_after,
+                    auxiliary_value=0,
+                ),
+            ),
+            trailing_value=trailing_value,
+        )
+        plan = SkillLevelChangeResponsePlan(
+            request=request,
+            stat_update=stat_update,
+            skill_update=skill_update,
+            skill_points_before=self.skill_points,
+            skill_points_after=skill_points_after,
+            level_before=level_before,
+            level_after=level_after,
+        )
+        for plaintext in plan.plaintexts:
+            self.apply_server_packet(plaintext)
+        return plan
+
+
+CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS = frozenset(
+    {
+        (22, 2_000_031, 300),
+        (10, 2_030_059, 10),
+        (9, 2_000_079, 100),
+        (6, 2_000_018, 100),
+        (5, 2_000_016, 100),
+    }
+)
+
+
+@dataclass(frozen=True)
+class ItemAcquisitionResponsePlan:
+    request: ClientOpcode298ItemAcquisitionRequest = field(repr=False)
+    inventory_update: InventoryChangeSet = field(repr=False)
+    destination_slot: int
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.inventory_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "destination_slot": self.destination_slot,
+            "response_quantity": self.request.quantity,
+            "update_flag": self.inventory_update.update_flag,
+            "server_opcodes": [self.inventory_update.opcode],
+        }
+
+
+@dataclass
+class ItemAcquisitionResponsePolicy:
+    use_items: dict[int, InventoryItemEntity] = field(repr=False)
+    field_epoch: int
+
+    def _eligible_requests(self) -> tuple[tuple[int, int, int], ...]:
+        existing_item_ids = {item.item_id for item in self.use_items.values()}
+        return tuple(
+            signature
+            for signature in sorted(
+                CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+            )
+            if signature[1] not in existing_item_ids
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "modeled_use_item_count": len(self.use_items),
+            "modeled_use_slots": sorted(self.use_items),
+            "captured_permanent_use_requests": [
+                {
+                    "selection_index": selection_index,
+                    "item_id": item_id,
+                    "quantity": quantity,
+                }
+                for selection_index, item_id, quantity in sorted(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                )
+            ],
+            "currently_eligible_requests": [
+                {
+                    "selection_index": selection_index,
+                    "item_id": item_id,
+                    "quantity": quantity,
+                }
+                for selection_index, item_id, quantity in (
+                    self._eligible_requests()
+                )
+            ],
+            "source_evidence": {
+                "permanent_use_transactions": len(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                ),
+                "lowest_free_slot_matches": len(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                ),
+                "quantity_matches": len(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                ),
+            },
+            "admission": {
+                "inventory": "use",
+                "duration_value": 0,
+                "serial_value": 0,
+                "request_tuple": "captured",
+                "existing_item_template": "absent",
+                "destination_slot": "lowest_positive_free",
+            },
+            "prediction": {
+                "server_opcodes": [39],
+                "update_flag": 0,
+                "operation": "add",
+                "record_type": 2,
+                "cash_item": False,
+                "expiration": "permanent_sentinel",
+                "quantity": "requested",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 39:
+            return
+        change_set = InventoryChangeSet.parse(plaintext)
+        for modification in change_set.modifications:
+            if modification.inventory_type != 2:
+                continue
+            if modification.operation == InventoryModification.ADD:
+                if modification.item is None:
+                    raise PacketShapeError(
+                        "item-acquisition policy saw add without an item"
+                    )
+                self.use_items[modification.slot] = (
+                    InventoryItemEntity.from_initial(modification.item)
+                )
+            elif (
+                modification.operation
+                == InventoryModification.UPDATE_QUANTITY
+            ):
+                item = self.use_items.get(modification.slot)
+                if item is None:
+                    continue
+                self.use_items[modification.slot] = replace(
+                    item, quantity=modification.quantity
+                )
+            elif modification.operation == InventoryModification.MOVE:
+                destination_slot = modification.destination_slot
+                item = self.use_items.pop(modification.slot, None)
+                if item is None or destination_slot is None:
+                    continue
+                destination_item = self.use_items.pop(destination_slot, None)
+                self.use_items[destination_slot] = replace(
+                    item, slot=destination_slot
+                )
+                if destination_item is not None:
+                    self.use_items[modification.slot] = replace(
+                        destination_item, slot=modification.slot
+                    )
+            else:
+                self.use_items.pop(modification.slot, None)
+
+    def respond(
+        self, request: ClientOpcode298ItemAcquisitionRequest
+    ) -> ItemAcquisitionResponsePlan:
+        if request.request_kind != 1:
+            raise ValueError(
+                "item-acquisition responder admits only captured Use requests"
+            )
+        if request.duration_value != 0:
+            raise ValueError(
+                "item-acquisition responder admits only permanent requests"
+            )
+        if request.serial_value != 0:
+            raise ValueError(
+                "item-acquisition responder requires the captured zero serial"
+            )
+        signature = (
+            request.selection_index,
+            request.item_id,
+            request.quantity,
+        )
+        if signature not in CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS:
+            raise ValueError(
+                "item-acquisition request tuple is outside captured evidence"
+            )
+        if any(
+            item.item_id == request.item_id
+            for item in self.use_items.values()
+        ):
+            raise ValueError(
+                "item-acquisition item template already has a modeled Use stack"
+            )
+        destination_slot = next(
+            (
+                candidate
+                for candidate in range(1, 0x100)
+                if candidate not in self.use_items
+            ),
+            None,
+        )
+        if destination_slot is None:
+            raise ValueError("item-acquisition responder has no free Use slot")
+        item = InitialInventoryItem.captured_permanent_stack(
+            slot=destination_slot,
+            item_id=request.item_id,
+            quantity=request.quantity,
+        )
+        inventory_update = InventoryChangeSet(
+            update_flag=0,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.ADD,
+                    inventory_type=2,
+                    slot=destination_slot,
+                    item=item,
+                ),
+            ),
+        )
+        plan = ItemAcquisitionResponsePlan(
+            request=request,
+            inventory_update=inventory_update,
+            destination_slot=destination_slot,
+        )
+        self.apply_server_packet(inventory_update.to_bytes())
+        return plan
+
+
+@dataclass(frozen=True)
+class NpcStateResponsePlan:
+    request: ClientNpcStateSubmission = field(repr=False)
+    update: NpcStateUpdate = field(repr=False)
+
+    @property
+    def plaintexts(self) -> tuple[bytes, ...]:
+        return (self.update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "active_npc_admitted": True,
+            "request_variant": self.request.variant,
+            "action": self.request.action,
+            "parameter": self.request.parameter,
+            "command_count": self.request.command_count,
+            "server_opcodes": [self.update.opcode],
+            "response_bytes": len(self.update.to_bytes()),
+            "client_only_trailer_bytes_removed": (
+                9 if self.request.movement is not None else 0
+            ),
+        }
+
+
+@dataclass
+class NpcStateResponsePolicy:
+    active_npc_ids: set[int] = field(repr=False)
+    field_epoch: int
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "active_npc_count": len(self.active_npc_ids),
+            "source_evidence": {
+                "exact_request_response_pairs": 930,
+                "compact_pairs": 339,
+                "movement_pairs": 591,
+                "client_requests": 937,
+                "server_updates": 1279,
+            },
+            "admission": {
+                "opcode": 217,
+                "object_id": "active_field_npc",
+                "variants": ["compact", "movement"],
+                "movement_command_types": [0, 2],
+                "trailer_marker": 0,
+            },
+            "prediction": {
+                "server_opcodes": [303],
+                "body": "exact client body",
+                "movement_trailer": "remove_client_only_final_9_bytes",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 157:
+            self.active_npc_ids.clear()
+            self.field_epoch += 1
+            return
+        if opcode == 300:
+            self.active_npc_ids.add(NpcSpawn.parse(plaintext).object_id)
+            return
+        if opcode != 302:
+            return
+        if not (
+            (len(plaintext) == 23 and plaintext[2] == NpcLifecycleControl.SPAWN)
+            or (
+                len(plaintext) == 7
+                and plaintext[2] == NpcLifecycleControl.REMOVE
+            )
+        ):
+            return
+        lifecycle = NpcLifecycleControl.parse(plaintext)
+        if lifecycle.spawn is None:
+            self.active_npc_ids.discard(lifecycle.object_id)
+        else:
+            self.active_npc_ids.add(lifecycle.object_id)
+
+    def respond(
+        self, request: ClientNpcStateSubmission
+    ) -> NpcStateResponsePlan:
+        if request.object_id not in self.active_npc_ids:
+            raise ValueError(
+                "NPC state responder requires an active field NPC object id"
+            )
+        update = request.to_state_update()
+        return NpcStateResponsePlan(request=request, update=update)
+
+
+@dataclass(frozen=True)
+class InventoryMoveResponsePlan:
+    request: InventoryMoveRequest
+    inventory_update: InventoryChangeSet = field(repr=False)
+    item_id: int
+    destination_item_id: int | None
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.inventory_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        modification = self.inventory_update.modifications[0]
+        return {
+            **self.request.safe_dict(),
+            "item_id": self.item_id,
+            "destination_item_id": self.destination_item_id,
+            "destination_occupied": self.destination_item_id is not None,
+            "update_flag": self.inventory_update.update_flag,
+            "move_flag": modification.move_flag,
+            "server_opcodes": [self.inventory_update.opcode],
+        }
+
+
+@dataclass
+class InventoryMoveResponsePolicy:
+    equip_items: dict[int, InventoryItemEntity] = field(repr=False)
+    field_epoch: int
+    source_requests: int = 0
+    source_matches: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "modeled_item_count": len(self.equip_items),
+            "modeled_items": [
+                {"slot": item.slot, "item_id": item.item_id}
+                for item in sorted(
+                    self.equip_items.values(),
+                    key=lambda candidate: candidate.slot,
+                )
+            ],
+            "source_evidence": {
+                "requests": self.source_requests,
+                "matches": self.source_matches,
+            },
+            "admission": {
+                "inventory": "equip",
+                "quantity": -1,
+                "source_slot": "modeled",
+            },
+            "prediction": {
+                "server_opcodes": [39],
+                "update_flag": 1,
+                "move_flag": 2,
+                "inventory_effect": "move_or_swap",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 39:
+            return
+        change_set = InventoryChangeSet.parse(plaintext)
+        for modification in change_set.modifications:
+            if modification.inventory_type != 1:
+                continue
+            if modification.operation == InventoryModification.ADD:
+                if modification.item is None:
+                    raise PacketShapeError(
+                        "inventory-move policy saw add without an item"
+                    )
+                self.equip_items[modification.slot] = (
+                    InventoryItemEntity.from_initial(modification.item)
+                )
+            elif modification.operation == InventoryModification.MOVE:
+                destination_slot = modification.destination_slot
+                item = self.equip_items.pop(modification.slot, None)
+                if item is None or destination_slot is None:
+                    continue
+                destination_item = self.equip_items.pop(destination_slot, None)
+                self.equip_items[destination_slot] = replace(
+                    item, slot=destination_slot
+                )
+                if destination_item is not None:
+                    self.equip_items[modification.slot] = replace(
+                        destination_item, slot=modification.slot
+                    )
+            else:
+                self.equip_items.pop(modification.slot, None)
+
+    def respond(
+        self, request: InventoryMoveRequest
+    ) -> InventoryMoveResponsePlan:
+        if request.inventory_type != 1:
+            raise ValueError(
+                "inventory-move responder admits only captured Equip requests"
+            )
+        if request.quantity != -1:
+            raise ValueError(
+                "inventory-move responder requires captured quantity -1"
+            )
+        item = self.equip_items.get(request.source_slot)
+        if item is None:
+            raise ValueError(
+                f"inventory-move request references unknown Equip slot "
+                f"{request.source_slot}"
+            )
+        destination_item = self.equip_items.get(request.destination_slot)
+        inventory_update = InventoryChangeSet(
+            update_flag=1,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.MOVE,
+                    inventory_type=1,
+                    slot=request.source_slot,
+                    destination_slot=request.destination_slot,
+                    move_flag=2,
+                ),
+            ),
+        )
+        plan = InventoryMoveResponsePlan(
+            request=request,
+            inventory_update=inventory_update,
+            item_id=item.item_id,
+            destination_item_id=(
+                destination_item.item_id
+                if destination_item is not None
+                else None
+            ),
+        )
+        self.apply_server_packet(inventory_update.to_bytes())
         return plan
 
 
@@ -1867,10 +2972,10 @@ class ItemPickupResponsePolicy:
             quantity=quantity_delta,
         )
         removal = FieldDropRemoval(
-            reason=5,
+            reason=2 if request.opcode == 222 else 5,
             drop_object_id=request.drop_object_id,
             actor_id=drop.spawn.owner_value_1,
-            trailing_value=0,
+            trailing_value=None if request.opcode == 222 else 0,
         )
         plan = ItemPickupResponsePlan(
             request=request,
@@ -1932,7 +3037,11 @@ class MobMovementBroadcastPlan:
             },
             "packet": {
                 "opcode": self.broadcast.opcode,
-                "control_prefix": self.broadcast.opaque_control.hex(),
+                "control_prefix": self.broadcast.control_prefix.hex(),
+                "control_flag_1": self.broadcast.control_flag_1,
+                "control_flag_2": self.broadcast.control_flag_2,
+                "control_selector": self.broadcast.control_selector,
+                "control_value": self.broadcast.control_value,
                 "reference_x": self.broadcast.reference_x,
                 "reference_y": self.broadcast.reference_y,
                 "command_count": len(self.broadcast.commands),
@@ -2720,7 +3829,7 @@ class MobMovementAcknowledgementPolicy:
                 f"mob template {template_id} has no deterministic captured "
                 "acknowledgement value"
             )
-        status_flag = int(bool(submission.movement_path.opaque_control[0]))
+        status_flag = int(bool(submission.movement_path.option_flags))
         return MobMovementAcknowledgement(
             object_id=submission.object_id,
             sequence=submission.sequence,
@@ -2976,6 +4085,8 @@ class GameplayAnalysis:
                 "hidden": spawn.hidden,
                 "action": entity.action,
                 "parameter": entity.parameter,
+                "state_x": entity.x,
+                "state_y": entity.y,
             }
             if show_identifiers:
                 record["object_id"] = spawn.object_id
@@ -3013,7 +4124,9 @@ class GameplayAnalysis:
                 "temporary_stat_bits": sorted(entity.temporary_stats),
                 "foothold_id": entity.foothold_id,
                 "origin_foothold_id": entity.spawn.origin_foothold_id,
-                "spawn_effect": entity.spawn.spawn_effect,
+                "appear_type": entity.spawn.appear_type,
+                "team": entity.spawn.team,
+                "effect_item_id": entity.spawn.effect_item_id,
             }
             if show_identifiers:
                 record["object_id"] = object_id
@@ -3032,20 +4145,23 @@ class GameplayAnalysis:
             if show_identifiers:
                 record["object_id"] = object_id
             observed_players.append(record)
-        positioned_effect_entities: list[dict[str, object]] = []
-        for primary_value, entity in sorted(
-            self.state.positioned_effect_entities.items(),
+        reactors: list[dict[str, object]] = []
+        for object_id, entity in sorted(
+            self.state.reactors.items(),
             key=lambda item: item[1].alias,
         ):
             record = {
                 "entity": entity.alias,
+                "reactor_id": entity.reactor_id,
+                "state": entity.state,
                 "x": entity.x,
                 "y": entity.y,
+                "spawn_flag": entity.spawn_flag,
                 "last_opcode": entity.last_opcode,
             }
             if show_identifiers:
-                record["primary_value"] = primary_value
-            positioned_effect_entities.append(record)
+                record["object_id"] = object_id
+            reactors.append(record)
         field_drops: list[dict[str, object]] = []
         for object_id, entity in sorted(
             self.state.field_drops.items(), key=lambda item: item[1].alias
@@ -3235,10 +4351,8 @@ class GameplayAnalysis:
                     self.state.observed_players
                 ),
                 "observed_remote_players": observed_players,
-                "positioned_effect_entity_count": len(
-                    self.state.positioned_effect_entities
-                ),
-                "positioned_effect_entities": positioned_effect_entities,
+                "active_reactor_count": len(self.state.reactors),
+                "reactors": reactors,
                 "active_field_drop_count": len(self.state.field_drops),
                 "field_drops": field_drops,
                 "active_npc_count": len(self.state.npcs),
@@ -3262,7 +4376,38 @@ class GameplayAnalysis:
                 "npc_lifecycle_unknown_removals": (
                     self.state.npc_lifecycle_unknown_removals
                 ),
-                "npc_state_updates": self.state.npc_state_updates,
+                "npc_state_updates": {
+                    "packet_count": self.state.npc_state_updates,
+                    "movement_packet_count": (
+                        self.state.npc_state_updates_with_movement
+                    ),
+                    "command_count": self.state.npc_state_update_commands,
+                    "commands_by_type": dict(
+                        self.state.npc_state_update_commands_by_type
+                    ),
+                    "matched_submissions": (
+                        self.state.npc_state_submission_matches
+                    ),
+                    "updates_without_submission": (
+                        self.state.npc_state_updates_without_submission
+                    ),
+                    "submissions_cleared_on_field_change": (
+                        self.state.npc_state_submissions_cleared_on_field_change
+                    ),
+                    "pending_submissions": (
+                        self.state.pending_npc_state_submissions
+                    ),
+                    "last_response_ms": (
+                        None
+                        if self.state.last_npc_state_response_ms is None
+                        else round(self.state.last_npc_state_response_ms, 3)
+                    ),
+                    "max_response_ms": (
+                        None
+                        if self.state.max_npc_state_response_ms is None
+                        else round(self.state.max_npc_state_response_ms, 3)
+                    ),
+                },
                 "mob_entries": self.state.mob_entries,
                 "mob_leaves": self.state.mob_leaves,
                 "mob_controller_changes": self.state.mob_controller_changes,
@@ -3436,6 +4581,31 @@ class GameplayAnalysis:
                 "player_stat_zero_mask_updates": (
                     self.state.player_stat_zero_mask_updates
                 ),
+                "ability_point_allocation": {
+                    "requests": self.state.ability_point_allocation_requests,
+                    "entries": self.state.ability_point_allocation_entries,
+                    "points_requested": self.state.ability_points_requested,
+                    "points_requested_by_stat": dict(
+                        self.state.ability_points_requested_by_stat
+                    ),
+                    "responses": self.state.ability_point_allocation_responses,
+                    "response_matches": (
+                        self.state.ability_point_allocation_response_matches
+                    ),
+                    "response_mismatches": (
+                        self.state.ability_point_allocation_response_mismatches
+                    ),
+                    "response_unverified": (
+                        self.state.ability_point_allocation_response_unverified
+                    ),
+                    "pending": self.state.pending_ability_point_allocations,
+                    "last_response_ms": (
+                        self.state.last_ability_point_allocation_response_ms
+                    ),
+                    "max_response_ms": (
+                        self.state.max_ability_point_allocation_response_ms
+                    ),
+                },
                 "inventory_change_packets": self.state.inventory_change_packets,
                 "inventory_modifications": self.state.inventory_modifications,
                 "inventory_modifications_by_operation": dict(
@@ -3450,6 +4620,89 @@ class GameplayAnalysis:
                 "inventory_unknown_slot_modifications": (
                     self.state.inventory_unknown_slot_modifications
                 ),
+                "inventory_move_requests": self.state.inventory_move_requests,
+                "inventory_move_requests_by_inventory": dict(
+                    self.state.inventory_move_requests_by_inventory
+                ),
+                "inventory_move_request_matches": (
+                    self.state.inventory_move_request_matches
+                ),
+                "inventory_move_updates_without_request": (
+                    self.state.inventory_move_updates_without_request
+                ),
+                "pending_inventory_move_requests": (
+                    self.state.pending_inventory_move_requests
+                ),
+                "last_inventory_move_response_ms": (
+                    self.state.last_inventory_move_response_ms
+                ),
+                "max_inventory_move_response_ms": (
+                    self.state.max_inventory_move_response_ms
+                ),
+                "client_item_acquisition_requests": (
+                    self.state.client_item_acquisition_requests
+                ),
+                "client_item_acquisition_requests_by_inventory": dict(
+                    self.state.client_item_acquisition_requests_by_inventory
+                ),
+                "client_item_acquisition_requests_by_kind": dict(
+                    self.state.client_item_acquisition_requests_by_kind
+                ),
+                "client_item_acquisition_duration_values": dict(
+                    self.state.client_item_acquisition_duration_values
+                ),
+                "client_item_acquisition_serial_values_present": (
+                    self.state.client_item_acquisition_serial_values_present
+                ),
+                "item_acquisition_matches": (
+                    self.state.item_acquisition_matches
+                ),
+                "item_acquisition_quantity_matches": (
+                    self.state.item_acquisition_quantity_matches
+                ),
+                "item_acquisition_quantity_mismatches": (
+                    self.state.item_acquisition_quantity_mismatches
+                ),
+                "item_acquisition_quantity_unavailable": (
+                    self.state.item_acquisition_quantity_unavailable
+                ),
+                "pending_item_acquisition_requests": (
+                    self.state.pending_item_acquisition_requests
+                ),
+                "last_item_acquisition_response_ms": (
+                    self.state.last_item_acquisition_response_ms
+                ),
+                "max_item_acquisition_response_ms": (
+                    self.state.max_item_acquisition_response_ms
+                ),
+                "chair": {
+                    "sit_requests": self.state.chair_sit_requests,
+                    "sit_requests_by_item": dict(
+                        self.state.chair_sit_requests_by_item
+                    ),
+                    "setup_inventory_matches": (
+                        self.state.chair_sit_setup_matches
+                    ),
+                    "setup_inventory_mismatches": (
+                        self.state.chair_sit_setup_mismatches
+                    ),
+                    "stand_requests": self.state.chair_stand_requests,
+                    "stand_requests_with_open_sit": (
+                        self.state.chair_stand_requests_with_open_sit
+                    ),
+                    "stand_requests_without_open_sit": (
+                        self.state.chair_stand_requests_without_open_sit
+                    ),
+                    "recovery_requests": self.state.chair_recovery_requests,
+                    "recovery_requests_with_open_sit": (
+                        self.state.chair_recovery_requests_with_open_sit
+                    ),
+                    "recovery_requests_without_open_sit": (
+                        self.state.chair_recovery_requests_without_open_sit
+                    ),
+                    "requested_item_id": self.state.requested_chair_item_id,
+                    "server_acknowledgement_modeled": False,
+                },
                 "item_use_requests": self.state.item_use_requests,
                 "item_use_requests_by_item": {
                     str(item_id): count
@@ -3476,6 +4729,9 @@ class GameplayAnalysis:
                 ),
                 "pending_item_uses": self.state.pending_item_uses,
                 "item_pickup_requests": self.state.item_pickup_requests,
+                "item_pickup_compact_requests": (
+                    self.state.item_pickup_compact_requests
+                ),
                 "item_pickup_base_requests": (
                     self.state.item_pickup_base_requests
                 ),
@@ -3507,14 +4763,35 @@ class GameplayAnalysis:
                 "item_pickup_removal_mismatches": (
                     self.state.item_pickup_removal_mismatches
                 ),
+                "item_pickup_interrupted_chains": (
+                    self.state.item_pickup_interrupted_chains
+                ),
                 "item_pickup_policy_rejections": (
                     self.state.item_pickup_policy_rejections
                 ),
                 "pending_item_pickups": self.state.pending_item_pickups,
+                "item_pickup_request_chains": (
+                    self.state.item_pickup_request_chains
+                ),
+                "item_pickup_request_retries": (
+                    self.state.item_pickup_request_retries
+                ),
                 "item_pickup_known_drops": self.state.item_pickup_known_drops,
                 "item_pickup_unknown_drops": (
                     self.state.item_pickup_unknown_drops
                 ),
+                "item_pickup_admitted_drops": (
+                    self.state.item_pickup_admitted_drops
+                ),
+                "item_pickup_admitted_drops_by_kind": dict(
+                    self.state.item_pickup_admitted_drops_by_kind
+                ),
+                "item_pickup_admitted_item_templates": {
+                    str(item_id): count
+                    for item_id, count in sorted(
+                        self.state.item_pickup_admitted_item_templates.items()
+                    )
+                },
                 "item_pickup_spawn_result_matches": (
                     self.state.item_pickup_spawn_result_matches
                 ),
@@ -3880,24 +5157,39 @@ class GameplayAnalysis:
                 "server_attack_damage_high_bit_markers": (
                     self.state.server_attack_damage_high_bit_markers
                 ),
-                "client_opcode_101_packets": (
-                    self.state.client_opcode_101_packets
-                ),
-                "client_opcode_101_header_values": dict(
-                    self.state.client_opcode_101_header_values
-                ),
-                "client_opcode_101_primary_values": dict(
-                    self.state.client_opcode_101_primary_values
-                ),
-                "client_opcode_101_flag_values": dict(
-                    self.state.client_opcode_101_flag_values
-                ),
-                "client_opcode_101_secondary_values": dict(
-                    self.state.client_opcode_101_secondary_values
-                ),
-                "client_opcode_101_tail_values": dict(
-                    self.state.client_opcode_101_tail_values
-                ),
+                "client_recovery": {
+                    "request_count": self.state.client_recovery_requests,
+                    "requests_by_stat": dict(
+                        self.state.client_recovery_requests_by_stat
+                    ),
+                    "hp_amounts": dict(
+                        self.state.client_hp_recovery_amounts
+                    ),
+                    "mp_amounts": dict(
+                        self.state.client_mp_recovery_amounts
+                    ),
+                    "stat_update_matches": (
+                        self.state.client_recovery_stat_update_matches
+                    ),
+                    "exact_amount_matches": (
+                        self.state.client_recovery_exact_amount_matches
+                    ),
+                    "capped_amount_matches": (
+                        self.state.client_recovery_capped_amount_matches
+                    ),
+                    "unverified_amount_matches": (
+                        self.state.client_recovery_unverified_amount_matches
+                    ),
+                    "pending_requests": (
+                        self.state.pending_client_recovery_requests
+                    ),
+                    "last_response_ms": (
+                        self.state.last_client_recovery_response_ms
+                    ),
+                    "max_response_ms": (
+                        self.state.max_client_recovery_response_ms
+                    ),
+                },
                 "client_skill_uses": {
                     "request_count": self.state.client_skill_use_requests,
                     "requests_by_skill_id": dict(
@@ -3924,6 +5216,12 @@ class GameplayAnalysis:
                     ),
                     "binding_mismatches": (
                         self.state.client_skill_use_binding_mismatches
+                    ),
+                    "same_skill_repeats": (
+                        self.state.client_skill_use_same_skill_repeats
+                    ),
+                    "response_free_same_skill_repeats": (
+                        self.state.client_skill_use_response_free_same_skill_repeats
                     ),
                     "last_client_tick": self.state.last_client_skill_tick,
                     "tick_decreases": self.state.client_skill_tick_decreases,
@@ -4013,14 +5311,52 @@ class GameplayAnalysis:
                     ),
                     "body_redacted": True,
                 },
-                "client_opcode_43": {
-                    "packet_count": self.state.client_opcode_43_packets,
-                    "sequences": dict(self.state.client_opcode_43_sequences),
-                    "variants": dict(self.state.client_opcode_43_variants),
-                    "text_code_units": dict(
-                        self.state.client_opcode_43_text_code_units
+                "client_field_transfer": {
+                    "request_count": (
+                        self.state.client_field_transfer_requests
                     ),
-                    "opaque_bytes": self.state.client_opcode_43_opaque_bytes,
+                    "variants": dict(
+                        self.state.client_field_transfer_variants
+                    ),
+                    "field_epoch_matches": (
+                        self.state.client_field_transfer_epoch_matches
+                    ),
+                    "field_epoch_mismatches": (
+                        self.state.client_field_transfer_epoch_mismatches
+                    ),
+                    "portal_name_code_units": dict(
+                        self.state.client_field_transfer_portal_name_code_units
+                    ),
+                    "redacted_portal_name_count": (
+                        self.state.client_field_transfer_redacted_portal_names
+                    ),
+                    "matched_transitions": (
+                        self.state.matched_client_field_transfers
+                    ),
+                    "cleared_on_field_change": (
+                        self.state.client_field_transfers_cleared_on_field_change
+                    ),
+                    "pending_transfers": (
+                        self.state.pending_client_field_transfers
+                    ),
+                    "last_response_ms": (
+                        None
+                        if self.state.last_client_field_transfer_response_ms
+                        is None
+                        else round(
+                            self.state.last_client_field_transfer_response_ms,
+                            3,
+                        )
+                    ),
+                    "max_response_ms": (
+                        None
+                        if self.state.max_client_field_transfer_response_ms
+                        is None
+                        else round(
+                            self.state.max_client_field_transfer_response_ms,
+                            3,
+                        )
+                    ),
                 },
                 "server_opcode_43": {
                     "packet_count": self.state.server_opcode_43_packets,
@@ -4041,6 +5377,27 @@ class GameplayAnalysis:
                         self.state.client_opcode_114_redacted_values
                     ),
                 },
+                "client_inner_portal": {
+                    "request_count": self.state.client_inner_portal_requests,
+                    "field_epoch_matches": (
+                        self.state.client_inner_portal_field_epoch_matches
+                    ),
+                    "field_epoch_mismatches": (
+                        self.state.client_inner_portal_field_epoch_mismatches
+                    ),
+                    "portal_name_code_units": dict(
+                        self.state.client_inner_portal_name_code_units
+                    ),
+                    "redacted_name_count": (
+                        self.state.client_inner_portal_redacted_names
+                    ),
+                    "same_epoch_chains": (
+                        self.state.client_inner_portal_same_epoch_chains
+                    ),
+                    "chained_sources_within_one_pixel": (
+                        self.state.client_inner_portal_chained_sources_within_one_pixel
+                    ),
+                },
                 "client_opcode_122": {
                     "packet_count": self.state.client_opcode_122_packets,
                     "selectors": dict(self.state.client_opcode_122_selectors),
@@ -4049,24 +5406,28 @@ class GameplayAnalysis:
                         self.state.client_opcode_122_terminal_sentinels
                     ),
                 },
-                "client_opcode_217_packets": (
-                    self.state.client_opcode_217_packets
-                ),
-                "client_opcode_217_compact_packets": (
-                    self.state.client_opcode_217_compact_packets
-                ),
-                "client_opcode_217_record_sets": (
-                    self.state.client_opcode_217_record_sets
-                ),
-                "client_opcode_217_records": (
-                    self.state.client_opcode_217_records
-                ),
-                "client_opcode_217_records_by_format": dict(
-                    self.state.client_opcode_217_records_by_format
-                ),
-                "client_opcode_217_record_counts": dict(
-                    self.state.client_opcode_217_record_counts
-                ),
+                "client_npc_state_submissions": {
+                    "packet_count": self.state.client_npc_state_submissions,
+                    "compact_packet_count": (
+                        self.state.client_npc_state_compact_submissions
+                    ),
+                    "movement_packet_count": (
+                        self.state.client_npc_state_movement_submissions
+                    ),
+                    "known_npcs": (
+                        self.state.client_npc_state_submissions_for_known_npcs
+                    ),
+                    "unknown_npcs": (
+                        self.state.client_npc_state_submissions_for_unknown_npcs
+                    ),
+                    "command_count": self.state.client_npc_state_commands,
+                    "commands_by_type": dict(
+                        self.state.client_npc_state_commands_by_type
+                    ),
+                    "command_counts": dict(
+                        self.state.client_npc_state_command_counts
+                    ),
+                },
                 "bootstrap_acknowledgements": (
                     self.state.bootstrap_acknowledgements
                 ),
@@ -4239,20 +5600,52 @@ class GameplayAnalysis:
                         self.state.server_opcode_272_trailer_values
                     ),
                 },
-                "positioned_effect_records": {
-                    "packet_count": self.state.positioned_effect_records,
-                    "by_opcode": dict(
-                        self.state.positioned_effect_records_by_opcode
+                "reactor_lifecycle": {
+                    "packet_count": self.state.reactor_packets,
+                    "by_opcode": dict(self.state.reactor_packets_by_opcode),
+                    "spawns": self.state.reactor_spawns,
+                    "state_updates": self.state.reactor_state_updates,
+                    "removals": self.state.reactor_removals,
+                    "unknown_updates": self.state.reactor_unknown_updates,
+                    "states": dict(self.state.reactor_states),
+                },
+                "reactor_hits": {
+                    "request_count": self.state.reactor_hit_requests,
+                    "active_reactor_matches": (
+                        self.state.reactor_hit_requests_for_active_reactors
                     ),
-                    "new_entity_count": (
-                        self.state.positioned_effect_new_entities
+                    "inactive_reactor_requests": (
+                        self.state.reactor_hit_requests_for_inactive_reactors
                     ),
-                    "update_count": self.state.positioned_effect_updates,
-                    "unknown_update_count": (
-                        self.state.positioned_effect_unknown_updates
+                    "after_attack_count": (
+                        self.state.reactor_hit_requests_after_attack
                     ),
-                    "control_values": dict(
-                        self.state.positioned_effect_control_values
+                    "character_positions": dict(
+                        self.state.reactor_hit_character_positions
+                    ),
+                    "stances": dict(self.state.reactor_hit_stances),
+                    "matched_requests": self.state.matched_reactor_hit_requests,
+                    "matched_state_updates": (
+                        self.state.matched_reactor_state_updates
+                    ),
+                    "matched_removals": self.state.matched_reactor_removals,
+                    "stance_matches": self.state.reactor_hit_stance_matches,
+                    "stance_mismatches": (
+                        self.state.reactor_hit_stance_mismatches
+                    ),
+                    "cleared_on_field_change": (
+                        self.state.reactor_hits_cleared_on_field_change
+                    ),
+                    "pending_requests": self.state.pending_reactor_hit_requests,
+                    "last_response_ms": (
+                        None
+                        if self.state.last_reactor_hit_response_ms is None
+                        else round(self.state.last_reactor_hit_response_ms, 3)
+                    ),
+                    "max_response_ms": (
+                        None
+                        if self.state.max_reactor_hit_response_ms is None
+                        else round(self.state.max_reactor_hit_response_ms, 3)
                     ),
                 },
                 "server_opcode_169": {
@@ -4275,6 +5668,67 @@ class GameplayAnalysis:
                     "control_pairs": dict(
                         self.state.server_opcode_348_control_pairs
                     ),
+                },
+                "npc_interactions": {
+                    "request_count": self.state.npc_interaction_requests,
+                    "active_npc_matches": (
+                        self.state.npc_interaction_requests_for_active_npcs
+                    ),
+                    "unknown_npc_targets": (
+                        self.state.npc_interaction_requests_for_unknown_npcs
+                    ),
+                    "target_templates": dict(
+                        self.state.npc_interaction_target_templates
+                    ),
+                    "life_movement_position_matches": (
+                        self.state.npc_interaction_position_matches
+                    ),
+                    "life_movement_position_mismatches": (
+                        self.state.npc_interaction_position_mismatches
+                    ),
+                    "server_opcode_348_matches": (
+                        self.state.npc_interaction_server_348_matches
+                    ),
+                    "pending_requests": (
+                        self.state.pending_npc_interaction_requests
+                    ),
+                    "last_response_ms": (
+                        self.state.last_npc_interaction_response_ms
+                    ),
+                    "max_response_ms": (
+                        self.state.max_npc_interaction_response_ms
+                    ),
+                },
+                "client_opcode_111": {
+                    "packet_count": self.state.client_opcode_111_packets,
+                    "neutral_values": dict(
+                        self.state.client_opcode_111_neutral_values
+                    ),
+                    "slots": dict(self.state.client_opcode_111_slots),
+                    "cash_slot_matches": (
+                        self.state.client_opcode_111_cash_slot_matches
+                    ),
+                    "pending_actions": (
+                        self.state.pending_client_opcode_111_actions
+                    ),
+                    "last_cash_slot_response_ms": (
+                        self.state.last_opcode_111_cash_slot_response_ms
+                    ),
+                    "max_cash_slot_response_ms": (
+                        self.state.max_opcode_111_cash_slot_response_ms
+                    ),
+                },
+                "client_opcode_276": {
+                    "packet_count": self.state.client_opcode_276_packets,
+                    "selectors": dict(self.state.client_opcode_276_selectors),
+                    "shapes": dict(self.state.client_opcode_276_shapes),
+                    "group_counts": dict(
+                        self.state.client_opcode_276_group_counts
+                    ),
+                    "pair_counts": dict(
+                        self.state.client_opcode_276_pair_counts
+                    ),
+                    "header_and_record_values_redacted": True,
                 },
                 "opcode_394_279": {
                     "server_packet_count": self.state.server_opcode_394_packets,
@@ -4389,12 +5843,92 @@ class GameplayAnalysis:
                     "key_code_space": "linux_evdev",
                     "validated_key_codes": {
                         "left_ctrl": VariableServerRecord.LEFT_CTRL_KEY_CODE,
+                        "left_shift": VariableServerRecord.LEFT_SHIFT_KEY_CODE,
+                        "z": VariableServerRecord.Z_KEY_CODE,
+                        "left_alt": VariableServerRecord.LEFT_ALT_KEY_CODE,
+                        "space": VariableServerRecord.SPACE_KEY_CODE,
+                        "keypad_zero": (
+                            VariableServerRecord.KEYPAD_ZERO_KEY_CODE
+                        ),
+                        "home": VariableServerRecord.HOME_KEY_CODE,
                     },
                     "selector_counts": dict(
                         self.state.keyboard_binding_selector_counts
                     ),
+                    "empty_binding_count": (
+                        self.state.keyboard_binding_selector_counts.get(
+                            VariableServerRecord.EMPTY_BINDING_SELECTOR,
+                            0,
+                        )
+                    ),
+                    "selector_ids": {
+                        "empty": VariableServerRecord.EMPTY_BINDING_SELECTOR,
+                        "skill": VariableServerRecord.SKILL_BINDING_SELECTOR,
+                        "item": VariableServerRecord.ITEM_BINDING_SELECTOR,
+                        "menu": VariableServerRecord.MENU_BINDING_SELECTOR,
+                        "action": VariableServerRecord.ACTION_BINDING_SELECTOR,
+                        "face_expression": (
+                            VariableServerRecord.FACE_EXPRESSION_BINDING_SELECTOR
+                        ),
+                    },
                     "skill_bindings": dict(
                         self.state.keyboard_skill_bindings
+                    ),
+                    "item_bindings": dict(
+                        self.state.keyboard_item_bindings
+                    ),
+                    "menu_bindings": dict(
+                        self.state.keyboard_menu_bindings
+                    ),
+                    "action_bindings": dict(
+                        self.state.keyboard_action_bindings
+                    ),
+                    "face_expression_bindings": dict(
+                        self.state.keyboard_face_expression_bindings
+                    ),
+                    "change_count": self.state.keyboard_binding_changes,
+                    "changes_by_type": dict(
+                        self.state.keyboard_binding_changes_by_type
+                    ),
+                    "removal_count": self.state.keyboard_binding_removals,
+                    "pickup_action_id": (
+                        VariableServerRecord.PICKUP_ACTION_ID
+                    ),
+                    "pickup_key_codes": self.state.pickup_key_codes,
+                    "sit_action_id": VariableServerRecord.SIT_ACTION_ID,
+                    "sit_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id == VariableServerRecord.SIT_ACTION_ID
+                    ),
+                    "attack_action_id": VariableServerRecord.ATTACK_ACTION_ID,
+                    "attack_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id == VariableServerRecord.ATTACK_ACTION_ID
+                    ),
+                    "jump_action_id": VariableServerRecord.JUMP_ACTION_ID,
+                    "jump_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id == VariableServerRecord.JUMP_ACTION_ID
+                    ),
+                    "npc_interaction_action_id": (
+                        VariableServerRecord.NPC_INTERACTION_ACTION_ID
+                    ),
+                    "npc_interaction_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id
+                        == VariableServerRecord.NPC_INTERACTION_ACTION_ID
                     ),
                     "known_skill_binding_count": (
                         self.state.keyboard_known_skill_bindings
@@ -4404,32 +5938,47 @@ class GameplayAnalysis:
                         self.state.left_ctrl_skill_known
                     ),
                 },
-                "client_fixed_opaque_records": {
+                "client_neutral_records": {
                     "packets_by_opcode": dict(
-                        self.state.client_fixed_opaque_records_by_opcode
+                        self.state.client_neutral_records_by_opcode
                     ),
-                    "opaque_bytes_by_opcode": dict(
-                        self.state.client_fixed_opaque_bytes_by_opcode
+                    "opcode_307_nonzero_redacted_values": (
+                        self.state.client_opcode_307_nonzero_redacted_values
                     ),
-                    "periodic_last_interval_ms": {
+                    "opcode_310_text_code_units": dict(
+                        self.state.client_opcode_310_text_code_units
+                    ),
+                    "neutral_values_redacted": True,
+                },
+                "client_periodic_records": {
+                    "packets_by_opcode": dict(
+                        self.state.client_periodic_records_by_opcode
+                    ),
+                    "opcode_308_mirrored_values": dict(
+                        self.state.client_opcode_308_mirrored_values
+                    ),
+                    "opcode_308_variants": dict(
+                        self.state.client_opcode_308_variants
+                    ),
+                    "last_interval_ms": {
                         opcode: round(interval, 3)
                         for opcode, interval in (
                             self.state.client_periodic_report_last_interval_ms.items()
                         )
                     },
-                    "periodic_min_interval_ms": {
+                    "min_interval_ms": {
                         opcode: round(interval, 3)
                         for opcode, interval in (
                             self.state.client_periodic_report_min_interval_ms.items()
                         )
                     },
-                    "periodic_max_interval_ms": {
+                    "max_interval_ms": {
                         opcode: round(interval, 3)
                         for opcode, interval in (
                             self.state.client_periodic_report_max_interval_ms.items()
                         )
                     },
-                    "bodies_redacted": True,
+                    "neutral_values_redacted": True,
                 },
                 "world_exit": {
                     "bootstrap_marker_count": (
@@ -4511,16 +6060,37 @@ class GameplayStateFold:
         self._mob_aliases: dict[int, str] = {}
         self._player_aliases: dict[int, str] = {}
         self._drop_aliases: dict[int, str] = {}
-        self._positioned_effect_aliases: dict[int, str] = {}
+        self._reactor_aliases: dict[int, str] = {}
+        self._pending_reactor_hits: dict[
+            int, deque[PendingReactorHit]
+        ] = {}
         self._pending_movements: dict[
             tuple[int, int], deque[PendingMobMovement]
         ] = {}
         self._pending_heartbeat_probes: deque[int] = deque()
         self._pending_opcode_426_notifications: deque[int] = deque()
         self._pending_server_opcode_348: dict[int, deque[int]] = {}
+        self._last_client_life_movement_position: (
+            tuple[int, int, int] | None
+        ) = None
+        self._pending_npc_interactions: deque[
+            tuple[int, int, int, ClientNpcInteractionRequest]
+        ] = deque()
+        self._pending_client_opcode_111: deque[
+            tuple[int, int, int, ClientOpcode111CashSlotAction]
+        ] = deque()
+        self._pending_client_recoveries: dict[
+            str, deque[tuple[int, int, int, ClientRecoveryRequest]]
+        ] = {
+            "current_hp": deque(),
+            "current_mp": deque(),
+        }
         self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
         self._pending_world_exit_requests: deque[int] = deque()
         self._last_client_periodic_report_timestamp_ns: dict[int, int] = {}
+        self._last_client_inner_portal_destination: (
+            tuple[int, int, int] | None
+        ) = None
         self._pending_skill_level_changes: deque[
             tuple[int, int, SkillLevelChangeRequest]
         ] = deque()
@@ -4528,16 +6098,32 @@ class GameplayStateFold:
             tuple[int, int]
         ] = deque()
         self._pending_item_uses: deque[PendingItemUse] = deque()
+        self._pending_ability_point_allocations: deque[
+            PendingAbilityPointAllocation
+        ] = deque()
+        self._pending_inventory_moves: deque[PendingInventoryMove] = deque()
+        self._pending_item_acquisitions: deque[
+            PendingItemAcquisition
+        ] = deque()
+        self._pending_field_transfers: deque[PendingFieldTransfer] = deque()
+        self._pending_npc_state_submissions: dict[
+            bytes, deque[PendingNpcStateSubmission]
+        ] = {}
         self._pending_item_pickups: deque[PendingItemPickup] = deque()
+        self._last_mob_controller_releases: dict[
+            int, tuple[int, int]
+        ] = {}
         self._pending_client_attacks: dict[
             int, deque[PendingClientAttackHit]
         ] = {}
         self._last_client_skill_use: (
             tuple[int, int, ClientSkillUseRequest] | None
         ) = None
+        self._server_opcodes_since_skill_use: Counter[int] = Counter()
         self._last_server_attack_relay: (
             tuple[PlainFrame, ServerAttackRelay] | None
         ) = None
+        self._last_client_packet: tuple[int, int, int] | None = None
         self._unknown_npc_updates: set[tuple[int, int]] = set()
         self._started = False
 
@@ -4563,9 +6149,11 @@ class GameplayStateFold:
             return None
         pending.effect = {
             **effect,
-            "request_frame": pending.request_frame_index,
+            "request_frame": pending.last_request_frame_index,
+            "first_request_frame": pending.first_request_frame_index,
+            "request_attempts": pending.attempts,
             "response_ms": round(
-                (frame.timestamp_ns - pending.request_timestamp_ns) / 1e6,
+                (frame.timestamp_ns - pending.last_request_timestamp_ns) / 1e6,
                 3,
             ),
         }
@@ -4636,7 +6224,8 @@ class GameplayStateFold:
                 (
                     candidate
                     for candidate in self._pending_item_pickups
-                    if event.timestamp_ns >= candidate.request_timestamp_ns
+                    if event.timestamp_ns
+                    >= candidate.last_request_timestamp_ns
                     and candidate.request.safe_dict() == request_fields
                 ),
                 None,
@@ -4655,14 +6244,15 @@ class GameplayStateFold:
     def _mob_spawn_details(spawn: MobSpawnData) -> dict[str, object]:
         return {
             "template_id": spawn.template_id,
-            "opaque_status_bytes": len(spawn.opaque_status),
+            "temporary_status": spawn.temporary_status.safe_dict(),
             "x": spawn.x,
             "y": spawn.y,
             "stance": spawn.stance,
             "foothold_id": spawn.foothold_id,
             "origin_foothold_id": spawn.origin_foothold_id,
-            "spawn_effect": spawn.spawn_effect,
-            "opaque_tail_bytes": len(spawn.opaque_tail),
+            "appear_type": spawn.appear_type,
+            "team": spawn.team,
+            "effect_item_id": spawn.effect_item_id,
         }
 
     @staticmethod
@@ -4679,7 +6269,7 @@ class GameplayStateFold:
             "commands": [
                 command.safe_dict() for command in movement.commands
             ],
-            "opaque_command_payload_bytes": sum(
+            "command_payload_bytes": sum(
                 len(command.opaque_payload) for command in movement.commands
             ),
         }
@@ -4815,19 +6405,20 @@ class GameplayStateFold:
         return self._observation(
             frame,
             kind="client_attack_action",
-            coverage=ShapeCoverage.PARTIAL,
+            coverage=(
+                ShapeCoverage.PARTIAL
+                if isinstance(action, ClientAttackAction)
+                else ShapeCoverage.FULL
+            ),
             parsed=action,
             details=details,
             issues=(
-                (
-                    "attack target and damage-array roles are "
-                    "capture-correlated; control, value, and opaque target "
-                    "prefix/tail roles remain uninterpreted"
-                    if isinstance(action, ClientAttackAction)
-                    else "attack target role is capture-correlated; control, "
-                    "value, and opaque body roles remain uninterpreted"
-                ),
-            ),
+                "attack target and damage-array roles are "
+                "capture-correlated; control, value, and opaque target "
+                "prefix/tail roles remain uninterpreted",
+            )
+            if isinstance(action, ClientAttackAction)
+            else (),
         )
 
     def _event(
@@ -4913,6 +6504,8 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        previous_client_packet = self._last_client_packet
+        self._last_client_packet = (frame.index, opcode, self.state.field_epoch)
         if opcode == 8:
             request = WorldEntryRequest.parse(payload)
             if self.state.entry_character_id is not None:
@@ -4957,63 +6550,147 @@ class GameplayStateFold:
                 parsed=marker,
                 details=details,
             )
-        if opcode in {100, 307, 308, 310, 311}:
-            record = ClientFixedOpaqueRecord.parse(payload)
-            body_length = len(record.opaque_body)
-            self.state.client_fixed_opaque_records_by_opcode[opcode] += 1
-            self.state.client_fixed_opaque_bytes_by_opcode[opcode] += body_length
+        if opcode in {308, 311}:
+            record = (
+                ClientOpcode308PeriodicRecord.parse(payload)
+                if opcode == 308
+                else ClientOpcode311PeriodicRecord.parse(payload)
+            )
+            self.state.client_periodic_records_by_opcode[opcode] += 1
+            if isinstance(record, ClientOpcode308PeriodicRecord):
+                self.state.client_opcode_308_mirrored_values[
+                    record.mirrored_value
+                ] += 1
+                self.state.client_opcode_308_variants[record.variant] += 1
+            previous_timestamp_ns = (
+                self._last_client_periodic_report_timestamp_ns.get(opcode)
+            )
+            self._last_client_periodic_report_timestamp_ns[opcode] = (
+                frame.timestamp_ns
+            )
             interval_ms: float | None = None
-            if opcode in {308, 311}:
-                previous_timestamp_ns = (
-                    self._last_client_periodic_report_timestamp_ns.get(opcode)
+            if previous_timestamp_ns is not None:
+                interval_ms = (
+                    frame.timestamp_ns - previous_timestamp_ns
+                ) / 1e6
+                self.state.client_periodic_report_last_interval_ms[
+                    opcode
+                ] = interval_ms
+                self.state.client_periodic_report_min_interval_ms[opcode] = min(
+                    self.state.client_periodic_report_min_interval_ms.get(
+                        opcode, interval_ms
+                    ),
+                    interval_ms,
                 )
-                self._last_client_periodic_report_timestamp_ns[opcode] = (
-                    frame.timestamp_ns
+                self.state.client_periodic_report_max_interval_ms[opcode] = max(
+                    self.state.client_periodic_report_max_interval_ms.get(
+                        opcode, interval_ms
+                    ),
+                    interval_ms,
                 )
-                if previous_timestamp_ns is not None:
-                    interval_ms = (
-                        frame.timestamp_ns - previous_timestamp_ns
-                    ) / 1e6
-                    self.state.client_periodic_report_last_interval_ms[
-                        opcode
-                    ] = interval_ms
-                    self.state.client_periodic_report_min_interval_ms[
-                        opcode
-                    ] = min(
-                        self.state.client_periodic_report_min_interval_ms.get(
-                            opcode, interval_ms
-                        ),
-                        interval_ms,
-                    )
-                    self.state.client_periodic_report_max_interval_ms[
-                        opcode
-                    ] = max(
-                        self.state.client_periodic_report_max_interval_ms.get(
-                            opcode, interval_ms
-                        ),
-                        interval_ms,
-                    )
             details: dict[str, object] = {
                 **record.safe_dict(),
+                "opcode": opcode,
                 "field_epoch": self.state.field_epoch,
                 "phase": self.state.phase.value,
             }
             if interval_ms is not None:
                 details["interval_ms"] = round(interval_ms, 3)
-            event_kind = (
-                "client_periodic_report_submitted"
-                if opcode in {308, 311}
-                else "client_fixed_record_submitted"
+            self._event(
+                frame,
+                "client_periodic_report_submitted",
+                details=details,
             )
-            self._event(frame, event_kind, details=details)
             return self._observation(
                 frame,
-                kind="client_fixed_opaque_record",
-                coverage=ShapeCoverage.PARTIAL,
+                kind=f"client_opcode_{opcode}_periodic_record",
+                coverage=ShapeCoverage.FULL,
+                parsed=record,
+                details=details,
+            )
+        if opcode == 100:
+            request = ClientAbilityPointAllocationRequest.parse(payload)
+            previous_stat_values = tuple(
+                (
+                    allocation.stat_name,
+                    getattr(self.state, allocation.stat_name),
+                )
+                for allocation in request.allocations
+            )
+            self._pending_ability_point_allocations.append(
+                PendingAbilityPointAllocation(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                    previous_ability_points=self.state.ability_points,
+                    previous_stat_values=previous_stat_values,
+                )
+            )
+            self.state.ability_point_allocation_requests += 1
+            self.state.ability_point_allocation_entries += len(
+                request.allocations
+            )
+            self.state.ability_points_requested += request.total_increment
+            for allocation in request.allocations:
+                self.state.ability_points_requested_by_stat[
+                    allocation.stat_name
+                ] += allocation.increment
+            self.state.pending_ability_point_allocations += 1
+            details: dict[str, object] = {
+                **request.safe_dict(),
+                "pending_requests": (
+                    self.state.pending_ability_point_allocations
+                ),
+                "field_epoch": self.state.field_epoch,
+                "phase": self.state.phase.value,
+            }
+            self._event(
+                frame,
+                "ability_point_allocation_requested",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="ability_point_allocation_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode in {307, 310}:
+            record = (
+                ClientOpcode307NeutralRecord.parse(payload)
+                if opcode == 307
+                else ClientOpcode310TextRecord.parse(payload)
+            )
+            self.state.client_neutral_records_by_opcode[opcode] += 1
+            if isinstance(record, ClientOpcode307NeutralRecord):
+                if record.redacted_value != 0:
+                    self.state.client_opcode_307_nonzero_redacted_values += 1
+            else:
+                self.state.client_opcode_310_text_code_units[
+                    record.text_code_units
+                ] += 1
+            details: dict[str, object] = {
+                **record.safe_dict(),
+                "opcode": opcode,
+                "field_epoch": self.state.field_epoch,
+                "phase": self.state.phase.value,
+            }
+            self._event(frame, "client_neutral_record_submitted", details=details)
+            return self._observation(
+                frame,
+                kind=f"client_opcode_{opcode}_neutral_record",
+                coverage=(
+                    ShapeCoverage.FULL
+                    if opcode == 307
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=record,
                 details=details,
                 issues=(
-                    f"client opcode-{opcode} fixed body remains opaque",
+                    ("client opcode-310 record purpose remains neutral",)
+                    if opcode == 310
+                    else ()
                 ),
             )
         if opcode == 241:
@@ -5079,44 +6756,135 @@ class GameplayStateFold:
                 issues=("bootstrap acknowledgement value remains opaque",),
             )
         if opcode == 158:
-            stage = FieldLoadStage.parse(payload)
+            request = ClientOpcode158Request.parse(payload)
             stage_details = {
                 "field_epoch": self.state.field_epoch,
-                "stage": stage.stage,
-                "opaque_tail_bytes": len(stage.opaque_tail),
+                "stage": request.mode,
             }
-            if stage.stage == 0:
+            if request.is_keymap_change:
+                for change in request.changes:
+                    self.state.keyboard_binding_changes += 1
+                    self.state.keyboard_binding_changes_by_type[
+                        change.binding_type
+                    ] += 1
+                    previous_type = self.state.keyboard_binding_types.get(
+                        change.key_code
+                    )
+                    if previous_type is not None:
+                        self.state.keyboard_binding_selector_counts[
+                            previous_type
+                        ] -= 1
+                        if not self.state.keyboard_binding_selector_counts[
+                            previous_type
+                        ]:
+                            del self.state.keyboard_binding_selector_counts[
+                                previous_type
+                            ]
+                    self.state.keyboard_binding_types[
+                        change.key_code
+                    ] = change.binding_type
+                    self.state.keyboard_binding_selector_counts[
+                        change.binding_type
+                    ] += 1
+                    self.state.keyboard_skill_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_item_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_menu_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_action_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_face_expression_bindings.pop(
+                        change.key_code, None
+                    )
+                    if change.binding_type == (
+                        VariableServerRecord.EMPTY_BINDING_SELECTOR
+                    ):
+                        self.state.keyboard_binding_removals += 1
+                    elif change.binding_type == (
+                        VariableServerRecord.SKILL_BINDING_SELECTOR
+                    ):
+                        self.state.keyboard_skill_bindings[
+                            change.key_code
+                        ] = change.action_id
+                    elif change.binding_type == (
+                        VariableServerRecord.ITEM_BINDING_SELECTOR
+                    ):
+                        self.state.keyboard_item_bindings[
+                            change.key_code
+                        ] = change.action_id
+                    elif change.binding_type == (
+                        VariableServerRecord.ACTION_BINDING_SELECTOR
+                    ):
+                        self.state.keyboard_action_bindings[
+                            change.key_code
+                        ] = change.action_id
+                self.state.pickup_key_codes = tuple(
+                    key_code
+                    for key_code, action_id in sorted(
+                        self.state.keyboard_action_bindings.items()
+                    )
+                    if action_id == VariableServerRecord.PICKUP_ACTION_ID
+                )
+                self.state.left_ctrl_skill_id = (
+                    self.state.keyboard_skill_bindings.get(
+                        VariableServerRecord.LEFT_CTRL_KEY_CODE
+                    )
+                )
+                self.state.left_ctrl_skill_known = (
+                    self.state.left_ctrl_skill_id in self.state.skill_levels
+                    if self.state.left_ctrl_skill_id is not None
+                    else False
+                )
+                self.state.keyboard_known_skill_bindings = sum(
+                    skill_id in self.state.skill_levels
+                    for skill_id in self.state.keyboard_skill_bindings.values()
+                )
+                change_details = {
+                    "field_epoch": self.state.field_epoch,
+                    "change_count": len(request.changes),
+                    "key_codes": tuple(
+                        change.key_code for change in request.changes
+                    ),
+                    "binding_types": tuple(
+                        change.binding_type for change in request.changes
+                    ),
+                    "action_ids": tuple(
+                        change.action_id for change in request.changes
+                    ),
+                }
                 self._event(
                     frame,
-                    "field_load_stage_observed",
-                    details=stage_details,
+                    "keyboard_bindings_changed",
+                    details=change_details,
                 )
                 return self._observation(
                     frame,
-                    kind="field_load_stage",
-                    coverage=ShapeCoverage.PARTIAL,
-                    parsed=stage,
-                    details=stage_details,
-                    issues=(
-                        "field-load stage-0 extended variant semantics remain opaque",
-                    ),
+                    kind="keyboard_binding_change",
+                    coverage=ShapeCoverage.FULL,
+                    parsed=request,
+                    details=change_details,
                 )
             if self.state.field_epoch == 0:
                 self.issues.append("field load stage arrived before a field snapshot")
-            if stage.stage == 1:
+            if request.mode == 1:
                 if self.state.field_load_stage is not None:
                     self.issues.append(
                         "field load stage 1 restarted an active field-load sequence"
                     )
             elif self.state.field_load_stage != 1:
                 self.issues.append("field load stage 2 arrived before stage 1")
-            self.state.field_load_stage = stage.stage
+            self.state.field_load_stage = request.mode
             self._event(
                 frame,
                 "field_load_stage_changed",
                 details=stage_details,
             )
-            if stage.stage == 2:
+            if request.mode == 2:
                 self.state.phase = GameplayPhase.ACTIVE
                 self._event(
                     frame,
@@ -5127,8 +6895,126 @@ class GameplayStateFold:
                 frame,
                 kind="field_load_stage",
                 coverage=ShapeCoverage.FULL,
-                parsed=stage,
+                parsed=request,
                 details=stage_details,
+            )
+        if opcode == 79:
+            request = InventoryMoveRequest.parse(payload)
+            inventory_name = request.inventory_name
+            items = self.state.inventory_items.get(inventory_name, ())
+            source_item = next(
+                (
+                    item
+                    for item in items
+                    if item.slot == request.source_slot
+                ),
+                None,
+            )
+            destination_item = next(
+                (
+                    item
+                    for item in items
+                    if item.slot == request.destination_slot
+                ),
+                None,
+            )
+            self.state.inventory_move_requests += 1
+            self.state.inventory_move_requests_by_inventory[inventory_name] += 1
+            self.state.pending_inventory_move_requests += 1
+            self._pending_inventory_moves.append(
+                PendingInventoryMove(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                )
+            )
+            details: dict[str, object] = {
+                **request.safe_dict(),
+                "source_known": source_item is not None,
+                "destination_known": destination_item is not None,
+                "field_epoch": self.state.field_epoch,
+            }
+            if source_item is not None:
+                details["item_id"] = source_item.item_id
+            self._event(frame, "inventory_move_requested", details=details)
+            return self._observation(
+                frame,
+                kind="inventory_move_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode == 49:
+            request = ChairSitRequest.parse(payload)
+            setup_item_known = any(
+                item.item_id == request.item_id
+                for item in self.state.inventory_items.get("setup", ())
+            )
+            self.state.chair_sit_requests += 1
+            self.state.chair_sit_requests_by_item[request.item_id] += 1
+            if setup_item_known:
+                self.state.chair_sit_setup_matches += 1
+            else:
+                self.state.chair_sit_setup_mismatches += 1
+            self.state.requested_chair_item_id = request.item_id
+            details = {
+                **request.safe_dict(),
+                "setup_item_known": setup_item_known,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "chair_sit_requested", details=details)
+            return self._observation(
+                frame,
+                kind="chair_sit_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode == 48:
+            request = ChairStandRequest.parse(payload)
+            requested_item_id = self.state.requested_chair_item_id
+            matched_open_sit = requested_item_id is not None
+            self.state.chair_stand_requests += 1
+            if matched_open_sit:
+                self.state.chair_stand_requests_with_open_sit += 1
+            else:
+                self.state.chair_stand_requests_without_open_sit += 1
+            self.state.requested_chair_item_id = None
+            details = {
+                **request.safe_dict(),
+                "matched_open_sit": matched_open_sit,
+                "requested_item_id": requested_item_id,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "chair_stand_requested", details=details)
+            return self._observation(
+                frame,
+                kind="chair_stand_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode == 82:
+            request = ChairRecoveryRequest.parse(payload)
+            requested_item_id = self.state.requested_chair_item_id
+            matched_open_sit = requested_item_id is not None
+            self.state.chair_recovery_requests += 1
+            if matched_open_sit:
+                self.state.chair_recovery_requests_with_open_sit += 1
+            else:
+                self.state.chair_recovery_requests_without_open_sit += 1
+            details = {
+                "matched_open_sit": matched_open_sit,
+                "requested_item_id": requested_item_id,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(frame, "chair_recovery_requested", details=details)
+            return self._observation(
+                frame,
+                kind="chair_recovery_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
             )
         if opcode == 80:
             request = ItemUseRequest.parse(payload)
@@ -5203,15 +7089,11 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="item_use_request",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=request,
                 details=details,
-                issues=(
-                    "client tick semantics and item effects beyond the two "
-                    "captured potion templates remain neutral",
-                ),
             )
-        if opcode == 185:
+        if opcode in {185, 222}:
             request = ItemPickupRequest.parse(payload)
             alias = self._alias(
                 self._drop_aliases, request.drop_object_id, "drop"
@@ -5223,7 +7105,9 @@ class GameplayStateFold:
                 self.state.item_pickup_known_drops += 1
             epoch_matches = request.field_epoch == self.state.field_epoch
             self.state.item_pickup_requests += 1
-            if request.optional_proof:
+            if request.opcode == 222:
+                self.state.item_pickup_compact_requests += 1
+            elif request.optional_proof:
                 self.state.item_pickup_extended_requests += 1
             else:
                 self.state.item_pickup_base_requests += 1
@@ -5235,10 +7119,23 @@ class GameplayStateFold:
                     f"item-pickup request field epoch {request.field_epoch} "
                     f"did not match folded epoch {self.state.field_epoch}"
                 )
-            self._pending_item_pickups.append(
-                PendingItemPickup(
-                    request_frame_index=frame.index,
-                    request_timestamp_ns=frame.timestamp_ns,
+            pending = next(
+                (
+                    candidate
+                    for candidate in self._pending_item_pickups
+                    if candidate.request.field_epoch == request.field_epoch
+                    and candidate.request.drop_object_id
+                    == request.drop_object_id
+                ),
+                None,
+            )
+            is_retry = pending is not None
+            if pending is None:
+                pending = PendingItemPickup(
+                    first_request_frame_index=frame.index,
+                    first_request_timestamp_ns=frame.timestamp_ns,
+                    last_request_frame_index=frame.index,
+                    last_request_timestamp_ns=frame.timestamp_ns,
                     request=request,
                     expected_drop_kind=(
                         drop.spawn.kind_name if drop is not None else None
@@ -5247,16 +7144,59 @@ class GameplayStateFold:
                         drop.spawn.value if drop is not None else None
                     ),
                 )
-            )
-            self.state.pending_item_pickups += 1
+                self._pending_item_pickups.append(pending)
+                self.state.pending_item_pickups += 1
+                self.state.item_pickup_request_chains += 1
+                if drop is not None:
+                    self.state.item_pickup_admitted_drops += 1
+                    self.state.item_pickup_admitted_drops_by_kind[
+                        drop.spawn.kind_name
+                    ] += 1
+                    if drop.spawn.drop_kind == FieldDropSpawn.ITEM:
+                        self.state.item_pickup_admitted_item_templates[
+                            drop.spawn.value
+                        ] += 1
+            else:
+                pending.last_request_frame_index = frame.index
+                pending.last_request_timestamp_ns = frame.timestamp_ns
+                pending.request = request
+                pending.attempts += 1
+                self.state.item_pickup_request_retries += 1
             details: dict[str, object] = {
+                "shape": request.shape_name,
                 **request.safe_dict(),
                 "drop": alias,
                 "known_drop": drop is not None,
                 "field_epoch_matches": epoch_matches,
+                "request_attempt": pending.attempts,
+                "request_retry": is_retry,
             }
             if drop is not None:
                 details["predicted_result_kind"] = drop.spawn.kind_name
+                if drop.first_spawn_timestamp_ns is not None:
+                    details["drop_spawn_frame"] = (
+                        drop.first_spawn_frame_index
+                    )
+                    details["drop_age_ms"] = round(
+                        (
+                            frame.timestamp_ns
+                            - drop.first_spawn_timestamp_ns
+                        )
+                        / 1e6,
+                        3,
+                    )
+                source_release = self._last_mob_controller_releases.get(
+                    drop.spawn.source_mob_object_id
+                )
+                if source_release is not None:
+                    release_frame, release_timestamp_ns = source_release
+                    details["source_controller_release_frame"] = (
+                        release_frame
+                    )
+                    details["source_controller_release_age_ms"] = round(
+                        (frame.timestamp_ns - release_timestamp_ns) / 1e6,
+                        3,
+                    )
                 if drop.spawn.drop_kind == FieldDropSpawn.ITEM:
                     details["predicted_item_id"] = drop.spawn.value
                 else:
@@ -5270,17 +7210,19 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="item_pickup_request",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=request,
                 details=details,
-                issues=(
-                    "pickup control, validation token, and optional proof "
-                    "semantics remain neutral",
-                ),
             )
         if opcode == 47:
             submission = LifeMovementSubmission.parse(payload)
             path = submission.movement
+            commands_typed = all(command.is_typed for command in path.commands)
+            self._last_client_life_movement_position = (
+                self.state.field_epoch,
+                submission.path_end_x,
+                submission.path_end_y,
+            )
             self.state.life_movement_submissions += 1
             self.state.life_movement_submission_commands += len(path.commands)
             self.state.life_movement_submission_commands_by_type.update(
@@ -5294,7 +7236,7 @@ class GameplayStateFold:
                 "control_value": submission.control_value,
                 **path.safe_dict(),
                 "tail_type": submission.tail_type,
-                "opaque_tail_state_bytes": len(submission.opaque_tail_state),
+                "tail_state_values": list(submission.tail_state_values),
                 "tail_marker": submission.tail_marker,
                 "path_start_x": submission.path_start_x,
                 "path_start_y": submission.path_start_y,
@@ -5306,12 +7248,17 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="life_movement_submission",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.FULL
+                    if commands_typed
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=submission,
                 details=details,
                 issues=(
-                    "life movement command payload and control/tail roles "
-                    "remain opaque",
+                    ()
+                    if commands_typed
+                    else ("life movement contains opaque command types",)
                 ),
             )
         if opcode == 182:
@@ -5337,13 +7284,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="player_movement_submission",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=movement,
                 details=details,
-                issues=(
-                    "player movement control value and type-3 command "
-                    "meaning remain opaque",
-                ),
             )
         if opcode == 207:
             movement = MobMovementSubmission.parse(payload)
@@ -5354,9 +7297,7 @@ class GameplayStateFold:
             key = (movement.object_id, movement.sequence)
             entity = self.state.mobs.get(movement.object_id)
             template_id = self.state.mob_templates.get(movement.object_id)
-            expected_status_flag = int(
-                bool(movement_path.opaque_control[0])
-            )
+            expected_status_flag = int(bool(movement_path.option_flags))
             self._pending_movements.setdefault(key, deque()).append(
                 PendingMobMovement(
                     expected_status_flag=expected_status_flag,
@@ -5388,7 +7329,7 @@ class GameplayStateFold:
                 "sequence": movement.sequence,
                 "predicted_acknowledgement_flag": expected_status_flag,
                 "movement_body_bytes": len(movement.opaque_movement),
-                "opaque_control_bytes": len(movement_path.opaque_control),
+                **movement_path.safe_control_dict(),
                 "reference_x": movement_path.reference_x,
                 "reference_y": movement_path.reference_y,
                 "command_count": len(movement_path.commands),
@@ -5417,12 +7358,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="mob_movement_submission",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=movement,
                 details=details,
-                issues=(
-                    "movement control metadata after byte zero remains opaque",
-                ),
             )
         if opcode == 293:
             acknowledgement = SkillRecordUpdateAcknowledgement.parse(payload)
@@ -5475,6 +7413,29 @@ class GameplayStateFold:
                 kind="skill_record_update_acknowledgement",
                 coverage=ShapeCoverage.FULL,
                 parsed=acknowledgement,
+                details=details,
+            )
+        if opcode == 276:
+            envelope = ClientOpcode276Envelope.parse(payload)
+            self.state.client_opcode_276_packets += 1
+            self.state.client_opcode_276_selectors[envelope.selector] += 1
+            self.state.client_opcode_276_shapes[envelope.shape_name] += 1
+            self.state.client_opcode_276_group_counts[len(envelope.groups)] += 1
+            self.state.client_opcode_276_pair_counts[envelope.pair_count] += 1
+            details = {
+                **envelope.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_276_record_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_276_envelope",
+                coverage=ShapeCoverage.FULL,
+                parsed=envelope,
                 details=details,
             )
         if opcode == 279:
@@ -5560,6 +7521,45 @@ class GameplayStateFold:
                 kind="client_opcode_279_text_envelope",
                 coverage=ShapeCoverage.FULL,
                 parsed=envelope,
+                details=details,
+            )
+        if opcode == 298:
+            request = ClientOpcode298ItemAcquisitionRequest.parse(payload)
+            self.state.client_item_acquisition_requests += 1
+            self.state.client_item_acquisition_requests_by_inventory[
+                request.inventory_name
+            ] += 1
+            self.state.client_item_acquisition_requests_by_kind[
+                request.request_kind
+            ] += 1
+            self.state.client_item_acquisition_duration_values[
+                request.duration_value
+            ] += 1
+            if request.serial_value:
+                self.state.client_item_acquisition_serial_values_present += 1
+            self.state.pending_item_acquisition_requests += 1
+            self._pending_item_acquisitions.append(
+                PendingItemAcquisition(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    field_epoch=self.state.field_epoch,
+                    request=request,
+                )
+            )
+            details = {
+                **request.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "inventory_item_acquisition_requested",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="inventory_item_acquisition_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
             )
         if opcode == 309:
@@ -5696,6 +7696,42 @@ class GameplayStateFold:
             )
         if opcode == 104:
             request = ClientSkillUseRequest.parse(payload)
+            previous_skill_use = self._last_client_skill_use
+            previous_request_frame: int | None = None
+            previous_request_elapsed_ms: float | None = None
+            same_skill_as_previous: bool | None = None
+            if previous_skill_use is not None:
+                (
+                    previous_request_frame,
+                    previous_request_timestamp_ns,
+                    previous_request,
+                ) = previous_skill_use
+                previous_request_elapsed_ms = round(
+                    (
+                        frame.timestamp_ns
+                        - previous_request_timestamp_ns
+                    )
+                    / 1e6,
+                    3,
+                )
+                same_skill_as_previous = (
+                    previous_request.skill_id == request.skill_id
+                )
+                if same_skill_as_previous:
+                    self.state.client_skill_use_same_skill_repeats += 1
+                    if not self._server_opcodes_since_skill_use:
+                        self.state.client_skill_use_response_free_same_skill_repeats += 1
+            intervening_nonheartbeat_server_opcodes = dict(
+                sorted(self._server_opcodes_since_skill_use.items())
+            )
+            intervening_nonheartbeat_server_packets = sum(
+                intervening_nonheartbeat_server_opcodes.values()
+            )
+            response_free_same_skill_repeat = (
+                same_skill_as_previous is True
+                and intervening_nonheartbeat_server_packets == 0
+            )
+            self._server_opcodes_since_skill_use.clear()
             modeled_skill_level = self.state.skill_levels.get(
                 request.skill_id
             )
@@ -5761,6 +7797,19 @@ class GameplayStateFold:
                 "bound_key_codes": bound_key_codes,
                 "binding_matches_model": binding_matches,
                 "client_tick_delta": tick_delta,
+                "previous_request_frame": previous_request_frame,
+                "previous_request_elapsed_ms": previous_request_elapsed_ms,
+                "same_skill_as_previous": same_skill_as_previous,
+                "intervening_nonheartbeat_server_packets": (
+                    intervening_nonheartbeat_server_packets
+                ),
+                "intervening_nonheartbeat_server_opcodes": (
+                    intervening_nonheartbeat_server_opcodes
+                ),
+                (
+                    "same_skill_repeat_without_intervening_"
+                    "nonheartbeat_server_packet"
+                ): response_free_same_skill_repeat,
             }
             self._event(
                 frame,
@@ -5775,39 +7824,42 @@ class GameplayStateFold:
                 details=details,
             )
         if opcode == 101:
-            record = ClientOpcode101Record.parse(payload)
-            self.state.client_opcode_101_packets += 1
-            self.state.client_opcode_101_header_values[
-                record.header_value
-            ] += 1
-            self.state.client_opcode_101_primary_values[
-                record.primary_value
-            ] += 1
-            self.state.client_opcode_101_flag_values[
-                record.flag_value
-            ] += 1
-            self.state.client_opcode_101_secondary_values[
-                record.secondary_value
-            ] += 1
-            self.state.client_opcode_101_tail_values[
-                record.tail_value
-            ] += 1
+            request = ClientRecoveryRequest.parse(payload)
+            stat_name = request.stat_name
+            self.state.client_recovery_requests += 1
+            self.state.client_recovery_requests_by_stat[stat_name] += 1
+            if request.hp_recovery:
+                self.state.client_hp_recovery_amounts[
+                    request.hp_recovery
+                ] += 1
+            else:
+                self.state.client_mp_recovery_amounts[
+                    request.mp_recovery
+                ] += 1
+            self._pending_client_recoveries[stat_name].append(
+                (
+                    frame.index,
+                    frame.timestamp_ns,
+                    self.state.field_epoch,
+                    request,
+                )
+            )
+            self.state.pending_client_recovery_requests += 1
             details = {
-                **record.safe_dict(),
+                **request.safe_dict(),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
                 frame,
-                "client_opcode_101_submitted",
+                "client_recovery_requested",
                 details=details,
             )
             return self._observation(
                 frame,
-                kind="client_opcode_101_record",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=record,
+                kind="client_recovery_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
-                issues=("client opcode-101 field roles remain neutral",),
             )
         if opcode == 13 and len(payload) >= 3:
             message_type = payload[2]
@@ -5845,35 +7897,144 @@ class GameplayStateFold:
                 issues=("client opcode-13 payload remains opaque",),
             )
         if opcode == 43:
-            envelope = ClientOpcode43Envelope.parse(payload)
-            self.state.client_opcode_43_packets += 1
-            self.state.client_opcode_43_sequences[envelope.sequence] += 1
-            self.state.client_opcode_43_variants[envelope.variant] += 1
-            self.state.client_opcode_43_text_code_units[
-                envelope.text_code_units
+            request = ClientFieldTransferRequest.parse(payload)
+            epoch_matches = request.field_epoch == self.state.field_epoch
+            self.state.client_field_transfer_requests += 1
+            self.state.client_field_transfer_variants[request.variant] += 1
+            self.state.client_field_transfer_portal_name_code_units[
+                request.portal_name_code_units
             ] += 1
-            self.state.client_opcode_43_opaque_bytes += (
-                envelope.opaque_byte_count
+            self.state.client_field_transfer_redacted_portal_names += (
+                request.portal_name is not None
             )
+            if epoch_matches:
+                self.state.client_field_transfer_epoch_matches += 1
+            else:
+                self.state.client_field_transfer_epoch_mismatches += 1
+            self._pending_field_transfers.append(
+                PendingFieldTransfer(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                )
+            )
+            self.state.pending_client_field_transfers += 1
             details = {
-                **envelope.safe_dict(),
-                "field_epoch": self.state.field_epoch,
+                **request.safe_dict(),
+                "active_field_epoch": self.state.field_epoch,
+                "field_epoch_matches": epoch_matches,
+                "pending_transfers": self.state.pending_client_field_transfers,
             }
             self._event(
                 frame,
-                "client_opcode_43_submitted",
+                "field_transfer_requested",
                 details=details,
             )
             return self._observation(
                 frame,
-                kind="client_opcode_43_envelope",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=envelope,
+                kind="client_field_transfer_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
-                issues=(
-                    "client opcode-43 identifier, text, opaque bytes, and "
-                    "higher-level purpose remain semantically unresolved",
+            )
+        if opcode == 64:
+            request = ClientNpcInteractionRequest.parse(payload)
+            life_position = self._last_client_life_movement_position
+            position_known = (
+                life_position is not None
+                and life_position[0] == self.state.field_epoch
+            )
+            position_matches = (
+                position_known
+                and life_position is not None
+                and request.position_x == life_position[1]
+                and request.position_y == life_position[2]
+            )
+            npc = self.state.npcs.get(request.npc_object_id)
+            npc_alias = self._alias(
+                self._npc_aliases, request.npc_object_id, "npc"
+            )
+            self.state.npc_interaction_requests += 1
+            if npc is None:
+                self.state.npc_interaction_requests_for_unknown_npcs += 1
+            else:
+                self.state.npc_interaction_requests_for_active_npcs += 1
+                self.state.npc_interaction_target_templates[
+                    npc.spawn.template_id
+                ] += 1
+            if position_matches:
+                self.state.npc_interaction_position_matches += 1
+            else:
+                self.state.npc_interaction_position_mismatches += 1
+            self._pending_npc_interactions.append(
+                (
+                    frame.index,
+                    frame.timestamp_ns,
+                    self.state.field_epoch,
+                    request,
+                )
+            )
+            self.state.pending_npc_interaction_requests += 1
+            details = {
+                "npc": npc_alias,
+                "active_npc": npc is not None,
+                "npc_template_id": (
+                    npc.spawn.template_id if npc is not None else None
                 ),
+                "position_x": request.position_x,
+                "position_y": request.position_y,
+                "life_movement_position_known": position_known,
+                "position_matches_last_life_movement": position_matches,
+                "field_epoch": self.state.field_epoch,
+            }
+            if npc is not None:
+                details.update(
+                    {
+                        "npc_x": npc.spawn.x,
+                        "npc_y": npc.spawn.cy,
+                        "npc_delta_x": request.position_x - npc.spawn.x,
+                        "npc_delta_y": request.position_y - npc.spawn.cy,
+                    }
+                )
+            self._event(
+                frame,
+                "npc_interaction_requested",
+                details=details,
+                identifiers={"npc_object_id": request.npc_object_id},
+            )
+            return self._observation(
+                frame,
+                kind="npc_interaction_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
+            )
+        if opcode == 111:
+            action = ClientOpcode111CashSlotAction.parse(payload)
+            self.state.client_opcode_111_packets += 1
+            self.state.client_opcode_111_neutral_values[
+                action.neutral_value
+            ] += 1
+            self.state.client_opcode_111_slots[action.slot] += 1
+            self._pending_client_opcode_111.append(
+                (frame.index, frame.timestamp_ns, self.state.field_epoch, action)
+            )
+            self.state.pending_client_opcode_111_actions += 1
+            details = {
+                **action.safe_dict(),
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "client_opcode_111_cash_slot_submitted",
+                details=details,
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_111_cash_slot_action",
+                coverage=ShapeCoverage.FULL,
+                parsed=action,
+                details=details,
             )
         if opcode == 66:
             acknowledgement = ClientOpcode66Acknowledgement.parse(payload)
@@ -5954,13 +8115,56 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="client_opcode_114_text_envelope",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=envelope,
                 details=details,
-                issues=(
-                    "client opcode-114 text, trailing value, and "
-                    "higher-level purpose remain semantically unresolved",
+            )
+        if opcode == 115:
+            request = ClientInnerPortalRequest.parse(payload)
+            field_epoch_matches = request.field_epoch == self.state.field_epoch
+            previous_destination = self._last_client_inner_portal_destination
+            same_epoch_chain = (
+                previous_destination is not None
+                and previous_destination[0] == request.field_epoch
+            )
+            source_near_previous_destination: bool | None = None
+            if same_epoch_chain and previous_destination is not None:
+                self.state.client_inner_portal_same_epoch_chains += 1
+                source_near_previous_destination = (
+                    abs(request.source_x - previous_destination[1]) <= 1
+                    and abs(request.source_y - previous_destination[2]) <= 1
+                )
+                if source_near_previous_destination:
+                    self.state.client_inner_portal_chained_sources_within_one_pixel += 1
+            self._last_client_inner_portal_destination = (
+                request.field_epoch,
+                request.destination_x,
+                request.destination_y,
+            )
+            self.state.client_inner_portal_requests += 1
+            self.state.client_inner_portal_name_code_units[
+                request.portal_name_code_units
+            ] += 1
+            self.state.client_inner_portal_redacted_names += 1
+            if field_epoch_matches:
+                self.state.client_inner_portal_field_epoch_matches += 1
+            else:
+                self.state.client_inner_portal_field_epoch_mismatches += 1
+            details = {
+                **request.safe_dict(),
+                "field_epoch_matches": field_epoch_matches,
+                "same_epoch_chain": same_epoch_chain,
+                "source_near_previous_destination": (
+                    source_near_previous_destination
                 ),
+            }
+            self._event(frame, "inner_portal_requested", details=details)
+            return self._observation(
+                frame,
+                kind="client_inner_portal_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
+                details=details,
             )
         if opcode == 122 and ClientOpcode122Envelope.is_captured_shape(payload):
             envelope = ClientOpcode122Envelope.parse(payload)
@@ -5986,38 +8190,115 @@ class GameplayStateFold:
                 details=details,
             )
         if opcode == 217:
-            record_set = ClientOpcode217RecordSet.parse(payload)
-            self.state.client_opcode_217_packets += 1
-            if record_set.record_format is None:
-                self.state.client_opcode_217_compact_packets += 1
+            submission = ClientNpcStateSubmission.parse(payload)
+            alias = self._alias(
+                self._npc_aliases, submission.object_id, "npc"
+            )
+            known_npc = submission.object_id in self.state.npcs
+            self.state.client_npc_state_submissions += 1
+            if known_npc:
+                self.state.client_npc_state_submissions_for_known_npcs += 1
             else:
-                self.state.client_opcode_217_record_sets += 1
-                self.state.client_opcode_217_records += record_set.record_count
-                self.state.client_opcode_217_records_by_format[
-                    record_set.record_format
-                ] += record_set.record_count
-                self.state.client_opcode_217_record_counts[
-                    record_set.record_count
+                self.state.client_npc_state_submissions_for_unknown_npcs += 1
+            if submission.movement is None:
+                self.state.client_npc_state_compact_submissions += 1
+            else:
+                self.state.client_npc_state_movement_submissions += 1
+                self.state.client_npc_state_commands += submission.command_count
+                self.state.client_npc_state_commands_by_type.update(
+                    command.command_type
+                    for command in submission.movement.commands
+                )
+                self.state.client_npc_state_command_counts[
+                    submission.command_count
                 ] += 1
+            expected_update = submission.to_state_update().to_bytes()
+            self._pending_npc_state_submissions.setdefault(
+                expected_update, deque()
+            ).append(
+                PendingNpcStateSubmission(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    field_epoch=self.state.field_epoch,
+                    request=submission,
+                )
+            )
+            self.state.pending_npc_state_submissions += 1
             details = {
-                **record_set.safe_dict(),
+                "entity": alias,
+                "known_npc": known_npc,
+                **submission.safe_dict(),
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
                 frame,
-                "client_opcode_217_submitted",
+                "npc_state_submitted",
+                details=details,
+                identifiers={"object_id": submission.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="npc_state_submission",
+                coverage=ShapeCoverage.FULL,
+                parsed=submission,
+                details=details,
+            )
+        if opcode == 225:
+            request = ClientReactorHitRequest.parse(payload)
+            existing = self.state.reactors.get(request.reactor_object_id)
+            alias = self._alias(
+                self._reactor_aliases,
+                request.reactor_object_id,
+                "reactor",
+            )
+            active_reactor = existing is not None
+            preceding_attack = (
+                previous_client_packet is not None
+                and previous_client_packet[1] == 50
+                and previous_client_packet[2] == self.state.field_epoch
+            )
+            self._pending_reactor_hits.setdefault(
+                request.reactor_object_id, deque()
+            ).append(
+                PendingReactorHit(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                )
+            )
+            self.state.reactor_hit_requests += 1
+            self.state.pending_reactor_hit_requests += 1
+            if active_reactor:
+                self.state.reactor_hit_requests_for_active_reactors += 1
+            else:
+                self.state.reactor_hit_requests_for_inactive_reactors += 1
+            if preceding_attack:
+                self.state.reactor_hit_requests_after_attack += 1
+            self.state.reactor_hit_character_positions[
+                request.character_position
+            ] += 1
+            self.state.reactor_hit_stances[request.stance] += 1
+            details: dict[str, object] = {
+                "reactor": alias,
+                **request.safe_dict(),
+                "active_reactor": active_reactor,
+                "preceding_client_attack": preceding_attack,
+                "pending_requests": self.state.pending_reactor_hit_requests,
+                "field_epoch": self.state.field_epoch,
+            }
+            if preceding_attack and previous_client_packet is not None:
+                details["preceding_attack_frame"] = previous_client_packet[0]
+            self._event(
+                frame,
+                "reactor_hit_requested",
                 details=details,
             )
             return self._observation(
                 frame,
-                kind="client_opcode_217_record_set",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=record_set,
+                kind="client_reactor_hit_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
-                issues=(
-                    "client opcode-217 prefix, records, trailer, and effect "
-                    "semantics remain opaque",
-                ),
             )
         return self._observation(
             frame,
@@ -6029,6 +8310,8 @@ class GameplayStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if self._last_client_skill_use is not None and opcode != 10:
+            self._server_opcodes_since_skill_use[opcode] += 1
         if opcode == 43:
             envelope = ServerOpcode43Envelope.parse(payload)
             self.state.server_opcode_43_packets += 1
@@ -6062,6 +8345,9 @@ class GameplayStateFold:
             change_set = InventoryChangeSet.parse(payload)
             modification_details: list[dict[str, object]] = []
             pickup_effect_candidates: list[dict[str, object]] = []
+            acquisition_additions: list[
+                tuple[str, InventoryItemEntity]
+            ] = []
             applied_modifications = 0
             self.state.inventory_change_packets += 1
             self.state.inventory_update_flags[change_set.update_flag] += 1
@@ -6105,6 +8391,7 @@ class GameplayStateFold:
                         items.append(added)
                     else:
                         items[existing_index] = added
+                    acquisition_additions.append((inventory_name, added))
                     if added.quantity is not None and added.quantity > 0:
                         pickup_effect_candidates.append(
                             {
@@ -6205,6 +8492,62 @@ class GameplayStateFold:
                         applied_modifications += 1
                 elif modification.operation == InventoryModification.MOVE:
                     destination_slot = modification.destination_slot
+                    pending_inventory_move = next(
+                        (
+                            pending
+                            for pending in self._pending_inventory_moves
+                            if (
+                                pending.request.inventory_type
+                                == modification.inventory_type
+                                and pending.request.source_slot
+                                == modification.slot
+                                and pending.request.destination_slot
+                                == destination_slot
+                            )
+                        ),
+                        None,
+                    )
+                    if pending_inventory_move is None:
+                        self.state.inventory_move_updates_without_request += 1
+                    else:
+                        self._pending_inventory_moves.remove(
+                            pending_inventory_move
+                        )
+                        self.state.pending_inventory_move_requests -= 1
+                        self.state.inventory_move_request_matches += 1
+                        response_ms = round(
+                            (
+                                frame.timestamp_ns
+                                - pending_inventory_move.request_timestamp_ns
+                            )
+                            / 1e6,
+                            3,
+                        )
+                        self.state.last_inventory_move_response_ms = response_ms
+                        self.state.max_inventory_move_response_ms = max(
+                            self.state.max_inventory_move_response_ms or 0.0,
+                            response_ms,
+                        )
+                        details["inventory_move_request_frame"] = (
+                            pending_inventory_move.request_frame_index
+                        )
+                        details["inventory_move_response_ms"] = response_ms
+                        details["inventory_move_quantity"] = (
+                            pending_inventory_move.request.quantity
+                        )
+                        self._event(
+                            frame,
+                            "inventory_move_confirmed",
+                            details={
+                                **pending_inventory_move.request.safe_dict(),
+                                "request_frame": (
+                                    pending_inventory_move.request_frame_index
+                                ),
+                                "response_ms": response_ms,
+                                "server_move_flag": modification.move_flag,
+                                "field_epoch": self.state.field_epoch,
+                            },
+                        )
                     if (
                         existing is None
                         or existing_index is None
@@ -6259,6 +8602,135 @@ class GameplayStateFold:
                     sorted(items, key=lambda item: item.slot)
                 )
                 modification_details.append(details)
+            opcode_111_response: dict[str, object] | None = None
+            if self._pending_client_opcode_111:
+                (
+                    request_frame_index,
+                    request_timestamp_ns,
+                    request_field_epoch,
+                    request_action,
+                ) = self._pending_client_opcode_111[0]
+                matching_modifications = tuple(
+                    details
+                    for details in modification_details
+                    if details.get("inventory") == "cash"
+                    and details.get("slot") == request_action.slot
+                )
+                if (
+                    request_field_epoch == self.state.field_epoch
+                    and matching_modifications
+                ):
+                    self._pending_client_opcode_111.popleft()
+                    self.state.pending_client_opcode_111_actions -= 1
+                    self.state.client_opcode_111_cash_slot_matches += 1
+                    response_ms = round(
+                        (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                        3,
+                    )
+                    self.state.last_opcode_111_cash_slot_response_ms = (
+                        response_ms
+                    )
+                    self.state.max_opcode_111_cash_slot_response_ms = max(
+                        self.state.max_opcode_111_cash_slot_response_ms or 0.0,
+                        response_ms,
+                    )
+                    opcode_111_response = {
+                        "request_frame": request_frame_index,
+                        "response_ms": response_ms,
+                        "inventory": "cash",
+                        "slot": request_action.slot,
+                        "operations": [
+                            details["operation"]
+                            for details in matching_modifications
+                        ],
+                        "field_epoch": self.state.field_epoch,
+                    }
+            acquisition_response: dict[str, object] | None = None
+            if self._pending_item_acquisitions and acquisition_additions:
+                pending_acquisition = self._pending_item_acquisitions[0]
+                matching_additions = tuple(
+                    (inventory_name, item)
+                    for inventory_name, item in acquisition_additions
+                    if (
+                        inventory_name
+                        == pending_acquisition.request.inventory_name
+                        and item.item_id
+                        == pending_acquisition.request.item_id
+                        and pending_acquisition.field_epoch
+                        == self.state.field_epoch
+                    )
+                )
+                if matching_additions:
+                    self._pending_item_acquisitions.popleft()
+                    self.state.pending_item_acquisition_requests -= 1
+                    self.state.item_acquisition_matches += 1
+                    response_quantities = tuple(
+                        item.quantity for _, item in matching_additions
+                    )
+                    response_quantity = (
+                        sum(
+                            quantity
+                            for quantity in response_quantities
+                            if quantity is not None
+                        )
+                        if all(
+                            quantity is not None
+                            for quantity in response_quantities
+                        )
+                        else None
+                    )
+                    quantity_matches = (
+                        response_quantity
+                        == pending_acquisition.request.quantity
+                        if response_quantity is not None
+                        else None
+                    )
+                    if quantity_matches is True:
+                        self.state.item_acquisition_quantity_matches += 1
+                    elif quantity_matches is False:
+                        self.state.item_acquisition_quantity_mismatches += 1
+                    else:
+                        self.state.item_acquisition_quantity_unavailable += 1
+                    response_ms = round(
+                        (
+                            frame.timestamp_ns
+                            - pending_acquisition.request_timestamp_ns
+                        )
+                        / 1e6,
+                        3,
+                    )
+                    self.state.last_item_acquisition_response_ms = response_ms
+                    self.state.max_item_acquisition_response_ms = max(
+                        self.state.max_item_acquisition_response_ms or 0.0,
+                        response_ms,
+                    )
+                    acquisition_response = {
+                        "request_frame": (
+                            pending_acquisition.request_frame_index
+                        ),
+                        "response_ms": response_ms,
+                        "inventory": (
+                            pending_acquisition.request.inventory_name
+                        ),
+                        "item_id": pending_acquisition.request.item_id,
+                        "request_quantity": (
+                            pending_acquisition.request.quantity
+                        ),
+                        "response_quantity": response_quantity,
+                        "quantity_matches": quantity_matches,
+                        "added_slots": [
+                            item.slot for _, item in matching_additions
+                        ],
+                        "field_epoch": self.state.field_epoch,
+                    }
+                    self._event(
+                        frame,
+                        "inventory_item_acquisition_confirmed",
+                        details={
+                            **pending_acquisition.request.safe_dict(),
+                            **acquisition_response,
+                        },
+                    )
             item_pickup_effect: dict[str, object] | None = None
             if len(pickup_effect_candidates) == 1:
                 pending_item_pickup = self._attach_item_pickup_effect(
@@ -6275,17 +8747,30 @@ class GameplayStateFold:
             }
             if item_pickup_effect is not None:
                 details["item_pickup_effect"] = item_pickup_effect
+            if acquisition_response is not None:
+                details["item_acquisition_response"] = acquisition_response
+            if opcode_111_response is not None:
+                details["client_opcode_111_response"] = opcode_111_response
             self._event(frame, "inventory_change_set_received", details=details)
+            has_extended_item_metadata = any(
+                modification.operation == InventoryModification.ADD
+                for modification in change_set.modifications
+            )
             return self._observation(
                 frame,
                 kind="inventory_change_set",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.PARTIAL
+                    if has_extended_item_metadata
+                    else ShapeCoverage.FULL
+                ),
                 parsed=change_set,
                 details=details,
                 issues=(
-                    "inventory update flag and extended item metadata roles "
-                    "remain neutral",
-                ),
+                    "inventory add records retain opaque extended item metadata",
+                )
+                if has_extended_item_metadata
+                else (),
             )
         if opcode == 42:
             header = LocalTemporaryStatSetHeader.parse(payload)
@@ -6541,6 +9026,176 @@ class GameplayStateFold:
                     "current": current_value,
                 }
                 self.state.player_stat_fields_updated[field_name] += 1
+            client_recovery_responses: list[dict[str, object]] = []
+            for stat_name, maximum_name in (
+                ("current_hp", "max_hp"),
+                ("current_mp", "max_mp"),
+            ):
+                if stat_name not in changes:
+                    continue
+                pending = next(
+                    (
+                        candidate
+                        for candidate in self._pending_client_recoveries[
+                            stat_name
+                        ]
+                        if candidate[2] == self.state.field_epoch
+                    ),
+                    None,
+                )
+                if pending is None:
+                    continue
+                (
+                    request_frame_index,
+                    request_timestamp_ns,
+                    _,
+                    request,
+                ) = pending
+                previous_value = changes[stat_name]["previous"]
+                current_value = changes[stat_name]["current"]
+                if current_value is None:
+                    continue
+                actual_increment = (
+                    None
+                    if previous_value is None
+                    else current_value - previous_value
+                )
+                expected_increment = request.recovery_amount
+                maximum_value = getattr(self.state, maximum_name)
+                if actual_increment is None:
+                    amount_match = "unverified"
+                elif actual_increment == expected_increment:
+                    amount_match = "exact"
+                elif (
+                    0 <= actual_increment < expected_increment
+                    and maximum_value is not None
+                    and current_value == maximum_value
+                ):
+                    amount_match = "capped"
+                else:
+                    continue
+                response_ms = round(
+                    (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                    3,
+                )
+                self._pending_client_recoveries[stat_name].remove(pending)
+                self.state.pending_client_recovery_requests -= 1
+                self.state.client_recovery_stat_update_matches += 1
+                if amount_match == "exact":
+                    self.state.client_recovery_exact_amount_matches += 1
+                elif amount_match == "capped":
+                    self.state.client_recovery_capped_amount_matches += 1
+                else:
+                    self.state.client_recovery_unverified_amount_matches += 1
+                self.state.last_client_recovery_response_ms = response_ms
+                self.state.max_client_recovery_response_ms = max(
+                    self.state.max_client_recovery_response_ms or 0.0,
+                    response_ms,
+                )
+                client_recovery_responses.append(
+                    {
+                        "request_frame": request_frame_index,
+                        "stat": stat_name,
+                        "requested_increment": expected_increment,
+                        "actual_increment": actual_increment,
+                        "amount_match": amount_match,
+                        "response_ms": response_ms,
+                        "field_epoch": self.state.field_epoch,
+                    }
+                )
+            ability_point_allocation: dict[str, object] | None = None
+            pending_allocation = next(
+                (
+                    pending
+                    for pending in self._pending_ability_point_allocations
+                    if "ability_points" in update.values
+                    and all(
+                        allocation.stat_name in update.values
+                        for allocation in pending.request.allocations
+                    )
+                ),
+                None,
+            )
+            if pending_allocation is not None:
+                previous_stat_values = dict(
+                    pending_allocation.previous_stat_values
+                )
+                actual_increments: dict[str, int | None] = {}
+                for allocation in pending_allocation.request.allocations:
+                    previous_value = previous_stat_values[allocation.stat_name]
+                    current_value = update.values[allocation.stat_name]
+                    actual_increments[allocation.stat_name] = (
+                        None
+                        if previous_value is None
+                        else current_value - previous_value
+                    )
+                current_ability_points = update.values["ability_points"]
+                ability_points_spent = (
+                    None
+                    if pending_allocation.previous_ability_points is None
+                    else (
+                        pending_allocation.previous_ability_points
+                        - current_ability_points
+                    )
+                )
+                response_ms = (
+                    frame.timestamp_ns
+                    - pending_allocation.request_timestamp_ns
+                ) / 1e6
+                increments_match = all(
+                    actual_increments[allocation.stat_name]
+                    == allocation.increment
+                    for allocation in pending_allocation.request.allocations
+                )
+                matches: bool | None = (
+                    None
+                    if ability_points_spent is None
+                    or any(
+                        increment is None
+                        for increment in actual_increments.values()
+                    )
+                    else (
+                        increments_match
+                        and ability_points_spent
+                        == pending_allocation.request.total_increment
+                    )
+                )
+                ability_point_allocation = {
+                    "request_frame": pending_allocation.request_frame_index,
+                    "requested_increments": {
+                        allocation.stat_name: allocation.increment
+                        for allocation in pending_allocation.request.allocations
+                    },
+                    "actual_increments": actual_increments,
+                    "requested_total": (
+                        pending_allocation.request.total_increment
+                    ),
+                    "ability_points_spent": ability_points_spent,
+                    "matches": matches,
+                    "response_ms": round(response_ms, 3),
+                }
+                self.state.ability_point_allocation_responses += 1
+                self.state.last_ability_point_allocation_response_ms = (
+                    response_ms
+                )
+                self.state.max_ability_point_allocation_response_ms = max(
+                    self.state.max_ability_point_allocation_response_ms or 0.0,
+                    response_ms,
+                )
+                if matches is True:
+                    self.state.ability_point_allocation_response_matches += 1
+                elif matches is False:
+                    self.state.ability_point_allocation_response_mismatches += 1
+                    self.warnings.append(
+                        "ability-point allocation response did not apply the "
+                        "requested increments"
+                    )
+                else:
+                    self.state.ability_point_allocation_response_unverified += 1
+                self._pending_ability_point_allocations.remove(
+                    pending_allocation
+                )
+                self.state.pending_ability_point_allocations -= 1
             item_use_effect: dict[str, object] | None = None
             pending_item_use = next(
                 (
@@ -6623,32 +9278,29 @@ class GameplayStateFold:
                 "stat_mask": f"0x{update.stat_mask:08x}",
                 "changes": changes,
                 "changed_field_count": len(changes),
-                "tail_variant": (
-                    "single_zero"
-                    if update.opaque_tail == b"\x00"
-                    else "double_one"
-                ),
+                "trailing_flag": update.trailing_flag,
+                "trailing_value": update.trailing_value,
                 "field_epoch": self.state.field_epoch,
             }
             if item_use_effect is not None:
                 details["item_use_effect"] = item_use_effect
             if item_pickup_effect is not None:
                 details["item_pickup_effect"] = item_pickup_effect
-            self._event(frame, "player_stats_updated", details=details)
-            issues = [
-                "stat update request flag and final marker semantics remain neutral"
-            ]
-            if update.stat_mask == 0:
-                issues.append(
-                    "zero-mask single-zero/double-one variant remains opaque"
+            if ability_point_allocation is not None:
+                details["ability_point_allocation"] = (
+                    ability_point_allocation
                 )
+            if client_recovery_responses:
+                details["client_recovery_responses"] = (
+                    client_recovery_responses
+                )
+            self._event(frame, "player_stats_updated", details=details)
             return self._observation(
                 frame,
                 kind="character_stat_update",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=update,
                 details=details,
-                issues=tuple(issues),
             )
         if opcode == 49 and len(payload) > 2 and payload[2] == 0:
             notice = PickupGainNotice.parse(payload)
@@ -6753,14 +9405,18 @@ class GameplayStateFold:
                 details.update(
                     {
                         "drop": alias,
-                        "request_frame": pending.request_frame_index,
+                        "request_frame": pending.last_request_frame_index,
+                        "first_request_frame": (
+                            pending.first_request_frame_index
+                        ),
+                        "request_attempts": pending.attempts,
                         "effect": effect,
                         "effect_matches_notice": result_matches,
                         "spawn_matches_notice": spawn_matches_notice,
                         "response_ms": round(
                             (
                                 frame.timestamp_ns
-                                - pending.request_timestamp_ns
+                                - pending.last_request_timestamp_ns
                             )
                             / 1e6,
                             3,
@@ -6787,13 +9443,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="pickup_gain_notice",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=notice,
                 details=details,
-                issues=(
-                    "pickup result flag, mesos subtype/tail, and special-value "
-                    "semantics remain neutral",
-                ),
             )
         if opcode == 49:
             envelope = ServerOpcode49Envelope.parse(payload)
@@ -6882,6 +9534,16 @@ class GameplayStateFold:
             self.state.field_drops[spawn.drop_object_id] = FieldDropEntity(
                 alias=alias,
                 spawn=spawn,
+                first_spawn_frame_index=(
+                    frame.index
+                    if existing is None
+                    else existing.first_spawn_frame_index
+                ),
+                first_spawn_timestamp_ns=(
+                    frame.timestamp_ns
+                    if existing is None
+                    else existing.first_spawn_timestamp_ns
+                ),
             )
             details: dict[str, object] = {
                 **spawn.safe_dict(),
@@ -6910,13 +9572,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="field_drop_spawn",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=spawn,
                 details=details,
-                issues=(
-                    "drop spawn-mode, ownership values/flag, expiration, and "
-                    "final-flag roles remain neutral",
-                ),
             )
         if opcode == 312 and len(payload) in {7, 11, 15}:
             removal = FieldDropRemoval.parse(payload)
@@ -6960,19 +9618,33 @@ class GameplayStateFold:
             if removal.actor_id is not None:
                 identifiers["actor_id"] = removal.actor_id
             if pending is not None:
+                expected_removal_reason = (
+                    2 if pending.request.opcode == 222 else 5
+                )
                 removal_matches = (
                     pending.result_confirmed
-                    and removal.reason == 5
+                    and removal.reason == expected_removal_reason
+                )
+                chain_interrupted = (
+                    not pending.result_confirmed
+                    and pending.effect is None
+                    and removal.reason != expected_removal_reason
                 )
                 details.update(
                     {
-                        "request_frame": pending.request_frame_index,
+                        "request_frame": pending.last_request_frame_index,
+                        "first_request_frame": (
+                            pending.first_request_frame_index
+                        ),
+                        "request_attempts": pending.attempts,
                         "result_confirmed": pending.result_confirmed,
+                        "expected_removal_reason": expected_removal_reason,
                         "pickup_removal_matches": removal_matches,
+                        "pickup_chain_interrupted": chain_interrupted,
                         "response_ms": round(
                             (
                                 frame.timestamp_ns
-                                - pending.request_timestamp_ns
+                                - pending.last_request_timestamp_ns
                             )
                             / 1e6,
                             3,
@@ -6981,6 +9653,8 @@ class GameplayStateFold:
                 )
                 if removal_matches:
                     self.state.item_pickup_removal_matches += 1
+                elif chain_interrupted:
+                    self.state.item_pickup_interrupted_chains += 1
                 else:
                     self.state.item_pickup_removal_mismatches += 1
                     self.warnings.append(
@@ -6998,13 +9672,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="field_drop_removal",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=removal,
                 details=details,
-                issues=(
-                    "drop-removal reason, actor role, and trailing value "
-                    "semantics remain neutral",
-                ),
             )
         if opcode == 9:
             termination = WorldSessionTermination.parse(payload)
@@ -7069,9 +9739,49 @@ class GameplayStateFold:
             )
             cleared_players = len(self.state.observed_players)
             cleared_drops = len(self.state.field_drops)
-            cleared_positioned_effects = len(
-                self.state.positioned_effect_entities
+            cleared_reactors = len(self.state.reactors)
+            cleared_reactor_hit_requests = sum(
+                len(pending) for pending in self._pending_reactor_hits.values()
             )
+            cleared_chair_sit_intent = (
+                self.state.requested_chair_item_id is not None
+            )
+            cleared_npc_interaction_requests = len(
+                self._pending_npc_interactions
+            )
+            cleared_npc_state_submissions = sum(
+                len(pending)
+                for pending in self._pending_npc_state_submissions.values()
+            )
+            cleared_client_recovery_requests = sum(
+                len(pending)
+                for pending in self._pending_client_recoveries.values()
+            )
+            pending_field_transfer = (
+                self._pending_field_transfers.popleft()
+                if self._pending_field_transfers
+                else None
+            )
+            cleared_field_transfers = len(self._pending_field_transfers)
+            field_transfer_response_ms: float | None = None
+            if pending_field_transfer is not None:
+                field_transfer_response_ms = (
+                    frame.timestamp_ns
+                    - pending_field_transfer.request_timestamp_ns
+                ) / 1e6
+                self.state.matched_client_field_transfers += 1
+                self.state.last_client_field_transfer_response_ms = (
+                    field_transfer_response_ms
+                )
+                self.state.max_client_field_transfer_response_ms = max(
+                    self.state.max_client_field_transfer_response_ms or 0.0,
+                    field_transfer_response_ms,
+                )
+            self.state.client_field_transfers_cleared_on_field_change += (
+                cleared_field_transfers
+            )
+            self._pending_field_transfers.clear()
+            self.state.pending_client_field_transfers = 0
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -7087,7 +9797,13 @@ class GameplayStateFold:
             self.state.mob_templates.clear()
             self.state.observed_players.clear()
             self.state.field_drops.clear()
-            self.state.positioned_effect_entities.clear()
+            self.state.reactors.clear()
+            self._pending_reactor_hits.clear()
+            self.state.pending_reactor_hit_requests = 0
+            self.state.reactor_hits_cleared_on_field_change += (
+                cleared_reactor_hit_requests
+            )
+            self._last_mob_controller_releases.clear()
             self.state.player_x = None
             self.state.player_y = None
             self._drop_aliases.clear()
@@ -7097,6 +9813,17 @@ class GameplayStateFold:
             self.state.pending_item_uses = 0
             self._pending_item_pickups.clear()
             self.state.pending_item_pickups = 0
+            self._pending_npc_interactions.clear()
+            self.state.pending_npc_interaction_requests = 0
+            self._pending_npc_state_submissions.clear()
+            self.state.pending_npc_state_submissions = 0
+            self.state.npc_state_submissions_cleared_on_field_change += (
+                cleared_npc_state_submissions
+            )
+            for pending in self._pending_client_recoveries.values():
+                pending.clear()
+            self.state.pending_client_recovery_requests = 0
+            self.state.requested_chair_item_id = None
             cleared_client_attack_effects = sum(
                 len(pending)
                 for pending in self._pending_client_attacks.values()
@@ -7117,7 +9844,20 @@ class GameplayStateFold:
                 ),
                 "cleared_players": cleared_players,
                 "cleared_drops": cleared_drops,
-                "cleared_positioned_effects": cleared_positioned_effects,
+                "cleared_reactors": cleared_reactors,
+                "cleared_reactor_hit_requests": cleared_reactor_hit_requests,
+                "cleared_chair_sit_intent": cleared_chair_sit_intent,
+                "cleared_npc_interaction_requests": (
+                    cleared_npc_interaction_requests
+                ),
+                "cleared_npc_state_submissions": (
+                    cleared_npc_state_submissions
+                ),
+                "cleared_client_recovery_requests": (
+                    cleared_client_recovery_requests
+                ),
+                "matched_field_transfer": pending_field_transfer is not None,
+                "cleared_field_transfer_requests": cleared_field_transfers,
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
                 ),
@@ -7131,6 +9871,20 @@ class GameplayStateFold:
                     )
                 ),
             }
+            if pending_field_transfer is not None:
+                details.update(
+                    {
+                        "field_transfer_request_frame": (
+                            pending_field_transfer.request_frame_index
+                        ),
+                        "field_transfer_variant": (
+                            pending_field_transfer.request.variant
+                        ),
+                        "field_transfer_response_ms": round(
+                            field_transfer_response_ms or 0.0, 3
+                        ),
+                    }
+                )
             event_identifiers: dict[str, object] = {}
             if initial_snapshot is not None:
                 character = initial_snapshot.character
@@ -7186,6 +9940,16 @@ class GameplayStateFold:
                     )
                     for group in inventory.groups
                 }
+                logical_equip_items = logical_equip_inventory(
+                    self.state.inventory_items
+                )
+                if logical_equip_items:
+                    self.state.inventory_items["equip"] = tuple(
+                        sorted(
+                            logical_equip_items.values(),
+                            key=lambda item: item.slot,
+                        )
+                    )
                 self.state.skill_levels = dict(progression.skill_levels)
                 self.state.string_property_code_units = {
                     key: len(value.encode("utf-16-le")) // 2
@@ -7418,13 +10182,30 @@ class GameplayStateFold:
                 self.state.keyboard_binding_selector_counts = Counter(
                     entry.selector for entry in variable_record.entries
                 )
+                self.state.keyboard_binding_types = {
+                    key_code: entry.selector
+                    for key_code, entry in enumerate(variable_record.entries)
+                }
                 self.state.keyboard_skill_bindings = (
                     variable_record.keyboard_skill_bindings
+                )
+                self.state.keyboard_item_bindings = (
+                    variable_record.keyboard_item_bindings
+                )
+                self.state.keyboard_menu_bindings = (
+                    variable_record.keyboard_menu_bindings
+                )
+                self.state.keyboard_face_expression_bindings = (
+                    variable_record.keyboard_face_expression_bindings
                 )
                 self.state.keyboard_known_skill_bindings = sum(
                     skill_id in self.state.skill_levels
                     for skill_id in self.state.keyboard_skill_bindings.values()
                 )
+                self.state.keyboard_action_bindings = (
+                    variable_record.keyboard_action_bindings
+                )
+                self.state.pickup_key_codes = variable_record.pickup_key_codes
                 self.state.left_ctrl_skill_id = (
                     variable_record.left_ctrl_skill_id
                 )
@@ -7448,9 +10229,32 @@ class GameplayStateFold:
                 "nonzero_keyboard_selector_count": (
                     variable_record.nonzero_keyboard_selector_count
                 ),
+                "empty_binding_count": (
+                    variable_record.empty_keyboard_binding_count
+                ),
                 "skill_binding_count": len(
                     variable_record.keyboard_skill_bindings
                 ),
+                "item_binding_count": len(
+                    variable_record.keyboard_item_bindings
+                ),
+                "menu_binding_count": len(
+                    variable_record.keyboard_menu_bindings
+                ),
+                "action_binding_count": len(
+                    variable_record.keyboard_action_bindings
+                ),
+                "face_expression_binding_count": len(
+                    variable_record.keyboard_face_expression_bindings
+                ),
+                "pickup_binding_count": len(
+                    variable_record.pickup_key_codes
+                ),
+                "pickup_key_codes": variable_record.pickup_key_codes,
+                "sit_binding_count": len(variable_record.sit_key_codes),
+                "sit_key_codes": variable_record.sit_key_codes,
+                "attack_binding_count": len(variable_record.attack_key_codes),
+                "attack_key_codes": variable_record.attack_key_codes,
                 "known_skill_binding_count": (
                     self.state.keyboard_known_skill_bindings
                     if opcode == 385 and not variable_record.variant
@@ -7866,57 +10670,128 @@ class GameplayStateFold:
             )
         if opcode in {320, 322, 323}:
             if opcode == 320:
-                effect_record = ServerOpcode320PositionedEffectRecord.parse(payload)
+                reactor_packet = ServerReactorStateUpdate.parse(payload)
             elif opcode == 322:
-                effect_record = ServerOpcode322PositionedEffectRecord.parse(payload)
+                reactor_packet = ServerReactorSpawn.parse(payload)
             else:
-                effect_record = ServerOpcode323PositionedEffectRecord.parse(payload)
-            primary_value = effect_record.primary_value
-            existing = self.state.positioned_effect_entities.get(primary_value)
-            new_entity = existing is None
+                reactor_packet = ServerReactorRemoval.parse(payload)
+            object_id = reactor_packet.reactor_object_id
+            existing = self.state.reactors.get(object_id)
+            new_reactor = existing is None
             if existing is None:
                 alias = self._alias(
-                    self._positioned_effect_aliases,
-                    primary_value,
-                    "effect",
+                    self._reactor_aliases,
+                    object_id,
+                    "reactor",
                 )
-                existing = PositionedEffectEntity(
+                existing = ReactorEntity(
                     alias=alias,
-                    x=effect_record.x,
-                    y=effect_record.y,
+                    x=reactor_packet.x,
+                    y=reactor_packet.y,
                     last_opcode=opcode,
+                    reactor_id=(
+                        reactor_packet.reactor_id if opcode == 322 else None
+                    ),
+                    state=reactor_packet.state,
+                    spawn_flag=(
+                        reactor_packet.spawn_flag if opcode == 322 else None
+                    ),
                 )
-                self.state.positioned_effect_entities[primary_value] = existing
-                self.state.positioned_effect_new_entities += 1
-                if opcode == 323:
-                    self.state.positioned_effect_unknown_updates += 1
+                self.state.reactors[object_id] = existing
+                if opcode != 322:
+                    self.state.reactor_unknown_updates += 1
             else:
-                existing.x = effect_record.x
-                existing.y = effect_record.y
+                existing.x = reactor_packet.x
+                existing.y = reactor_packet.y
                 existing.last_opcode = opcode
-                self.state.positioned_effect_updates += 1
-            self.state.positioned_effect_records += 1
-            self.state.positioned_effect_records_by_opcode[opcode] += 1
-            self.state.positioned_effect_control_values[
-                f"{opcode}:{effect_record.control_value}"
-            ] += 1
-            details = {
-                "entity": existing.alias,
-                **effect_record.safe_dict(),
-                "new_entity": new_entity,
+                existing.state = reactor_packet.state
+                if opcode == 322:
+                    existing.reactor_id = reactor_packet.reactor_id
+                    existing.spawn_flag = reactor_packet.spawn_flag
+            if opcode == 322:
+                self.state.reactor_spawns += 1
+            elif opcode == 320:
+                self.state.reactor_state_updates += 1
+            else:
+                self.state.reactor_removals += 1
+            self.state.reactor_packets += 1
+            self.state.reactor_packets_by_opcode[opcode] += 1
+            self.state.reactor_states[f"{opcode}:{reactor_packet.state}"] += 1
+
+            pending_queue = (
+                self._pending_reactor_hits.get(object_id)
+                if opcode in {320, 323}
+                else None
+            )
+            pending_hit = pending_queue.popleft() if pending_queue else None
+            if pending_queue is not None and not pending_queue:
+                del self._pending_reactor_hits[object_id]
+            response_ms: float | None = None
+            stance_matches: bool | None = None
+            if pending_hit is not None:
+                response_ms = (
+                    frame.timestamp_ns - pending_hit.request_timestamp_ns
+                ) / 1e6
+                self.state.matched_reactor_hit_requests += 1
+                self.state.pending_reactor_hit_requests -= 1
+                self.state.last_reactor_hit_response_ms = response_ms
+                self.state.max_reactor_hit_response_ms = max(
+                    self.state.max_reactor_hit_response_ms or 0.0,
+                    response_ms,
+                )
+                if opcode == 320:
+                    self.state.matched_reactor_state_updates += 1
+                    stance_matches = (
+                        pending_hit.request.stance == reactor_packet.stance
+                    )
+                    if stance_matches:
+                        self.state.reactor_hit_stance_matches += 1
+                    else:
+                        self.state.reactor_hit_stance_mismatches += 1
+                else:
+                    self.state.matched_reactor_removals += 1
+
+            details: dict[str, object] = {
+                "reactor": existing.alias,
+                **reactor_packet.safe_dict(),
+                "new_reactor": new_reactor,
+                "matched_hit_request": pending_hit is not None,
                 "field_epoch": self.state.field_epoch,
             }
+            if pending_hit is not None:
+                details.update(
+                    {
+                        "hit_request_frame": pending_hit.request_frame_index,
+                        "hit_response_ms": round(response_ms or 0.0, 3),
+                    }
+                )
+            if stance_matches is not None:
+                details["hit_stance_matches"] = stance_matches
             self._event(
                 frame,
-                "positioned_effect_observed",
+                (
+                    "reactor_spawned"
+                    if opcode == 322
+                    else "reactor_state_updated"
+                    if opcode == 320
+                    else "reactor_removed"
+                ),
                 details=details,
-                identifiers={"primary_value": primary_value},
+                identifiers={"object_id": object_id},
             )
+            if opcode == 323:
+                self.state.reactors.pop(object_id, None)
             return self._observation(
                 frame,
-                kind="positioned_effect_record",
+                kind=(
+                    "reactor_spawn"
+                    if opcode == 322
+                    else "reactor_state_update"
+                    if opcode == 320
+                    else "reactor_removal"
+                ),
                 coverage=ShapeCoverage.FULL,
-                parsed=effect_record,
+                parsed=reactor_packet,
                 details=details,
             )
         if opcode == 169:
@@ -7952,6 +10827,43 @@ class GameplayStateFold:
             }
         ):
             envelope = ServerOpcode348TextEnvelope.parse(payload)
+            npc_interaction_response: dict[str, object] | None = None
+            npc_interaction_identifiers: dict[str, object] = {}
+            if self._pending_npc_interactions:
+                (
+                    request_frame_index,
+                    request_timestamp_ns,
+                    request_field_epoch,
+                    request,
+                ) = self._pending_npc_interactions[0]
+                if request_field_epoch == self.state.field_epoch:
+                    self._pending_npc_interactions.popleft()
+                    self.state.pending_npc_interaction_requests -= 1
+                    self.state.npc_interaction_server_348_matches += 1
+                    response_ms = round(
+                        (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                        3,
+                    )
+                    self.state.last_npc_interaction_response_ms = response_ms
+                    self.state.max_npc_interaction_response_ms = max(
+                        self.state.max_npc_interaction_response_ms or 0.0,
+                        response_ms,
+                    )
+                    npc_interaction_response = {
+                        "request_frame": request_frame_index,
+                        "response_ms": response_ms,
+                        "npc": self._alias(
+                            self._npc_aliases,
+                            request.npc_object_id,
+                            "npc",
+                        ),
+                        "position_x": request.position_x,
+                        "position_y": request.position_y,
+                        "field_epoch": self.state.field_epoch,
+                    }
+                    npc_interaction_identifiers["npc_object_id"] = (
+                        request.npc_object_id
+                    )
             pending = self._pending_server_opcode_348.setdefault(
                 envelope.selector, deque()
             )
@@ -7974,11 +10886,18 @@ class GameplayStateFold:
                 ),
                 "field_epoch": self.state.field_epoch,
             }
+            if npc_interaction_response is not None:
+                details["npc_interaction_response"] = (
+                    npc_interaction_response
+                )
             self._event(
                 frame,
                 "server_opcode_348_received",
                 details=details,
-                identifiers={"primary_value": envelope.primary_value},
+                identifiers={
+                    "primary_value": envelope.primary_value,
+                    **npc_interaction_identifiers,
+                },
             )
             return self._observation(
                 frame,
@@ -8216,7 +11135,12 @@ class GameplayStateFold:
                     f"{alias} was respawned with a different shape in field "
                     f"epoch {self.state.field_epoch}"
                 )
-            self.state.npcs[spawn.object_id] = NpcEntity(alias=alias, spawn=spawn)
+            self.state.npcs[spawn.object_id] = NpcEntity(
+                alias=alias,
+                spawn=spawn,
+                x=spawn.x,
+                y=spawn.cy,
+            )
             self.state.npc_spawns += 1
             details = {
                 "entity": alias,
@@ -8260,7 +11184,10 @@ class GameplayStateFold:
                         f"shape in field epoch {self.state.field_epoch}"
                     )
                 self.state.npcs[lifecycle.object_id] = NpcEntity(
-                    alias=alias, spawn=spawn
+                    alias=alias,
+                    spawn=spawn,
+                    x=spawn.x,
+                    y=spawn.cy,
                 )
                 self.state.npc_spawns += 1
                 self.state.npc_lifecycle_spawns += 1
@@ -8322,6 +11249,8 @@ class GameplayStateFold:
             if entity is not None:
                 entity.action = update.action
                 entity.parameter = update.parameter
+                if update.movement is not None:
+                    entity.x, entity.y = update.movement.final_position
             else:
                 warning_key = (self.state.field_epoch, update.object_id)
                 if warning_key not in self._unknown_npc_updates:
@@ -8331,14 +11260,43 @@ class GameplayStateFold:
                         f"epoch {self.state.field_epoch}"
                     )
             self.state.npc_state_updates += 1
+            if update.movement is not None:
+                self.state.npc_state_updates_with_movement += 1
+                self.state.npc_state_update_commands += len(
+                    update.movement.commands
+                )
+                self.state.npc_state_update_commands_by_type.update(
+                    command.command_type
+                    for command in update.movement.commands
+                )
+            pending_queue = self._pending_npc_state_submissions.get(payload)
+            pending = pending_queue.popleft() if pending_queue else None
+            if pending_queue is not None and not pending_queue:
+                self._pending_npc_state_submissions.pop(payload)
+            if pending is None:
+                self.state.npc_state_updates_without_submission += 1
+                response_ms = None
+            else:
+                self.state.npc_state_submission_matches += 1
+                self.state.pending_npc_state_submissions -= 1
+                response_ms = (
+                    frame.timestamp_ns - pending.request_timestamp_ns
+                ) / 1_000_000
+                self.state.last_npc_state_response_ms = response_ms
+                self.state.max_npc_state_response_ms = max(
+                    response_ms,
+                    self.state.max_npc_state_response_ms or response_ms,
+                )
             details = {
                 "entity": alias,
                 "known_entity": known_entity,
-                "action": update.action,
-                "parameter": update.parameter,
-                "opaque_tail_bytes": len(update.opaque_tail),
+                **update.safe_dict(),
+                "matched_client_submission": pending is not None,
+                "response_ms": response_ms,
                 "field_epoch": self.state.field_epoch,
             }
+            if pending is not None:
+                details["request_frame_index"] = pending.request_frame_index
             self._event(
                 frame,
                 "npc_state_updated",
@@ -8348,18 +11306,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="npc_state_update",
-                coverage=(
-                    ShapeCoverage.PARTIAL
-                    if update.opaque_tail
-                    else ShapeCoverage.FULL
-                ),
+                coverage=ShapeCoverage.FULL,
                 parsed=update,
                 details=details,
-                issues=(
-                    ("NPC state-update tail remains opaque",)
-                    if update.opaque_tail
-                    else ()
-                ),
             )
         if opcode == 189:
             entered = RemotePlayerEnterField.parse(payload)
@@ -8483,10 +11432,15 @@ class GameplayStateFold:
         if opcode == 217:
             broadcast = LifeMovementBroadcast.parse(payload)
             path = broadcast.movement
+            commands_typed = all(command.is_typed for command in path.commands)
             alias = self._alias(
                 self._player_aliases, broadcast.object_id, "player"
             )
             known_player = broadcast.object_id in self.state.observed_players
+            final_position = path.final_position
+            if known_player and final_position is not None:
+                player = self.state.observed_players[broadcast.object_id]
+                player.x, player.y = final_position
             self.state.life_movement_broadcasts += 1
             self.state.life_movement_broadcast_commands += len(path.commands)
             self.state.life_movement_broadcast_commands_by_type.update(
@@ -8500,6 +11454,7 @@ class GameplayStateFold:
                 "entity": alias,
                 "known_player": known_player,
                 **path.safe_dict(),
+                "final_position": final_position,
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -8511,10 +11466,18 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="life_movement_broadcast",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.FULL
+                    if commands_typed
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=broadcast,
                 details=details,
-                issues=("life movement command payload roles remain opaque",),
+                issues=(
+                    ()
+                    if commands_typed
+                    else ("life movement contains opaque command types",)
+                ),
             )
         if opcode == 202:
             broadcast = PlayerMovementBroadcast.parse(payload)
@@ -8564,18 +11527,15 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="player_movement_broadcast",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=broadcast,
                 details=details,
-                issues=(
-                    "player movement control value and type-3 command "
-                    "meaning remain opaque",
-                ),
             )
         if opcode == 279:
             entered = MobEnterField.parse(payload)
             alias = self._alias(self._mob_aliases, entered.object_id, "mob")
             existing = self.state.mobs.get(entered.object_id)
+            self._last_mob_controller_releases.pop(entered.object_id, None)
             cleared_client_attack_effects = len(
                 self._pending_client_attacks.pop(entered.object_id, ())
             )
@@ -8621,10 +11581,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="mob_enter_field",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=entered,
                 details=details,
-                issues=("mob temporary status and spawn tail remain opaque",),
             )
         if opcode == 280:
             left = MobLeaveField.parse(payload)
@@ -8680,6 +11639,7 @@ class GameplayStateFold:
             entity = self.state.mobs.get(change.object_id)
             known_entity = entity is not None
             if change.spawn is not None:
+                self._last_mob_controller_releases.pop(change.object_id, None)
                 self.state.mob_templates[change.object_id] = (
                     change.spawn.template_id
                 )
@@ -8693,8 +11653,13 @@ class GameplayStateFold:
                 entity.foothold_id = change.spawn.foothold_id
                 entity.stance = change.spawn.stance
                 entity.controller_level = change.control_level
-            elif entity is not None:
-                entity.controller_level = 0
+            else:
+                self._last_mob_controller_releases[change.object_id] = (
+                    frame.index,
+                    frame.timestamp_ns,
+                )
+                if entity is not None:
+                    entity.controller_level = 0
             self.state.mob_controller_changes += 1
             details = {
                 "entity": alias,
@@ -8705,28 +11670,39 @@ class GameplayStateFold:
             }
             if change.spawn is not None:
                 details.update(self._mob_spawn_details(change.spawn))
+            else:
+                source_drop_release_delays_ms = {
+                    drop.alias: round(
+                        (
+                            frame.timestamp_ns
+                            - drop.first_spawn_timestamp_ns
+                        )
+                        / 1e6,
+                        3,
+                    )
+                    for drop in self.state.field_drops.values()
+                    if drop.spawn.source_mob_object_id == change.object_id
+                    and drop.first_spawn_timestamp_ns is not None
+                }
+                details["source_drop_count"] = len(
+                    source_drop_release_delays_ms
+                )
+                if source_drop_release_delays_ms:
+                    details["source_drop_release_delays_ms"] = (
+                        source_drop_release_delays_ms
+                    )
             self._event(
                 frame,
                 "mob_controller_changed",
                 details=details,
                 identifiers={"object_id": change.object_id},
             )
-            issues = (
-                ("mob temporary status and spawn tail remain opaque",)
-                if change.spawn is not None
-                else ()
-            )
             return self._observation(
                 frame,
                 kind="mob_controller_change",
-                coverage=(
-                    ShapeCoverage.PARTIAL
-                    if change.spawn is not None
-                    else ShapeCoverage.FULL
-                ),
+                coverage=ShapeCoverage.FULL,
                 parsed=change,
                 details=details,
-                issues=issues,
             )
         if opcode == 282:
             broadcast = MobMovementBroadcast.parse(payload)
@@ -8771,7 +11747,10 @@ class GameplayStateFold:
             details = {
                 "entity": alias,
                 "known_entity": entity is not None,
-                "opaque_control_bytes": len(broadcast.opaque_control),
+                "control_flag_1": broadcast.control_flag_1,
+                "control_flag_2": broadcast.control_flag_2,
+                "control_selector": broadcast.control_selector,
+                "control_value": broadcast.control_value,
                 "reference_x": broadcast.reference_x,
                 "reference_y": broadcast.reference_y,
                 "command_count": len(broadcast.commands),
@@ -8803,10 +11782,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="mob_movement_broadcast",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=broadcast,
                 details=details,
-                issues=("server mob-movement control metadata remains opaque",),
             )
         if opcode == 283:
             acknowledgement = MobMovementAcknowledgement.parse(payload)
@@ -9612,6 +12590,59 @@ class GameplayStateFold:
                 "opcode-426 notifications had no captured client "
                 "opcode-309 acknowledgement"
             )
+        if self.state.npc_interaction_requests_for_unknown_npcs:
+            self.warnings.append(
+                f"{self.state.npc_interaction_requests_for_unknown_npcs} NPC "
+                "interaction requests targeted inactive field NPCs"
+            )
+        if self.state.npc_interaction_position_mismatches:
+            self.warnings.append(
+                f"{self.state.npc_interaction_position_mismatches} NPC "
+                "interaction request positions did not match the last "
+                "same-epoch client life-movement path"
+            )
+        if self.state.client_inner_portal_field_epoch_mismatches:
+            self.warnings.append(
+                f"{self.state.client_inner_portal_field_epoch_mismatches} "
+                "client inner-portal requests did not match the active field "
+                "epoch"
+            )
+        if self.state.client_field_transfer_epoch_mismatches:
+            self.warnings.append(
+                f"{self.state.client_field_transfer_epoch_mismatches} client "
+                "field-transfer requests did not match the active field epoch"
+            )
+        if self.state.pending_client_field_transfers:
+            self.warnings.append(
+                f"{self.state.pending_client_field_transfers} client "
+                "field-transfer requests had no following field snapshot"
+            )
+        if self.state.reactor_hit_stance_mismatches:
+            self.warnings.append(
+                f"{self.state.reactor_hit_stance_mismatches} reactor-hit "
+                "requests did not match the authoritative reactor stance"
+            )
+        if self.state.reactor_hit_requests_for_inactive_reactors:
+            self.warnings.append(
+                f"{self.state.reactor_hit_requests_for_inactive_reactors} "
+                "reactor-hit requests targeted no active reactor"
+            )
+        if self.state.pending_reactor_hit_requests:
+            self.warnings.append(
+                f"{self.state.pending_reactor_hit_requests} reactor-hit "
+                "requests had no following state update or removal"
+            )
+        if self.state.pending_npc_interaction_requests:
+            self.warnings.append(
+                f"{self.state.pending_npc_interaction_requests} NPC "
+                "interaction requests had no following same-epoch server "
+                "opcode-348 response"
+            )
+        if self.state.pending_client_opcode_111_actions:
+            self.warnings.append(
+                f"{self.state.pending_client_opcode_111_actions} client "
+                "opcode-111 actions had no following same-slot Cash update"
+            )
         if self.state.unmatched_client_opcode_66_acknowledgements:
             self.warnings.append(
                 f"{self.state.unmatched_client_opcode_66_acknowledgements} "
@@ -9668,6 +12699,21 @@ class GameplayStateFold:
                 f"{self.state.pending_item_uses} item-use requests had no "
                 "complete captured inventory/effect response"
             )
+        if self.state.pending_inventory_move_requests:
+            self.warnings.append(
+                f"{self.state.pending_inventory_move_requests} inventory-move "
+                "requests had no matching captured move update"
+            )
+        if self.state.pending_item_acquisition_requests:
+            self.warnings.append(
+                f"{self.state.pending_item_acquisition_requests} item-"
+                "acquisition requests had no matching captured inventory add"
+            )
+        if self.state.pending_npc_state_submissions:
+            self.warnings.append(
+                f"{self.state.pending_npc_state_submissions} client NPC state "
+                "submissions had no exact captured server state update"
+            )
         if self.state.pending_item_pickups:
             self.warnings.append(
                 f"{self.state.pending_item_pickups} item-pickup requests had no "
@@ -9703,7 +12749,19 @@ class GameplayStateFold:
                         self.state.pending_skill_record_update_acknowledgements
                     ),
                     "pending_item_uses": self.state.pending_item_uses,
+                    "pending_inventory_move_requests": (
+                        self.state.pending_inventory_move_requests
+                    ),
+                    "pending_item_acquisition_requests": (
+                        self.state.pending_item_acquisition_requests
+                    ),
+                    "pending_npc_state_submissions": (
+                        self.state.pending_npc_state_submissions
+                    ),
                     "pending_item_pickups": self.state.pending_item_pickups,
+                    "pending_reactor_hit_requests": (
+                        self.state.pending_reactor_hit_requests
+                    ),
                     "pending_client_attack_effects": (
                         self.state.pending_client_attack_effects
                     ),
@@ -9901,6 +12959,199 @@ def derive_item_use_response_policy(
         source_item_use_requests=state.item_use_requests,
         source_inventory_matches=state.item_use_inventory_matches,
         source_effect_matches=state.item_use_effect_matches,
+    )
+
+
+def derive_client_recovery_response_policy(
+    transcript: Transcript,
+) -> ClientRecoveryResponsePolicy:
+    """Build mutable natural-recovery state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_client_recovery_requests:
+        raise ValueError(
+            "world transcript has unresolved client-recovery correlations"
+        )
+    stats = (state.current_hp, state.max_hp, state.current_mp, state.max_mp)
+    if any(value is None for value in stats):
+        raise ValueError("world transcript has incomplete HP/MP state")
+    current_hp, max_hp, current_mp, max_mp = stats
+    assert current_hp is not None
+    assert max_hp is not None
+    assert current_mp is not None
+    assert max_mp is not None
+    return ClientRecoveryResponsePolicy(
+        current_hp=current_hp,
+        max_hp=max_hp,
+        current_mp=current_mp,
+        max_mp=max_mp,
+        field_epoch=state.field_epoch,
+        source_requests=state.client_recovery_requests,
+        source_stat_update_matches=(
+            state.client_recovery_stat_update_matches
+        ),
+        source_exact_amount_matches=(
+            state.client_recovery_exact_amount_matches
+        ),
+        source_capped_amount_matches=(
+            state.client_recovery_capped_amount_matches
+        ),
+        source_unverified_amount_matches=(
+            state.client_recovery_unverified_amount_matches
+        ),
+    )
+
+
+def derive_inventory_move_response_policy(
+    transcript: Transcript,
+) -> InventoryMoveResponsePolicy:
+    """Build mutable Equip-move state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_inventory_move_requests:
+        raise ValueError(
+            "world transcript has unresolved inventory-move correlations"
+        )
+    if state.inventory_move_request_matches != state.inventory_move_requests:
+        raise ValueError(
+            "world transcript has unmatched inventory-move requests"
+        )
+
+    equip_items = logical_equip_inventory(state.inventory_items)
+    if not equip_items:
+        raise ValueError("world transcript has no modeled Equip items")
+
+    return InventoryMoveResponsePolicy(
+        equip_items=equip_items,
+        field_epoch=state.field_epoch,
+        source_requests=state.inventory_move_requests,
+        source_matches=state.inventory_move_request_matches,
+    )
+
+
+def derive_ability_point_allocation_response_policy(
+    transcript: Transcript,
+) -> AbilityPointAllocationResponsePolicy:
+    """Build mutable base-stat/AP state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_ability_point_allocations:
+        raise ValueError(
+            "world transcript has unresolved ability-point allocations"
+        )
+    if (
+        state.ability_point_allocation_response_matches
+        != state.ability_point_allocation_requests
+    ):
+        raise ValueError(
+            "world transcript has unmatched ability-point allocations"
+        )
+    stat_values = (
+        state.strength,
+        state.dexterity,
+        state.intelligence,
+        state.luck,
+        state.ability_points,
+    )
+    if any(value is None for value in stat_values):
+        raise ValueError("world transcript has incomplete base-stat/AP state")
+    strength, dexterity, intelligence, luck, ability_points = stat_values
+    assert strength is not None
+    assert dexterity is not None
+    assert intelligence is not None
+    assert luck is not None
+    assert ability_points is not None
+    return AbilityPointAllocationResponsePolicy(
+        strength=strength,
+        dexterity=dexterity,
+        intelligence=intelligence,
+        luck=luck,
+        ability_points=ability_points,
+        field_epoch=state.field_epoch,
+        source_requests=state.ability_point_allocation_requests,
+        source_matches=state.ability_point_allocation_response_matches,
+        source_points=state.ability_points_requested,
+    )
+
+
+def derive_skill_level_change_response_policy(
+    transcript: Transcript,
+) -> SkillLevelChangeResponsePolicy:
+    """Build mutable SP/skill-level state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_skill_level_change_requests:
+        raise ValueError(
+            "world transcript has unresolved skill-level change requests"
+        )
+    if state.skill_record_request_matches != state.skill_level_change_requests:
+        raise ValueError(
+            "world transcript has unmatched skill-level change requests"
+        )
+    if state.pending_skill_record_update_acknowledgements:
+        raise ValueError(
+            "world transcript has unacknowledged skill-record updates"
+        )
+    if state.skill_points is None:
+        raise ValueError("world transcript has no modeled skill-point state")
+    if any(level < 0 for level in state.skill_levels.values()):
+        raise ValueError("world transcript has negative modeled skill levels")
+
+    return SkillLevelChangeResponsePolicy(
+        skill_points=state.skill_points,
+        skill_levels=dict(state.skill_levels),
+        field_epoch=state.field_epoch,
+        source_requests=state.skill_level_change_requests,
+        source_matches=state.skill_record_request_matches,
+        source_acknowledgements=(
+            state.matched_skill_record_update_acknowledgements
+        ),
+    )
+
+
+def derive_item_acquisition_response_policy(
+    transcript: Transcript,
+) -> ItemAcquisitionResponsePolicy:
+    """Build mutable permanent-Use acquisition state from a world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.inventory_region_bytes is None:
+        raise ValueError("world transcript has no modeled inventory snapshot")
+    use_items = {
+        item.slot: item for item in state.inventory_items.get("use", ())
+    }
+    return ItemAcquisitionResponsePolicy(
+        use_items=use_items,
+        field_epoch=state.field_epoch,
+    )
+
+
+def derive_npc_state_response_policy(
+    transcript: Transcript,
+) -> NpcStateResponsePolicy:
+    """Build active-NPC admission state from a validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    return NpcStateResponsePolicy(
+        active_npc_ids=set(analysis.state.npcs),
+        field_epoch=analysis.state.field_epoch,
     )
 
 
@@ -10138,7 +13389,7 @@ def build_mob_movement_planning_context(
     )
     stationary_shape_counts: Counter[int] = Counter()
     for broadcast in evidence_broadcasts:
-        if broadcast.opaque_control != MOB_MOVEMENT_CONTROL_PREFIX:
+        if broadcast.control_prefix != MOB_MOVEMENT_CONTROL_PREFIX:
             continue
         if len(broadcast.commands) != 1:
             continue
@@ -10325,7 +13576,10 @@ def plan_mob_movement_broadcast(
     if not path_requested:
         broadcast = MobMovementBroadcast(
             object_id=object_id,
-            opaque_control=control_prefix,
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=target_x,
             reference_y=target_y,
             commands=(
@@ -10352,7 +13606,7 @@ def plan_mob_movement_broadcast(
         for candidate in path_evidence_candidates:
             if (
                 candidate.template_id != template_id
-                or candidate.broadcast.opaque_control != control_prefix
+                or candidate.broadcast.control_prefix != control_prefix
                 or len(candidate.broadcast.commands) < 2
                 or any(
                     command.command_type != 0
@@ -10411,7 +13665,7 @@ def plan_mob_movement_broadcast(
                 "mob movement path evidence template does not match the "
                 f"active mob: {source_template_id} != {template_id}"
             )
-        if source_broadcast.opaque_control != control_prefix:
+        if source_broadcast.control_prefix != control_prefix:
             raise ValueError(
                 "mob movement path evidence does not use the dominant "
                 "captured control prefix"
@@ -10487,7 +13741,7 @@ def plan_mob_movement_broadcast(
         for evidence_path in path_evidence_candidates:
             if (
                 evidence_path.template_id != template_id
-                or evidence_path.broadcast.opaque_control != control_prefix
+                or evidence_path.broadcast.control_prefix != control_prefix
             ):
                 continue
             if evidence_path.relative_motion_shape == source_shape:
@@ -10501,7 +13755,10 @@ def plan_mob_movement_broadcast(
             mode = "translated_captured_path"
         broadcast = MobMovementBroadcast(
             object_id=object_id,
-            opaque_control=source_broadcast.opaque_control,
+            control_flag_1=source_broadcast.control_flag_1,
+            control_flag_2=source_broadcast.control_flag_2,
+            control_selector=source_broadcast.control_selector,
+            control_value=source_broadcast.control_value,
             reference_x=reference_x,
             reference_y=reference_y,
             commands=tuple(translated_commands),
@@ -10596,7 +13853,7 @@ def plan_composed_mob_movement_broadcasts(
     for path in context.captured_paths:
         if (
             path.template_id != template_id
-            or path.broadcast.opaque_control != control_prefix
+            or path.broadcast.control_prefix != control_prefix
             or len(path.broadcast.commands) < 2
             or path.relative_motion_shape is None
             or path.displacement is None
@@ -11126,7 +14383,7 @@ def plan_current_hp_stat_update(
             f"emitted current HP must be between 0 and {analysis.state.max_hp}"
         )
     update = CharacterStatUpdate(
-        request_flag=0,
+        request_flag=False,
         stat_mask=CharacterStatUpdate.CURRENT_HP,
         current_hp=current_hp,
     )
@@ -11389,6 +14646,12 @@ def render_gameplay_analysis(
     )
     event_counts = Counter(event.kind for event in analysis.events)
     state = analysis.state
+    empty_keyboard_binding_count = (
+        state.keyboard_binding_selector_counts.get(
+            VariableServerRecord.EMPTY_BINDING_SELECTOR,
+            0,
+        )
+    )
     movement_command_types = json.dumps(
         dict(sorted(state.movement_commands_by_type.items()))
     )
@@ -11462,20 +14725,14 @@ def render_gameplay_analysis(
     server_ranged_attack_projectile_ids = json.dumps(
         dict(sorted(state.server_ranged_attack_projectile_ids.items()))
     )
-    client_opcode_101_header_values = json.dumps(
-        dict(sorted(state.client_opcode_101_header_values.items()))
+    client_recovery_requests_by_stat = json.dumps(
+        dict(sorted(state.client_recovery_requests_by_stat.items()))
     )
-    client_opcode_101_primary_values = json.dumps(
-        dict(sorted(state.client_opcode_101_primary_values.items()))
+    client_hp_recovery_amounts = json.dumps(
+        dict(sorted(state.client_hp_recovery_amounts.items()))
     )
-    client_opcode_101_flag_values = json.dumps(
-        dict(sorted(state.client_opcode_101_flag_values.items()))
-    )
-    client_opcode_101_secondary_values = json.dumps(
-        dict(sorted(state.client_opcode_101_secondary_values.items()))
-    )
-    client_opcode_101_tail_values = json.dumps(
-        dict(sorted(state.client_opcode_101_tail_values.items()))
+    client_mp_recovery_amounts = json.dumps(
+        dict(sorted(state.client_mp_recovery_amounts.items()))
     )
     client_skill_use_requests_by_skill_id = json.dumps(
         dict(sorted(state.client_skill_use_requests_by_skill_id.items()))
@@ -11501,11 +14758,11 @@ def render_gameplay_analysis(
     server_opcode_77_control_patterns = json.dumps(
         dict(sorted(state.server_opcode_77_control_patterns.items()))
     )
-    client_opcode_217_record_formats = json.dumps(
-        dict(sorted(state.client_opcode_217_records_by_format.items()))
+    client_npc_state_command_types = json.dumps(
+        dict(sorted(state.client_npc_state_commands_by_type.items()))
     )
-    client_opcode_217_record_counts = json.dumps(
-        dict(sorted(state.client_opcode_217_record_counts.items()))
+    client_npc_state_command_counts = json.dumps(
+        dict(sorted(state.client_npc_state_command_counts.items()))
     )
     neutral_server_record_opcodes = json.dumps(
         dict(sorted(state.neutral_server_records_by_opcode.items()))
@@ -11522,8 +14779,8 @@ def render_gameplay_analysis(
     tutorial_ui_control_values = json.dumps(
         dict(sorted(state.tutorial_ui_control_values.items()))
     )
-    positioned_effect_opcodes = json.dumps(
-        dict(sorted(state.positioned_effect_records_by_opcode.items()))
+    reactor_opcodes = json.dumps(
+        dict(sorted(state.reactor_packets_by_opcode.items()))
     )
     player_stat_masks = json.dumps(
         {
@@ -11533,6 +14790,9 @@ def render_gameplay_analysis(
     )
     player_stat_fields = json.dumps(
         dict(sorted(state.player_stat_fields_updated.items()))
+    )
+    ability_points_requested_by_stat = json.dumps(
+        dict(sorted(state.ability_points_requested_by_stat.items()))
     )
     acknowledgement_template_values = json.dumps(
         {
@@ -11551,6 +14811,15 @@ def render_gameplay_analysis(
     )
     inventory_modification_operations = json.dumps(
         dict(sorted(state.inventory_modifications_by_operation.items()))
+    )
+    item_acquisition_inventories = json.dumps(
+        dict(sorted(state.client_item_acquisition_requests_by_inventory.items()))
+    )
+    item_acquisition_kinds = json.dumps(
+        dict(sorted(state.client_item_acquisition_requests_by_kind.items()))
+    )
+    item_acquisition_durations = json.dumps(
+        dict(sorted(state.client_item_acquisition_duration_values.items()))
     )
     lines = [
         f"source={analysis.source}",
@@ -11590,6 +14859,22 @@ def render_gameplay_analysis(
             f"zero_mask:{state.player_stat_zero_mask_updates}"
         ),
         (
+            "ability_point_allocation="
+            f"requests:{state.ability_point_allocation_requests} "
+            f"entries:{state.ability_point_allocation_entries} "
+            f"points:{state.ability_points_requested} "
+            f"by_stat:{ability_points_requested_by_stat} "
+            f"responses:{state.ability_point_allocation_responses} "
+            f"matches:{state.ability_point_allocation_response_matches} "
+            f"mismatches:{state.ability_point_allocation_response_mismatches} "
+            f"unverified:{state.ability_point_allocation_response_unverified} "
+            f"pending:{state.pending_ability_point_allocations} "
+            "last_ms:"
+            f"{state.last_ability_point_allocation_response_ms} "
+            "max_ms:"
+            f"{state.max_ability_point_allocation_response_ms}"
+        ),
+        (
             "inventory="
             f"counts:{inventory_item_counts} "
             f"region_bytes:{state.inventory_region_bytes} "
@@ -11598,7 +14883,45 @@ def render_gameplay_analysis(
             f"modifications:{state.inventory_modifications} "
             f"operations:{inventory_modification_operations} "
             f"empty_packets:{state.inventory_empty_change_packets} "
-            f"unknown_slots:{state.inventory_unknown_slot_modifications}"
+            f"unknown_slots:{state.inventory_unknown_slot_modifications} "
+            f"move_requests:{state.inventory_move_requests} "
+            f"move_matches:{state.inventory_move_request_matches} "
+            "move_updates_without_request:"
+            f"{state.inventory_move_updates_without_request} "
+            f"pending_moves:{state.pending_inventory_move_requests} "
+            f"last_move_ms:{state.last_inventory_move_response_ms} "
+            f"max_move_ms:{state.max_inventory_move_response_ms}"
+        ),
+        (
+            "item_acquisition="
+            f"requests:{state.client_item_acquisition_requests} "
+            f"inventories:{item_acquisition_inventories} "
+            f"kinds:{item_acquisition_kinds} "
+            f"durations:{item_acquisition_durations} "
+            "serial_values_present:"
+            f"{state.client_item_acquisition_serial_values_present} "
+            f"matches:{state.item_acquisition_matches} "
+            "quantity_matches:"
+            f"{state.item_acquisition_quantity_matches} "
+            "quantity_mismatches:"
+            f"{state.item_acquisition_quantity_mismatches} "
+            "quantity_unavailable:"
+            f"{state.item_acquisition_quantity_unavailable} "
+            f"pending:{state.pending_item_acquisition_requests} "
+            f"last_ms:{state.last_item_acquisition_response_ms} "
+            f"max_ms:{state.max_item_acquisition_response_ms}"
+        ),
+        (
+            f"chair=sit:{state.chair_sit_requests} "
+            f"setup_matches:{state.chair_sit_setup_matches} "
+            f"setup_mismatches:{state.chair_sit_setup_mismatches} "
+            f"recovery:{state.chair_recovery_requests} "
+            "recovery_with_open_sit:"
+            f"{state.chair_recovery_requests_with_open_sit} "
+            f"stand:{state.chair_stand_requests} "
+            "stand_with_open_sit:"
+            f"{state.chair_stand_requests_with_open_sit} "
+            f"requested_item:{state.requested_chair_item_id}"
         ),
         (
             f"item_use=requests:{state.item_use_requests} "
@@ -11613,6 +14936,7 @@ def render_gameplay_analysis(
         ),
         (
             f"item_pickup=requests:{state.item_pickup_requests} "
+            f"compact:{state.item_pickup_compact_requests} "
             f"base:{state.item_pickup_base_requests} "
             f"extended:{state.item_pickup_extended_requests} "
             f"epoch_matches:{state.item_pickup_field_epoch_matches} "
@@ -11630,8 +14954,12 @@ def render_gameplay_analysis(
             f"{state.item_pickup_inferred_mesos_baselines} "
             f"removal_matches:{state.item_pickup_removal_matches} "
             f"removal_mismatches:{state.item_pickup_removal_mismatches} "
+            f"interrupted:{state.item_pickup_interrupted_chains} "
             f"policy_rejections:{state.item_pickup_policy_rejections} "
             f"field_removals:{state.field_drop_removals} "
+            f"chains:{state.item_pickup_request_chains} "
+            f"retries:{state.item_pickup_request_retries} "
+            f"admitted_drops:{state.item_pickup_admitted_drops} "
             f"pending:{state.pending_item_pickups}"
         ),
         (
@@ -11689,8 +15017,17 @@ def render_gameplay_analysis(
         (
             f"keyboard_bindings=snapshots:{state.keyboard_binding_snapshots} "
             f"selectors:{dict(state.keyboard_binding_selector_counts)} "
+            f"empty_bindings:{empty_keyboard_binding_count} "
             f"skills:{dict(state.keyboard_skill_bindings)} "
+            f"items:{dict(state.keyboard_item_bindings)} "
+            f"menus:{dict(state.keyboard_menu_bindings)} "
             f"known_skills:{state.keyboard_known_skill_bindings} "
+            f"actions:{dict(state.keyboard_action_bindings)} "
+            "faces:"
+            f"{dict(state.keyboard_face_expression_bindings)} "
+            f"changes:{state.keyboard_binding_changes} "
+            f"removals:{state.keyboard_binding_removals} "
+            f"pickup_keys:{state.pickup_key_codes} "
             f"left_ctrl_skill:{state.left_ctrl_skill_id}"
         ),
         (
@@ -11943,12 +15280,18 @@ def render_gameplay_analysis(
             f"{state.server_attack_damage_high_bit_markers}"
         ),
         (
-            f"client_opcode_101=packets:{state.client_opcode_101_packets} "
-            f"header_values:{client_opcode_101_header_values} "
-            f"primary_values:{client_opcode_101_primary_values} "
-            f"flag_values:{client_opcode_101_flag_values} "
-            f"secondary_values:{client_opcode_101_secondary_values} "
-            f"tail_values:{client_opcode_101_tail_values}"
+            f"client_recovery=requests:{state.client_recovery_requests} "
+            f"by_stat:{client_recovery_requests_by_stat} "
+            f"hp_amounts:{client_hp_recovery_amounts} "
+            f"mp_amounts:{client_mp_recovery_amounts} "
+            "stat_update_matches:"
+            f"{state.client_recovery_stat_update_matches} "
+            f"exact:{state.client_recovery_exact_amount_matches} "
+            f"capped:{state.client_recovery_capped_amount_matches} "
+            f"unverified:{state.client_recovery_unverified_amount_matches} "
+            f"pending:{state.pending_client_recovery_requests} "
+            f"last_ms:{state.last_client_recovery_response_ms} "
+            f"max_ms:{state.max_client_recovery_response_ms}"
         ),
         (
             f"client_skill_uses=requests:{state.client_skill_use_requests} "
@@ -11961,6 +15304,9 @@ def render_gameplay_analysis(
             f"level_mismatches:{state.client_skill_use_level_mismatches} "
             f"binding_matches:{state.client_skill_use_binding_matches} "
             f"binding_mismatches:{state.client_skill_use_binding_mismatches} "
+            f"same_skill_repeats:{state.client_skill_use_same_skill_repeats} "
+            "response_free_same_skill_repeats:"
+            f"{state.client_skill_use_response_free_same_skill_repeats} "
             f"last_tick:{state.last_client_skill_tick} "
             f"tick_decreases:{state.client_skill_tick_decreases}"
         ),
@@ -12127,14 +15473,33 @@ def render_gameplay_analysis(
             f"value_3:{dict(sorted(state.instructional_dialogue_value_3.items()))}"
         ),
         (
-            "positioned_effect_records="
-            f"packets:{state.positioned_effect_records} "
-            f"opcodes:{positioned_effect_opcodes} "
-            f"active:{len(state.positioned_effect_entities)} "
-            f"new:{state.positioned_effect_new_entities} "
-            f"updates:{state.positioned_effect_updates} "
-            f"unknown_updates:{state.positioned_effect_unknown_updates} "
-            f"controls:{dict(sorted(state.positioned_effect_control_values.items()))}"
+            "reactors="
+            f"packets:{state.reactor_packets} "
+            f"opcodes:{reactor_opcodes} "
+            f"active:{len(state.reactors)} "
+            f"spawns:{state.reactor_spawns} "
+            f"updates:{state.reactor_state_updates} "
+            f"removals:{state.reactor_removals} "
+            f"unknown_updates:{state.reactor_unknown_updates} "
+            f"states:{dict(sorted(state.reactor_states.items()))}"
+        ),
+        (
+            "reactor_hits="
+            f"requests:{state.reactor_hit_requests} "
+            f"active:{state.reactor_hit_requests_for_active_reactors} "
+            f"inactive:{state.reactor_hit_requests_for_inactive_reactors} "
+            f"after_attack:{state.reactor_hit_requests_after_attack} "
+            "character_positions:"
+            f"{dict(sorted(state.reactor_hit_character_positions.items()))} "
+            f"stances:{dict(sorted(state.reactor_hit_stances.items()))} "
+            f"matched:{state.matched_reactor_hit_requests} "
+            f"updates:{state.matched_reactor_state_updates} "
+            f"removals:{state.matched_reactor_removals} "
+            f"stance_matches:{state.reactor_hit_stance_matches} "
+            f"stance_mismatches:{state.reactor_hit_stance_mismatches} "
+            f"pending:{state.pending_reactor_hit_requests} "
+            f"last_ms:{state.last_reactor_hit_response_ms} "
+            f"max_ms:{state.max_reactor_hit_response_ms}"
         ),
         (
             "server_opcode_169="
@@ -12155,16 +15520,27 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.server_opcode_348_control_pairs.items()))}"
         ),
         (
-            "client_fixed_opaque_records="
+            "client_neutral_records="
             "packets:"
-            f"{dict(sorted(state.client_fixed_opaque_records_by_opcode.items()))} "
-            "opaque_bytes:"
-            f"{dict(sorted(state.client_fixed_opaque_bytes_by_opcode.items()))} "
-            "periodic_last_ms:"
+            f"{dict(sorted(state.client_neutral_records_by_opcode.items()))} "
+            "opcode307_nonzero:"
+            f"{state.client_opcode_307_nonzero_redacted_values} "
+            "opcode310_code_units:"
+            f"{dict(sorted(state.client_opcode_310_text_code_units.items()))}"
+        ),
+        (
+            "client_periodic_records="
+            "packets:"
+            f"{dict(sorted(state.client_periodic_records_by_opcode.items()))} "
+            "opcode308_mirrors:"
+            f"{dict(sorted(state.client_opcode_308_mirrored_values.items()))} "
+            "opcode308_variants:"
+            f"{dict(sorted(state.client_opcode_308_variants.items()))} "
+            "last_ms:"
             f"{dict(sorted(state.client_periodic_report_last_interval_ms.items()))} "
-            "periodic_min_ms:"
+            "min_ms:"
             f"{dict(sorted(state.client_periodic_report_min_interval_ms.items()))} "
-            "periodic_max_ms:"
+            "max_ms:"
             f"{dict(sorted(state.client_periodic_report_max_interval_ms.items()))}"
         ),
         (
@@ -12180,6 +15556,16 @@ def render_gameplay_analysis(
             f"pending:{state.pending_world_exit_requests} "
             f"last_rtt_ms:{state.last_world_exit_round_trip_ms} "
             f"max_rtt_ms:{state.max_world_exit_round_trip_ms}"
+        ),
+        (
+            "client_opcode_276="
+            f"packets:{state.client_opcode_276_packets} "
+            f"selectors:{dict(sorted(state.client_opcode_276_selectors.items()))} "
+            f"shapes:{dict(sorted(state.client_opcode_276_shapes.items()))} "
+            "group_counts:"
+            f"{dict(sorted(state.client_opcode_276_group_counts.items()))} "
+            "pair_counts:"
+            f"{dict(sorted(state.client_opcode_276_pair_counts.items()))}"
         ),
         (
             "opcode_394_279="
@@ -12205,6 +15591,36 @@ def render_gameplay_analysis(
             f"max_gap_ms:{state.max_opcode_394_279_gap_ms}"
         ),
         (
+            "npc_interactions="
+            f"requests:{state.npc_interaction_requests} "
+            "active_npc_matches:"
+            f"{state.npc_interaction_requests_for_active_npcs} "
+            "unknown_npc_targets:"
+            f"{state.npc_interaction_requests_for_unknown_npcs} "
+            "target_templates:"
+            f"{dict(sorted(state.npc_interaction_target_templates.items()))} "
+            "life_position_matches:"
+            f"{state.npc_interaction_position_matches} "
+            "life_position_mismatches:"
+            f"{state.npc_interaction_position_mismatches} "
+            "server_348_matches:"
+            f"{state.npc_interaction_server_348_matches} "
+            f"pending:{state.pending_npc_interaction_requests} "
+            f"last_ms:{state.last_npc_interaction_response_ms} "
+            f"max_ms:{state.max_npc_interaction_response_ms}"
+        ),
+        (
+            "client_opcode_111="
+            f"packets:{state.client_opcode_111_packets} "
+            "neutral_values:"
+            f"{dict(sorted(state.client_opcode_111_neutral_values.items()))} "
+            f"slots:{dict(sorted(state.client_opcode_111_slots.items()))} "
+            f"cash_slot_matches:{state.client_opcode_111_cash_slot_matches} "
+            f"pending:{state.pending_client_opcode_111_actions} "
+            f"last_ms:{state.last_opcode_111_cash_slot_response_ms} "
+            f"max_ms:{state.max_opcode_111_cash_slot_response_ms}"
+        ),
+        (
             "client_opcode_66="
             f"packets:{state.client_opcode_66_acknowledgements} "
             f"selectors:{dict(sorted(state.client_opcode_66_selectors.items()))} "
@@ -12221,12 +15637,20 @@ def render_gameplay_analysis(
             f"max_rtt_ms:{state.max_opcode_348_round_trip_ms}"
         ),
         (
-            f"client_opcode_43=packets:{state.client_opcode_43_packets} "
-            f"sequences:{dict(sorted(state.client_opcode_43_sequences.items()))} "
-            f"variants:{dict(sorted(state.client_opcode_43_variants.items()))} "
-            "text_code_units:"
-            f"{dict(sorted(state.client_opcode_43_text_code_units.items()))} "
-            f"opaque_bytes:{state.client_opcode_43_opaque_bytes}"
+            "client_field_transfer="
+            f"requests:{state.client_field_transfer_requests} "
+            "variants:"
+            f"{dict(sorted(state.client_field_transfer_variants.items()))} "
+            f"epoch_matches:{state.client_field_transfer_epoch_matches} "
+            f"epoch_mismatches:{state.client_field_transfer_epoch_mismatches} "
+            "portal_name_code_units:"
+            f"{dict(sorted(state.client_field_transfer_portal_name_code_units.items()))} "
+            "redacted_portal_names:"
+            f"{state.client_field_transfer_redacted_portal_names} "
+            f"matched:{state.matched_client_field_transfers} "
+            f"pending:{state.pending_client_field_transfers} "
+            f"last_ms:{state.last_client_field_transfer_response_ms} "
+            f"max_ms:{state.max_client_field_transfer_response_ms}"
         ),
         (
             f"server_opcode_43=packets:{state.server_opcode_43_packets} "
@@ -12243,6 +15667,19 @@ def render_gameplay_analysis(
             f"redacted_values:{state.client_opcode_114_redacted_values}"
         ),
         (
+            "client_inner_portal="
+            f"requests:{state.client_inner_portal_requests} "
+            f"epoch_matches:{state.client_inner_portal_field_epoch_matches} "
+            "epoch_mismatches:"
+            f"{state.client_inner_portal_field_epoch_mismatches} "
+            "name_code_units:"
+            f"{dict(sorted(state.client_inner_portal_name_code_units.items()))} "
+            f"redacted_names:{state.client_inner_portal_redacted_names} "
+            f"chains:{state.client_inner_portal_same_epoch_chains} "
+            "chains_within_one_pixel:"
+            f"{state.client_inner_portal_chained_sources_within_one_pixel}"
+        ),
+        (
             f"client_opcode_122=packets:{state.client_opcode_122_packets} "
             f"selectors:{dict(sorted(state.client_opcode_122_selectors.items()))} "
             f"shapes:{dict(sorted(state.client_opcode_122_shapes.items()))} "
@@ -12250,12 +15687,18 @@ def render_gameplay_analysis(
             f"{state.client_opcode_122_terminal_sentinels}"
         ),
         (
-            f"client_opcode_217=packets:{state.client_opcode_217_packets} "
-            f"compact:{state.client_opcode_217_compact_packets} "
-            f"record_sets:{state.client_opcode_217_record_sets} "
-            f"records:{state.client_opcode_217_records} "
-            f"records_by_format:{client_opcode_217_record_formats} "
-            f"record_counts:{client_opcode_217_record_counts}"
+            "npc_state_submissions="
+            f"packets:{state.client_npc_state_submissions} "
+            f"compact:{state.client_npc_state_compact_submissions} "
+            f"movement:{state.client_npc_state_movement_submissions} "
+            f"known_npcs:{state.client_npc_state_submissions_for_known_npcs} "
+            f"unknown_npcs:{state.client_npc_state_submissions_for_unknown_npcs} "
+            f"commands:{state.client_npc_state_commands} "
+            f"commands_by_type:{client_npc_state_command_types} "
+            f"command_counts:{client_npc_state_command_counts} "
+            f"matched:{state.npc_state_submission_matches} "
+            f"unmatched_updates:{state.npc_state_updates_without_submission} "
+            f"pending:{state.pending_npc_state_submissions}"
         ),
         f"packet_shapes={json.dumps(dict(sorted(packet_counts.items())))}",
         f"events={json.dumps(dict(sorted(event_counts.items())))}",

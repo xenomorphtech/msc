@@ -91,7 +91,7 @@
       {"method":"c58f82ceee46f64f11ac7ba9c02f80d4e14685cb309effac8005de7255c000a","rva":30215392,"kind":"string","width":null}
     ]
   },
-  "observed_opaque_shapes": [{"direction":"client_to_server","opcode":6,"length":1836,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":8,"length":66,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":31,"length":183,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":46,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":75,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":100,"length":26,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":115,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":241,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":274,"length":1698,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":279,"length":120,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":307,"length":14,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":308,"length":74,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":311,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":0,"length":63,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":4,"length":170,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":9,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":11,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":20,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":21,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":22,"length":34447,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":23,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":24,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":27,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":28,"length":260,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":29,"length":327,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":56,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":58,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":59,"length":19,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":71,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":72,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":74,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":76,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":89,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":105,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":112,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":121,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":131,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":135,"length":3725,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":137,"length":84,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":142,"length":254,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":147,"length":94,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":148,"length":1639,"source":"1-10FS stream 126 legacy non-empty variant-9 record body: exact opcode, direction, and width; the current delegated IL2CPP mask-0x9 parser does not consume this captured body"},{"direction":"server_to_client","opcode":156,"length":21,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4464,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4506,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":161,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":178,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":189,"length":326,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":328,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":330,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":331,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":332,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":333,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":339,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":344,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":348,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":353,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":360,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":361,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":363,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":366,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":367,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":370,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":372,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":373,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":378,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":380,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":386,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":388,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":395,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":400,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":407,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":419,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":218,"length":27,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":219,"length":26,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":31,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":35,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":39,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":44,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":53,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":62,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":228,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":230,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":232,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":234,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":235,"length":12,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":239,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":272,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":276,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":385,"length":448,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":386,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":388,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":389,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":394,"length":119,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":398,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":425,"length":68,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"}],
+  "observed_opaque_shapes": [{"direction":"client_to_server","opcode":8,"length":66,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":46,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":75,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":100,"length":26,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":115,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":241,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":279,"length":120,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":307,"length":14,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":308,"length":74,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"client_to_server","opcode":311,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":0,"length":63,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":4,"length":170,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":9,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":11,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":24,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":27,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":28,"length":260,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":29,"length":327,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":56,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":58,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":59,"length":19,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":71,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":72,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":74,"length":4,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":76,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":89,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":105,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":112,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":121,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":131,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":135,"length":3725,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":137,"length":84,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":142,"length":254,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":147,"length":94,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":148,"length":1639,"source":"1-10FS stream 126 legacy non-empty variant-9 record body: exact opcode, direction, and width; the current delegated IL2CPP mask-0x9 parser does not consume this captured body"},{"direction":"server_to_client","opcode":156,"length":21,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4464,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":157,"length":4506,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":178,"length":2,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":189,"length":326,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":328,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":330,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":331,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":332,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":333,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":339,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":344,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":348,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":353,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":360,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":361,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":363,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":366,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":367,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":370,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":372,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":373,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":378,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":380,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":386,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":388,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":395,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":400,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":407,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":189,"length":419,"source":"capture 111 character-entry cluster: object id plus level/name prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":218,"length":27,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":219,"length":26,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":31,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":35,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":39,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":44,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":53,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":219,"length":62,"source":"capture 111 attack-relay cluster: object id plus packed attack-count prefix verified; remaining version-pinned body opaque"},{"direction":"server_to_client","opcode":228,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":230,"length":7,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":232,"length":22,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":234,"length":9,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":235,"length":12,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":239,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":272,"length":1056,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":276,"length":3,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":385,"length":448,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":386,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":388,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":389,"length":6,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":394,"length":119,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":398,"length":10,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"},{"direction":"server_to_client","opcode":425,"length":68,"source":"capture 111 residual variant: exact opcode, direction, and width compared against pinned version"}],
   "manual_shapes": [
     {
       "name":"world_selection","direction":"client_to_server","opcode":4,"length":6,
@@ -225,11 +225,236 @@
       ]
     },
     {
+      "name":"client_opcode_6_record_set","direction":"client_to_server","opcode":6,
+      "source":"packets.py:ClientOpcode6RecordSet; capture 111 streams 83 and 116 plus live login transcript 1786463759633587464",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":6},
+        {"op":"read","name":"neutral_header_0","kind":"u32"},
+        {"op":"read","name":"reserved_header_1","kind":"u32","equals":0},
+        {"op":"read","name":"neutral_header_2","kind":"u32"},
+        {"op":"read","name":"neutral_header_3","kind":"u32"},
+        {"op":"read","name":"neutral_header_4","kind":"u32"},
+        {"op":"read","name":"reserved_header_5","kind":"u32","equals":0},
+        {"op":"read","name":"neutral_header_6","kind":"u32"},
+        {"op":"read","name":"neutral_header_7","kind":"u32"},
+        {"op":"read","name":"neutral_header_8","kind":"u32"},
+        {"op":"read","name":"record_count","kind":"u32"},
+        {"op":"repeat","count_from":"record_count","operations":[
+          {"op":"read","name":"record_index","kind":"u16"},
+          {"op":"read","name":"opaque_value","kind":"u32"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_22_indexed_text_ledger","direction":"server_to_client","opcode":22,
+      "source":"packets.py:ServerOpcode22IndexedTextLedger; capture 111 streams 83 and 116 plus live login transcript 1786463759633587464",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":22},
+        {"op":"read","name":"entry_count","kind":"u32"},
+        {"op":"repeat","count_from":"entry_count","operations":[
+          {"op":"utf16","name":"opaque_text","trailing_zero":true},
+          {"op":"read","name":"record_index","kind":"u16"}
+        ]}
+      ]
+    },
+    {
+      "name":"server_opcode_0_local_account_bootstrap_probe","direction":"server_to_client","opcode":0,"length":36,
+      "source":"packets.py:ServerOpcode0AccountBootstrapProbe; documented local --server-frame-patch and live login transcript 1786463759633587464",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":0},
+        {"op":"read","name":"result","kind":"u8","equals":0},
+        {"op":"read","name":"account_id","kind":"u32"},
+        {"op":"read","name":"gender","kind":"u8","equals":0},
+        {"op":"read","name":"administrator","kind":"u8","equals":0},
+        {"op":"read","name":"restricted","kind":"u8","equals":0},
+        {"op":"read","name":"account_name_code_units","kind":"u16","equals":4},
+        {"op":"bytes","name":"account_name_utf16le","length":8},
+        {"op":"bytes","name":"reserved_suffix","length":16,"equals_hex":"00000000000000000000000000000000"}
+      ]
+    },
+    {
+      "name":"login_server_opcode_3_generated_record","direction":"server_to_client","opcode":3,"length":8,
+      "source":"packets.py:LoginServerOpcode3Record; generated handler baf4804a... direct u8/i32/bool reads plus 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":3},
+        {"op":"read","name":"leading_value","kind":"u8"},
+        {"op":"read","name":"neutral_value","kind":"i32"},
+        {"op":"read","name":"flag","kind":"bool"}
+      ]
+    },
+    {
+      "name":"login_client_opcode_255_u32","direction":"client_to_server","opcode":255,"length":6,
+      "source":"packets.py:LoginClientOpcode255Record; single capture-bounded record from 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":255},
+        {"op":"read","name":"neutral_value","kind":"u32"}
+      ]
+    },
+    {
+      "name":"login_server_opcode_390_u8","direction":"server_to_client","opcode":390,"length":3,
+      "source":"packets.py:LoginServerOpcode390Record; generated handler a728fad3... direct u8 read plus 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":390},
+        {"op":"read","name":"neutral_value","kind":"u8"}
+      ]
+    },
+    {
+      "name":"login_client_opcode_9_text_record","direction":"client_to_server","opcode":9,
+      "source":"packets.py:LoginClientOpcode9TextRecord; single capture-bounded record from 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":9},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true}
+      ]
+    },
+    {
+      "name":"login_server_opcode_6_text_record","direction":"server_to_client","opcode":6,
+      "source":"packets.py:LoginServerOpcode6TextRecord; generated handler ed3b67a8... direct UTF-16/u8 reads plus 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":6},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"read","name":"neutral_value","kind":"u8"}
+      ]
+    },
+    {
+      "name":"login_server_opcode_35_text_record","direction":"server_to_client","opcode":35,"length":24,
+      "source":"packets.py:LoginServerOpcode35Record; single capture-bounded login-prelude record from 1-10FS stream 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":35},
+        {"op":"read","name":"reserved_prefix_0","kind":"u8","equals":0},
+        {"op":"read","name":"prefix_marker","kind":"u8","equals":1},
+        {"op":"utf16","name":"opaque_text","trailing_zero":true},
+        {"op":"bytes","name":"reserved_suffix","length":3,"equals_hex":"000000"}
+      ]
+    },
+    {
+      "name":"client_opcode_10_character_creation_request","direction":"client_to_server","opcode":10,
+      "source":"packets.py:ClientOpcode10CharacterCreationRequest; single 1-10FS stream-116 request correlated with the opcode-7 returned name and appearance",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":10},
+        {"op":"utf16","name":"name","trailing_zero":true},
+        {"op":"read","name":"neutral_value_0","kind":"u32"},
+        {"op":"read","name":"neutral_value_1","kind":"u32"},
+        {"op":"read","name":"neutral_value_2","kind":"u32"},
+        {"op":"read","name":"neutral_value_3","kind":"u32"},
+        {"op":"read","name":"neutral_value_4","kind":"u32"},
+        {"op":"read","name":"neutral_value_5","kind":"u32"},
+        {"op":"read","name":"neutral_value_6","kind":"u32"},
+        {"op":"read","name":"neutral_value_7","kind":"u32"}
+      ]
+    },
+    {
+      "name":"server_opcode_7_character_creation_success","direction":"server_to_client","opcode":7,
+      "source":"packets.py:ServerOpcode7CharacterCreationResponse; generated handler f2861e8a... reads the result u8 and the sole 1-10FS stream-116 success body reuses InitialCharacterSnapshot plus a 49-byte compact appearance",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":7},
+        {"op":"read","name":"result","kind":"u8","equals":0},
+        {"op":"read","name":"character_id","kind":"u32"},
+        {"op":"read","name":"data_flags","kind":"u32"},
+        {"op":"utf16","name":"name","trailing_zero":true},
+        {"op":"read","name":"gender","kind":"u8"},
+        {"op":"read","name":"skin","kind":"u8"},
+        {"op":"read","name":"face_id","kind":"u32"},
+        {"op":"read","name":"hair_id","kind":"u32"},
+        {"op":"read","name":"companion_id","kind":"u64"},
+        {"op":"read","name":"level","kind":"u8"},
+        {"op":"read","name":"job_id","kind":"u16"},
+        {"op":"read","name":"strength","kind":"u16"},
+        {"op":"read","name":"dexterity","kind":"u16"},
+        {"op":"read","name":"intelligence","kind":"u16"},
+        {"op":"read","name":"luck","kind":"u16"},
+        {"op":"read","name":"current_hp","kind":"u16"},
+        {"op":"read","name":"max_hp","kind":"u16"},
+        {"op":"read","name":"current_mp","kind":"u16"},
+        {"op":"read","name":"max_mp","kind":"u16"},
+        {"op":"read","name":"ability_points","kind":"u16"},
+        {"op":"read","name":"skill_points","kind":"u16"},
+        {"op":"read","name":"experience","kind":"u32"},
+        {"op":"read","name":"fame","kind":"i16"},
+        {"op":"read","name":"map_id","kind":"u32"},
+        {"op":"read","name":"portal_index","kind":"u8"},
+        {"op":"read","name":"opaque_state_flag","kind":"u8"},
+        {"op":"read","name":"opaque_state_u64","kind":"u64"},
+        {"op":"bytes","name":"compact_appearance","length":49}
+      ]
+    },
+    {
+      "name":"client_opcode_16_created_character_selection","direction":"client_to_server","opcode":16,"length":7,
+      "source":"packets.py:ClientOpcode16CreatedCharacterSelection; single 1-10FS stream-116 record whose id matches opcode-7 creation and the next opcode-5 handoff",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":16},
+        {"op":"read","name":"reserved_zero","kind":"u8","equals":0},
+        {"op":"read","name":"character_id","kind":"u32"}
+      ]
+    },
+    {
       "name":"heartbeat_response","direction":"client_to_server","opcode":23,"length":10,
       "source":"packets.py:HeartbeatResponse; capture 111 stream 92",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":23},
         {"op":"bytes","name":"opaque_token","length":8}
+      ]
+    },
+    {
+      "name":"login_server_opcode_20_u32","direction":"server_to_client","opcode":20,"length":6,
+      "source":"packets.py:LoginServerFixedRecord; capture 111 streams 83 and 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":20},
+        {"op":"read","name":"neutral_value","kind":"u32"}
+      ]
+    },
+    {
+      "name":"login_server_opcode_21_zero","direction":"server_to_client","opcode":21,"length":3,
+      "source":"packets.py:LoginServerFixedRecord; capture 111 streams 83 and 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":21},
+        {"op":"read","name":"reserved_zero","kind":"u8","equals":0}
+      ]
+    },
+    {
+      "name":"login_server_opcode_23_zero","direction":"server_to_client","opcode":23,"length":6,
+      "source":"packets.py:LoginServerFixedRecord; capture 111 streams 83 and 116 plus live login transcript 1786463759633587464",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":23},
+        {"op":"read","name":"reserved_zero","kind":"u32","equals":0}
+      ]
+    },
+    {
+      "name":"login_server_opcode_161_zero","direction":"server_to_client","opcode":161,"length":3,
+      "source":"packets.py:LoginServerFixedRecord; capture 111 streams 83 and 116",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":161},
+        {"op":"read","name":"reserved_zero","kind":"u8","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_31_record","direction":"client_to_server","opcode":31,
+      "source":"packets.py:ClientOpcode31Record; capture 111 streams 83 and 116 plus live login transcript 1786463759633587464",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":31},
+        {"op":"bytes","name":"reserved_prefix","length":20,"equals_hex":"0000000000000000000000000000000000000000"},
+        {"op":"read","name":"variant","kind":"u8","equals":2},
+        {"op":"utf16","name":"opaque_text_1","trailing_zero":true},
+        {"op":"utf16","name":"opaque_text_2","trailing_zero":true},
+        {"op":"utf16","name":"opaque_text_3","trailing_zero":true},
+        {"op":"read","name":"opaque_blob_length","kind":"u32","equals":48},
+        {"op":"bytes_from","name":"opaque_blob","length_from":"opaque_blob_length"},
+        {"op":"bytes","name":"reserved_suffix","length":3,"equals_hex":"000000"}
+      ]
+    },
+    {
+      "name":"client_opcode_274_opaque_text_record","direction":"client_to_server","opcode":274,"length":1698,
+      "source":"packets.py:ClientOpcode274OpaqueTextRecord; single capture-bounded variant from capture 111 stream 83",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":274},
+        {"op":"read","name":"opaque_text_1_code_units","kind":"u16","equals":768},
+        {"op":"bytes","name":"opaque_text_1_utf16le","length":1536},
+        {"op":"read","name":"opaque_text_1_trailing_zero","kind":"u8","equals":0},
+        {"op":"read","name":"middle_value","kind":"u32","equals":2},
+        {"op":"read","name":"flag_1","kind":"u8","equals":1},
+        {"op":"read","name":"flag_2","kind":"u8","equals":1},
+        {"op":"read","name":"opaque_text_2_code_units","kind":"u16","equals":74},
+        {"op":"bytes","name":"opaque_text_2_utf16le","length":148},
+        {"op":"read","name":"opaque_text_2_trailing_zero","kind":"u8","equals":0}
       ]
     },
     {
@@ -260,7 +485,7 @@
     },
     {
       "name":"client_life_movement_relay","direction":"client_to_server","opcode":47,
-      "source":"capture-111 opcode 47 paired with opcode 217; IL2CPP movement parser caa238b8... jump table at 0x18560933c and branch disassembly",
+      "source":"captures 111/1-10FS opcode 47 paired with opcode 217; IL2CPP movement parser caa238b8... jump table at 0x18560933c and branch disassembly; all observed command tags and four fixed-width tail variants are typed",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":47},
         {"op":"read","name":"local_object_index","kind":"u8"},
@@ -270,24 +495,24 @@
         {"op":"repeat","count_from":"command_count","operations":[
           {"op":"read","name":"command_type","kind":"u8"},
           {"op":"switch","field":"command_type","cases":[
-            {"equals":0,"operations":[{"op":"bytes","name":"absolute_0","length":13}]},
-            {"equals":1,"operations":[{"op":"bytes","name":"relative_1","length":7}]},
-            {"equals":2,"operations":[{"op":"bytes","name":"relative_2","length":7}]},
-            {"equals":3,"operations":[{"op":"bytes","name":"extended_3","length":9}]},
-            {"equals":4,"operations":[{"op":"bytes","name":"extended_4","length":9}]},
-            {"equals":5,"operations":[{"op":"bytes","name":"absolute_5","length":13}]},
-            {"equals":6,"operations":[{"op":"bytes","name":"relative_6","length":7}]},
-            {"equals":7,"operations":[{"op":"bytes","name":"extended_7","length":9}]},
-            {"equals":8,"operations":[{"op":"bytes","name":"extended_8","length":9}]},
-            {"equals":9,"operations":[{"op":"bytes","name":"extended_9","length":9}]},
-            {"equals":10,"operations":[{"op":"bytes","name":"state_10","length":1}]},
-            {"equals":11,"operations":[{"op":"bytes","name":"extended_11","length":9}]},
-            {"equals":12,"operations":[{"op":"bytes","name":"relative_12","length":7}]},
-            {"equals":13,"operations":[{"op":"bytes","name":"relative_13","length":7}]},
-            {"equals":14,"operations":[{"op":"bytes","name":"reference_14","length":9}]},
-            {"equals":15,"operations":[{"op":"bytes","name":"absolute_15","length":15}]},
-            {"equals":16,"operations":[{"op":"bytes","name":"relative_16","length":7}]},
-            {"equals":17,"operations":[{"op":"bytes","name":"absolute_17","length":13}]},
+            {"equals":0,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"last_x","kind":"i16"},{"op":"read","name":"last_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":1,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":2,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":3,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":4,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":5,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"last_x","kind":"i16"},{"op":"read","name":"last_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":6,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":7,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":8,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":9,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":10,"operations":[{"op":"read","name":"equipment_change_value","kind":"u8"}]},
+            {"equals":11,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":12,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":13,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":14,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":15,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"vector_x","kind":"i16"},{"op":"read","name":"vector_y","kind":"i16"},{"op":"read","name":"neutral_value_1","kind":"i16"},{"op":"read","name":"neutral_value_2","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":16,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":17,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"last_x","kind":"i16"},{"op":"read","name":"last_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
             {"equals":18,"operations":[{"op":"bytes","name":"relative_18","length":7}]},
             {"equals":19,"operations":[{"op":"bytes","name":"relative_19","length":7}]},
             {"equals":20,"operations":[{"op":"bytes","name":"state_20","length":3}]},
@@ -297,10 +522,10 @@
         ]},
         {"op":"read","name":"tail_type","kind":"u8"},
         {"op":"switch","field":"tail_type","cases":[
-          {"equals":17,"operations":[{"op":"bytes","name":"tail_state_17","length":8}]},
-          {"equals":18,"operations":[{"op":"bytes","name":"tail_state_18","length":8}]},
-          {"equals":21,"operations":[{"op":"bytes","name":"tail_state_21","length":10}]},
-          {"equals":24,"operations":[{"op":"bytes","name":"tail_state_24","length":11}]}
+          {"equals":17,"operations":[{"op":"read","name":"tail_state_0","kind":"u8"},{"op":"read","name":"tail_state_1","kind":"u8"},{"op":"read","name":"tail_state_2","kind":"u8"},{"op":"read","name":"tail_state_3","kind":"u8"},{"op":"read","name":"tail_state_4","kind":"u8"},{"op":"read","name":"tail_state_5","kind":"u8"},{"op":"read","name":"tail_state_6","kind":"u8"},{"op":"read","name":"tail_state_7","kind":"u8"}]},
+          {"equals":18,"operations":[{"op":"read","name":"tail_state_0","kind":"u8"},{"op":"read","name":"tail_state_1","kind":"u8"},{"op":"read","name":"tail_state_2","kind":"u8"},{"op":"read","name":"tail_state_3","kind":"u8"},{"op":"read","name":"tail_state_4","kind":"u8"},{"op":"read","name":"tail_state_5","kind":"u8"},{"op":"read","name":"tail_state_6","kind":"u8"},{"op":"read","name":"tail_state_7","kind":"u8"}]},
+          {"equals":21,"operations":[{"op":"read","name":"tail_state_0","kind":"u8"},{"op":"read","name":"tail_state_1","kind":"u8"},{"op":"read","name":"tail_state_2","kind":"u8"},{"op":"read","name":"tail_state_3","kind":"u8"},{"op":"read","name":"tail_state_4","kind":"u8"},{"op":"read","name":"tail_state_5","kind":"u8"},{"op":"read","name":"tail_state_6","kind":"u8"},{"op":"read","name":"tail_state_7","kind":"u8"},{"op":"read","name":"tail_state_8","kind":"u8"},{"op":"read","name":"tail_state_9","kind":"u8"}]},
+          {"equals":24,"operations":[{"op":"read","name":"tail_state_0","kind":"u8"},{"op":"read","name":"tail_state_1","kind":"u8"},{"op":"read","name":"tail_state_2","kind":"u8"},{"op":"read","name":"tail_state_3","kind":"u8"},{"op":"read","name":"tail_state_4","kind":"u8"},{"op":"read","name":"tail_state_5","kind":"u8"},{"op":"read","name":"tail_state_6","kind":"u8"},{"op":"read","name":"tail_state_7","kind":"u8"},{"op":"read","name":"tail_state_8","kind":"u8"},{"op":"read","name":"tail_state_9","kind":"u8"},{"op":"read","name":"tail_state_10","kind":"u8"}]}
         ]},
         {"op":"read","name":"tail_marker","kind":"u8"},
         {"op":"read","name":"start_x","kind":"i16"},{"op":"read","name":"start_y","kind":"i16"},
@@ -309,7 +534,7 @@
     },
     {
       "name":"life_movement_broadcast","direction":"server_to_client","opcode":217,
-      "source":"IL2CPP opcode-217 handler b2c92030... and movement parser caa238b8... jump-table disassembly; capture 111",
+      "source":"IL2CPP opcode-217 handler b2c92030... and movement parser caa238b8... jump-table disassembly; captures 111/1-10FS observed command tags are typed",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":217},{"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"reference_x","kind":"i16"},{"op":"read","name":"reference_y","kind":"i16"},
@@ -317,15 +542,15 @@
         {"op":"repeat","count_from":"command_count","operations":[
           {"op":"read","name":"command_type","kind":"u8"},
           {"op":"switch","field":"command_type","cases":[
-            {"equals":0,"operations":[{"op":"bytes","name":"absolute_0","length":13}]},{"equals":1,"operations":[{"op":"bytes","name":"relative_1","length":7}]},
-            {"equals":2,"operations":[{"op":"bytes","name":"relative_2","length":7}]},{"equals":3,"operations":[{"op":"bytes","name":"extended_3","length":9}]},
-            {"equals":4,"operations":[{"op":"bytes","name":"extended_4","length":9}]},{"equals":5,"operations":[{"op":"bytes","name":"absolute_5","length":13}]},
-            {"equals":6,"operations":[{"op":"bytes","name":"relative_6","length":7}]},{"equals":7,"operations":[{"op":"bytes","name":"extended_7","length":9}]},
-            {"equals":8,"operations":[{"op":"bytes","name":"extended_8","length":9}]},{"equals":9,"operations":[{"op":"bytes","name":"extended_9","length":9}]},
-            {"equals":10,"operations":[{"op":"bytes","name":"state_10","length":1}]},{"equals":11,"operations":[{"op":"bytes","name":"extended_11","length":9}]},
-            {"equals":12,"operations":[{"op":"bytes","name":"relative_12","length":7}]},{"equals":13,"operations":[{"op":"bytes","name":"relative_13","length":7}]},
-            {"equals":14,"operations":[{"op":"bytes","name":"reference_14","length":9}]},{"equals":15,"operations":[{"op":"bytes","name":"absolute_15","length":15}]},
-            {"equals":16,"operations":[{"op":"bytes","name":"relative_16","length":7}]},{"equals":17,"operations":[{"op":"bytes","name":"absolute_17","length":13}]},
+            {"equals":0,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"last_x","kind":"i16"},{"op":"read","name":"last_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},{"equals":1,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":2,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},{"equals":3,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":4,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},{"equals":5,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"last_x","kind":"i16"},{"op":"read","name":"last_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":6,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},{"equals":7,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":8,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},{"equals":9,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":10,"operations":[{"op":"read","name":"equipment_change_value","kind":"u8"}]},{"equals":11,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":12,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},{"equals":13,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":14,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},{"equals":15,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"vector_x","kind":"i16"},{"op":"read","name":"vector_y","kind":"i16"},{"op":"read","name":"neutral_value_1","kind":"i16"},{"op":"read","name":"neutral_value_2","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"trailing_value","kind":"i16"}]},
+            {"equals":16,"operations":[{"op":"read","name":"delta_x","kind":"i16"},{"op":"read","name":"delta_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},{"equals":17,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"last_x","kind":"i16"},{"op":"read","name":"last_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
             {"equals":18,"operations":[{"op":"bytes","name":"relative_18","length":7}]},{"equals":19,"operations":[{"op":"bytes","name":"relative_19","length":7}]},
             {"equals":20,"operations":[{"op":"bytes","name":"state_20","length":3}]},{"equals":21,"operations":[{"op":"bytes","name":"state_21","length":3}]},
             {"equals":22,"operations":[{"op":"bytes","name":"relative_22","length":7}]}
@@ -353,8 +578,86 @@
       ]
     },
     {
+      "name":"inventory_move_request","direction":"client_to_server","opcode":79,"length":13,
+      "source":"packets.py:InventoryMoveRequest; 1-10FS stream-126 frames 31564/63904 each match the next same-slot server opcode-39 move; v79 handler source confirms tick and quantity roles",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":79},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"inventory_type","kind":"u8"},
+        {"op":"read","name":"source_slot","kind":"i16"},
+        {"op":"read","name":"destination_slot","kind":"i16"},
+        {"op":"read","name":"quantity","kind":"i16"}
+      ]
+    },
+    {
+      "name":"client_reactor_hit_request","direction":"client_to_server","opcode":225,"length":16,
+      "source":"packets.py:ClientReactorHitRequest; 1-10FS stream-126 all 15 records reference an active same-epoch reactor, immediately follow client opcode 50, and match the next same-reactor state update/removal",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":225},
+        {"op":"read","name":"reactor_object_id","kind":"i32"},
+        {"op":"read","name":"character_position","kind":"i32"},
+        {"op":"read","name":"stance","kind":"u16"},
+        {"op":"read","name":"reserved_value","kind":"u32","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_276_compact","direction":"client_to_server","opcode":276,"length":9,
+      "source":"packets.py:ClientOpcode276Envelope; active local-Wine transcript positioned_effect_actions_live_20260811 selector-17 packet",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":276},
+        {"op":"read","name":"selector","kind":"u32","equals":17},
+        {"op":"read","name":"reserved_u16","kind":"u16","equals":0},
+        {"op":"read","name":"reserved_u8","kind":"u8","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_276_grouped","direction":"client_to_server","opcode":276,"length":210,
+      "source":"packets.py:ClientOpcode276Envelope; sole 1-10FS stream-126 selector-24 packet has five groups and 19 u32 pairs",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":276},
+        {"op":"read","name":"selector","kind":"u32","equals":24},
+        {"op":"read","name":"header_value_1","kind":"u32"},
+        {"op":"read","name":"header_value_2","kind":"u32"},
+        {"op":"read","name":"group_count","kind":"u32"},
+        {"op":"repeat","count_from":"group_count","operations":[
+          {"op":"read","name":"group_selector","kind":"u32"},
+          {"op":"read","name":"pair_count","kind":"u32"},
+          {"op":"repeat","count_from":"pair_count","operations":[
+            {"op":"read","name":"value_1","kind":"u32"},
+            {"op":"read","name":"value_2","kind":"u32"}
+          ]}
+        ]}
+      ]
+    },
+    {
+      "name":"client_item_acquisition_request","direction":"client_to_server","opcode":298,"length":76,
+      "source":"packets.py:ClientOpcode298ItemAcquisitionRequest; 1-10FS stream-126 all 12 records match the next same-epoch server opcode-39 additions by request-kind inventory and item template",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":298},
+        {"op":"read","name":"control_value","kind":"u32","equals":0},
+        {"op":"read","name":"selection_index","kind":"u32"},
+        {"op":"read","name":"request_kind","kind":"u32"},
+        {"op":"read","name":"item_id","kind":"u32"},
+        {"op":"read","name":"quantity","kind":"u32"},
+        {"op":"read","name":"duration_value","kind":"u32"},
+        {"op":"read","name":"expires_at_ticks","kind":"u64"},
+        {"op":"read","name":"serial_value","kind":"u32"},
+        {"op":"read","name":"reserved_value_1","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_2","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_3","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_4","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_value_5","kind":"u32","equals":0},
+        {"op":"read","name":"signed_sentinel_1","kind":"i32","equals":-99},
+        {"op":"read","name":"signed_sentinel_2","kind":"i32","equals":-99},
+        {"op":"read","name":"trailing_value_1","kind":"u32","equals":0},
+        {"op":"read","name":"trailing_value_2","kind":"u32","equals":0},
+        {"op":"read","name":"flag_1","kind":"u8","equals":0},
+        {"op":"read","name":"flag_2","kind":"u8","equals":1}
+      ]
+    },
+    {
       "name":"item_use_request","direction":"client_to_server","opcode":80,"length":12,
-      "source":"packets.py:ItemUseRequest; capture 111 stream 92",
+      "source":"packets.py:ItemUseRequest; capture 111 stream 92 and 1-10FS stream 126; v79 handler source confirms the tick role",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":80},
         {"op":"read","name":"client_tick","kind":"u32"},
@@ -363,17 +666,22 @@
       ]
     },
     {
-      "name":"field_load_stage","direction":"client_to_server","opcode":158,"length":10,
-      "source":"packets.py:FieldLoadStage; capture 111 stream 92",
+      "name":"client_opcode_158_request","direction":"client_to_server","opcode":158,
+      "source":"packets.py:ClientOpcode158Request; capture 111 streams 92/114 and 1-10FS stream 126; mode 0 matches independent v83 keymap-change grammar",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":158},
-        {"op":"read","name":"stage","kind":"u32"},
-        {"op":"read","name":"trailing","kind":"u32","equals":0}
+        {"op":"read","name":"mode","kind":"u32"},
+        {"op":"read","name":"change_count","kind":"u32"},
+        {"op":"repeat","count_from":"change_count","operations":[
+          {"op":"read","name":"key_code","kind":"u32"},
+          {"op":"read","name":"binding_type","kind":"u8"},
+          {"op":"read","name":"action_id","kind":"i32"}
+        ]}
       ]
     },
     {
       "name":"player_movement_submission","direction":"client_to_server","opcode":182,
-      "source":"PlayerMovementSubmission/Path/Command; command tags 0,1,3,5 select 13,7,5,13-byte layouts",
+      "source":"PlayerMovementSubmission/Path/Command; pinned IL2CPP movement parser caa238b8... jump table at 0x18560933c; both reference captures",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":182},
         {"op":"read","name":"control_value","kind":"u32"},
@@ -385,7 +693,8 @@
           {"op":"switch","field":"command_type","cases":[
             {"equals":0,"operations":[{"op":"bytes","name":"absolute_command","length":13}]},
             {"equals":1,"operations":[{"op":"bytes","name":"relative_command","length":7}]},
-            {"equals":3,"operations":[{"op":"bytes","name":"compact_command","length":5}]},
+            {"equals":3,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":4,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
             {"equals":5,"operations":[{"op":"bytes","name":"alternate_absolute_command","length":13}]}
           ]}
         ]},
@@ -423,40 +732,31 @@
       ]
     },
     {
-      "name":"character_stat_update_zero_mask","direction":"server_to_client","opcode":41,"length":8,
-      "source":"IL2CPP opcode-41 handler b383d354... delegates to parser 0x1812ED210; CharacterStatUpdate; capture 111",
-      "operations":[
-        {"op":"read","name":"opcode","kind":"u16","equals":41},
-        {"op":"read","name":"request_flag","kind":"u8"},
-        {"op":"read","name":"stat_mask","kind":"u32","equals":0},
-        {"op":"read","name":"tail","kind":"u8","equals":0}
-      ]
-    },
-    {
-      "name":"character_stat_update_zero_mask_extended","direction":"server_to_client","opcode":41,"length":9,
-      "source":"IL2CPP opcode-41 handler b383d354... delegates to parser 0x1812ED210; CharacterStatUpdate; capture 111",
-      "operations":[
-        {"op":"read","name":"opcode","kind":"u16","equals":41},
-        {"op":"read","name":"request_flag","kind":"u8"},
-        {"op":"read","name":"stat_mask","kind":"u32","equals":0},
-        {"op":"bytes","name":"tail","length":2,"equals_hex":"0101"}
-      ]
-    },
-    {
       "name":"character_stat_update","direction":"server_to_client","opcode":41,
-      "source":"IL2CPP opcode-41 handler b383d354... delegates to parser 0x1812ED210; mask branches verified against CharacterStatUpdate and capture 111",
+      "source":"IL2CPP opcode-41 handler b383d354... reads bool, delegates all mask fields to parser 0x1812ED210, then reads bool plus a conditional u8; CharacterStatUpdate; both reference captures",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":41},
-        {"op":"read","name":"request_flag","kind":"u8"},
+        {"op":"read","name":"request_flag","kind":"bool"},
         {"op":"read","name":"stat_mask","kind":"u32"},
+        {"op":"if_mask","field":"stat_mask","mask":16,"operations":[{"op":"read","name":"character_level","kind":"u8"}]},
+        {"op":"if_mask","field":"stat_mask","mask":32,"operations":[{"op":"read","name":"job_id","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":64,"operations":[{"op":"read","name":"strength","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":128,"operations":[{"op":"read","name":"dexterity","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":256,"operations":[{"op":"read","name":"intelligence","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":512,"operations":[{"op":"read","name":"luck","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":1024,"operations":[{"op":"read","name":"current_hp","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":2048,"operations":[{"op":"read","name":"max_hp","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":4096,"operations":[{"op":"read","name":"current_mp","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":8192,"operations":[{"op":"read","name":"max_mp","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":16384,"operations":[{"op":"read","name":"ability_points","kind":"u16"}]},
+        {"op":"if_mask","field":"stat_mask","mask":32768,"operations":[{"op":"read","name":"skill_points","kind":"u16"}]},
         {"op":"if_mask","field":"stat_mask","mask":65536,"operations":[{"op":"read","name":"experience","kind":"u32"}]},
         {"op":"if_mask","field":"stat_mask","mask":262144,"operations":[{"op":"read","name":"mesos","kind":"u64"}]},
-        {"op":"read","name":"tail","kind":"u8","equals":0}
+        {"op":"read","name":"trailing_flag","kind":"bool"},
+        {"op":"switch","field":"trailing_flag","cases":[
+          {"equals":0,"operations":[]},
+          {"equals":1,"operations":[{"op":"read","name":"trailing_value","kind":"u8"}]}
+        ]}
       ]
     },
     {
@@ -521,9 +821,9 @@
       ]
     },
     {
-      "name":"client_status_101","direction":"client_to_server","opcode":101,"length":11,
-      "source":"73 identical-width capture frames; field boundaries compared with opcode-101 handler e216d134... opposite-direction string branches",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":101},{"op":"read","name":"status","kind":"u8"},{"op":"read","name":"client_tick","kind":"u32"},{"op":"read","name":"flag","kind":"u8"},{"op":"read","name":"value","kind":"u16"},{"op":"read","name":"tail","kind":"u8"}]
+      "name":"client_recovery_request","direction":"client_to_server","opcode":101,"length":11,
+      "source":"ClientRecoveryRequest; stream 92 separates HP +10 from MP +5 and stream 126 separates HP +10 from MP +3, with following authoritative opcode-41 current-HP/current-MP updates; active live cadence independently repeats HP +10 and MP +5",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":101},{"op":"read","name":"reserved_prefix","kind":"u8","equals":0},{"op":"read","name":"request_type","kind":"u8","equals":20},{"op":"read","name":"reserved_value","kind":"u16","equals":0},{"op":"read","name":"hp_recovery","kind":"u16"},{"op":"read","name":"mp_recovery","kind":"u16"},{"op":"read","name":"reserved_tail","kind":"u8","equals":0}]
     },
     {
       "name":"client_empty_309","direction":"client_to_server","opcode":309,"length":2,
@@ -546,65 +846,84 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":185},{"op":"read","name":"control_value","kind":"u32"},{"op":"read","name":"field_epoch","kind":"u8"},{"op":"read","name":"client_tick","kind":"u32"},{"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},{"op":"read","name":"drop_object_id","kind":"u32"},{"op":"read","name":"validation_token","kind":"u32"},{"op":"bytes","name":"proof","length":12}]
     },
     {
+      "name":"compact_item_pickup_request","direction":"client_to_server","opcode":222,"length":19,
+      "source":"ItemPickupRequest compact branch; all six 1-10FS stream-126 records match known same-epoch drops and the following opcode-39/41/49/312 pickup chain",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":222},{"op":"read","name":"field_epoch","kind":"u8"},{"op":"read","name":"client_tick","kind":"u32"},{"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},{"op":"read","name":"drop_object_id","kind":"u32"},{"op":"read","name":"validation_token","kind":"u32"}]
+    },
+    {
       "name":"mob_enter_field_short_status","direction":"server_to_client","opcode":279,"length":48,
-      "source":"IL2CPP opcode-279 handler e13fd581... reads object/marker/template then b3052290... parses status; MobSpawnData; capture 111",
+      "source":"IL2CPP opcode-279 handler e13fd581... plus live primitive-reader trace of both captured branches; MobSpawnData; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":279},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":22},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {
       "name":"mob_enter_field_extended_status","direction":"server_to_client","opcode":279,"length":56,
-      "source":"IL2CPP opcode-279 handler e13fd581... reads object/marker/template then b3052290... parses status; MobSpawnData; capture 111",
+      "source":"IL2CPP opcode-279 handler e13fd581... plus live primitive-reader trace of both captured branches; MobSpawnData; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":279},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":30},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_value","kind":"i16"},{"op":"read","name":"status_source_skill_id","kind":"i32"},
+        {"op":"read","name":"status_duration_units","kind":"i16"},{"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {
       "name":"mob_controller_spawn_short_status","direction":"server_to_client","opcode":281,"length":49,
-      "source":"IL2CPP opcode-281 handler f0e98d8f... branches on control level and delegates spawn parser; MobControllerChange; capture 111",
+      "source":"IL2CPP opcode-281 handler f0e98d8f... delegates the same live-traced spawn parser; MobControllerChange; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":281},
         {"op":"read","name":"control_level","kind":"u8"},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":22},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {
       "name":"mob_controller_spawn_extended_status","direction":"server_to_client","opcode":281,"length":57,
-      "source":"IL2CPP opcode-281 handler f0e98d8f... branches on control level and delegates spawn parser; MobControllerChange; capture 111",
+      "source":"IL2CPP opcode-281 handler f0e98d8f... delegates the same live-traced spawn parser; MobControllerChange; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":281},
         {"op":"read","name":"control_level","kind":"u8"},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":30},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_value","kind":"i16"},{"op":"read","name":"status_source_skill_id","kind":"i32"},
+        {"op":"read","name":"status_duration_units","kind":"i16"},{"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {
@@ -640,27 +959,48 @@
     },
     {
       "name":"mob_movement_broadcast","direction":"server_to_client","opcode":282,
-      "source":"IL2CPP opcode-282 handler fce96542... plus MobMovementBroadcast/Command; tags 0,1,2 select 13,7,7 bytes",
+      "source":"IL2CPP opcode-282 handler fce96542... delegates to c593a76f... direct bool/bool/u8/u32 reads plus MobMovementBroadcast/Command; both reference captures; tags 0,1,2 select typed 13,7,7-byte records",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":282},
         {"op":"read","name":"object_id","kind":"u32"},
-        {"op":"bytes","name":"opaque_control","length":7},
+        {"op":"read","name":"control_flag_1","kind":"bool"},
+        {"op":"read","name":"control_flag_2","kind":"bool"},
+        {"op":"read","name":"control_selector","kind":"u8"},
+        {"op":"read","name":"control_value","kind":"u32"},
         {"op":"read","name":"reference_x","kind":"i16"},
         {"op":"read","name":"reference_y","kind":"i16"},
         {"op":"read","name":"command_count","kind":"u8"},
         {"op":"repeat","count_from":"command_count","operations":[
           {"op":"read","name":"command_type","kind":"u8"},
           {"op":"switch","field":"command_type","cases":[
-            {"equals":0,"operations":[{"op":"bytes","name":"absolute_command","length":13}]},
-            {"equals":1,"operations":[{"op":"bytes","name":"relative_command_1","length":7}]},
-            {"equals":2,"operations":[{"op":"bytes","name":"relative_command_2","length":7}]}
+            {"equals":0,"operations":[
+              {"op":"read","name":"position_x","kind":"i16"},
+              {"op":"read","name":"position_y","kind":"i16"},
+              {"op":"read","name":"velocity_x","kind":"i16"},
+              {"op":"read","name":"velocity_y","kind":"i16"},
+              {"op":"read","name":"foothold_id","kind":"u16"},
+              {"op":"read","name":"stance","kind":"u8"},
+              {"op":"read","name":"duration_ms","kind":"u16"}
+            ]},
+            {"equals":1,"operations":[
+              {"op":"read","name":"velocity_x","kind":"i16"},
+              {"op":"read","name":"velocity_y","kind":"i16"},
+              {"op":"read","name":"stance","kind":"u8"},
+              {"op":"read","name":"duration_ms","kind":"u16"}
+            ]},
+            {"equals":2,"operations":[
+              {"op":"read","name":"velocity_x","kind":"i16"},
+              {"op":"read","name":"velocity_y","kind":"i16"},
+              {"op":"read","name":"stance","kind":"u8"},
+              {"op":"read","name":"duration_ms","kind":"u16"}
+            ]}
           ]}
         ]}
       ]
     },
     {
       "name":"player_movement_broadcast","direction":"server_to_client","opcode":202,
-      "source":"IL2CPP opcode-202 handler dc9d52c2... delegates movement parsing; PlayerMovementBroadcast/Path/Command; capture 111",
+      "source":"IL2CPP opcode-202 handler dc9d52c2... delegates to the pinned caa238b8... movement parser; both reference captures",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":202},
         {"op":"read","name":"object_id","kind":"u32"},
@@ -672,7 +1012,8 @@
           {"op":"switch","field":"command_type","cases":[
             {"equals":0,"operations":[{"op":"bytes","name":"absolute_command","length":13}]},
             {"equals":1,"operations":[{"op":"bytes","name":"relative_command","length":7}]},
-            {"equals":3,"operations":[{"op":"bytes","name":"compact_command","length":5}]},
+            {"equals":3,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":4,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
             {"equals":5,"operations":[{"op":"bytes","name":"alternate_absolute_command","length":13}]}
           ]}
         ]}
@@ -795,11 +1136,63 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":241}]
     },
     {
-      "name":"client_opcode_310_live_fixed_record","direction":"client_to_server","opcode":310,"length":41,
-      "source":"three controlled direct-Wayland game-menu confirmations in the local-Wine world session each emitted one 41-byte client packet; no opcode 241 or phase transition followed, so the 39-byte body and UI role remain explicitly opaque",
+      "name":"client_opcode_307_neutral_record","direction":"client_to_server","opcode":307,"length":14,
+      "source":"packets.py:ClientOpcode307NeutralRecord; two references and 28 live sessions share redacted u32/redacted u32/zero-u32, with all four nonzero middle values page-aligned; purpose remains neutral",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":307},
+        {"op":"read","name":"neutral_value","kind":"u32"},
+        {"op":"read","name":"redacted_value","kind":"u32"},
+        {"op":"read","name":"reserved_zero","kind":"u32","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_310_text_record","direction":"client_to_server","opcode":310,"length":41,
+      "source":"packets.py:ClientOpcode310TextRecord; three controlled direct-Wayland confirmations share a counted 16-unit UTF-16 value and zero-u32/zero-u8 suffix; text, purpose, and UI role remain redacted/neutral",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":310},
-        {"op":"bytes","name":"opaque_body","length":39}
+        {"op":"utf16","name":"redacted_text","trailing_zero":false},
+        {"op":"read","name":"reserved_zero_u32","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_zero_u8","kind":"u8","equals":0}
+      ]
+    },
+    {
+      "name":"client_ability_point_allocation_request","direction":"client_to_server","opcode":100,"length":26,
+      "source":"packets.py:ClientAbilityPointAllocationRequest; stream-92 and stream-126 requests allocate LUK/INT by 1/4 and 9/29, and the following opcode-41 responses apply those exact gains while consuming 5/38 AP",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":100},
+        {"op":"read","name":"client_tick","kind":"u32"},
+        {"op":"read","name":"allocation_count","kind":"u32"},
+        {"op":"repeat","count_from":"allocation_count","operations":[
+          {"op":"read","name":"stat_mask","kind":"u32"},
+          {"op":"read","name":"increment","kind":"u32"}
+        ]}
+      ]
+    },
+    {
+      "name":"client_opcode_308_periodic_record","direction":"client_to_server","opcode":308,"length":74,
+      "source":"packets.py:ClientOpcode308PeriodicRecord; 11 stream-126 and 13 active-live records share two f64, two u64, mirrored u32/f64/f64, and fixed control boundaries at periodic cadence",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":308},
+        {"op":"bytes","name":"neutral_f64_values","length":16},
+        {"op":"read","name":"neutral_u64_0","kind":"u64"},
+        {"op":"read","name":"neutral_u64_1","kind":"u64"},
+        {"op":"read","name":"mirrored_value","kind":"u32"},
+        {"op":"read","name":"constant_50","kind":"u32","equals":50},
+        {"op":"read","name":"constant_1_a","kind":"u32","equals":1},
+        {"op":"read","name":"variant","kind":"u32"},
+        {"op":"bytes","name":"mirrored_f64_values","length":16},
+        {"op":"read","name":"constant_1_b","kind":"u32","equals":1},
+        {"op":"read","name":"reserved_zero","kind":"u32","equals":0}
+      ]
+    },
+    {
+      "name":"client_opcode_311_periodic_record","direction":"client_to_server","opcode":311,"length":22,
+      "source":"packets.py:ClientOpcode311PeriodicRecord; all six stream-126 and seven active-live records are zero-u64/redacted-u32/zero-u64 at periodic cadence",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":311},
+        {"op":"read","name":"reserved_prefix","kind":"u64","equals":0},
+        {"op":"read","name":"neutral_value","kind":"u32"},
+        {"op":"read","name":"reserved_suffix","kind":"u64","equals":0}
       ]
     },
     {
@@ -808,29 +1201,43 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":45}]
     },
     {
-      "name":"client_opcode_43_identified_text","direction":"client_to_server","opcode":43,
-      "source":"capture-111 and 1-10FS shared u8/u32/counted-UTF16/trailing-zero/six-byte-tail envelope; opcode-43 handler d43559a5... begins with the same u8 direct read",
+      "name":"client_portal_field_transfer_request","direction":"client_to_server","opcode":43,
+      "source":"capture-111 and 1-10FS portal transfers: active field epoch, signed -1 server-resolved map sentinel, portal name, player position, and zero u16; every request is followed by a field snapshot",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":43},
-        {"op":"read","name":"sequence","kind":"u8"},
-        {"op":"read","name":"opaque_identifier","kind":"u32"},
-        {"op":"utf16","name":"opaque_text","trailing_zero":true},
-        {"op":"bytes","name":"opaque_tail","length":6}
+        {"op":"read","name":"field_epoch","kind":"u8"},
+        {"op":"read","name":"destination_map_id","kind":"i32","equals":-1},
+        {"op":"utf16","name":"portal_name","trailing_zero":true},
+        {"op":"read","name":"position_x","kind":"i16"},
+        {"op":"read","name":"position_y","kind":"i16"},
+        {"op":"read","name":"reserved_value","kind":"u16","equals":0}
       ]
     },
     {
-      "name":"client_opcode_43_compact","direction":"client_to_server","opcode":43,"length":12,
-      "source":"capture-111 compact u8 plus nine-byte body; kept separate because the same u8 values use the identified-text envelope in 1-10FS",
+      "name":"client_death_respawn_field_transfer_request","direction":"client_to_server","opcode":43,"length":12,
+      "source":"capture-111 death-respawn transfers: active field epoch followed by nine zero bytes; all three follow a same-epoch HP-zero update and precede a field snapshot",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":43},
-        {"op":"read","name":"sequence","kind":"u8"},
-        {"op":"bytes","name":"opaque_body","length":9}
+        {"op":"read","name":"field_epoch","kind":"u8"},
+        {"op":"read","name":"zero_1","kind":"u32","equals":0},
+        {"op":"read","name":"zero_2","kind":"u32","equals":0},
+        {"op":"read","name":"zero_3","kind":"u8","equals":0}
       ]
     },
     {
       "name":"server_opcode_43","direction":"server_to_client","opcode":43,"length":19,
       "source":"IL2CPP opcode-43 handler d43559a5...; capture-111 fixed server branch",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":43},{"op":"read","name":"message_type","kind":"u8"},{"op":"bytes","name":"body","length":16}]
+    },
+    {
+      "name":"client_npc_interaction_request","direction":"client_to_server","opcode":64,"length":10,
+      "source":"ClientNpcInteractionRequest; live action 54 / Space emitted object 3294 for active NPC template 1032005, while both 1-10FS stream-126 requests target active NPCs, match the last same-epoch client movement position, and precede server opcode 348",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":64},{"op":"read","name":"npc_object_id","kind":"u32"},{"op":"read","name":"player_x","kind":"i16"},{"op":"read","name":"player_y","kind":"i16"}]
+    },
+    {
+      "name":"client_opcode_111_cash_slot_action","direction":"client_to_server","opcode":111,"length":8,
+      "source":"ClientOpcode111CashSlotAction; sole 1-10FS stream-126 record precedes a same-epoch server opcode-39 Cash remove/add at the exact signed slot",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":111},{"op":"read","name":"neutral_value","kind":"u32"},{"op":"read","name":"slot","kind":"i16"}]
     },
     {
       "name":"client_opcode_66_server_348_acknowledgement","direction":"client_to_server","opcode":66,
@@ -872,6 +1279,19 @@
         {"op":"read","name":"control_value","kind":"u8"},
         {"op":"utf16","name":"opaque_text","trailing_zero":true},
         {"op":"read","name":"opaque_value","kind":"u32"}
+      ]
+    },
+    {
+      "name":"client_inner_portal_request","direction":"client_to_server","opcode":115,"length":22,
+      "source":"ClientInnerPortalRequest; both capture-111 stream-92 records carry the active field epoch, a redacted inner-portal name, and chained source/destination positions",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":115},
+        {"op":"read","name":"field_epoch","kind":"u8"},
+        {"op":"utf16","name":"portal_name","trailing_zero":true},
+        {"op":"read","name":"source_x","kind":"i16"},
+        {"op":"read","name":"source_y","kind":"i16"},
+        {"op":"read","name":"destination_x","kind":"i16"},
+        {"op":"read","name":"destination_y","kind":"i16"}
       ]
     },
     {
@@ -1255,6 +1675,29 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":379},{"op":"read","name":"variant","kind":"u8","equals":36},{"op":"read","name":"time_1","kind":"i64"},{"op":"read","name":"time_2","kind":"i64"},{"op":"read","name":"time_3","kind":"i64"},{"op":"read","name":"time_4","kind":"i64"}]
     },
     {
+      "name":"chair_stand_request","direction":"client_to_server","opcode":48,"length":4,
+      "source":"2026-08-11 live selector-5 action-51 control: physical X and a movement attempt while seated emitted two byte-identical signed -1 records",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":48},
+        {"op":"read","name":"marker","kind":"i16","equals":-1}
+      ]
+    },
+    {
+      "name":"chair_sit_request","direction":"client_to_server","opcode":49,"length":6,
+      "source":"2026-08-11 live selector-5 action-51 control: physical X rendered the setup-slot-1 chair and emitted its exact item template as u32",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":49},
+        {"op":"read","name":"item_id","kind":"u32"}
+      ]
+    },
+    {
+      "name":"chair_recovery_request","direction":"client_to_server","opcode":82,"length":2,
+      "source":"2026-08-11 live selector-5 action-51 control: one empty request arrived 20006 ms after the chair-sit request and before the first stand request",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":82}
+      ]
+    },
+    {
       "name":"npc_spawn","direction":"server_to_client","opcode":300,"length":22,
       "source":"packets.py:NpcSpawn; capture 111 stream 92",
       "operations":[
@@ -1271,13 +1714,68 @@
       ]
     },
     {
+      "name":"client_npc_state_submission_compact","direction":"client_to_server","opcode":217,"length":8,
+      "source":"packets.py:ClientNpcStateSubmission; 1-10FS stream 126 exact FIFO correlation with server opcode 303 (339 matched compact pairs)",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":217},
+        {"op":"read","name":"object_id","kind":"u32"},
+        {"op":"read","name":"action","kind":"u8"},
+        {"op":"read","name":"parameter","kind":"u8"}
+      ]
+    },
+    {
+      "name":"client_npc_state_submission_movement","direction":"client_to_server","opcode":217,
+      "source":"type-0/type-2 fields share the pinned caa238b8... movement-parser layouts; all 592 stream-126 packets parse exactly and 591 match opcode-303 echoes after removal of the final nine-byte client trailer",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":217},
+        {"op":"read","name":"object_id","kind":"u32"},
+        {"op":"read","name":"action","kind":"u8"},
+        {"op":"read","name":"parameter","kind":"u8"},
+        {"op":"read","name":"reference_x","kind":"i16"},
+        {"op":"read","name":"reference_y","kind":"i16"},
+        {"op":"read","name":"command_count","kind":"u8"},
+        {"op":"repeat","count_from":"command_count","operations":[
+          {"op":"read","name":"command_type","kind":"u8"},
+          {"op":"switch","field":"command_type","cases":[
+            {"equals":0,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]},
+            {"equals":2,"operations":[{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]}
+          ]}
+        ]},
+        {"op":"read","name":"trailer_marker","kind":"u8","equals":0},
+        {"op":"read","name":"path_start_x","kind":"i16"},
+        {"op":"read","name":"path_start_y","kind":"i16"},
+        {"op":"read","name":"path_end_x","kind":"i16"},
+        {"op":"read","name":"path_end_y","kind":"i16"}
+      ]
+    },
+    {
       "name":"npc_state_update","direction":"server_to_client","opcode":303,"length":8,
-      "source":"packets.py:NpcStateUpdate; capture 111 stream 92",
+      "source":"packets.py:NpcStateUpdate; compact capture-111 stream 92 and 1-10FS stream 126 forms",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":303},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"action","kind":"u8"},
         {"op":"read","name":"parameter","kind":"u8"}
+      ]
+    },
+    {
+      "name":"npc_state_update_movement","direction":"server_to_client","opcode":303,
+      "source":"type-0/type-2 fields share the pinned caa238b8... movement-parser layouts; all 683 stream-126 packets parse exactly, including 591 exact client opcode-217 echoes",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":303},
+        {"op":"read","name":"object_id","kind":"u32"},
+        {"op":"read","name":"action","kind":"u8"},
+        {"op":"read","name":"parameter","kind":"u8"},
+        {"op":"read","name":"reference_x","kind":"i16"},
+        {"op":"read","name":"reference_y","kind":"i16"},
+        {"op":"read","name":"command_count","kind":"u8"},
+        {"op":"repeat","count_from":"command_count","operations":[
+          {"op":"read","name":"command_type","kind":"u8"},
+          {"op":"switch","field":"command_type","cases":[
+            {"equals":0,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]},
+            {"equals":2,"operations":[{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]}
+          ]}
+        ]}
       ]
     }
   ]

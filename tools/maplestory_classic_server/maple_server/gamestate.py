@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 import json
@@ -10,10 +11,29 @@ from .packets import (
     ChannelSelection,
     CharacterListEnvelope,
     CharacterSelection,
+    ClientOpcode10CharacterCreationRequest,
+    ClientOpcode16CreatedCharacterSelection,
+    ClientOpcode274OpaqueTextRecord,
+    ClientOpcode6RecordSet,
+    ClientOpcode31Record,
     ClientStatusMessage,
+    HeartbeatProbe,
+    HeartbeatResponse,
+    LoginClientOpcode255Record,
+    LoginClientOpcode9TextRecord,
+    LoginServerFixedRecord,
+    LoginServerOpcode3Record,
+    LoginServerOpcode35Record,
+    LoginServerOpcode390Record,
+    LoginServerOpcode6TextRecord,
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    ServerOpcode0AccountBootstrapProbe,
+    ServerOpcode22IndexedTextLedger,
+    ServerOpcode27IntegerLedger,
+    ServerOpcode28TextLedger,
+    ServerOpcode7CharacterCreationResponse,
     ServerTime,
     WorldHandoff,
     WorldListEnd,
@@ -107,6 +127,69 @@ class LoginGameState:
     )
     selected_character_id: int | None = field(default=None, repr=False)
     handoff: WorldHandoff | None = None
+    heartbeat_probes: int = 0
+    heartbeat_responses: int = 0
+    matched_heartbeat_responses: int = 0
+    unmatched_heartbeat_responses: int = 0
+    pending_heartbeat_probes: int = 0
+    last_heartbeat_round_trip_ms: float | None = None
+    max_heartbeat_round_trip_ms: float | None = None
+    login_server_fixed_records: int = 0
+    login_server_fixed_records_by_opcode: dict[str, int] = field(
+        default_factory=dict
+    )
+    login_server_fixed_zero_values: int = 0
+    server_opcode_22_ledgers: int = 0
+    server_opcode_22_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    server_opcode_22_text_code_units: int = 0
+    server_opcode_22_pending_client_record_sets: int = 0
+    client_opcode_6_server_index_set_matches: int = 0
+    client_opcode_6_server_index_set_mismatches: int = 0
+    server_opcode_27_ledgers: int = 0
+    server_opcode_27_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    server_opcode_27_text_code_units: int = 0
+    server_opcode_28_ledgers: int = 0
+    server_opcode_28_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    server_opcode_28_text_1_code_units: int = 0
+    server_opcode_28_text_2_code_units: int = 0
+    client_opcode_6_record_sets: int = 0
+    client_opcode_6_entry_count_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    client_opcode_6_opaque_values: int = 0
+    client_opcode_31_records: int = 0
+    client_opcode_31_text_code_unit_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    client_opcode_31_opaque_blob_bytes: int = 0
+    client_opcode_274_records: int = 0
+    client_opcode_274_text_code_unit_patterns: dict[str, int] = field(
+        default_factory=dict
+    )
+    local_account_bootstrap_probes: int = 0
+    login_server_opcode_3_records: int = 0
+    login_client_opcode_255_records: int = 0
+    login_server_opcode_390_records: int = 0
+    login_client_opcode_9_text_records: int = 0
+    login_server_opcode_6_text_records: int = 0
+    login_opcode_9_6_text_matches: int = 0
+    login_opcode_9_6_text_mismatches: int = 0
+    login_server_opcode_35_records: int = 0
+    character_creation_requests: int = 0
+    character_creation_responses: int = 0
+    character_creation_name_matches: int = 0
+    character_creation_name_mismatches: int = 0
+    character_creation_appearance_matches: int = 0
+    character_creation_appearance_mismatches: int = 0
+    created_character_selections: int = 0
+    created_character_selection_matches: int = 0
+    created_character_selection_mismatches: int = 0
 
 
 @dataclass(frozen=True)
@@ -228,6 +311,145 @@ class LoginAnalysis:
                 "characters": characters,
                 "selected_character_id": character_id,
                 "handoff": handoff,
+                "heartbeat_probes": self.state.heartbeat_probes,
+                "heartbeat_responses": self.state.heartbeat_responses,
+                "matched_heartbeat_responses": (
+                    self.state.matched_heartbeat_responses
+                ),
+                "unmatched_heartbeat_responses": (
+                    self.state.unmatched_heartbeat_responses
+                ),
+                "pending_heartbeat_probes": (
+                    self.state.pending_heartbeat_probes
+                ),
+                "last_heartbeat_round_trip_ms": (
+                    self.state.last_heartbeat_round_trip_ms
+                ),
+                "max_heartbeat_round_trip_ms": (
+                    self.state.max_heartbeat_round_trip_ms
+                ),
+                "login_server_fixed_records": (
+                    self.state.login_server_fixed_records
+                ),
+                "login_server_fixed_records_by_opcode": (
+                    self.state.login_server_fixed_records_by_opcode
+                ),
+                "login_server_fixed_zero_values": (
+                    self.state.login_server_fixed_zero_values
+                ),
+                "server_opcode_22_ledgers": self.state.server_opcode_22_ledgers,
+                "server_opcode_22_entry_count_patterns": (
+                    self.state.server_opcode_22_entry_count_patterns
+                ),
+                "server_opcode_22_text_code_units": (
+                    self.state.server_opcode_22_text_code_units
+                ),
+                "server_opcode_22_pending_client_record_sets": (
+                    self.state.server_opcode_22_pending_client_record_sets
+                ),
+                "client_opcode_6_server_index_set_matches": (
+                    self.state.client_opcode_6_server_index_set_matches
+                ),
+                "client_opcode_6_server_index_set_mismatches": (
+                    self.state.client_opcode_6_server_index_set_mismatches
+                ),
+                "server_opcode_27_ledgers": (
+                    self.state.server_opcode_27_ledgers
+                ),
+                "server_opcode_27_entry_count_patterns": (
+                    self.state.server_opcode_27_entry_count_patterns
+                ),
+                "server_opcode_27_text_code_units": (
+                    self.state.server_opcode_27_text_code_units
+                ),
+                "server_opcode_28_ledgers": (
+                    self.state.server_opcode_28_ledgers
+                ),
+                "server_opcode_28_entry_count_patterns": (
+                    self.state.server_opcode_28_entry_count_patterns
+                ),
+                "server_opcode_28_text_1_code_units": (
+                    self.state.server_opcode_28_text_1_code_units
+                ),
+                "server_opcode_28_text_2_code_units": (
+                    self.state.server_opcode_28_text_2_code_units
+                ),
+                "client_opcode_6_record_sets": (
+                    self.state.client_opcode_6_record_sets
+                ),
+                "client_opcode_6_entry_count_patterns": (
+                    self.state.client_opcode_6_entry_count_patterns
+                ),
+                "client_opcode_6_opaque_values": (
+                    self.state.client_opcode_6_opaque_values
+                ),
+                "client_opcode_31_records": (
+                    self.state.client_opcode_31_records
+                ),
+                "client_opcode_31_text_code_unit_patterns": (
+                    self.state.client_opcode_31_text_code_unit_patterns
+                ),
+                "client_opcode_31_opaque_blob_bytes": (
+                    self.state.client_opcode_31_opaque_blob_bytes
+                ),
+                "client_opcode_274_records": self.state.client_opcode_274_records,
+                "client_opcode_274_text_code_unit_patterns": (
+                    self.state.client_opcode_274_text_code_unit_patterns
+                ),
+                "local_account_bootstrap_probes": (
+                    self.state.local_account_bootstrap_probes
+                ),
+                "login_server_opcode_3_records": (
+                    self.state.login_server_opcode_3_records
+                ),
+                "login_client_opcode_255_records": (
+                    self.state.login_client_opcode_255_records
+                ),
+                "login_server_opcode_390_records": (
+                    self.state.login_server_opcode_390_records
+                ),
+                "login_client_opcode_9_text_records": (
+                    self.state.login_client_opcode_9_text_records
+                ),
+                "login_server_opcode_6_text_records": (
+                    self.state.login_server_opcode_6_text_records
+                ),
+                "login_opcode_9_6_text_matches": (
+                    self.state.login_opcode_9_6_text_matches
+                ),
+                "login_opcode_9_6_text_mismatches": (
+                    self.state.login_opcode_9_6_text_mismatches
+                ),
+                "login_server_opcode_35_records": (
+                    self.state.login_server_opcode_35_records
+                ),
+                "character_creation_requests": (
+                    self.state.character_creation_requests
+                ),
+                "character_creation_responses": (
+                    self.state.character_creation_responses
+                ),
+                "character_creation_name_matches": (
+                    self.state.character_creation_name_matches
+                ),
+                "character_creation_name_mismatches": (
+                    self.state.character_creation_name_mismatches
+                ),
+                "character_creation_appearance_matches": (
+                    self.state.character_creation_appearance_matches
+                ),
+                "character_creation_appearance_mismatches": (
+                    self.state.character_creation_appearance_mismatches
+                ),
+                "created_character_selections": (
+                    self.state.created_character_selections
+                ),
+                "created_character_selection_matches": (
+                    self.state.created_character_selection_matches
+                ),
+                "created_character_selection_mismatches": (
+                    self.state.created_character_selection_mismatches
+                ),
             },
             "packets": [
                 {
@@ -423,6 +645,15 @@ class LoginStateFold:
         self.state = LoginGameState()
         self.issues: list[str] = []
         self.warnings: list[str] = []
+        self._pending_heartbeat_probes: deque[int] = deque()
+        self._pending_server_opcode_22_index_sets: deque[frozenset[int]] = (
+            deque()
+        )
+        self._pending_client_opcode_9_texts: deque[tuple[int, str]] = deque()
+        self._pending_character_creation_requests: deque[
+            tuple[int, ClientOpcode10CharacterCreationRequest]
+        ] = deque()
+        self._created_character_ids: dict[int, int] = {}
 
     def _invalid(
         self, frame: PlainFrame, kind: str, error: PacketShapeError
@@ -487,6 +718,20 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 10:
+            probe = HeartbeatProbe.parse(payload)
+            self._pending_heartbeat_probes.append(frame.timestamp_ns)
+            self.state.heartbeat_probes += 1
+            self.state.pending_heartbeat_probes += 1
+            return self._observation(
+                frame,
+                kind="heartbeat_probe",
+                coverage=ShapeCoverage.FULL,
+                parsed=probe,
+                details={
+                    "pending_probes": self.state.pending_heartbeat_probes
+                },
+            )
         if opcode == 13:
             if len(payload) == 3:
                 acknowledgment = Opcode13Ack.parse(payload)
@@ -517,6 +762,240 @@ class LoginStateFold:
                 coverage=ShapeCoverage.FULL,
                 parsed=server_time,
                 details={"ticks": server_time.ticks},
+            )
+        if opcode in LoginServerFixedRecord.VALUE_WIDTHS:
+            record = LoginServerFixedRecord.parse(payload)
+            opcode_key = str(opcode)
+            self.state.login_server_fixed_records += 1
+            self.state.login_server_fixed_records_by_opcode[opcode_key] = (
+                self.state.login_server_fixed_records_by_opcode.get(
+                    opcode_key, 0
+                )
+                + 1
+            )
+            if record.value == 0:
+                self.state.login_server_fixed_zero_values += 1
+            return self._observation(
+                frame,
+                kind="login_server_fixed_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "fixed login-server record value and role remain neutral",
+                ),
+            )
+        if opcode == 22:
+            ledger = ServerOpcode22IndexedTextLedger.parse(payload)
+            entry_count = str(len(ledger.opaque_entries))
+            self.state.server_opcode_22_ledgers += 1
+            self.state.server_opcode_22_entry_count_patterns[entry_count] = (
+                self.state.server_opcode_22_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.server_opcode_22_text_code_units += (
+                ledger.text_code_units
+            )
+            self.state.server_opcode_22_pending_client_record_sets += 1
+            self._pending_server_opcode_22_index_sets.append(
+                frozenset(index for index, _ in ledger.opaque_entries)
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_22_indexed_text_ledger",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=ledger,
+                details=ledger.safe_dict(),
+                issues=(
+                    "opcode-22 text values and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 27:
+            ledger = ServerOpcode27IntegerLedger.parse(payload)
+            entry_count = str(len(ledger.entries))
+            self.state.server_opcode_27_ledgers += 1
+            self.state.server_opcode_27_entry_count_patterns[entry_count] = (
+                self.state.server_opcode_27_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.server_opcode_27_text_code_units += (
+                ledger.text_code_units
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_27_integer_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger,
+                details=ledger.safe_dict(),
+            )
+        if opcode == 28:
+            ledger = ServerOpcode28TextLedger.parse(payload)
+            entry_count = str(len(ledger.entries))
+            self.state.server_opcode_28_ledgers += 1
+            self.state.server_opcode_28_entry_count_patterns[entry_count] = (
+                self.state.server_opcode_28_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.server_opcode_28_text_1_code_units += (
+                ledger.text_1_code_units
+            )
+            self.state.server_opcode_28_text_2_code_units += (
+                ledger.text_2_code_units
+            )
+            return self._observation(
+                frame,
+                kind="server_opcode_28_text_ledger",
+                coverage=ShapeCoverage.FULL,
+                parsed=ledger,
+                details=ledger.safe_dict(),
+            )
+        if opcode == 3:
+            record = LoginServerOpcode3Record.parse(payload)
+            self.state.login_server_opcode_3_records += 1
+            return self._observation(
+                frame,
+                kind="login_server_opcode_3_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=("opcode-3 values and higher-level role remain neutral",),
+            )
+        if opcode == 390:
+            record = LoginServerOpcode390Record.parse(payload)
+            self.state.login_server_opcode_390_records += 1
+            return self._observation(
+                frame,
+                kind="login_server_opcode_390_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-390 value and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 6:
+            record = LoginServerOpcode6TextRecord.parse(payload)
+            self.state.login_server_opcode_6_text_records += 1
+            details = record.safe_dict()
+            if self._pending_client_opcode_9_texts:
+                request_timestamp_ns, request_text = (
+                    self._pending_client_opcode_9_texts.popleft()
+                )
+                text_match = record.opaque_text == request_text
+                details["client_opcode_9_text_match"] = text_match
+                details["response_latency_ms"] = round(
+                    (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                    3,
+                )
+                if text_match:
+                    self.state.login_opcode_9_6_text_matches += 1
+                else:
+                    self.state.login_opcode_9_6_text_mismatches += 1
+                    self.warnings.append(
+                        "server opcode-6 text does not match preceding client "
+                        "opcode-9 text"
+                    )
+            else:
+                details["client_opcode_9_text_match"] = None
+            return self._observation(
+                frame,
+                kind="login_server_opcode_6_text_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=details,
+                issues=(
+                    "opcode-6 text, value, and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 35:
+            record = LoginServerOpcode35Record.parse(payload)
+            self.state.login_server_opcode_35_records += 1
+            return self._observation(
+                frame,
+                kind="login_server_opcode_35_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-35 text and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 7:
+            response = ServerOpcode7CharacterCreationResponse.parse(payload)
+            self.state.character_creation_responses += 1
+            details = response.safe_dict()
+            issues: tuple[str, ...] = (
+                "creation request first u32 and response style values remain "
+                "neutral",
+            )
+            if response.result != 0:
+                issues = (
+                    "non-success character-creation payload remains opaque",
+                )
+            elif response.snapshot is not None and response.appearance is not None:
+                self._created_character_ids[response.snapshot.character_id] = (
+                    frame.timestamp_ns
+                )
+                if self._pending_character_creation_requests:
+                    request_timestamp_ns, request = (
+                        self._pending_character_creation_requests.popleft()
+                    )
+                    name_match = request.name == response.snapshot.name
+                    appearance_match = (
+                        request.appearance_fingerprint()
+                        == response.appearance.request_fingerprint()
+                    )
+                    details["request_name_match"] = name_match
+                    details["request_appearance_match"] = appearance_match
+                    details["response_latency_ms"] = round(
+                        (frame.timestamp_ns - request_timestamp_ns) / 1e6,
+                        3,
+                    )
+                    if name_match:
+                        self.state.character_creation_name_matches += 1
+                    else:
+                        self.state.character_creation_name_mismatches += 1
+                        self.warnings.append(
+                            "character creation response name does not match "
+                            "the request"
+                        )
+                    if appearance_match:
+                        self.state.character_creation_appearance_matches += 1
+                    else:
+                        self.state.character_creation_appearance_mismatches += 1
+                        self.warnings.append(
+                            "character creation response appearance does not "
+                            "match the request"
+                        )
+                else:
+                    details["request_name_match"] = None
+                    details["request_appearance_match"] = None
+            return self._observation(
+                frame,
+                kind="character_creation_response",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=response,
+                details=details,
+                issues=issues,
+            )
+        if opcode == 0 and len(payload) == 36:
+            probe = ServerOpcode0AccountBootstrapProbe.parse(payload)
+            self.state.local_account_bootstrap_probes += 1
+            return self._observation(
+                frame,
+                kind="local_account_bootstrap_probe",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=probe,
+                details=probe.safe_dict(),
+                issues=(
+                    "local diagnostic prefix is not a complete account result",
+                ),
             )
         account_shape_candidate = opcode == 1 or (
             opcode == 0 and len(payload) >= 31 and len(payload) % 2 == 1
@@ -711,6 +1190,214 @@ class LoginStateFold:
         self, frame: PlainFrame, opcode: int
     ) -> PacketObservation:
         payload = frame.plaintext
+        if opcode == 10:
+            request = ClientOpcode10CharacterCreationRequest.parse(payload)
+            self.state.character_creation_requests += 1
+            self._pending_character_creation_requests.append(
+                (frame.timestamp_ns, request)
+            )
+            return self._observation(
+                frame,
+                kind="character_creation_request",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=request,
+                details=request.safe_dict(),
+                issues=(
+                    "creation request u32 values remain neutral and redacted",
+                ),
+            )
+        if opcode == 16:
+            selection = ClientOpcode16CreatedCharacterSelection.parse(payload)
+            self.state.created_character_selections += 1
+            details = selection.safe_dict()
+            created_timestamp_ns = self._created_character_ids.get(
+                selection.character_id
+            )
+            created_character_match = created_timestamp_ns is not None
+            details["created_character_match"] = created_character_match
+            if created_timestamp_ns is not None:
+                details["selection_latency_ms"] = round(
+                    (frame.timestamp_ns - created_timestamp_ns) / 1e6,
+                    3,
+                )
+                self.state.created_character_selection_matches += 1
+            else:
+                self.state.created_character_selection_mismatches += 1
+                self.warnings.append(
+                    "client opcode-16 character id was not introduced by a "
+                    "creation response"
+                )
+            self.state.selected_character_id = selection.character_id
+            self.state.phase = LoginPhase.CHARACTER_SELECTED
+            return self._observation(
+                frame,
+                kind="created_character_selection",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=selection,
+                details=details,
+                issues=(
+                    "opcode-16 reserved byte role remains neutral",
+                ),
+            )
+        if opcode == 255:
+            record = LoginClientOpcode255Record.parse(payload)
+            self.state.login_client_opcode_255_records += 1
+            return self._observation(
+                frame,
+                kind="login_client_opcode_255_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-255 value and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 9:
+            record = LoginClientOpcode9TextRecord.parse(payload)
+            self.state.login_client_opcode_9_text_records += 1
+            self._pending_client_opcode_9_texts.append(
+                (frame.timestamp_ns, record.opaque_text)
+            )
+            return self._observation(
+                frame,
+                kind="login_client_opcode_9_text_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-9 text and higher-level role remain neutral",
+                ),
+            )
+        if opcode == 274:
+            record = ClientOpcode274OpaqueTextRecord.parse(payload)
+            text_pattern = "/".join(
+                str(length) for length in record.text_code_units
+            )
+            self.state.client_opcode_274_records += 1
+            self.state.client_opcode_274_text_code_unit_patterns[
+                text_pattern
+            ] = (
+                self.state.client_opcode_274_text_code_unit_patterns.get(
+                    text_pattern, 0
+                )
+                + 1
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_274_opaque_text_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-274 text contents and higher-level role remain "
+                    "neutral",
+                ),
+            )
+        if opcode == 6:
+            record_set = ClientOpcode6RecordSet.parse(payload)
+            entry_count = str(len(record_set.opaque_entries))
+            self.state.client_opcode_6_record_sets += 1
+            self.state.client_opcode_6_entry_count_patterns[entry_count] = (
+                self.state.client_opcode_6_entry_count_patterns.get(
+                    entry_count, 0
+                )
+                + 1
+            )
+            self.state.client_opcode_6_opaque_values += len(
+                record_set.opaque_entries
+            )
+            details = record_set.safe_dict()
+            if self._pending_server_opcode_22_index_sets:
+                server_indices = (
+                    self._pending_server_opcode_22_index_sets.popleft()
+                )
+                self.state.server_opcode_22_pending_client_record_sets -= 1
+                client_indices = frozenset(
+                    index for index, _ in record_set.opaque_entries
+                )
+                index_set_match = client_indices == server_indices
+                details["server_opcode_22_index_set_match"] = index_set_match
+                if index_set_match:
+                    self.state.client_opcode_6_server_index_set_matches += 1
+                else:
+                    self.state.client_opcode_6_server_index_set_mismatches += 1
+                    self.warnings.append(
+                        "client opcode-6 index set does not match the preceding "
+                        "server opcode-22 ledger"
+                    )
+            else:
+                details["server_opcode_22_index_set_match"] = None
+            return self._observation(
+                frame,
+                kind="client_opcode_6_record_set",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record_set,
+                details=details,
+                issues=(
+                    "opcode-6 header and indexed record values remain neutral",
+                ),
+            )
+        if opcode == 31:
+            record = ClientOpcode31Record.parse(payload)
+            text_pattern = "/".join(
+                str(length) for length in record.text_code_units
+            )
+            self.state.client_opcode_31_records += 1
+            self.state.client_opcode_31_text_code_unit_patterns[
+                text_pattern
+            ] = (
+                self.state.client_opcode_31_text_code_unit_patterns.get(
+                    text_pattern, 0
+                )
+                + 1
+            )
+            self.state.client_opcode_31_opaque_blob_bytes += len(
+                record.opaque_blob
+            )
+            return self._observation(
+                frame,
+                kind="client_opcode_31_record",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=record,
+                details=record.safe_dict(),
+                issues=(
+                    "opcode-31 text, blob contents, and higher-level role "
+                    "remain neutral",
+                ),
+            )
+        if opcode == 23:
+            response = HeartbeatResponse.parse(payload)
+            matched_probe = bool(self._pending_heartbeat_probes)
+            round_trip_ms: float | None = None
+            if matched_probe:
+                probe_timestamp_ns = self._pending_heartbeat_probes.popleft()
+                round_trip_ms = (
+                    frame.timestamp_ns - probe_timestamp_ns
+                ) / 1e6
+                self.state.pending_heartbeat_probes -= 1
+                self.state.matched_heartbeat_responses += 1
+                self.state.last_heartbeat_round_trip_ms = round_trip_ms
+                self.state.max_heartbeat_round_trip_ms = max(
+                    self.state.max_heartbeat_round_trip_ms or 0.0,
+                    round_trip_ms,
+                )
+            else:
+                self.state.unmatched_heartbeat_responses += 1
+            self.state.heartbeat_responses += 1
+            details: dict[str, object] = {
+                "matched_probe": matched_probe,
+                "opaque_token_bytes": 8,
+            }
+            if round_trip_ms is not None:
+                details["round_trip_ms"] = round(round_trip_ms, 3)
+            return self._observation(
+                frame,
+                kind="heartbeat_response",
+                coverage=ShapeCoverage.PARTIAL,
+                parsed=response,
+                details=details,
+                issues=("heartbeat response token remains opaque",),
+            )
         if opcode == 13:
             if len(payload) >= 3 and payload[2] == 15:
                 status = ClientStatusMessage.parse(payload)
@@ -870,6 +1557,95 @@ def render_login_analysis(
         ),
         f"character_list_received={state['character_list_received']}",
         f"handoff={state['handoff']}",
+        (
+            f"heartbeats=probes:{state['heartbeat_probes']} "
+            f"responses:{state['heartbeat_responses']} "
+            f"matched:{state['matched_heartbeat_responses']} "
+            f"unmatched:{state['unmatched_heartbeat_responses']} "
+            f"pending:{state['pending_heartbeat_probes']}"
+        ),
+        (
+            "login_server_fixed_records="
+            f"total:{state['login_server_fixed_records']} "
+            f"by_opcode:{state['login_server_fixed_records_by_opcode']} "
+            f"zero_values:{state['login_server_fixed_zero_values']}"
+        ),
+        (
+            "server_opcode_22="
+            f"ledgers:{state['server_opcode_22_ledgers']} "
+            f"entry_counts:{state['server_opcode_22_entry_count_patterns']} "
+            f"text_code_units:{state['server_opcode_22_text_code_units']} "
+            f"pending_client_sets:"
+            f"{state['server_opcode_22_pending_client_record_sets']}"
+        ),
+        (
+            "opcode_22_to_client_opcode_6="
+            f"matched:"
+            f"{state['client_opcode_6_server_index_set_matches']} "
+            f"mismatched:"
+            f"{state['client_opcode_6_server_index_set_mismatches']}"
+        ),
+        (
+            "server_opcode_27="
+            f"ledgers:{state['server_opcode_27_ledgers']} "
+            "entry_counts:"
+            f"{state['server_opcode_27_entry_count_patterns']} "
+            f"text_code_units:{state['server_opcode_27_text_code_units']}"
+        ),
+        (
+            "server_opcode_28="
+            f"ledgers:{state['server_opcode_28_ledgers']} "
+            "entry_counts:"
+            f"{state['server_opcode_28_entry_count_patterns']} "
+            f"text_1_code_units:{state['server_opcode_28_text_1_code_units']} "
+            f"text_2_code_units:{state['server_opcode_28_text_2_code_units']}"
+        ),
+        (
+            "client_opcode_6="
+            f"record_sets:{state['client_opcode_6_record_sets']} "
+            "entry_counts:"
+            f"{state['client_opcode_6_entry_count_patterns']} "
+            f"opaque_values:{state['client_opcode_6_opaque_values']}"
+        ),
+        (
+            "client_opcode_31="
+            f"records:{state['client_opcode_31_records']} "
+            "text_patterns:"
+            f"{state['client_opcode_31_text_code_unit_patterns']} "
+            f"opaque_blob_bytes:{state['client_opcode_31_opaque_blob_bytes']}"
+        ),
+        (
+            "client_opcode_274="
+            f"records:{state['client_opcode_274_records']} "
+            f"text_code_units:"
+            f"{state['client_opcode_274_text_code_unit_patterns']}"
+        ),
+        (
+            "local_account_bootstrap_probes="
+            f"{state['local_account_bootstrap_probes']}"
+        ),
+        (
+            "legacy_login_records="
+            f"server3:{state['login_server_opcode_3_records']} "
+            f"client255:{state['login_client_opcode_255_records']} "
+            f"server390:{state['login_server_opcode_390_records']} "
+            f"client9:{state['login_client_opcode_9_text_records']} "
+            f"server6:{state['login_server_opcode_6_text_records']} "
+            f"text_matches:{state['login_opcode_9_6_text_matches']} "
+            f"text_mismatches:{state['login_opcode_9_6_text_mismatches']}"
+        ),
+        (
+            "legacy_character_creation="
+            f"server35:{state['login_server_opcode_35_records']} "
+            f"requests:{state['character_creation_requests']} "
+            f"responses:{state['character_creation_responses']} "
+            f"name_matches:{state['character_creation_name_matches']} "
+            "appearance_matches:"
+            f"{state['character_creation_appearance_matches']} "
+            f"selections:{state['created_character_selections']} "
+            "selection_matches:"
+            f"{state['created_character_selection_matches']}"
+        ),
         f"packet_shapes={json.dumps(packet_counts, sort_keys=True)}",
     ]
     lines.extend(f"issue={issue}" for issue in analysis.issues)

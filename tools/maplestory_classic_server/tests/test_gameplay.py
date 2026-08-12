@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from maple_server.gameplay import (  # noqa: E402
     GameplayPhase,
     GameplayStateFold,
+    InventoryItemEntity,
     MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     MobHealthResponsePolicy,
     MobMovementBroadcastDecisionQueue,
@@ -22,9 +23,16 @@ from maple_server.gameplay import (  # noqa: E402
     PlayerMobProximityPredicate,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
+    derive_ability_point_allocation_response_policy,
+    derive_client_recovery_response_policy,
+    derive_inventory_move_response_policy,
+    derive_item_acquisition_response_policy,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    derive_npc_state_response_policy,
+    derive_skill_level_change_response_policy,
+    logical_equip_inventory,
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
@@ -42,20 +50,35 @@ from maple_server.gameplay import (  # noqa: E402
     render_gameplay_analysis,
     world_session_termination_frame_index,
 )
-from maple_server.gamestate import PlainFrame  # noqa: E402
+from maple_server.gamestate import PlainFrame, ShapeCoverage  # noqa: E402
 from maple_server.packets import (  # noqa: E402
+    AbilityPointAllocationEntry,
+    ChairRecoveryRequest,
+    ChairSitRequest,
+    ChairStandRequest,
     CharacterStatUpdate,
+    ClientAbilityPointAllocationRequest,
     ClientAttackAction,
-    ClientFixedOpaqueRecord,
-    ClientOpcode43Envelope,
+    ClientFieldTransferRequest,
+    ClientInnerPortalRequest,
+    ClientOpcode111CashSlotAction,
+    ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
-    ClientOpcode101Record,
+    ClientRecoveryRequest,
     ClientOpcode114TextEnvelope,
     ClientOpcode122Envelope,
-    ClientOpcode217RecordSet,
+    ClientNpcStateSubmission,
+    ClientReactorHitRequest,
+    ClientOpcode276Envelope,
+    ClientOpcode276RecordGroup,
     ClientOpcode279TextEnvelope,
+    ClientOpcode298ItemAcquisitionRequest,
+    ClientOpcode307NeutralRecord,
+    ClientOpcode308PeriodicRecord,
     ClientOpcode309Acknowledgement,
+    ClientOpcode310TextRecord,
+    ClientOpcode311PeriodicRecord,
     ClientOpcode54AttackAction,
     ClientSkillUseRequest,
     ClientWorldExitRequest,
@@ -73,7 +96,8 @@ from maple_server.packets import (  # noqa: E402
     FixedServerU32Record,
     FixedServerU64Record,
     FixedServerU8Record,
-    FieldLoadStage,
+    ClientKeymapBindingChange,
+    ClientOpcode158Request,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
@@ -89,6 +113,7 @@ from maple_server.packets import (  # noqa: E402
     VariableServerRecord,
     InventoryChangeSet,
     InventoryModification,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     LifeMovementBroadcast,
@@ -106,9 +131,11 @@ from maple_server.packets import (  # noqa: E402
     MobMovementPath,
     MobMovementSubmission,
     MobSpawnData,
+    MobSpawnTemporaryStatus,
     MobTemporaryStatReset,
     MobTemporaryStatSet,
     NpcLifecycleControl,
+    NpcMovementPath,
     NpcSpawn,
     NpcStateUpdate,
     Opcode13Envelope,
@@ -151,9 +178,9 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode272Ledger,
     ServerOpcode272LedgerEntry,
     ServerOpcode276BooleanFlag,
-    ServerOpcode320PositionedEffectRecord,
-    ServerOpcode322PositionedEffectRecord,
-    ServerOpcode323PositionedEffectRecord,
+    ServerReactorRemoval,
+    ServerReactorSpawn,
+    ServerReactorStateUpdate,
     ServerOpcode348TextEnvelope,
     ServerOpcode394TextEnvelope,
     ServerOpcode379Record,
@@ -311,7 +338,7 @@ def fixture_variable_server_records() -> tuple[VariableServerRecord, ...]:
 
 def fixture_movement_path() -> MobMovementPath:
     return MobMovementPath(
-        opaque_control=b"\x00anitized-control".ljust(19, b"\x00"),
+        opaque_control=b"\x00\xff\x00\x00\x00\x00" + b"\x00" * 13,
         reference_x=100,
         reference_y=-200,
         commands=(
@@ -353,7 +380,21 @@ def fixture_player_movement_path() -> PlayerMovementPath:
                 stance=3,
                 duration_ms=12,
             ),
-            PlayerMovementCommand.compact(b"\x01\x02\x03\x04\x05"),
+            PlayerMovementCommand.positioned(
+                position_x=115,
+                position_y=-190,
+                neutral_value=0,
+                stance=3,
+                duration_ms=15,
+            ),
+            PlayerMovementCommand.positioned(
+                command_type=4,
+                position_x=118,
+                position_y=-185,
+                neutral_value=0,
+                stance=4,
+                duration_ms=20,
+            ),
             PlayerMovementCommand.absolute(
                 command_type=5,
                 position_x=120,
@@ -382,11 +423,41 @@ def fixture_life_movement_path() -> LifeMovementPath:
         reference_x=100,
         reference_y=-200,
         commands=(
-            LifeMovementCommand(command_type=0, opaque_payload=b"\x00" * 13),
-            LifeMovementCommand(command_type=2, opaque_payload=b"\x00" * 7),
-            LifeMovementCommand(command_type=10, opaque_payload=b"\x00"),
-            LifeMovementCommand(command_type=14, opaque_payload=b"\x00" * 9),
-            LifeMovementCommand(command_type=15, opaque_payload=b"\x00" * 15),
+            LifeMovementCommand.absolute(
+                position_x=110,
+                position_y=-190,
+                last_x=3,
+                last_y=-4,
+                foothold_id=5,
+                stance=6,
+                duration_ms=7,
+            ),
+            LifeMovementCommand.relative(
+                command_type=2,
+                delta_x=8,
+                delta_y=-9,
+                stance=10,
+                duration_ms=11,
+            ),
+            LifeMovementCommand.equipment_change(12),
+            LifeMovementCommand.teleport(
+                command_type=14,
+                position_x=120,
+                position_y=-180,
+                unknown_value=13,
+                stance=14,
+                trailing_value=15,
+            ),
+            LifeMovementCommand.jump_down(
+                position_x=130,
+                position_y=-170,
+                vector_x=16,
+                vector_y=-17,
+                unknown_value_1=18,
+                unknown_value_2=19,
+                stance=20,
+                trailing_value=21,
+            ),
         ),
     )
 
@@ -474,17 +545,28 @@ def fixture_cash_inventory_item(*, slot: int) -> InitialInventoryItem:
 
 
 def fixture_mob_spawn(*, extended_status: bool = False) -> MobSpawnData:
+    temporary_status = (
+        MobSpawnTemporaryStatus(
+            mask_words=(0, 0, 0, 0x8800_0080),
+            value=1,
+            source_skill_id=3_101_005,
+            duration_units=0,
+        )
+        if extended_status
+        else MobSpawnTemporaryStatus()
+    )
     return MobSpawnData(
         spawn_marker=1,
         template_id=210_100,
-        opaque_status=b"\x00" * (30 if extended_status else 22),
+        temporary_status=temporary_status,
         x=100,
         y=-200,
         stance=2,
         foothold_id=7,
         origin_foothold_id=8,
-        spawn_effect=-1,
-        opaque_tail=b"\x00" * 4,
+        appear_type=-1,
+        team=0xFF,
+        effect_item_id=0,
     )
 
 
@@ -685,19 +767,26 @@ def fixture_gameplay_transcript(
     initial_snapshot_payload: bytes | None = None,
     player_movement: bool = False,
     attack_actions: bool = False,
-    opcode_101_records: bool = False,
+    recovery_requests: bool = False,
     opcode_13_messages: bool = False,
     opcode_217_records: bool = False,
     opcode_426_acknowledgement: bool = False,
+    npc_interaction: bool = False,
+    opcode_111_cash_slot_action: bool = False,
     skill_record_lifecycle: bool = False,
     stat_updates: bool = False,
     inventory_changes: bool = False,
+    inventory_move: bool = False,
+    item_acquisition: bool = False,
     item_use: bool = False,
     item_pickup: bool = False,
+    item_pickup_retries: int = 0,
+    compact_item_pickup: bool = False,
     active_item_drop: bool = False,
     active_item_drop_owner: int | None = None,
     extra_server_plaintexts: tuple[bytes, ...] = (),
     extra_client_plaintexts: tuple[bytes, ...] = (),
+    extra_directional_plaintexts: tuple[tuple[str, bytes], ...] = (),
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -781,7 +870,10 @@ def fixture_gameplay_transcript(
         "server_to_client",
         MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=fixture_movement_path().commands,
@@ -791,8 +883,8 @@ def fixture_gameplay_transcript(
         "client_to_server",
         WorldBootstrapAcknowledgement(opaque_value=0).to_bytes(),
     )
-    append("client_to_server", FieldLoadStage(stage=1).to_bytes())
-    append("client_to_server", FieldLoadStage(stage=2).to_bytes())
+    append("client_to_server", ClientOpcode158Request(mode=1).to_bytes())
+    append("client_to_server", ClientOpcode158Request(mode=2).to_bytes())
     for health_percentage in (75, 50, 0):
         append(
             "server_to_client",
@@ -805,7 +897,7 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=(
                     CharacterStatUpdate.CURRENT_HP
                     | CharacterStatUpdate.EXPERIENCE
@@ -817,9 +909,90 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=1,
+                request_flag=True,
                 stat_mask=CharacterStatUpdate.MESOS,
                 mesos=9_001,
+            ).to_bytes(),
+        )
+    if inventory_move:
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=1,
+                        slot=2,
+                        item=fixture_equipment_inventory_item(
+                            slot=2,
+                            item_id=1_332_066,
+                        ),
+                    ),
+                ),
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            InventoryMoveRequest(
+                client_tick=1_640_184,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=-11,
+                quantity=-1,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=1,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.MOVE,
+                        inventory_type=1,
+                        slot=2,
+                        destination_slot=-11,
+                        move_flag=2,
+                    ),
+                ),
+            ).to_bytes(),
+        )
+    if item_acquisition:
+        append(
+            "client_to_server",
+            ClientOpcode298ItemAcquisitionRequest(
+                control_value=0,
+                selection_index=4,
+                request_kind=1,
+                item_id=2_433_928,
+                quantity=2,
+                duration_value=20_160,
+                expires_at_ticks=150_842_304_000_000_000,
+                serial_value=0,
+                reserved_values=(0, 0, 0, 0, 0),
+                signed_sentinel_values=(-99, -99),
+                trailing_values=(0, 0),
+                flag_1=0,
+                flag_2=1,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=tuple(
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=2,
+                        slot=slot,
+                        item=fixture_stack_inventory_item(
+                            slot=slot,
+                            item_id=2_433_928,
+                            quantity=1,
+                        ),
+                    )
+                    for slot in (11, 12)
+                ),
             ).to_bytes(),
         )
     if inventory_changes:
@@ -889,7 +1062,7 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=1,
+                request_flag=True,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
                 current_hp=120,
             ).to_bytes(),
@@ -910,15 +1083,30 @@ def fixture_gameplay_transcript(
         append(
             "client_to_server",
             ItemPickupRequest(
-                control_value=0,
+                control_value=None if compact_item_pickup else 0,
                 field_epoch=1,
                 client_tick=102_040,
                 position_x=120,
                 position_y=-210,
                 drop_object_id=40_001,
                 item_validation_token=1_352_639_939,
+                opcode=222 if compact_item_pickup else 185,
             ).to_bytes(),
         )
+        for retry_index in range(item_pickup_retries):
+            append(
+                "client_to_server",
+                ItemPickupRequest(
+                    control_value=None if compact_item_pickup else 0,
+                    field_epoch=1,
+                    client_tick=105_040 + retry_index * 3_000,
+                    position_x=120,
+                    position_y=-210,
+                    drop_object_id=40_001,
+                    item_validation_token=1_352_639_939,
+                    opcode=222 if compact_item_pickup else 185,
+                ).to_bytes(),
+            )
         append(
             "server_to_client",
             InventoryChangeSet(
@@ -949,10 +1137,10 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             FieldDropRemoval(
-                reason=5,
+                reason=2 if compact_item_pickup else 5,
                 drop_object_id=40_001,
                 actor_id=CHARACTER_ID,
-                trailing_value=0,
+                trailing_value=None if compact_item_pickup else 0,
             ).to_bytes(),
         )
         for spawn_mode in (1, 0):
@@ -970,20 +1158,25 @@ def fixture_gameplay_transcript(
         append(
             "client_to_server",
             ItemPickupRequest(
-                control_value=0,
+                control_value=None if compact_item_pickup else 0,
                 field_epoch=1,
                 client_tick=102_041,
                 position_x=121,
                 position_y=-210,
                 drop_object_id=40_002,
                 item_validation_token=0,
-                optional_proof=bytes.fromhex("00112233445566778899aabb"),
+                optional_proof=(
+                    b""
+                    if compact_item_pickup
+                    else bytes.fromhex("00112233445566778899aabb")
+                ),
+                opcode=222 if compact_item_pickup else 185,
             ).to_bytes(),
         )
         append(
             "server_to_client",
             CharacterStatUpdate(
-                request_flag=1,
+                request_flag=True,
                 stat_mask=CharacterStatUpdate.MESOS,
                 mesos=16,
             ).to_bytes(),
@@ -1001,10 +1194,10 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             FieldDropRemoval(
-                reason=5,
+                reason=2 if compact_item_pickup else 5,
                 drop_object_id=40_002,
                 actor_id=CHARACTER_ID,
-                trailing_value=0,
+                trailing_value=None if compact_item_pickup else 0,
             ).to_bytes(),
         )
         append(
@@ -1021,13 +1214,14 @@ def fixture_gameplay_transcript(
         append(
             "client_to_server",
             ItemPickupRequest(
-                control_value=0,
+                control_value=None if compact_item_pickup else 0,
                 field_epoch=1,
                 client_tick=102_042,
                 position_x=122,
                 position_y=-210,
                 drop_object_id=40_003,
                 item_validation_token=3_854_219_900,
+                opcode=222 if compact_item_pickup else 185,
             ).to_bytes(),
         )
         append(
@@ -1041,10 +1235,10 @@ def fixture_gameplay_transcript(
         append(
             "server_to_client",
             FieldDropRemoval(
-                reason=5,
+                reason=2 if compact_item_pickup else 5,
                 drop_object_id=40_003,
                 actor_id=CHARACTER_ID,
-                trailing_value=0,
+                trailing_value=None if compact_item_pickup else 0,
             ).to_bytes(),
         )
     if active_item_drop:
@@ -1095,7 +1289,7 @@ def fixture_gameplay_transcript(
                 control_value=0,
                 movement=fixture_life_movement_path(),
                 tail_type=17,
-                opaque_tail_state=b"\x00" * 8,
+                tail_state_values=(0,) * 8,
                 tail_marker=4,
                 path_start_x=90,
                 path_start_y=-205,
@@ -1241,25 +1435,19 @@ def fixture_gameplay_transcript(
                 ),
             ).to_bytes(),
         )
-    if opcode_101_records:
+    if recovery_requests:
         append(
             "client_to_server",
-            ClientOpcode101Record(
-                header_value=0,
-                primary_value=20,
-                flag_value=0,
-                secondary_value=3,
-                tail_value=0,
+            ClientRecoveryRequest(
+                hp_recovery=0,
+                mp_recovery=3,
             ).to_bytes(),
         )
         append(
             "client_to_server",
-            ClientOpcode101Record(
-                header_value=0,
-                primary_value=0x0A00_0014,
-                flag_value=0,
-                secondary_value=0,
-                tail_value=0,
+            ClientRecoveryRequest(
+                hp_recovery=10,
+                mp_recovery=0,
             ).to_bytes(),
         )
     if opcode_13_messages:
@@ -1282,30 +1470,73 @@ def fixture_gameplay_transcript(
             ).to_bytes(),
         )
     if opcode_217_records:
-        append(
-            "client_to_server",
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"short!",
-            ).to_bytes(),
+        submissions = (
+            ClientNpcStateSubmission(
+                object_id=NPC_OBJECT_ID,
+                action=2,
+                parameter=1,
+            ),
+            ClientNpcStateSubmission(
+                object_id=NPC_OBJECT_ID,
+                action=5,
+                parameter=255,
+                movement=NpcMovementPath(
+                    reference_x=65,
+                    reference_y=65,
+                    commands=(
+                        MobMovementCommand.absolute(
+                            position_x=69,
+                            position_y=65,
+                            velocity_x=0,
+                            velocity_y=0,
+                            foothold_id=89,
+                            stance=5,
+                            duration_ms=1080,
+                        ),
+                    ),
+                ),
+                trailer_marker=0,
+                path_start_x=65,
+                path_start_y=65,
+                path_end_x=69,
+                path_end_y=65,
+            ),
+            ClientNpcStateSubmission(
+                object_id=NPC_OBJECT_ID,
+                action=5,
+                parameter=255,
+                movement=NpcMovementPath(
+                    reference_x=61,
+                    reference_y=65,
+                    commands=(
+                        MobMovementCommand.relative(
+                            command_type=2,
+                            velocity_x=0,
+                            velocity_y=0,
+                            stance=4,
+                            duration_ms=0,
+                        ),
+                        MobMovementCommand.absolute(
+                            position_x=61,
+                            position_y=65,
+                            velocity_x=0,
+                            velocity_y=0,
+                            foothold_id=89,
+                            stance=4,
+                            duration_ms=5000,
+                        ),
+                    ),
+                ),
+                trailer_marker=0,
+                path_start_x=61,
+                path_start_y=65,
+                path_end_x=61,
+                path_end_y=65,
+            ),
         )
-        append(
-            "client_to_server",
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"prefix-000",
-                record_format=0,
-                records=(b"a" * 14, b"b" * 14),
-                opaque_trailer=b"trailer!",
-            ).to_bytes(),
-        )
-        append(
-            "client_to_server",
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"prefix-002",
-                record_format=2,
-                records=(b"c" * 11, b"d" * 11),
-                opaque_trailer=b"trailer?",
-            ).to_bytes(),
-        )
+        for submission in submissions:
+            append("client_to_server", submission.to_bytes())
+            append("server_to_client", submission.to_state_update().to_bytes())
     if opcode_426_acknowledgement:
         append("server_to_client", ServerOpcode426Notification().to_bytes())
         append(
@@ -1379,10 +1610,60 @@ def fixture_gameplay_transcript(
                 parameter=1,
             ).to_bytes(),
         )
+    if npc_interaction:
+        append(
+            "client_to_server",
+            ClientNpcInteractionRequest(
+                npc_object_id=NPC_OBJECT_ID,
+                position_x=132,
+                position_y=-168,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            ServerOpcode348TextEnvelope(
+                category=4,
+                primary_value=3_456_789,
+                selector=3,
+                value=0,
+                text="redacted-position-response",
+            ).to_bytes(),
+        )
+        append(
+            "client_to_server",
+            ClientOpcode66Acknowledgement(
+                selector=3,
+                status_value=1,
+            ).to_bytes(),
+        )
+    if opcode_111_cash_slot_action:
+        append(
+            "client_to_server",
+            ClientOpcode111CashSlotAction(
+                neutral_value=425_341,
+                slot=3,
+            ).to_bytes(),
+        )
+        append(
+            "server_to_client",
+            InventoryChangeSet(
+                update_flag=0,
+                modifications=(
+                    InventoryModification(
+                        operation=InventoryModification.ADD,
+                        inventory_type=5,
+                        slot=3,
+                        item=fixture_cash_inventory_item(slot=3),
+                    ),
+                ),
+            ).to_bytes(),
+        )
     for plaintext in extra_server_plaintexts:
         append("server_to_client", plaintext)
     for plaintext in extra_client_plaintexts:
         append("client_to_server", plaintext)
+    for direction, plaintext in extra_directional_plaintexts:
+        append(direction, plaintext)
     if terminate:
         append(
             "server_to_client",
@@ -1643,6 +1924,69 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "between 1 and 32767"):
             ItemUseRequest(client_tick=0, slot=0, item_id=2_000_014).to_bytes()
 
+    def test_chair_request_family_round_trip(self) -> None:
+        sit = ChairSitRequest(item_id=3_010_370)
+        stand = ChairStandRequest()
+        recovery = ChairRecoveryRequest()
+
+        self.assertEqual(sit.to_bytes().hex(), "310042ef2d00")
+        self.assertEqual(ChairSitRequest.parse(sit.to_bytes()), sit)
+        self.assertEqual(sit.safe_dict(), {"item_id": 3_010_370})
+        self.assertEqual(stand.to_bytes().hex(), "3000ffff")
+        self.assertEqual(ChairStandRequest.parse(stand.to_bytes()), stand)
+        self.assertEqual(stand.safe_dict(), {"marker": -1})
+        self.assertEqual(recovery.to_bytes().hex(), "5200")
+        self.assertEqual(ChairRecoveryRequest.parse(recovery.to_bytes()), recovery)
+        with self.assertRaisesRegex(PacketShapeError, "captured -1"):
+            ChairStandRequest(marker=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "opcode must be 49"):
+            ChairSitRequest(item_id=3_010_370, opcode=50).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "opcode must be 48"):
+            ChairStandRequest(opcode=49).to_bytes()
+
+    def test_inventory_move_request_round_trip(self) -> None:
+        requests = (
+            InventoryMoveRequest(
+                client_tick=1_640_184,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=-11,
+                quantity=-1,
+            ),
+            InventoryMoveRequest(
+                client_tick=3_131_327,
+                inventory_type=1,
+                source_slot=3,
+                destination_slot=-11,
+                quantity=-1,
+            ),
+        )
+
+        for request in requests:
+            with self.subTest(source_slot=request.source_slot):
+                encoded = request.to_bytes()
+                self.assertEqual(len(encoded), 13)
+                self.assertEqual(InventoryMoveRequest.parse(encoded), request)
+                self.assertEqual(request.safe_dict()["inventory"], "equip")
+                self.assertEqual(request.safe_dict()["quantity"], -1)
+
+        with self.assertRaisesRegex(PacketShapeError, "between one and five"):
+            InventoryMoveRequest(
+                client_tick=0,
+                inventory_type=0,
+                source_slot=1,
+                destination_slot=2,
+                quantity=1,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must differ"):
+            InventoryMoveRequest(
+                client_tick=0,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=2,
+                quantity=-1,
+            ).to_bytes()
+
     def test_item_pickup_packet_family_round_trip(self) -> None:
         base_payload = bytes.fromhex(
             "b90000000000029c660100e9fb9c04711f0000c3a59f50"
@@ -1651,8 +1995,12 @@ class GameplayPacketShapeTest(unittest.TestCase):
             "b900000000000477b90200a8fe2d003c1c0000d5a06278"
             "a8fe2d004fa0482729e30797"
         )
+        compact_payload = bytes.fromhex(
+            "de0008b7e70300d0015f004200000000000000"
+        )
         base = ItemPickupRequest.parse(base_payload)
         extended = ItemPickupRequest.parse(extended_payload)
+        compact = ItemPickupRequest.parse(compact_payload)
 
         self.assertEqual(base.to_bytes(), base_payload)
         self.assertEqual(base.field_epoch, 2)
@@ -1662,6 +2010,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(base.optional_proof, b"")
         self.assertEqual(extended.to_bytes(), extended_payload)
         self.assertEqual(len(extended.optional_proof), 12)
+        self.assertEqual(compact.to_bytes(), compact_payload)
+        self.assertEqual(compact.opcode, 222)
+        self.assertEqual(compact.shape_name, "compact")
+        self.assertIsNone(compact.control_value)
+        self.assertEqual(compact.field_epoch, 8)
+        self.assertEqual(compact.client_tick, 255_927)
+        self.assertEqual((compact.position_x, compact.position_y), (464, 95))
+        self.assertEqual(compact.drop_object_id, 66)
+        self.assertEqual(compact.item_validation_token, 0)
         self.assertNotIn("drop_object_id", base.safe_dict())
         with self.assertRaisesRegex(PacketShapeError, "absent or 12 bytes"):
             ItemPickupRequest(
@@ -1674,6 +2031,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 item_validation_token=0,
                 optional_proof=b"short",
             ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "control value"):
+            replace(compact, control_value=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "optional proof"):
+            replace(compact, optional_proof=b"proof").to_bytes()
 
         spawn_payloads = (
             bytes.fromhex(
@@ -1852,7 +2213,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
     def test_character_stat_update_round_trip(self) -> None:
         combined = CharacterStatUpdate(
-            request_flag=1,
+            request_flag=True,
             stat_mask=(
                 CharacterStatUpdate.INTELLIGENCE
                 | CharacterStatUpdate.LUCK
@@ -1863,9 +2224,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ability_points=0,
         )
         zero_mask = CharacterStatUpdate(
-            request_flag=0,
+            request_flag=False,
             stat_mask=0,
-            opaque_tail=b"\x01\x01",
+            trailing_flag=True,
+            trailing_value=1,
         )
 
         self.assertEqual(
@@ -1878,6 +2240,12 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             CharacterStatUpdate.parse(zero_mask.to_bytes()), zero_mask
         )
+        self.assertTrue(zero_mask.trailing_flag)
+        self.assertEqual(zero_mask.trailing_value, 1)
+        with self.assertRaisesRegex(PacketShapeError, "presence mismatch"):
+            replace(zero_mask, trailing_flag=False).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be a boolean"):
+            replace(combined, request_flag=1).to_bytes()
         level_up_payload = bytes.fromhex(
             "290000d03c0100071c000b009000b10060007b004101000000"
         )
@@ -1907,14 +2275,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(PacketShapeError, "requires current_hp"):
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "unsupported bits"):
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=1,
-                opaque_tail=b"\x00",
             ).to_bytes()
 
     def test_initial_field_snapshot_typed_prefix_round_trip(self) -> None:
@@ -2382,30 +2749,28 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "value count"):
             ServerOpcode425ValueLedger.parse(bytes(invalid_425_count))
 
-    def test_client_opcode_43_variants_round_trip_and_redact(self) -> None:
-        compact = ClientOpcode43Envelope(
-            sequence=4,
-            opaque_compact_body=bytes(range(9)),
-        )
-        identified = ClientOpcode43Envelope(
-            sequence=35,
-            opaque_identifier=3_456_789,
-            opaque_text="hidden",
-            opaque_tail=b"ABCDEF",
+    def test_client_field_transfer_variants_round_trip_and_redact(self) -> None:
+        death_respawn = ClientFieldTransferRequest(field_epoch=4)
+        portal = ClientFieldTransferRequest(
+            field_epoch=35,
+            destination_map_id=-1,
+            portal_name="west00",
+            position_x=-1_001,
+            position_y=298,
+            reserved_value=0,
         )
 
-        for envelope in (compact, identified):
-            payload = envelope.to_bytes()
-            self.assertEqual(ClientOpcode43Envelope.parse(payload), envelope)
-        self.assertEqual(len(compact.to_bytes()), 12)
-        self.assertEqual(len(identified.to_bytes()), 28)
-        self.assertEqual(compact.variant, "compact")
-        self.assertEqual(identified.variant, "identified_text")
-        self.assertEqual(identified.text_code_units, 6)
-        self.assertEqual(identified.opaque_byte_count, 6)
-        safe = str(identified.safe_dict())
-        self.assertNotIn("3456789", safe)
-        self.assertNotIn("hidden", safe)
+        for request in (death_respawn, portal):
+            payload = request.to_bytes()
+            self.assertEqual(ClientFieldTransferRequest.parse(payload), request)
+        self.assertEqual(len(death_respawn.to_bytes()), 12)
+        self.assertEqual(len(portal.to_bytes()), 28)
+        self.assertEqual(death_respawn.variant, "death_respawn")
+        self.assertEqual(portal.variant, "portal")
+        self.assertEqual(portal.portal_name_code_units, 6)
+        safe = str(portal.safe_dict())
+        self.assertNotIn("west00", safe)
+        self.assertIn("-1001", safe)
 
         server = ServerOpcode43Envelope(
             message_type=0,
@@ -2415,18 +2780,65 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(server.to_bytes()), 19)
         self.assertNotIn(bytes(range(16)).hex(), str(server.safe_dict()))
 
-        with self.assertRaisesRegex(PacketShapeError, "needs 9 opaque"):
-            replace(compact, opaque_compact_body=b"short").to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "needs text"):
-            replace(identified, opaque_text=None).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "6-byte tail"):
-            replace(identified, opaque_tail=b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "cannot contain portal"):
+            replace(death_respawn, portal_name="west00").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "destination map id"):
+            replace(portal, destination_map_id=101_000_000).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires a portal name"):
+            replace(portal, portal_name=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "reserved value"):
+            replace(portal, reserved_value=1).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "fit in u8"):
-            replace(compact, sequence=256).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "needs 2 bytes"):
-            ClientOpcode43Envelope.parse(bytes.fromhex("2b00010000000000"))
+            replace(death_respawn, field_epoch=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "nine zeros"):
+            ClientFieldTransferRequest.parse(
+                bytes.fromhex("2b0004000000000000000001")
+            )
         with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
             replace(server, opaque_body=b"short").to_bytes()
+
+    def test_npc_interaction_and_client_opcode_111_round_trip(self) -> None:
+        interaction_payloads = (
+            bytes.fromhex("400095990200c6001301"),
+            bytes.fromhex("4000332e0000030d25ff"),
+        )
+        interactions = tuple(
+            ClientNpcInteractionRequest.parse(payload)
+            for payload in interaction_payloads
+        )
+        cash_payload = bytes.fromhex("6f007d7d06000300")
+        cash_action = ClientOpcode111CashSlotAction.parse(cash_payload)
+
+        self.assertEqual(
+            tuple(interaction.to_bytes() for interaction in interactions),
+            interaction_payloads,
+        )
+        self.assertEqual(
+            (
+                interactions[0].npc_object_id,
+                interactions[0].position_x,
+                interactions[0].position_y,
+            ),
+            (170_389, 198, 275),
+        )
+        self.assertEqual(
+            (
+                interactions[1].npc_object_id,
+                interactions[1].position_x,
+                interactions[1].position_y,
+            ),
+            (11_827, 3_331, -219),
+        )
+        self.assertEqual(cash_action.to_bytes(), cash_payload)
+        self.assertEqual(cash_action.neutral_value, 425_341)
+        self.assertEqual(cash_action.slot, 3)
+        self.assertEqual(cash_action.safe_dict()["inventory"], "cash")
+        with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
+            replace(interactions[0], position_x=0x8000).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
+            replace(interactions[0], npc_object_id=-1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
+            replace(cash_action, slot=0x8000).to_bytes()
 
     def test_client_opcode_66_acknowledgement_variants_round_trip(self) -> None:
         acknowledgements = tuple(
@@ -2508,6 +2920,48 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(envelopes[0], control_value=256).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "fit in u32"):
             replace(envelopes[0], opaque_value=0x1_0000_0000).to_bytes()
+
+    def test_client_inner_portal_requests_round_trip_and_redact(self) -> None:
+        payloads = (
+            bytes.fromhex("73000704006400770030003000001a04ea004b049a01"),
+            bytes.fromhex("73000704006400770030003100004b049b011004ef03"),
+        )
+        requests = tuple(
+            ClientInnerPortalRequest.parse(payload) for payload in payloads
+        )
+
+        self.assertEqual(
+            tuple(request.to_bytes() for request in requests),
+            payloads,
+        )
+        self.assertEqual(requests[0].field_epoch, 7)
+        self.assertEqual(requests[0].portal_name, "dw00")
+        self.assertEqual(requests[0].portal_name_code_units, 4)
+        self.assertEqual(
+            (
+                requests[0].source_x,
+                requests[0].source_y,
+                requests[0].destination_x,
+                requests[0].destination_y,
+            ),
+            (1_050, 234, 1_099, 410),
+        )
+        self.assertEqual(
+            (requests[1].source_x, requests[1].source_y),
+            (1_099, 411),
+        )
+        safe = str(requests[0].safe_dict())
+        self.assertNotIn("dw00", safe)
+        self.assertIn("portal_name_redacted", safe)
+
+        invalid_terminator = bytearray(payloads[0])
+        invalid_terminator[13] = 1
+        with self.assertRaisesRegex(PacketShapeError, "expected 0"):
+            ClientInnerPortalRequest.parse(bytes(invalid_terminator))
+        with self.assertRaisesRegex(PacketShapeError, "fit in u8"):
+            replace(requests[0], field_epoch=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "fit in i16"):
+            replace(requests[0], destination_y=0x8000).to_bytes()
 
     def test_client_opcode_122_captured_variants_round_trip(self) -> None:
         payloads = (
@@ -2595,35 +3049,35 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode348TextEnvelope.parse(simple[0].to_bytes() + b"\x00")
 
-    def test_positioned_effect_records_round_trip_and_redact_primary(self) -> None:
+    def test_reactor_packets_round_trip_and_redact_object_id(self) -> None:
         records = (
             (
-                ServerOpcode320PositionedEffectRecord(
-                    primary_value=2_357_555,
-                    control_value=1,
+                ServerReactorStateUpdate(
+                    reactor_object_id=2_357_555,
+                    state=1,
                     x=1412,
                     y=435,
-                    numeric_value=305,
-                    secondary_control_value=0,
-                    trailing_value=5,
+                    stance=305,
+                    reserved_value=0,
+                    frame_delay=5,
                 ),
                 "400133f92300018405b30131010005",
             ),
             (
-                ServerOpcode322PositionedEffectRecord(
-                    primary_value=12_597,
-                    numeric_value=2000,
-                    control_value=0,
+                ServerReactorSpawn(
+                    reactor_object_id=12_597,
+                    reactor_id=2000,
+                    state=0,
                     x=2609,
                     y=-372,
-                    trailing_value=0,
+                    spawn_flag=0,
                 ),
                 "420135310000d007000000310a8cfe00",
             ),
             (
-                ServerOpcode323PositionedEffectRecord(
-                    primary_value=12_597,
-                    control_value=0,
+                ServerReactorRemoval(
+                    reactor_object_id=12_597,
+                    state=0,
                     x=2609,
                     y=-372,
                 ),
@@ -2635,12 +3089,146 @@ class GameplayPacketShapeTest(unittest.TestCase):
             encoded = record.to_bytes()
             self.assertEqual(encoded.hex(), expected_hex)
             self.assertEqual(type(record).parse(encoded), record)
-            self.assertNotIn(str(record.primary_value), str(record.safe_dict()))
+            self.assertNotIn(
+                str(record.reactor_object_id), str(record.safe_dict())
+            )
+
+        hit = ClientReactorHitRequest(
+            reactor_object_id=2_357_555,
+            character_position=2,
+            stance=305,
+            reserved_value=0,
+        )
+        self.assertEqual(
+            hit.to_bytes().hex(),
+            "e10033f9230002000000310100000000",
+        )
+        self.assertEqual(
+            ClientReactorHitRequest.parse(hit.to_bytes()),
+            hit,
+        )
+        self.assertNotIn("2357555", str(hit.safe_dict()))
+        with self.assertRaisesRegex(PacketShapeError, "reserved value"):
+            replace(hit, reserved_value=1).to_bytes()
 
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
-            ServerOpcode323PositionedEffectRecord.parse(
+            ServerReactorRemoval.parse(
                 records[-1][0].to_bytes() + b"\x00"
             )
+
+    def test_item_acquisition_request_round_trip_and_redacts_serial(
+        self,
+    ) -> None:
+        request = ClientOpcode298ItemAcquisitionRequest(
+            control_value=0,
+            selection_index=25,
+            request_kind=2,
+            item_id=5_510_000,
+            quantity=1,
+            duration_value=0,
+            expires_at_ticks=150_842_304_000_000_000,
+            serial_value=92_000_150,
+            reserved_values=(0, 0, 0, 0, 0),
+            signed_sentinel_values=(-99, -99),
+            trailing_values=(0, 0),
+            flag_1=0,
+            flag_2=1,
+        )
+
+        encoded = request.to_bytes()
+        self.assertEqual(
+            encoded.hex(),
+            "2a01000000001900000002000000701354000100000000000000008005"
+            "bb46e6170296cf7b050000000000000000000000000000000000000000"
+            "9dffffff9dffffff00000000000000000001",
+        )
+        self.assertEqual(
+            ClientOpcode298ItemAcquisitionRequest.parse(encoded),
+            request,
+        )
+        self.assertEqual(request.inventory_name, "cash")
+        safe = str(request.safe_dict())
+        self.assertNotIn("92000150", safe)
+        self.assertIn("serial_value_redacted", safe)
+        with self.assertRaisesRegex(PacketShapeError, "flags must"):
+            replace(request, flag_2=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            replace(request, duration_value=0x1_0000_0000).to_bytes()
+
+    def test_client_opcode_276_envelopes_round_trip_and_redact_values(
+        self,
+    ) -> None:
+        compact = ClientOpcode276Envelope(
+            selector=17,
+            header_value_1=None,
+            header_value_2=None,
+            groups=(),
+            compact_reserved=b"\x00\x00\x00",
+        )
+        grouped = ClientOpcode276Envelope(
+            selector=24,
+            header_value_1=1_020_000,
+            header_value_2=600_016,
+            groups=(
+                ClientOpcode276RecordGroup(
+                    selector=6,
+                    pairs=((1214, 35619), (1170, 35619), (1188, 35619)),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=5,
+                    pairs=(
+                        (549, 18477),
+                        (554, 18477),
+                        (619, 18477),
+                        (563, 27),
+                        (616, 27),
+                    ),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=0,
+                    pairs=(
+                        (451, 19800),
+                        (522, 19800),
+                        (478, 9353),
+                        (485, 34),
+                        (506, 34),
+                    ),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=1,
+                    pairs=((574, 276362), (862, 276362), (635, 141442)),
+                ),
+                ClientOpcode276RecordGroup(
+                    selector=4,
+                    pairs=((867, 27), (879, 27), (1274, 27)),
+                ),
+            ),
+            compact_reserved=b"",
+        )
+
+        self.assertEqual(compact.to_bytes().hex(), "140111000000000000")
+        self.assertEqual(
+            ClientOpcode276Envelope.parse(compact.to_bytes()), compact
+        )
+        encoded = grouped.to_bytes()
+        self.assertEqual(len(encoded), 210)
+        self.assertEqual(
+            encoded.hex(),
+            "14011800000060900f00d0270900050000000600000003000000be040000"
+            "238b000092040000238b0000a4040000238b000005000000050000002502"
+            "00002d4800002a0200002d4800006b0200002d480000330200001b000000"
+            "680200001b0000000000000005000000c3010000584d00000a020000584d"
+            "0000de01000089240000e501000022000000fa0100002200000001000000"
+            "030000003e0200008a3704005e0300008a3704007b020000822802000400"
+            "000003000000630300001b0000006f0300001b000000fa0400001b000000",
+        )
+        self.assertEqual(ClientOpcode276Envelope.parse(encoded), grouped)
+        self.assertEqual(grouped.pair_count, 19)
+        safe = str(grouped.safe_dict())
+        self.assertNotIn("1020000", safe)
+        self.assertNotIn("35619", safe)
+        with self.assertRaisesRegex(PacketShapeError, "reserved bytes"):
+            replace(compact, compact_reserved=b"\x00\x00\x01").to_bytes()
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,
@@ -2910,33 +3498,156 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "45 or 46"):
             ClientWorldExitStatus(value=0, opcode=47).to_bytes()
 
-    def test_client_fixed_opaque_records_round_trip_and_redact(self) -> None:
-        for opcode, body_length in (
-            (100, 24),
-            (307, 12),
-            (308, 72),
-            (310, 39),
-            (311, 20),
-        ):
-            with self.subTest(opcode=opcode):
-                body = bytes(range(body_length))
-                record = ClientFixedOpaqueRecord(
-                    opaque_body=body,
-                    opcode=opcode,
-                )
+    def test_ability_point_allocation_request_round_trip(self) -> None:
+        request = ClientAbilityPointAllocationRequest(
+            client_tick=0x002E_A79F,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=9,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=29,
+                ),
+            ),
+        )
 
-                self.assertEqual(len(record.to_bytes()), body_length + 2)
-                self.assertEqual(
-                    ClientFixedOpaqueRecord.parse(record.to_bytes()),
-                    record,
-                )
-                self.assertTrue(record.safe_dict()["opaque_body_redacted"])
-                self.assertNotIn(body.hex(), str(record.safe_dict()))
-                with self.assertRaisesRegex(PacketShapeError, "body must be"):
-                    ClientFixedOpaqueRecord(
-                        opaque_body=body[:-1],
-                        opcode=opcode,
-                    ).to_bytes()
+        self.assertEqual(
+            request.to_bytes(),
+            bytes.fromhex(
+                "64009fa72e00020000000002000009000000000100001d000000"
+            ),
+        )
+        self.assertEqual(
+            ClientAbilityPointAllocationRequest.parse(request.to_bytes()),
+            request,
+        )
+        self.assertEqual(
+            request.safe_dict()["allocations"],
+            [
+                {"stat": "luck", "stat_mask": "0x00000200", "increment": 9},
+                {
+                    "stat": "intelligence",
+                    "stat_mask": "0x00000100",
+                    "increment": 29,
+                },
+            ],
+        )
+        self.assertEqual(request.total_increment, 38)
+        zero_entry_request = ClientAbilityPointAllocationRequest(
+            client_tick=292_645,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=0,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=1,
+                ),
+            ),
+        )
+        self.assertEqual(
+            zero_entry_request.to_bytes(),
+            bytes.fromhex(
+                "6400257704000200000000020000000000000001000001000000"
+            ),
+        )
+        self.assertEqual(
+            ClientAbilityPointAllocationRequest.parse(
+                zero_entry_request.to_bytes()
+            ),
+            zero_entry_request,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "at least one point"):
+            ClientAbilityPointAllocationRequest(
+                client_tick=1,
+                allocations=(
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=0,
+                    ),
+                ),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be unique"):
+            ClientAbilityPointAllocationRequest(
+                client_tick=1,
+                allocations=(
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=1,
+                    ),
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=1,
+                    ),
+                ),
+            ).to_bytes()
+
+    def test_client_neutral_records_round_trip_and_redact(self) -> None:
+        opcode_307 = ClientOpcode307NeutralRecord(
+            neutral_value=0x1234,
+            redacted_value=0x5678_9000,
+        )
+        opcode_310 = ClientOpcode310TextRecord(
+            redacted_text="private-value-01"
+        )
+
+        self.assertEqual(len(opcode_307.to_bytes()), 14)
+        self.assertEqual(
+            ClientOpcode307NeutralRecord.parse(opcode_307.to_bytes()),
+            opcode_307,
+        )
+        self.assertEqual(len(opcode_310.to_bytes()), 41)
+        self.assertEqual(
+            ClientOpcode310TextRecord.parse(opcode_310.to_bytes()),
+            opcode_310,
+        )
+        safe = [opcode_307.safe_dict(), opcode_310.safe_dict()]
+        self.assertNotIn(str(opcode_307.neutral_value), str(safe))
+        self.assertNotIn(str(opcode_307.redacted_value), str(safe))
+        self.assertNotIn(opcode_310.redacted_text, str(safe))
+
+        malformed_307 = bytearray(opcode_307.to_bytes())
+        malformed_307[-1] = 1
+        with self.assertRaisesRegex(PacketShapeError, "trailer must be zero"):
+            ClientOpcode307NeutralRecord.parse(bytes(malformed_307))
+
+        malformed_310 = bytearray(opcode_310.to_bytes())
+        malformed_310[-1] = 1
+        with self.assertRaisesRegex(PacketShapeError, "reserved u8"):
+            ClientOpcode310TextRecord.parse(bytes(malformed_310))
+
+    def test_client_periodic_records_round_trip_and_redact(self) -> None:
+        opcode_308 = ClientOpcode308PeriodicRecord(
+            neutral_f64_values=(4.5, 2.0),
+            neutral_u64_values=(123, 456),
+            mirrored_value=59,
+            variant=0,
+        )
+        opcode_311 = ClientOpcode311PeriodicRecord(
+            neutral_value=0xDEAD_BEEF
+        )
+
+        self.assertEqual(
+            ClientOpcode308PeriodicRecord.parse(opcode_308.to_bytes()),
+            opcode_308,
+        )
+        self.assertEqual(len(opcode_308.to_bytes()), 74)
+        self.assertEqual(
+            ClientOpcode311PeriodicRecord.parse(opcode_311.to_bytes()),
+            opcode_311,
+        )
+        self.assertEqual(len(opcode_311.to_bytes()), 22)
+        safe = [opcode_308.safe_dict(), opcode_311.safe_dict()]
+        self.assertNotIn("4.5", str(safe))
+        self.assertNotIn(str(0xDEAD_BEEF), str(safe))
+
+        malformed_mirror = bytearray(opcode_308.to_bytes())
+        malformed_mirror[50:58] = struct.pack("<d", 58.0)
+        with self.assertRaisesRegex(PacketShapeError, "do not mirror"):
+            ClientOpcode308PeriodicRecord.parse(bytes(malformed_mirror))
 
     def test_server_opcode_148_envelope_round_trip_and_partial_record_body(
         self,
@@ -3009,62 +3720,180 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         self.assertEqual(records[2].left_ctrl_skill_id, 2_001_005)
         self.assertEqual(records[2].nonzero_keyboard_selector_count, 3)
+        self.assertEqual(records[2].empty_keyboard_binding_count, 86)
+        action_entries = list(records[2].entries)
+        action_entries[44] = VariableServerEntry(selector=5, value=50)
+        action_entries[45] = VariableServerEntry(selector=5, value=51)
+        action_entries[56] = VariableServerEntry(selector=5, value=53)
+        action_entries[57] = VariableServerEntry(selector=5, value=54)
+        action_entries[78] = VariableServerEntry(selector=5, value=50)
+        action_entries[82] = VariableServerEntry(selector=5, value=52)
+        action_record = replace(records[2], entries=tuple(action_entries))
+        self.assertEqual(
+            action_record.keyboard_action_bindings,
+            {44: 50, 45: 51, 56: 53, 57: 54, 78: 50, 82: 52},
+        )
+        self.assertEqual(action_record.pickup_key_codes, (44, 78))
+        self.assertEqual(action_record.jump_key_codes, (56,))
+        self.assertEqual(action_record.npc_interaction_key_codes, (57,))
         self.assertEqual(records[3].keyboard_skill_bindings, {})
+        self.assertEqual(records[3].keyboard_action_bindings, {})
+        self.assertEqual(records[3].pickup_key_codes, ())
+        self.assertEqual(records[3].jump_key_codes, ())
+        self.assertEqual(records[3].npc_interaction_key_codes, ())
+        self.assertEqual(records[3].empty_keyboard_binding_count, 0)
 
-    def test_bounded_gameplay_envelopes_preserve_opaque_tails(self) -> None:
-        stage = FieldLoadStage(
-            stage=0,
-            trailing=1,
-            opaque_tail=b"nine-byte",
+    def test_npc_state_submission_and_update_round_trip(self) -> None:
+        keymap_change = ClientOpcode158Request(
+            mode=0,
+            changes=(
+                ClientKeymapBindingChange(
+                    key_code=42,
+                    binding_type=1,
+                    action_id=1000,
+                ),
+            ),
         )
-        update = NpcStateUpdate(
-            object_id=NPC_OBJECT_ID,
-            action=2,
-            parameter=3,
-            opaque_tail=b"capture-backed-tail",
+        compact = bytes.fromhex("d900b55b00000201")
+        absolute = bytes.fromhex(
+            "d900fd2b0000ffff45004100010045004100000000005900053804"
+            "004500410045004100"
         )
-        compact_records = ClientOpcode217RecordSet(
-            opaque_prefix=b"short!",
-        )
-        format_zero_records = ClientOpcode217RecordSet(
-            opaque_prefix=b"prefix-000",
-            record_format=0,
-            records=(b"a" * 14, b"b" * 14),
-            opaque_trailer=b"trailer!",
-        )
-        format_two_records = ClientOpcode217RecordSet(
-            opaque_prefix=b"prefix-002",
-            record_format=2,
-            records=(b"c" * 11, b"d" * 11),
-            opaque_trailer=b"trailer?",
+        mixed = bytes.fromhex(
+            "d900fd2b000005ff3d004100020200000000040000003d00410000"
+            "0000005900048813003d0041003d004100"
         )
 
-        self.assertEqual(FieldLoadStage.parse(stage.to_bytes()), stage)
-        self.assertEqual(NpcStateUpdate.parse(update.to_bytes()), update)
-        for record_set in (
-            compact_records,
-            format_zero_records,
-            format_two_records,
-        ):
-            self.assertEqual(
-                ClientOpcode217RecordSet.parse(record_set.to_bytes()),
-                record_set,
+        self.assertEqual(
+            ClientOpcode158Request.parse(keymap_change.to_bytes()),
+            keymap_change,
+        )
+        item_change = ClientOpcode158Request(
+            mode=0,
+            changes=(
+                ClientKeymapBindingChange(
+                    key_code=82,
+                    binding_type=2,
+                    action_id=2_000_013,
+                ),
+            ),
+        )
+        self.assertEqual(
+            ClientOpcode158Request.parse(item_change.to_bytes()), item_change
+        )
+        for payload in (compact, absolute, mixed):
+            submission = ClientNpcStateSubmission.parse(payload)
+            self.assertEqual(submission.to_bytes(), payload)
+            update = submission.to_state_update()
+            self.assertEqual(NpcStateUpdate.parse(update.to_bytes()), update)
+            expected_response = (
+                b"\x2f\x01" + payload[2:-9]
+                if submission.movement is not None
+                else b"\x2f\x01" + payload[2:]
             )
-        self.assertEqual(len(compact_records.to_bytes()), 8)
-        self.assertEqual(len(format_zero_records.to_bytes()), 50)
-        self.assertEqual(len(format_two_records.to_bytes()), 44)
-        with self.assertRaisesRegex(PacketShapeError, "needs 14 bytes"):
-            ClientOpcode217RecordSet(
-                opaque_prefix=b"prefix-000",
-                record_format=0,
-                records=(b"short",),
-                opaque_trailer=b"trailer!",
-            ).to_bytes()
+            self.assertEqual(update.to_bytes(), expected_response)
+        with self.assertRaisesRegex(PacketShapeError, "trailer marker"):
+            ClientNpcStateSubmission.parse(absolute[:-9] + b"\x01" + absolute[-8:])
         captured_stage = bytes.fromhex(
             "9e0000000000010000002a00000001e8030000"
         )
         self.assertEqual(
-            FieldLoadStage.parse(captured_stage).to_bytes(), captured_stage
+            ClientOpcode158Request.parse(captured_stage).to_bytes(),
+            captured_stage,
+        )
+        for payload in (
+            bytes.fromhex("9e000100000000000000"),
+            bytes.fromhex("9e000200000000000000"),
+        ):
+            self.assertEqual(
+                ClientOpcode158Request.parse(payload).to_bytes(), payload
+            )
+        with self.assertRaisesRegex(PacketShapeError, "mode 0 requires"):
+            ClientOpcode158Request(mode=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "expected observed"):
+            ClientOpcode158Request(
+                mode=0,
+                changes=(ClientKeymapBindingChange(42, 4, 0),),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "removal action"):
+            ClientOpcode158Request(
+                mode=0,
+                changes=(ClientKeymapBindingChange(42, 0, 1),),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "change count requires"):
+            ClientOpcode158Request.parse(
+                bytes.fromhex("9e0000000000020000002a00000001e8030000")
+            )
+
+    def test_folds_client_opcode_158_keyboard_binding_changes(self) -> None:
+        requests = (
+            ClientOpcode158Request(
+                mode=0,
+                changes=(
+                    ClientKeymapBindingChange(29, 1, 2_001_005),
+                ),
+            ),
+            ClientOpcode158Request(
+                mode=0,
+                changes=(
+                    ClientKeymapBindingChange(42, 2, 2_000_014),
+                    ClientKeymapBindingChange(82, 5, 52),
+                ),
+            ),
+            ClientOpcode158Request(
+                mode=0,
+                changes=(ClientKeymapBindingChange(42, 0, 0),),
+            ),
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_directional_plaintexts=tuple(
+                    ("client_to_server", request.to_bytes())
+                    for request in requests
+                )
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.keyboard_binding_changes, 4)
+        self.assertEqual(
+            analysis.state.keyboard_binding_changes_by_type,
+            {0: 1, 1: 1, 2: 1, 5: 1},
+        )
+        self.assertEqual(analysis.state.keyboard_binding_removals, 1)
+        self.assertEqual(
+            analysis.state.keyboard_binding_selector_counts,
+            {0: 1, 1: 1, 5: 1},
+        )
+        self.assertEqual(
+            analysis.state.keyboard_skill_bindings, {29: 2_001_005}
+        )
+        self.assertEqual(analysis.state.keyboard_item_bindings, {})
+        self.assertEqual(analysis.state.keyboard_menu_bindings, {})
+        self.assertEqual(analysis.state.keyboard_action_bindings, {82: 52})
+        self.assertEqual(analysis.state.keyboard_face_expression_bindings, {})
+        self.assertEqual(analysis.state.left_ctrl_skill_id, 2_001_005)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "keyboard_binding_change"
+        ]
+        self.assertEqual(len(observations), 3)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            len(
+                [
+                    event
+                    for event in analysis.events
+                    if event.kind == "keyboard_bindings_changed"
+                ]
+            ),
+            3,
         )
 
     def test_world_entry_request_types_character_id_after_entry_value(self) -> None:
@@ -3194,7 +4023,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             control_value=0,
             movement=life_path,
             tail_type=17,
-            opaque_tail_state=b"\x00" * 8,
+            tail_state_values=(0,) * 8,
             tail_marker=4,
             path_start_x=90,
             path_start_y=-205,
@@ -3227,26 +4056,133 @@ class GameplayPacketShapeTest(unittest.TestCase):
             [0, 2, 10, 14, 15],
         )
         self.assertEqual(
+            [command.byte_length for command in life_path.commands],
+            [14, 8, 2, 10, 16],
+        )
+        self.assertEqual(life_path.final_position, (130, -170))
+        self.assertTrue(all(command.is_typed for command in life_path.commands))
+        self.assertEqual(
+            life_path.commands[0].safe_dict(),
+            {
+                "type": 0,
+                "kind": "absolute",
+                "position_x": 110,
+                "position_y": -190,
+                "last_x": 3,
+                "last_y": -4,
+                "foothold_id": 5,
+                "stance": 6,
+                "duration_ms": 7,
+            },
+        )
+        self.assertEqual(
+            life_path.commands[1].safe_dict(),
+            {
+                "type": 2,
+                "kind": "relative",
+                "delta_x": 8,
+                "delta_y": -9,
+                "stance": 10,
+                "duration_ms": 11,
+            },
+        )
+        self.assertEqual(
+            life_path.commands[2].safe_dict(),
+            {"type": 10, "kind": "equipment_change", "value": 12},
+        )
+        self.assertEqual(life_path.commands[3].safe_dict()["kind"], "teleport")
+        self.assertEqual(
+            life_path.commands[4].safe_dict(),
+            {
+                "type": 15,
+                "kind": "jump_down",
+                "position_x": 130,
+                "position_y": -170,
+                "vector_x": 16,
+                "vector_y": -17,
+                "unknown_value_1": 18,
+                "unknown_value_2": 19,
+                "stance": 20,
+                "trailing_value": 21,
+            },
+        )
+        self.assertEqual(
+            LifeMovementCommand.chair(
+                position_x=22,
+                position_y=-23,
+                unknown_value=24,
+                stance=25,
+                trailing_value=26,
+            ).safe_dict(),
+            {
+                "type": 11,
+                "kind": "chair",
+                "position_x": 22,
+                "position_y": -23,
+                "unknown_value": 24,
+                "stance": 25,
+                "trailing_value": 26,
+            },
+        )
+        self.assertEqual(
+            LifeMovementCommand(
+                command_type=21, opaque_payload=b"\x01\x02\x03"
+            ).safe_dict(),
+            {"type": 21, "kind": "opaque", "opaque_payload_bytes": 3},
+        )
+        self.assertFalse(
+            LifeMovementCommand(
+                command_type=21, opaque_payload=b"\x01\x02\x03"
+            ).is_typed
+        )
+        self.assertEqual(
             [command.byte_length for command in path.commands],
-            [14, 8, 6, 14, 14],
+            [14, 8, 10, 10, 14, 14],
         )
         self.assertEqual(path.final_position, (130, -170))
+        self.assertEqual(path.commands[2].position, (115, -190))
+        self.assertEqual(path.commands[3].position, (118, -185))
         self.assertEqual(
             path.commands[2].safe_dict(),
             {
                 "type": 3,
-                "kind": "compact_opaque",
-                "opaque_payload_bytes": 5,
+                "kind": "positioned",
+                "position_x": 115,
+                "position_y": -190,
+                "neutral_value": 0,
+                "stance": 3,
+                "duration_ms": 15,
+            },
+        )
+        self.assertEqual(
+            path.commands[3].safe_dict(),
+            {
+                "type": 4,
+                "kind": "alternate_positioned",
+                "position_x": 118,
+                "position_y": -185,
+                "neutral_value": 0,
+                "stance": 4,
+                "duration_ms": 20,
             },
         )
         with self.assertRaisesRegex(PacketShapeError, "expected one of"):
             PlayerMovementPath(
                 reference_x=0,
                 reference_y=0,
-                commands=(PlayerMovementCommand(4, b""),),
+                commands=(PlayerMovementCommand(2, b""),),
             ).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "needs 5 opaque bytes"):
-            PlayerMovementCommand.compact(b"four").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 9 payload bytes"):
+            PlayerMovementCommand(3, b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be three or four"):
+            PlayerMovementCommand.positioned(
+                command_type=5,
+                position_x=0,
+                position_y=0,
+                neutral_value=0,
+                stance=0,
+                duration_ms=0,
+            )
         with self.assertRaisesRegex(PacketShapeError, "must contain a command"):
             PlayerMovementPath(
                 reference_x=0,
@@ -3255,6 +4191,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "needs 13 opaque bytes"):
             LifeMovementCommand(command_type=0, opaque_payload=b"").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "type must be 0, 5, or 17"):
+            LifeMovementCommand.absolute(
+                command_type=1,
+                position_x=0,
+                position_y=0,
+                last_x=0,
+                last_y=0,
+                foothold_id=0,
+                stance=0,
+                duration_ms=0,
+            )
         with self.assertRaisesRegex(PacketShapeError, "tail type 17 needs 8"):
             LifeMovementSubmission(
                 local_object_index=0,
@@ -3262,7 +4209,21 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 control_value=0,
                 movement=life_path,
                 tail_type=17,
-                opaque_tail_state=b"short",
+                tail_state_values=(0,) * 5,
+                tail_marker=0,
+                path_start_x=0,
+                path_start_y=0,
+                path_end_x=0,
+                path_end_y=0,
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must fit in one byte"):
+            LifeMovementSubmission(
+                local_object_index=0,
+                client_token=0,
+                control_value=0,
+                movement=life_path,
+                tail_type=17,
+                tail_state_values=(0, 0, 0, 0, 0, 0, 0, 256),
                 tail_marker=0,
                 path_start_x=0,
                 path_start_y=0,
@@ -3272,7 +4233,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
     def test_movement_header_and_ack_round_trip(self) -> None:
         movement_path = MobMovementPath(
-            opaque_control=b"opaque-control".ljust(19, b"\x00"),
+            opaque_control=bytes((17, 0xFF, 96, 112, 18, 0))
+            + struct.pack("<BIII", 7, 1, 0x00FFDDCC, 0x12345678),
             reference_x=-12,
             reference_y=34,
             commands=(
@@ -3327,6 +4289,21 @@ class GameplayPacketShapeTest(unittest.TestCase):
             submission.to_bytes()
         ).movement_path
         self.assertEqual(parsed_path, movement_path)
+        self.assertEqual(
+            parsed_path.safe_control_dict(),
+            {
+                "option_flags": 17,
+                "activity_code": -1,
+                "skill_id": 96,
+                "skill_level": 112,
+                "action_auxiliary_1": 18,
+                "action_auxiliary_2": 0,
+                "control_marker": 7,
+                "control_value_1": 1,
+                "control_value_2": 0x00FFDDCC,
+                "control_value_3": 0x12345678,
+            },
+        )
         self.assertEqual(
             [command.byte_length for command in parsed_path.commands],
             [14, 8, 8],
@@ -3449,7 +4426,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         broadcast = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=fixture_movement_path().commands,
@@ -3472,6 +4452,54 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(released.to_bytes()), 7)
         self.assertEqual(len(controlled.to_bytes()), 49)
         self.assertEqual(len(broadcast.to_bytes()), 32)
+        self.assertEqual(
+            extended_enter.spawn.temporary_status.safe_dict(),
+            {
+                "mask_words": [0, 0, 0, 0x8800_0080],
+                "mask_pattern": "00000000:00000000:00000000:88000080",
+                "enabled_bit_indices": [103, 123, 127],
+                "extended": True,
+                "value": 1,
+                "source_skill_id": 3_101_005,
+                "duration_units": 0,
+                "control_value": 0,
+                "flag_1": False,
+                "flag_2": False,
+            },
+        )
+        captured_extended = bytes.fromhex(
+            "1701ea1143000130fe30000000000000000000000000008000008801004d512f"
+            "0000000000000000007301cefd0486008100ffff00000000"
+        )
+        parsed_extended = MobEnterField.parse(captured_extended)
+        self.assertEqual(parsed_extended.to_bytes(), captured_extended)
+        self.assertEqual(parsed_extended.spawn.appear_type, -1)
+        self.assertEqual(parsed_extended.spawn.team, 0xFF)
+        self.assertEqual(parsed_extended.spawn.effect_item_id, 0)
+        self.assertEqual(
+            parsed_extended.spawn.temporary_status.source_skill_id,
+            3_101_005,
+        )
+        self.assertEqual(
+            parsed_extended.spawn.temporary_status.duration_units, 0
+        )
+        alternate_control = replace(
+            broadcast,
+            control_flag_2=True,
+            control_selector=0x0D,
+            control_value=0x1234_5678,
+        )
+        self.assertEqual(
+            alternate_control.control_prefix.hex(), "00010d78563412"
+        )
+        self.assertEqual(
+            MobMovementBroadcast.parse(alternate_control.to_bytes()),
+            alternate_control,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            replace(broadcast, control_selector=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be a boolean"):
+            replace(broadcast, control_flag_1=1).to_bytes()
         with self.assertRaises(PacketShapeError):
             MobControllerChange(
                 control_level=0,
@@ -3494,12 +4522,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
         response = HeartbeatResponse(opaque_token=b"response")
         notification = ServerOpcode426Notification()
         acknowledgement = ClientOpcode309Acknowledgement()
-        opcode_101_record = ClientOpcode101Record(
-            header_value=0,
-            primary_value=0x0A00_0014,
-            flag_value=0,
-            secondary_value=0,
-            tail_value=0,
+        recovery_request = ClientRecoveryRequest(
+            hp_recovery=10,
+            mp_recovery=0,
         )
         opcode_54_record = ClientOpcode54AttackAction(
             control_value=364_201,
@@ -3579,10 +4604,16 @@ class GameplayPacketShapeTest(unittest.TestCase):
             acknowledgement,
         )
         self.assertEqual(
-            ClientOpcode101Record.parse(opcode_101_record.to_bytes()),
-            opcode_101_record,
+            ClientRecoveryRequest.parse(recovery_request.to_bytes()),
+            recovery_request,
         )
-        self.assertEqual(len(opcode_101_record.to_bytes()), 11)
+        self.assertEqual(len(recovery_request.to_bytes()), 11)
+        self.assertEqual(recovery_request.stat_name, "current_hp")
+        self.assertEqual(recovery_request.recovery_amount, 10)
+        invalid_recovery_type = bytearray(recovery_request.to_bytes())
+        invalid_recovery_type[3] = 19
+        with self.assertRaisesRegex(PacketShapeError, "type must be 20"):
+            ClientRecoveryRequest.parse(bytes(invalid_recovery_type))
         self.assertEqual(
             ClientOpcode54AttackAction.parse(opcode_54_record.to_bytes()),
             opcode_54_record,
@@ -3718,14 +4749,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 target_object_id=MOB_OBJECT_ID,
                 tail_value=1,
             ).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "tail_value must fit"):
-            ClientOpcode101Record(
-                header_value=0,
-                primary_value=20,
-                flag_value=0,
-                secondary_value=3,
-                tail_value=256,
+        with self.assertRaisesRegex(PacketShapeError, "must fit in u16"):
+            ClientRecoveryRequest(
+                hp_recovery=0,
+                mp_recovery=0x1_0000,
             ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "exactly one"):
+            ClientRecoveryRequest(hp_recovery=0, mp_recovery=0).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "uninterpreted bytes"):
             ServerOpcode426Notification.parse(
                 notification.to_bytes() + b"\x00"
@@ -4166,6 +5196,34 @@ class GameplayStateFoldTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown active drop"):
             policy.respond(request)
 
+    def test_compact_item_pickup_response_uses_reason_two_removal(self) -> None:
+        policy = derive_item_pickup_response_policy(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                inventory_changes=True,
+                active_item_drop=True,
+            ),
+            evidence_transcript=fixture_gameplay_transcript(item_pickup=True),
+        )
+        request = ItemPickupRequest(
+            control_value=None,
+            field_epoch=1,
+            client_tick=102_100,
+            position_x=633,
+            position_y=-2677,
+            drop_object_id=40_004,
+            item_validation_token=0,
+            opcode=222,
+        )
+
+        plan = policy.respond(request)
+
+        self.assertEqual(plan.request.shape_name, "compact")
+        self.assertEqual(plan.removal.reason, 2)
+        self.assertEqual(plan.removal.actor_id, CHARACTER_ID)
+        self.assertIsNone(plan.removal.trailing_value)
+        self.assertEqual(len(plan.removal.to_bytes()), 11)
+
     def test_plans_typed_final_field_drop_position_rewrite(self) -> None:
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -4550,18 +5608,40 @@ class GameplayStateFoldTest(unittest.TestCase):
             safe["prediction"]["final_left_ctrl_skill_id"], 2_001_005
         )
         self.assertEqual(safe["frames"][2]["skill_binding_count"], 2)
+        self.assertEqual(safe["frames"][2]["menu_binding_count"], 1)
+        self.assertEqual(safe["frames"][2]["action_binding_count"], 0)
+        self.assertEqual(
+            safe["frames"][2]["face_expression_binding_count"], 0
+        )
+        self.assertEqual(safe["frames"][2]["pickup_binding_count"], 0)
+        self.assertEqual(safe["frames"][2]["pickup_key_codes"], ())
+        self.assertEqual(safe["frames"][2]["empty_binding_count"], 86)
         self.assertEqual(
             safe["frames"][2]["left_ctrl_skill_id"], 2_001_005
         )
         keyboard_state = analysis.safe_dict()["state"]["keyboard_bindings"]
         self.assertEqual(keyboard_state["key_code_space"], "linux_evdev")
         self.assertEqual(
-            keyboard_state["validated_key_codes"], {"left_ctrl": 29}
+            keyboard_state["validated_key_codes"],
+            {
+                "left_ctrl": 29,
+                "left_shift": 42,
+                "z": 44,
+                "left_alt": 56,
+                "space": 57,
+                "keypad_zero": 82,
+                "home": 71,
+            },
         )
         self.assertEqual(
             keyboard_state["skill_bindings"],
             {29: 2_001_005, 71: 2_001_002},
         )
+        self.assertEqual(keyboard_state["menu_bindings"], {2: 10})
+        self.assertEqual(keyboard_state["action_bindings"], {})
+        self.assertEqual(keyboard_state["face_expression_bindings"], {})
+        self.assertEqual(keyboard_state["pickup_key_codes"], ())
+        self.assertEqual(keyboard_state["empty_binding_count"], 86)
         self.assertEqual(
             sum(
                 event.kind == "keyboard_bindings_loaded"
@@ -4618,6 +5698,11 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.client_skill_use_level_mismatches, 0)
         self.assertEqual(analysis.state.client_skill_use_binding_matches, 2)
         self.assertEqual(analysis.state.client_skill_use_binding_mismatches, 0)
+        self.assertEqual(analysis.state.client_skill_use_same_skill_repeats, 1)
+        self.assertEqual(
+            analysis.state.client_skill_use_response_free_same_skill_repeats,
+            1,
+        )
         self.assertEqual(analysis.state.last_client_skill_tick, 623_660)
         self.assertEqual(analysis.state.client_skill_tick_decreases, 0)
         observations = [
@@ -4636,6 +5721,28 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(observations[0].details["skill_level_matches_model"])
         self.assertEqual(observations[1].details["client_tick_delta"], 230_024)
         self.assertEqual(
+            observations[1].details["previous_request_elapsed_ms"],
+            0.0,
+        )
+        self.assertEqual(
+            observations[1].details[
+                "intervening_nonheartbeat_server_packets"
+            ],
+            0,
+        )
+        self.assertEqual(
+            observations[1].details[
+                "intervening_nonheartbeat_server_opcodes"
+            ],
+            {},
+        )
+        self.assertTrue(
+            observations[1].details[
+                "same_skill_repeat_without_intervening_"
+                "nonheartbeat_server_packet"
+            ]
+        )
+        self.assertEqual(
             sum(
                 event.kind == "client_skill_use_submitted"
                 for event in analysis.events
@@ -4645,10 +5752,97 @@ class GameplayStateFoldTest(unittest.TestCase):
         safe = analysis.safe_dict()["state"]["client_skill_uses"]
         self.assertEqual(safe["requests_by_skill_id"], {2_001_002: 2})
         self.assertEqual(safe["level_matches"], 2)
+        self.assertEqual(safe["same_skill_repeats"], 1)
+        self.assertEqual(
+            safe["response_free_same_skill_repeats"],
+            1,
+        )
         self.assertIn(
             "client_skill_uses=requests:2",
             render_gameplay_analysis(analysis),
         )
+
+    def test_tracks_server_packets_between_same_skill_requests(self) -> None:
+        keyboard = fixture_variable_server_records()[2]
+        first_request = ClientSkillUseRequest(
+            client_tick=700_000,
+            skill_id=2_001_002,
+            skill_level=1,
+            trailing_value=0,
+        )
+        second_request = replace(first_request, client_tick=701_000)
+        third_request = replace(first_request, client_tick=702_000)
+        temporary_stat = LocalTemporaryStatSetHeader(
+            mask_words=(0, 0, 0, 0),
+            zero_mask_flag_a=0,
+            zero_mask_flag_b=0,
+            zero_mask_trailing_i16=0,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(keyboard.to_bytes(),),
+            extra_directional_plaintexts=(
+                ("client_to_server", first_request.to_bytes()),
+                ("server_to_client", HeartbeatProbe().to_bytes()),
+                (
+                    "client_to_server",
+                    HeartbeatResponse(opaque_token=b"response").to_bytes(),
+                ),
+                ("client_to_server", second_request.to_bytes()),
+                ("server_to_client", temporary_stat.to_bytes()),
+                ("client_to_server", third_request.to_bytes()),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_skill_use_request"
+        ]
+        self.assertEqual(len(observations), 3)
+        self.assertEqual(
+            observations[1].details[
+                "intervening_nonheartbeat_server_packets"
+            ],
+            0,
+        )
+        self.assertTrue(
+            observations[1].details[
+                "same_skill_repeat_without_intervening_"
+                "nonheartbeat_server_packet"
+            ]
+        )
+        self.assertEqual(
+            observations[2].details[
+                "intervening_nonheartbeat_server_packets"
+            ],
+            1,
+        )
+        self.assertEqual(
+            observations[2].details[
+                "intervening_nonheartbeat_server_opcodes"
+            ],
+            {42: 1},
+        )
+        self.assertFalse(
+            observations[2].details[
+                "same_skill_repeat_without_intervening_"
+                "nonheartbeat_server_packet"
+            ]
+        )
+        self.assertEqual(
+            analysis.state.client_skill_use_same_skill_repeats,
+            2,
+        )
+        self.assertEqual(
+            analysis.state.client_skill_use_response_free_same_skill_repeats,
+            1,
+        )
+        self.assertEqual(analysis.state.matched_heartbeat_responses, 2)
+        self.assertEqual(analysis.state.pending_heartbeat_probes, 0)
 
     def test_folds_local_temporary_stat_zero_mask_without_state_change(
         self,
@@ -5354,19 +6548,16 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
-    def test_folds_client_opcode_43_neutral_envelopes(self) -> None:
-        envelopes = (
-            ClientOpcode43Envelope(
-                sequence=4,
-                opaque_compact_body=bytes(range(9)),
-            ),
-            ClientOpcode43Envelope(
-                sequence=35,
-                opaque_identifier=3_456_789,
-                opaque_text="sensitive-label",
-                opaque_tail=b"ABCDEF",
-            ),
+    def test_folds_client_field_transfer_requests_into_transitions(self) -> None:
+        portal = ClientFieldTransferRequest(
+            field_epoch=1,
+            destination_map_id=-1,
+            portal_name="sensitive-portal",
+            position_x=1_239,
+            position_y=485,
+            reserved_value=0,
         )
+        death_respawn = ClientFieldTransferRequest(field_epoch=2)
         server = ServerOpcode43Envelope(
             message_type=0,
             opaque_body=bytes(range(16)),
@@ -5374,43 +6565,66 @@ class GameplayStateFoldTest(unittest.TestCase):
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_server_plaintexts=(server.to_bytes(),),
-            extra_client_plaintexts=tuple(
-                envelope.to_bytes() for envelope in envelopes
+            extra_directional_plaintexts=(
+                ("client_to_server", portal.to_bytes()),
+                (
+                    "server_to_client",
+                    fixture_compact_field_transition().to_bytes(),
+                ),
+                ("client_to_server", death_respawn.to_bytes()),
+                (
+                    "server_to_client",
+                    replace(
+                        fixture_compact_field_transition(),
+                        transition_sequence=3,
+                        map_id=101_000_000,
+                        portal_index=14,
+                        current_hp=50,
+                    ).to_bytes(),
+                ),
             ),
         )
 
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.client_opcode_43_packets, 2)
-        self.assertEqual(analysis.state.client_opcode_43_sequences, {4: 1, 35: 1})
+        self.assertEqual(analysis.state.client_field_transfer_requests, 2)
         self.assertEqual(
-            analysis.state.client_opcode_43_variants,
-            {"compact": 1, "identified_text": 1},
+            analysis.state.client_field_transfer_variants,
+            {"portal": 1, "death_respawn": 1},
         )
         self.assertEqual(
-            analysis.state.client_opcode_43_text_code_units,
-            {0: 1, 15: 1},
+            analysis.state.client_field_transfer_portal_name_code_units,
+            {0: 1, 16: 1},
         )
-        self.assertEqual(analysis.state.client_opcode_43_opaque_bytes, 15)
+        self.assertEqual(analysis.state.client_field_transfer_epoch_matches, 2)
+        self.assertEqual(analysis.state.client_field_transfer_epoch_mismatches, 0)
+        self.assertEqual(
+            analysis.state.client_field_transfer_redacted_portal_names, 1
+        )
+        self.assertEqual(analysis.state.matched_client_field_transfers, 2)
+        self.assertEqual(analysis.state.pending_client_field_transfers, 0)
+        self.assertEqual(
+            analysis.state.last_client_field_transfer_response_ms, 0.000001
+        )
         self.assertEqual(analysis.state.server_opcode_43_packets, 1)
         self.assertEqual(analysis.state.server_opcode_43_message_types, {0: 1})
         self.assertEqual(analysis.state.server_opcode_43_opaque_bytes, 16)
         observations = [
             observation
             for observation in analysis.observations
-            if observation.kind == "client_opcode_43_envelope"
+            if observation.kind == "client_field_transfer_request"
         ]
         self.assertEqual(len(observations), 2)
         self.assertTrue(
             all(
-                observation.coverage.value == "partial"
+                observation.coverage.value == "full"
                 for observation in observations
             )
         )
         self.assertEqual(
             sum(
-                event.kind == "client_opcode_43_submitted"
+                event.kind == "field_transfer_requested"
                 for event in analysis.events
             ),
             2,
@@ -5430,17 +6644,190 @@ class GameplayStateFoldTest(unittest.TestCase):
             1,
         )
         safe = str(analysis.safe_dict())
-        self.assertNotIn("3456789", safe)
-        self.assertNotIn("sensitive-label", safe)
+        self.assertNotIn("sensitive-portal", safe)
         self.assertNotIn(bytes(range(16)).hex(), safe)
         self.assertIn(
-            "client_opcode_43=packets:2 sequences:{4: 1, 35: 1}",
+            "client_field_transfer=requests:2",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(
             "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:16",
             render_gameplay_analysis(analysis),
         )
+
+    def test_warns_for_unmatched_client_field_transfer_epoch(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_directional_plaintexts=(
+                    (
+                        "client_to_server",
+                        ClientFieldTransferRequest(field_epoch=2).to_bytes(),
+                    ),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_field_transfer_requests, 1)
+        self.assertEqual(analysis.state.client_field_transfer_epoch_matches, 0)
+        self.assertEqual(
+            analysis.state.client_field_transfer_epoch_mismatches,
+            1,
+        )
+        self.assertEqual(analysis.state.matched_client_field_transfers, 0)
+        self.assertEqual(analysis.state.pending_client_field_transfers, 1)
+        self.assertIn(
+            "1 client field-transfer requests did not match the active field epoch",
+            analysis.warnings,
+        )
+        self.assertIn(
+            "1 client field-transfer requests had no following field snapshot",
+            analysis.warnings,
+        )
+
+    def test_correlates_npc_interaction_and_opcode_111_cash_slot(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                player_movement=True,
+                npc_interaction=True,
+                opcode_111_cash_slot_action=True,
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.npc_interaction_requests, 1)
+        self.assertEqual(
+            analysis.state.npc_interaction_requests_for_active_npcs,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.npc_interaction_requests_for_unknown_npcs,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.npc_interaction_target_templates,
+            {1_032_000: 1},
+        )
+        self.assertEqual(analysis.state.npc_interaction_position_matches, 1)
+        self.assertEqual(
+            analysis.state.npc_interaction_position_mismatches,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.npc_interaction_server_348_matches,
+            1,
+        )
+        self.assertEqual(analysis.state.pending_npc_interaction_requests, 0)
+        self.assertEqual(analysis.state.client_opcode_111_packets, 1)
+        self.assertEqual(analysis.state.client_opcode_111_slots, {3: 1})
+        self.assertEqual(
+            analysis.state.client_opcode_111_cash_slot_matches,
+            1,
+        )
+        self.assertEqual(analysis.state.pending_client_opcode_111_actions, 0)
+        opcode_64 = next(
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 64
+        )
+        opcode_111 = next(
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 111
+        )
+        self.assertEqual(opcode_64.coverage.value, "full")
+        self.assertEqual(opcode_64.kind, "npc_interaction_request")
+        self.assertTrue(opcode_64.details["active_npc"])
+        self.assertEqual(opcode_64.details["npc_template_id"], 1_032_000)
+        self.assertTrue(
+            opcode_64.details["position_matches_last_life_movement"]
+        )
+        self.assertEqual(opcode_111.coverage, ShapeCoverage.FULL)
+        self.assertEqual(opcode_111.issues, ())
+        server_response = next(
+            event
+            for event in analysis.events
+            if event.kind == "server_opcode_348_received"
+        )
+        self.assertEqual(
+            server_response.details["npc_interaction_response"][
+                "request_frame"
+            ],
+            opcode_64.frame_index,
+        )
+        inventory_response = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_change_set_received"
+            and "client_opcode_111_response" in event.details
+        )
+        self.assertEqual(
+            inventory_response.details["client_opcode_111_response"]["slot"],
+            3,
+        )
+        report = analysis.safe_dict()["state"]
+        self.assertEqual(
+            report["npc_interactions"]["active_npc_matches"],
+            1,
+        )
+        self.assertEqual(
+            report["npc_interactions"]["life_movement_position_matches"],
+            1,
+        )
+        self.assertEqual(report["client_opcode_111"]["cash_slot_matches"], 1)
+        rendered = render_gameplay_analysis(analysis)
+        self.assertIn("npc_interactions=requests:1", rendered)
+        self.assertIn("client_opcode_111=packets:1", rendered)
+
+    def test_warns_on_unresolved_npc_interaction(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                player_movement=True,
+                extra_client_plaintexts=(
+                    ClientNpcInteractionRequest(
+                        npc_object_id=987_654_321,
+                        position_x=0,
+                        position_y=0,
+                    ).to_bytes(),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.npc_interaction_requests, 1)
+        self.assertEqual(
+            analysis.state.npc_interaction_requests_for_unknown_npcs,
+            1,
+        )
+        self.assertEqual(analysis.state.npc_interaction_position_mismatches, 1)
+        self.assertEqual(analysis.state.pending_npc_interaction_requests, 1)
+        self.assertTrue(
+            any(
+                "inactive field NPCs" in warning
+                for warning in analysis.warnings
+            )
+        )
+        self.assertTrue(
+            any(
+                "positions did not match" in warning
+                for warning in analysis.warnings
+            )
+        )
+        self.assertTrue(
+            any("no following" in warning for warning in analysis.warnings)
+        )
+        request = next(
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 64
+        )
+        self.assertEqual(request.coverage.value, "full")
+        self.assertFalse(request.details["active_npc"])
+        self.assertNotIn("987654321", repr(analysis.safe_dict()))
 
     def test_correlates_client_opcode_66_with_server_opcode_348(self) -> None:
         requests = tuple(
@@ -5569,7 +6956,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(observations), 2)
         self.assertTrue(
             all(
-                observation.coverage.value == "partial"
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
                 for observation in observations
             )
         )
@@ -5587,6 +6975,82 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("4567890", safe)
         self.assertIn(
             "client_opcode_114=packets:2 control_values:{1: 1, 32: 1}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_chained_inner_portal_requests(self) -> None:
+        requests = (
+            ClientInnerPortalRequest(
+                field_epoch=1,
+                portal_name="secret00",
+                source_x=100,
+                source_y=200,
+                destination_x=300,
+                destination_y=400,
+            ),
+            ClientInnerPortalRequest(
+                field_epoch=1,
+                portal_name="secret01",
+                source_x=300,
+                source_y=401,
+                destination_x=500,
+                destination_y=600,
+            ),
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_client_plaintexts=tuple(
+                    request.to_bytes() for request in requests
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_inner_portal_requests, 2)
+        self.assertEqual(
+            analysis.state.client_inner_portal_field_epoch_matches,
+            2,
+        )
+        self.assertEqual(
+            analysis.state.client_inner_portal_field_epoch_mismatches,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.client_inner_portal_name_code_units,
+            {8: 2},
+        )
+        self.assertEqual(analysis.state.client_inner_portal_redacted_names, 2)
+        self.assertEqual(analysis.state.client_inner_portal_same_epoch_chains, 1)
+        self.assertEqual(
+            analysis.state.client_inner_portal_chained_sources_within_one_pixel,
+            1,
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_inner_portal_request"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "inner_portal_requested"
+                for event in analysis.events
+            ),
+            2,
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("secret00", safe)
+        self.assertNotIn("secret01", safe)
+        self.assertIn(
+            "client_inner_portal=requests:2 epoch_matches:2",
             render_gameplay_analysis(analysis),
         )
 
@@ -5954,23 +7418,33 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
-    def test_folds_fixed_and_periodic_client_opaque_records(self) -> None:
-        def record(opcode: int, body_length: int) -> bytes:
-            return ClientFixedOpaqueRecord(
-                opaque_body=bytes([opcode & 0xFF]) * body_length,
-                opcode=opcode,
-            ).to_bytes()
+    def test_folds_typed_neutral_and_periodic_client_records(self) -> None:
+        opcode_307 = ClientOpcode307NeutralRecord(
+            neutral_value=0x1234,
+            redacted_value=0x5678_9000,
+        ).to_bytes()
+        opcode_310 = ClientOpcode310TextRecord(
+            redacted_text="private-value-01"
+        ).to_bytes()
+        opcode_308 = ClientOpcode308PeriodicRecord(
+            neutral_f64_values=(4.5, 2.0),
+            neutral_u64_values=(123, 456),
+            mirrored_value=59,
+            variant=0,
+        ).to_bytes()
+        opcode_311 = ClientOpcode311PeriodicRecord(
+            neutral_value=0xDEAD_BEEF
+        ).to_bytes()
 
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_client_plaintexts=(
-                record(100, 24),
-                record(307, 12),
-                record(310, 39),
-                record(308, 72),
-                record(311, 20),
-                record(308, 72),
-                record(311, 20),
+                opcode_307,
+                opcode_310,
+                opcode_308,
+                opcode_311,
+                opcode_308,
+                opcode_311,
             ),
         )
 
@@ -5978,12 +7452,28 @@ class GameplayStateFoldTest(unittest.TestCase):
 
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(
-            analysis.state.client_fixed_opaque_records_by_opcode,
-            {100: 1, 307: 1, 308: 2, 310: 1, 311: 2},
+            analysis.state.client_neutral_records_by_opcode,
+            {307: 1, 310: 1},
         )
         self.assertEqual(
-            analysis.state.client_fixed_opaque_bytes_by_opcode,
-            {100: 24, 307: 12, 308: 144, 310: 39, 311: 40},
+            analysis.state.client_opcode_307_nonzero_redacted_values,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_310_text_code_units,
+            {16: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_periodic_records_by_opcode,
+            {308: 2, 311: 2},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_308_mirrored_values,
+            {59: 2},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_308_variants,
+            {0: 2},
         )
         self.assertEqual(
             set(analysis.state.client_periodic_report_last_interval_ms),
@@ -5992,21 +7482,121 @@ class GameplayStateFoldTest(unittest.TestCase):
         observations = [
             observation
             for observation in analysis.observations
-            if observation.kind == "client_fixed_opaque_record"
+            if observation.kind.startswith("client_opcode_3")
+            and observation.kind.endswith("_periodic_record")
         ]
-        self.assertEqual(len(observations), 7)
+        self.assertEqual(len(observations), 4)
         self.assertTrue(
             all(
-                observation.coverage.value == "partial"
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
                 for observation in observations
             )
         )
+        neutral_observations = {
+            observation.opcode: observation
+            for observation in analysis.observations
+            if observation.kind.endswith("_neutral_record")
+        }
+        self.assertEqual(neutral_observations[307].coverage, ShapeCoverage.FULL)
+        self.assertEqual(neutral_observations[307].issues, ())
+        self.assertEqual(
+            neutral_observations[310].coverage, ShapeCoverage.PARTIAL
+        )
         event_counts = Counter(event.kind for event in analysis.events)
-        self.assertEqual(event_counts["client_fixed_record_submitted"], 3)
+        self.assertEqual(event_counts["client_neutral_record_submitted"], 2)
         self.assertEqual(event_counts["client_periodic_report_submitted"], 4)
         self.assertIn(
-            "client_fixed_opaque_records=packets:"
-            "{100: 1, 307: 1, 308: 2, 310: 1, 311: 2}",
+            "client_neutral_records=packets:{307: 1, 310: 1} "
+            "opcode307_nonzero:1 opcode310_code_units:{16: 1}",
+            render_gameplay_analysis(analysis),
+        )
+        self.assertIn(
+            "client_periodic_records=packets:{308: 2, 311: 2} "
+            "opcode308_mirrors:{59: 2} opcode308_variants:{0: 2}",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_correlates_ability_point_allocation_with_stat_update(self) -> None:
+        request = ClientAbilityPointAllocationRequest(
+            client_tick=0x0008_9CF4,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=1,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=4,
+                ),
+            ),
+        )
+        initial_ap = CharacterStatUpdate(
+            request_flag=False,
+            stat_mask=CharacterStatUpdate.ABILITY_POINTS,
+            ability_points=5,
+        )
+        response = CharacterStatUpdate(
+            request_flag=True,
+            stat_mask=(
+                CharacterStatUpdate.INTELLIGENCE
+                | CharacterStatUpdate.LUCK
+                | CharacterStatUpdate.ABILITY_POINTS
+            ),
+            intelligence=61,
+            luck=16,
+            ability_points=0,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_directional_plaintexts=(
+                ("server_to_client", initial_ap.to_bytes()),
+                ("client_to_server", request.to_bytes()),
+                ("server_to_client", response.to_bytes()),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.ability_point_allocation_requests, 1)
+        self.assertEqual(analysis.state.ability_point_allocation_entries, 2)
+        self.assertEqual(analysis.state.ability_points_requested, 5)
+        self.assertEqual(
+            analysis.state.ability_points_requested_by_stat,
+            {"luck": 1, "intelligence": 4},
+        )
+        self.assertEqual(analysis.state.ability_point_allocation_responses, 1)
+        self.assertEqual(
+            analysis.state.ability_point_allocation_response_matches,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.ability_point_allocation_response_mismatches,
+            0,
+        )
+        self.assertEqual(analysis.state.pending_ability_point_allocations, 0)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "ability_point_allocation_request"
+        )
+        self.assertEqual(request_observation.coverage.value, "full")
+        response_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "player_stats_updated"
+            and "ability_point_allocation" in event.details
+        )
+        allocation = response_event.details["ability_point_allocation"]
+        self.assertEqual(
+            allocation["actual_increments"],
+            {"luck": 1, "intelligence": 4},
+        )
+        self.assertEqual(allocation["ability_points_spent"], 5)
+        self.assertTrue(allocation["matches"])
+        self.assertIn(
+            "ability_point_allocation=requests:1 entries:2 points:5",
             render_gameplay_analysis(analysis),
         )
 
@@ -6028,61 +7618,105 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.warnings,
         )
 
-    def test_folds_positioned_effect_records(self) -> None:
+    def test_folds_reactor_hit_into_state_update_and_removal(self) -> None:
         records = (
-            ServerOpcode322PositionedEffectRecord(
-                primary_value=12_597,
-                numeric_value=2000,
-                control_value=0,
+            ServerReactorSpawn(
+                reactor_object_id=12_597,
+                reactor_id=2000,
+                state=0,
                 x=2609,
                 y=-372,
-                trailing_value=0,
+                spawn_flag=0,
             ),
-            ServerOpcode320PositionedEffectRecord(
-                primary_value=12_597,
-                control_value=1,
+            ServerReactorStateUpdate(
+                reactor_object_id=12_597,
+                state=1,
                 x=2600,
                 y=-370,
-                numeric_value=305,
-                secondary_control_value=0,
-                trailing_value=5,
+                stance=305,
+                reserved_value=0,
+                frame_delay=5,
             ),
-            ServerOpcode323PositionedEffectRecord(
-                primary_value=12_597,
-                control_value=2,
+            ServerReactorRemoval(
+                reactor_object_id=12_597,
+                state=2,
                 x=2590,
                 y=-368,
             ),
-            ServerOpcode323PositionedEffectRecord(
-                primary_value=99_999,
-                control_value=3,
+            ServerReactorRemoval(
+                reactor_object_id=99_999,
+                state=3,
                 x=10,
                 y=20,
             ),
         )
+        client_packets = (
+            ClientAttackAction(
+                opcode=50,
+                local_object_index=7,
+                variant=1,
+                client_token=987_654_321,
+                control_value=0,
+                opaque_common_state=b"state",
+                value_1=1_000,
+                value_2=2_000,
+                opaque_suffix=b"",
+            ),
+            ClientReactorHitRequest(
+                reactor_object_id=12_597,
+                character_position=2,
+                stance=305,
+                reserved_value=0,
+            ),
+        )
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
-            extra_server_plaintexts=tuple(record.to_bytes() for record in records),
+            extra_directional_plaintexts=(
+                ("server_to_client", records[0].to_bytes()),
+                ("client_to_server", client_packets[0].to_bytes()),
+                ("client_to_server", client_packets[1].to_bytes()),
+                ("server_to_client", records[1].to_bytes()),
+                ("client_to_server", client_packets[0].to_bytes()),
+                (
+                    "client_to_server",
+                    replace(client_packets[1], stance=393).to_bytes(),
+                ),
+                ("server_to_client", records[2].to_bytes()),
+                ("server_to_client", records[3].to_bytes()),
+            ),
         )
 
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.positioned_effect_records, 4)
+        self.assertEqual(analysis.state.reactor_packets, 4)
         self.assertEqual(
-            analysis.state.positioned_effect_records_by_opcode,
+            analysis.state.reactor_packets_by_opcode,
             {322: 1, 320: 1, 323: 2},
         )
-        self.assertEqual(analysis.state.positioned_effect_new_entities, 2)
-        self.assertEqual(analysis.state.positioned_effect_updates, 2)
-        self.assertEqual(analysis.state.positioned_effect_unknown_updates, 1)
-        self.assertEqual(len(analysis.state.positioned_effect_entities), 2)
-        entity = analysis.state.positioned_effect_entities[12_597]
-        self.assertEqual((entity.x, entity.y, entity.last_opcode), (2590, -368, 323))
+        self.assertEqual(analysis.state.reactor_spawns, 1)
+        self.assertEqual(analysis.state.reactor_state_updates, 1)
+        self.assertEqual(analysis.state.reactor_removals, 2)
+        self.assertEqual(analysis.state.reactor_unknown_updates, 1)
+        self.assertEqual(len(analysis.state.reactors), 0)
+        self.assertEqual(analysis.state.reactor_hit_requests, 2)
+        self.assertEqual(
+            analysis.state.reactor_hit_requests_for_active_reactors, 2
+        )
+        self.assertEqual(analysis.state.reactor_hit_requests_after_attack, 2)
+        self.assertEqual(analysis.state.reactor_hit_character_positions, {2: 2})
+        self.assertEqual(analysis.state.reactor_hit_stances, {305: 1, 393: 1})
+        self.assertEqual(analysis.state.matched_reactor_hit_requests, 2)
+        self.assertEqual(analysis.state.matched_reactor_state_updates, 1)
+        self.assertEqual(analysis.state.matched_reactor_removals, 1)
+        self.assertEqual(analysis.state.reactor_hit_stance_matches, 1)
+        self.assertEqual(analysis.state.reactor_hit_stance_mismatches, 0)
+        self.assertEqual(analysis.state.pending_reactor_hit_requests, 0)
         observations = [
             observation
             for observation in analysis.observations
-            if observation.kind == "positioned_effect_record"
+            if observation.kind.startswith("reactor_")
+            and observation.kind != "client_reactor_hit_request"
         ]
         self.assertEqual(len(observations), 4)
         self.assertTrue(
@@ -6093,20 +7727,136 @@ class GameplayStateFoldTest(unittest.TestCase):
                 [
                     event
                     for event in analysis.events
-                    if event.kind == "positioned_effect_observed"
+                    if event.kind
+                    in {"reactor_spawned", "reactor_state_updated", "reactor_removed"}
                 ]
             ),
             4,
         )
+        action_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_reactor_hit_request"
+        )
+        self.assertEqual(action_observation.coverage.value, "full")
+        self.assertEqual(action_observation.details["reactor"], "reactor:1")
+        self.assertTrue(action_observation.details["active_reactor"])
+        self.assertTrue(
+            action_observation.details["preceding_client_attack"]
+        )
+        action_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "reactor_hit_requested"
+        )
+        self.assertEqual(action_event.details["stance"], 305)
         safe = analysis.safe_dict()
         self.assertNotIn("12597", str(safe))
         self.assertEqual(
-            safe["state"]["positioned_effect_entities"][0]["entity"],
-            "effect:1",
+            safe["state"]["reactors"],
+            [],
         )
         self.assertIn(
-            "positioned_effect_records=packets:4",
+            "reactors=packets:4",
             render_gameplay_analysis(analysis),
+        )
+        self.assertIn(
+            "reactor_hits=requests:2 active:2 inactive:0 after_attack:2",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_warns_for_mismatched_and_pending_reactor_hits(self) -> None:
+        spawn = ServerReactorSpawn(
+            reactor_object_id=12_597,
+            reactor_id=2000,
+            state=0,
+            x=2609,
+            y=-372,
+            spawn_flag=0,
+        )
+        attack = ClientAttackAction(
+            opcode=50,
+            local_object_index=7,
+            variant=1,
+            client_token=987_654_321,
+            control_value=0,
+            opaque_common_state=b"state",
+            value_1=1_000,
+            value_2=2_000,
+            opaque_suffix=b"",
+        )
+        hit = ClientReactorHitRequest(
+            reactor_object_id=12_597,
+            character_position=2,
+            stance=305,
+            reserved_value=0,
+        )
+        update = ServerReactorStateUpdate(
+            reactor_object_id=12_597,
+            state=1,
+            x=2600,
+            y=-370,
+            stance=393,
+            reserved_value=0,
+            frame_delay=6,
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_directional_plaintexts=(
+                    ("server_to_client", spawn.to_bytes()),
+                    ("client_to_server", attack.to_bytes()),
+                    ("client_to_server", hit.to_bytes()),
+                    ("server_to_client", update.to_bytes()),
+                    ("client_to_server", attack.to_bytes()),
+                    ("client_to_server", hit.to_bytes()),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.reactor_hit_stance_matches, 0)
+        self.assertEqual(analysis.state.reactor_hit_stance_mismatches, 1)
+        self.assertEqual(analysis.state.matched_reactor_hit_requests, 1)
+        self.assertEqual(analysis.state.pending_reactor_hit_requests, 1)
+        active_reactor = analysis.safe_dict()["state"]["reactors"][0]
+        self.assertEqual(active_reactor["reactor_id"], 2000)
+        self.assertEqual(active_reactor["state"], 1)
+        self.assertEqual(active_reactor["spawn_flag"], 0)
+        self.assertIn(
+            "1 reactor-hit requests did not match the authoritative reactor stance",
+            analysis.warnings,
+        )
+        self.assertIn(
+            "1 reactor-hit requests had no following state update or removal",
+            analysis.warnings,
+        )
+
+    def test_warns_for_reactor_hit_targeting_no_active_reactor(self) -> None:
+        hit = ClientReactorHitRequest(
+            reactor_object_id=12_597,
+            character_position=2,
+            stance=305,
+            reserved_value=0,
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_directional_plaintexts=(
+                    ("client_to_server", hit.to_bytes()),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.reactor_hit_requests, 1)
+        self.assertEqual(
+            analysis.state.reactor_hit_requests_for_inactive_reactors, 1
+        )
+        self.assertEqual(analysis.state.pending_reactor_hit_requests, 1)
+        self.assertIn(
+            "1 reactor-hit requests targeted no active reactor",
+            analysis.warnings,
         )
 
     def test_folds_neutral_server_records_with_bounded_opaque_tails(
@@ -6288,6 +8038,104 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.left_ctrl_skill_id, 2_001_005)
         self.assertTrue(analysis.state.left_ctrl_skill_known)
 
+    def test_folds_keyboard_empty_binding_reload_sequence(self) -> None:
+        original = fixture_variable_server_records()[2]
+        entries = list(original.entries)
+        entries[71] = replace(entries[71], selector=0)
+        zeroed = replace(original, entries=tuple(entries))
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                original.to_bytes(),
+                zeroed.to_bytes(),
+                original.to_bytes(),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        loaded = [
+            event
+            for event in analysis.events
+            if event.kind == "keyboard_bindings_loaded"
+        ]
+        self.assertEqual(
+            [event.details["empty_binding_count"] for event in loaded],
+            [86, 87, 86],
+        )
+        self.assertEqual(
+            [event.details["skill_binding_count"] for event in loaded],
+            [2, 1, 2],
+        )
+        keyboard_state = analysis.safe_dict()["state"]["keyboard_bindings"]
+        self.assertEqual(keyboard_state["empty_binding_count"], 86)
+        self.assertEqual(
+            keyboard_state["skill_bindings"],
+            {29: 2_001_005, 71: 2_001_002},
+        )
+
+    def test_folds_keyboard_action_bindings(self) -> None:
+        original = fixture_variable_server_records()[2]
+        entries = list(original.entries)
+        entries[44] = VariableServerEntry(selector=5, value=50)
+        entries[45] = VariableServerEntry(selector=5, value=51)
+        entries[56] = VariableServerEntry(selector=5, value=53)
+        entries[57] = VariableServerEntry(selector=5, value=54)
+        entries[59] = VariableServerEntry(selector=6, value=100)
+        entries[78] = VariableServerEntry(selector=5, value=50)
+        entries[82] = VariableServerEntry(selector=5, value=52)
+        bound = replace(original, entries=tuple(entries))
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(bound.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        keyboard_state = analysis.safe_dict()["state"]["keyboard_bindings"]
+        self.assertEqual(
+            keyboard_state["action_bindings"],
+            {44: 50, 45: 51, 56: 53, 57: 54, 78: 50, 82: 52},
+        )
+        self.assertEqual(keyboard_state["pickup_action_id"], 50)
+        self.assertEqual(keyboard_state["pickup_key_codes"], (44, 78))
+        self.assertEqual(keyboard_state["sit_action_id"], 51)
+        self.assertEqual(keyboard_state["sit_key_codes"], (45,))
+        self.assertEqual(keyboard_state["attack_action_id"], 52)
+        self.assertEqual(keyboard_state["attack_key_codes"], (82,))
+        self.assertEqual(keyboard_state["jump_action_id"], 53)
+        self.assertEqual(keyboard_state["jump_key_codes"], (56,))
+        self.assertEqual(keyboard_state["npc_interaction_action_id"], 54)
+        self.assertEqual(keyboard_state["npc_interaction_key_codes"], (57,))
+        self.assertEqual(keyboard_state["menu_bindings"], {2: 10})
+        self.assertEqual(keyboard_state["face_expression_bindings"], {59: 100})
+        self.assertEqual(
+            keyboard_state["validated_key_codes"],
+            {
+                "left_ctrl": 29,
+                "left_shift": 42,
+                "z": 44,
+                "left_alt": 56,
+                "space": 57,
+                "keypad_zero": 82,
+                "home": 71,
+            },
+        )
+        loaded = next(
+            event
+            for event in analysis.events
+            if event.kind == "keyboard_bindings_loaded"
+        )
+        self.assertEqual(loaded.details["action_binding_count"], 6)
+        self.assertEqual(loaded.details["menu_binding_count"], 1)
+        self.assertEqual(loaded.details["face_expression_binding_count"], 1)
+        self.assertEqual(loaded.details["pickup_binding_count"], 2)
+        self.assertEqual(loaded.details["pickup_key_codes"], (44, 78))
+        self.assertEqual(loaded.details["sit_key_codes"], (45,))
+        self.assertEqual(loaded.details["attack_key_codes"], (82,))
+
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -6302,7 +8150,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             plan.update,
             CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
                 current_hp=1,
             ),
@@ -6768,10 +8616,10 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.player_x, 132)
         self.assertEqual(analysis.state.player_y, -168)
         self.assertEqual(analysis.state.player_movement_submissions, 1)
-        self.assertEqual(analysis.state.player_movement_commands, 5)
+        self.assertEqual(analysis.state.player_movement_commands, 6)
         self.assertEqual(
             analysis.state.player_movement_commands_by_type,
-            {0: 2, 1: 1, 3: 1, 5: 1},
+            {0: 2, 1: 1, 3: 1, 4: 1, 5: 1},
         )
         self.assertEqual(analysis.state.remote_player_movement_broadcasts, 1)
         self.assertEqual(
@@ -6782,10 +8630,10 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.remote_player_movement_broadcasts_for_unknown_players,
             1,
         )
-        self.assertEqual(analysis.state.remote_player_movement_commands, 5)
+        self.assertEqual(analysis.state.remote_player_movement_commands, 6)
         self.assertEqual(
             analysis.state.remote_player_movement_commands_by_type,
-            {0: 2, 1: 1, 3: 1, 5: 1},
+            {0: 2, 1: 1, 3: 1, 4: 1, 5: 1},
         )
         self.assertEqual(analysis.state.life_movement_submissions, 1)
         self.assertEqual(analysis.state.life_movement_submission_commands, 5)
@@ -6819,6 +8667,32 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("remote_player_movement_broadcast", event_kinds)
         self.assertIn("life_movement_submitted", event_kinds)
         self.assertIn("life_movement_broadcast_received", event_kinds)
+        player_movement_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"player_movement_submission", "player_movement_broadcast"}
+        ]
+        self.assertEqual(len(player_movement_observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in player_movement_observations
+            )
+        )
+        life_movement_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"life_movement_submission", "life_movement_broadcast"}
+        ]
+        self.assertEqual(len(life_movement_observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in life_movement_observations
+            )
+        )
         life_submission_event = next(
             event
             for event in analysis.events
@@ -6826,11 +8700,56 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertNotIn("client_token", life_submission_event.details)
         self.assertTrue(life_submission_event.details["client_token_present"])
+        self.assertEqual(
+            life_submission_event.details["tail_state_values"], [0] * 8
+        )
         report = analysis.safe_dict()
         self.assertEqual(report["state"]["player"]["x"], 132)
         self.assertEqual(report["state"]["observed_remote_player_count"], 1)
         self.assertNotIn(
             "object_id", report["state"]["observed_remote_players"][0]
+        )
+
+    def test_opaque_life_movement_command_remains_partial(self) -> None:
+        payload = LifeMovementSubmission(
+            local_object_index=1,
+            client_token=0,
+            control_value=0,
+            movement=LifeMovementPath(
+                reference_x=0,
+                reference_y=0,
+                commands=(
+                    LifeMovementCommand(
+                        command_type=21,
+                        opaque_payload=b"\x01\x02\x03",
+                    ),
+                ),
+            ),
+            tail_type=17,
+            tail_state_values=(0,) * 8,
+            tail_marker=0,
+            path_start_x=0,
+            path_start_y=0,
+            path_end_x=0,
+            path_end_y=0,
+        ).to_bytes()
+
+        observation = GameplayStateFold().consume(
+            PlainFrame(
+                index=0,
+                direction_index=0,
+                timestamp_ns=1_000_000_000,
+                direction="client_to_server",
+                wire_offset=0,
+                wire_length=len(payload),
+                plaintext=payload,
+            )
+        )
+
+        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(
+            observation.issues,
+            ("life movement contains opaque command types",),
         )
 
     def test_folds_character_stat_updates_into_player_state(self) -> None:
@@ -6871,6 +8790,117 @@ class GameplayStateFoldTest(unittest.TestCase):
             {"0x00010400": 1, "0x00040000": 1},
         )
 
+    def test_correlates_client_recovery_with_stat_updates(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_directional_plaintexts=(
+                (
+                    "server_to_client",
+                    CharacterStatUpdate(
+                        request_flag=False,
+                        stat_mask=CharacterStatUpdate.CURRENT_HP,
+                        current_hp=218,
+                    ).to_bytes(),
+                ),
+                (
+                    "client_to_server",
+                    ClientRecoveryRequest(
+                        hp_recovery=10,
+                        mp_recovery=0,
+                    ).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    CharacterStatUpdate(
+                        request_flag=False,
+                        stat_mask=CharacterStatUpdate.CURRENT_HP,
+                        current_hp=222,
+                    ).to_bytes(),
+                ),
+                (
+                    "client_to_server",
+                    ClientRecoveryRequest(
+                        hp_recovery=0,
+                        mp_recovery=3,
+                    ).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    CharacterStatUpdate(
+                        request_flag=False,
+                        stat_mask=CharacterStatUpdate.CURRENT_MP,
+                        current_mp=139,
+                    ).to_bytes(),
+                ),
+            ),
+        )
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_recovery_requests, 2)
+        self.assertEqual(
+            analysis.state.client_recovery_requests_by_stat,
+            {"current_hp": 1, "current_mp": 1},
+        )
+        self.assertEqual(analysis.state.client_hp_recovery_amounts, {10: 1})
+        self.assertEqual(analysis.state.client_mp_recovery_amounts, {3: 1})
+        self.assertEqual(
+            analysis.state.client_recovery_stat_update_matches,
+            2,
+        )
+        self.assertEqual(
+            analysis.state.client_recovery_exact_amount_matches,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.client_recovery_capped_amount_matches,
+            1,
+        )
+        self.assertEqual(analysis.state.pending_client_recovery_requests, 0)
+        requests = [
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 101
+        ]
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(
+            all(request.coverage.value == "full" for request in requests)
+        )
+        responses = [
+            response
+            for event in analysis.events
+            if event.kind == "player_stats_updated"
+            for response in event.details.get(
+                "client_recovery_responses", ()
+            )
+        ]
+        self.assertEqual(
+            [response["amount_match"] for response in responses],
+            ["capped", "exact"],
+        )
+        policy = derive_client_recovery_response_policy(transcript)
+        mp_response = policy.respond(
+            ClientRecoveryRequest(hp_recovery=0, mp_recovery=3)
+        )
+        self.assertEqual(mp_response.stat_name, "current_mp")
+        self.assertEqual(mp_response.value_before, 139)
+        self.assertEqual(mp_response.value_after, 142)
+        self.assertFalse(mp_response.safe_dict()["maximum_cap_applied"])
+        self.assertEqual(
+            CharacterStatUpdate.parse(mp_response.plaintexts[0]).current_mp,
+            142,
+        )
+        hp_response = policy.respond(
+            ClientRecoveryRequest(hp_recovery=10, mp_recovery=0)
+        )
+        self.assertEqual(hp_response.value_before, 222)
+        self.assertEqual(hp_response.value_after, 222)
+        self.assertTrue(hp_response.safe_dict()["maximum_cap_applied"])
+        self.assertEqual(policy.current_hp, 222)
+        self.assertEqual(policy.current_mp, 142)
+        self.assertEqual(policy.safe_dict()["source_evidence"]["requests"], 2)
+
     def test_folds_inventory_changes_into_item_state(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
@@ -6901,6 +8931,18 @@ class GameplayStateFoldTest(unittest.TestCase):
             for event in analysis.events
             if event.kind == "inventory_change_set_received"
         )
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_change_set"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(
+            observation.issues,
+            (
+                "inventory add records retain opaque extended item metadata",
+            ),
+        )
         self.assertEqual(event.details["applied_modifications"], 4)
         self.assertEqual(
             event.details["modifications"][0]["previous_quantity"], 3
@@ -6908,6 +8950,496 @@ class GameplayStateFoldTest(unittest.TestCase):
         report = analysis.safe_dict()
         self.assertEqual(report["state"]["inventory"]["item_counts"]["etc"], 1)
         self.assertEqual(report["state"]["inventory_modifications"], 4)
+
+    def test_correlates_inventory_move_request_with_change_set(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(inventory_move=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.inventory_move_requests, 1)
+        self.assertEqual(
+            analysis.state.inventory_move_requests_by_inventory,
+            {"equip": 1},
+        )
+        self.assertEqual(analysis.state.inventory_move_request_matches, 1)
+        self.assertEqual(
+            analysis.state.inventory_move_updates_without_request, 0
+        )
+        self.assertEqual(analysis.state.pending_inventory_move_requests, 0)
+        self.assertEqual(
+            analysis.state.inventory_items["equip"][0].slot, -11
+        )
+        request_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_move_requested"
+        )
+        self.assertTrue(request_event.details["source_known"])
+        self.assertFalse(request_event.details["destination_known"])
+        self.assertEqual(request_event.details["quantity"], -1)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_move_request"
+        )
+        self.assertEqual(request_observation.coverage, ShapeCoverage.FULL)
+        confirmation = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_move_confirmed"
+        )
+        self.assertEqual(confirmation.details["source_slot"], 2)
+        self.assertEqual(confirmation.details["destination_slot"], -11)
+        inventory_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_change_set_received"
+            and event.details["modifications"][0]["operation"] == "move"
+        )
+        inventory_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_change_set"
+        ]
+        self.assertEqual(
+            [observation.coverage for observation in inventory_observations],
+            [ShapeCoverage.PARTIAL, ShapeCoverage.FULL],
+        )
+        self.assertEqual(inventory_observations[1].issues, ())
+        self.assertIn(
+            "inventory_move_request_frame",
+            inventory_event.details["modifications"][0],
+        )
+        report = analysis.safe_dict()
+        self.assertEqual(report["state"]["inventory_move_requests"], 1)
+        self.assertEqual(
+            report["state"]["pending_inventory_move_requests"], 0
+        )
+
+    def test_derives_captured_inventory_move_response(self) -> None:
+        source = fixture_gameplay_transcript(
+            extra_server_plaintexts=(
+                InventoryChangeSet(
+                    update_flag=0,
+                    modifications=(
+                        InventoryModification(
+                            operation=InventoryModification.ADD,
+                            inventory_type=1,
+                            slot=2,
+                            item=fixture_equipment_inventory_item(
+                                slot=2,
+                                item_id=1_332_066,
+                            ),
+                        ),
+                    ),
+                ).to_bytes(),
+            )
+        )
+        policy = derive_inventory_move_response_policy(source)
+        request = InventoryMoveRequest(
+            client_tick=1_640_184,
+            inventory_type=1,
+            source_slot=2,
+            destination_slot=-11,
+            quantity=-1,
+        )
+
+        plan = policy.respond(request)
+
+        self.assertEqual(plan.item_id, 1_332_066)
+        self.assertIsNone(plan.destination_item_id)
+        response = InventoryChangeSet.parse(plan.plaintexts[0])
+        self.assertEqual(response.update_flag, 1)
+        self.assertEqual(len(response.modifications), 1)
+        modification = response.modifications[0]
+        self.assertEqual(modification.operation, InventoryModification.MOVE)
+        self.assertEqual(modification.inventory_type, 1)
+        self.assertEqual(modification.slot, 2)
+        self.assertEqual(modification.destination_slot, -11)
+        self.assertEqual(modification.move_flag, 2)
+        self.assertNotIn(2, policy.equip_items)
+        self.assertEqual(policy.equip_items[-11].item_id, 1_332_066)
+        self.assertEqual(
+            policy.safe_dict()["prediction"]["inventory_effect"],
+            "move_or_swap",
+        )
+        with self.assertRaisesRegex(ValueError, "quantity -1"):
+            policy.respond(
+                InventoryMoveRequest(
+                    client_tick=1_640_185,
+                    inventory_type=1,
+                    source_slot=-11,
+                    destination_slot=2,
+                    quantity=0,
+                )
+            )
+
+    def test_derives_captured_ability_point_allocation_response(self) -> None:
+        source = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                CharacterStatUpdate(
+                    request_flag=False,
+                    stat_mask=CharacterStatUpdate.ABILITY_POINTS,
+                    ability_points=5,
+                ).to_bytes(),
+            ),
+        )
+        policy = derive_ability_point_allocation_response_policy(source)
+        request = ClientAbilityPointAllocationRequest(
+            client_tick=564_468,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=0,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=1,
+                ),
+            ),
+        )
+
+        plan = policy.respond(request)
+
+        response = CharacterStatUpdate.parse(plan.plaintexts[0])
+        self.assertEqual(response.request_flag, 1)
+        self.assertEqual(response.stat_mask, 0x0000_4300)
+        self.assertEqual(response.intelligence, 58)
+        self.assertEqual(response.luck, 15)
+        self.assertEqual(response.ability_points, 4)
+        self.assertEqual(plan.stat_values_before, {"luck": 15, "intelligence": 57})
+        self.assertEqual(plan.stat_values_after, {"luck": 15, "intelligence": 58})
+        self.assertEqual(policy.intelligence, 58)
+        self.assertEqual(policy.luck, 15)
+        self.assertEqual(policy.ability_points, 4)
+        self.assertEqual(
+            policy.safe_dict()["prediction"]["stat_mask"],
+            "requested_stats_plus_ability_points",
+        )
+        with self.assertRaisesRegex(ValueError, "available points"):
+            policy.respond(
+                ClientAbilityPointAllocationRequest(
+                    client_tick=564_469,
+                    allocations=(
+                        AbilityPointAllocationEntry(
+                            stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                            increment=5,
+                        ),
+                    ),
+                )
+            )
+
+    def test_derives_captured_skill_level_change_response(self) -> None:
+        source = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            skill_record_lifecycle=True,
+            extra_server_plaintexts=(
+                CharacterStatUpdate(
+                    request_flag=False,
+                    stat_mask=CharacterStatUpdate.SKILL_POINTS,
+                    skill_points=5,
+                ).to_bytes(),
+            ),
+        )
+        policy = derive_skill_level_change_response_policy(source)
+
+        plan = policy.respond(
+            SkillLevelChangeRequest(
+                client_tick=200_900,
+                skill_id=2_001_005,
+            )
+        )
+
+        self.assertEqual(
+            plan.plaintexts,
+            (
+                bytes.fromhex("29000000800000040000"),
+                bytes.fromhex(
+                    "2e00010001006d881e00080000000000000012"
+                ),
+            ),
+        )
+        stat_update = CharacterStatUpdate.parse(plan.plaintexts[0])
+        skill_update = SkillRecordUpdate.parse(plan.plaintexts[1])
+        self.assertEqual(stat_update.request_flag, 0)
+        self.assertEqual(stat_update.skill_points, 4)
+        self.assertEqual(skill_update.records[0].skill_id, 2_001_005)
+        self.assertEqual(skill_update.records[0].level, 8)
+        self.assertEqual(skill_update.records[0].auxiliary_value, 0)
+        self.assertEqual(skill_update.trailing_value, 18)
+        self.assertEqual(policy.skill_points, 4)
+        self.assertEqual(policy.skill_levels[2_001_005], 8)
+        self.assertEqual(plan.safe_dict()["server_opcodes"], [41, 46])
+
+        policy.skill_points = 0
+        with self.assertRaisesRegex(ValueError, "available skill point"):
+            policy.respond(
+                SkillLevelChangeRequest(
+                    client_tick=200_901,
+                    skill_id=2_001_005,
+                )
+            )
+
+    def test_derives_captured_permanent_use_acquisition_response(self) -> None:
+        source = fixture_gameplay_transcript(initial_snapshot=True)
+        policy = derive_item_acquisition_response_policy(source)
+        request = ClientOpcode298ItemAcquisitionRequest(
+            control_value=0,
+            selection_index=10,
+            request_kind=1,
+            item_id=2_030_059,
+            quantity=10,
+            duration_value=0,
+            expires_at_ticks=150_842_304_000_000_000,
+            serial_value=0,
+            reserved_values=(0, 0, 0, 0, 0),
+            signed_sentinel_values=(-99, -99),
+            trailing_values=(0, 0),
+            flag_1=0,
+            flag_2=1,
+        )
+
+        plan = policy.respond(request)
+
+        self.assertEqual(plan.destination_slot, 2)
+        self.assertEqual(
+            plan.plaintexts,
+            (
+                bytes.fromhex(
+                    "270000010002020002ebf91e0000008005bb46e61702"
+                    "0a00000000000000000000000000000040e0fd3b374f"
+                    "0100000000"
+                ),
+            ),
+        )
+        response = InventoryChangeSet.parse(plan.plaintexts[0])
+        modification = response.modifications[0]
+        self.assertEqual(response.update_flag, 0)
+        self.assertEqual(modification.operation, InventoryModification.ADD)
+        self.assertEqual(modification.inventory_type, 2)
+        self.assertEqual(modification.slot, 2)
+        self.assertIsNotNone(modification.item)
+        assert modification.item is not None
+        self.assertEqual(modification.item.item_id, 2_030_059)
+        self.assertEqual(modification.item.quantity, 10)
+        self.assertEqual(policy.use_items[2].item_id, 2_030_059)
+        self.assertEqual(plan.safe_dict()["server_opcodes"], [39])
+        self.assertNotIn(
+            2_030_059,
+            {
+                candidate["item_id"]
+                for candidate in policy.safe_dict()[
+                    "currently_eligible_requests"
+                ]
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "permanent requests"):
+            policy.respond(replace(request, duration_value=10_080))
+
+    def test_derives_active_npc_state_response(self) -> None:
+        policy = derive_npc_state_response_policy(fixture_gameplay_transcript())
+        request = ClientNpcStateSubmission(
+            object_id=NPC_OBJECT_ID,
+            action=2,
+            parameter=1,
+        )
+
+        plan = policy.respond(request)
+
+        self.assertEqual(plan.plaintexts, (b"\x2f\x01" + request.to_bytes()[2:],))
+        self.assertEqual(plan.safe_dict()["server_opcodes"], [303])
+        self.assertEqual(plan.safe_dict()["client_only_trailer_bytes_removed"], 0)
+        self.assertEqual(policy.safe_dict()["active_npc_count"], 1)
+        with self.assertRaisesRegex(ValueError, "active field NPC"):
+            policy.respond(replace(request, object_id=0xFFFF_FFFE))
+        policy.apply_server_packet(fixture_compact_field_transition().to_bytes())
+        self.assertEqual(policy.safe_dict()["active_npc_count"], 0)
+        self.assertEqual(policy.safe_dict()["field_epoch"], 2)
+        with self.assertRaisesRegex(ValueError, "active field NPC"):
+            policy.respond(request)
+
+    def test_projects_initial_equipment_groups_into_signed_slots(self) -> None:
+        equipped = InventoryItemEntity(
+            slot=11,
+            record_type=1,
+            item_id=1_372_043,
+            cash_item=False,
+            expires_at_ticks=150_842_304_000_000_000,
+            quantity=None,
+        )
+        inventory_item = InventoryItemEntity(
+            slot=3,
+            record_type=1,
+            item_id=1_302_000,
+            cash_item=False,
+            expires_at_ticks=150_842_304_000_000_000,
+            quantity=None,
+        )
+
+        projected = logical_equip_inventory(
+            {
+                "equipment_group_1": (equipped,),
+                "equipment_group_3": (inventory_item,),
+            }
+        )
+
+        self.assertEqual(sorted(projected), [-11, 3])
+        self.assertEqual(projected[-11].item_id, 1_372_043)
+        self.assertEqual(projected[-11].slot, -11)
+        self.assertEqual(projected[3], inventory_item)
+
+    def test_correlates_item_acquisition_request_with_inventory_adds(
+        self,
+    ) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(item_acquisition=True)
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_item_acquisition_requests, 1)
+        self.assertEqual(
+            analysis.state.client_item_acquisition_requests_by_inventory,
+            {"use": 1},
+        )
+        self.assertEqual(analysis.state.item_acquisition_matches, 1)
+        self.assertEqual(
+            analysis.state.item_acquisition_quantity_matches,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.item_acquisition_quantity_mismatches,
+            0,
+        )
+        self.assertEqual(
+            analysis.state.pending_item_acquisition_requests,
+            0,
+        )
+        request = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_item_acquisition_requested"
+        )
+        self.assertEqual(request.details["item_id"], 2_433_928)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_item_acquisition_request"
+        )
+        self.assertEqual(request_observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(request_observation.issues, ())
+        confirmation = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_item_acquisition_confirmed"
+        )
+        self.assertEqual(confirmation.details["response_quantity"], 2)
+        self.assertEqual(confirmation.details["added_slots"], [11, 12])
+        inventory_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "inventory_change_set_received"
+        )
+        self.assertTrue(
+            inventory_event.details["item_acquisition_response"][
+                "quantity_matches"
+            ]
+        )
+        report = analysis.safe_dict()
+        self.assertEqual(
+            report["state"]["item_acquisition_matches"],
+            1,
+        )
+        self.assertEqual(
+            report["state"]["pending_item_acquisition_requests"],
+            0,
+        )
+        self.assertIn(
+            "item_acquisition=requests:1",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_client_opcode_276_compact_and_grouped_envelopes(
+        self,
+    ) -> None:
+        compact = ClientOpcode276Envelope(
+            selector=17,
+            header_value_1=None,
+            header_value_2=None,
+            groups=(),
+            compact_reserved=b"\x00\x00\x00",
+        )
+        grouped = ClientOpcode276Envelope(
+            selector=24,
+            header_value_1=100,
+            header_value_2=200,
+            groups=(
+                ClientOpcode276RecordGroup(
+                    selector=3,
+                    pairs=((400, 500), (600, 700)),
+                ),
+            ),
+            compact_reserved=b"",
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_client_plaintexts=(compact.to_bytes(), grouped.to_bytes())
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.client_opcode_276_packets, 2)
+        self.assertEqual(
+            analysis.state.client_opcode_276_selectors,
+            {17: 1, 24: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_276_shapes,
+            {"compact": 1, "grouped": 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_276_group_counts,
+            {0: 1, 1: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_opcode_276_pair_counts,
+            {0: 1, 2: 1},
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "client_opcode_276_envelope"
+        ]
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                for observation in observations
+            )
+        )
+        events = [
+            event
+            for event in analysis.events
+            if event.kind == "client_opcode_276_record_submitted"
+        ]
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[-1].details["pair_count"], 2)
+        report = analysis.safe_dict()
+        self.assertTrue(
+            report["state"]["client_opcode_276"][
+                "header_and_record_values_redacted"
+            ]
+        )
+        self.assertIn(
+            "client_opcode_276=packets:2",
+            render_gameplay_analysis(analysis),
+        )
 
     def test_correlates_item_use_request_inventory_and_stat_effects(self) -> None:
         transcript = fixture_gameplay_transcript(
@@ -6934,6 +9466,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(request_event.details["predicted_quantity"], 2)
         self.assertEqual(request_event.details["predicted_effect_value"], 120)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "item_use_request"
+        )
+        self.assertEqual(request_observation.coverage, ShapeCoverage.FULL)
+        inventory_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_change_set"
+        )
+        self.assertEqual(inventory_observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(inventory_observation.issues, ())
         stat_event = next(
             event for event in analysis.events if event.kind == "player_stats_updated"
         )
@@ -6961,6 +9506,129 @@ class GameplayStateFoldTest(unittest.TestCase):
                 ItemUseRequest(client_tick=102_101, slot=1, item_id=2_000_000)
             )
 
+    def test_folds_chair_sit_recovery_and_stand_requests(self) -> None:
+        chair_item_id = 3_010_370
+        chair_add = InventoryChangeSet(
+            update_flag=0,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.ADD,
+                    inventory_type=3,
+                    slot=1,
+                    item=fixture_stack_inventory_item(
+                        slot=1,
+                        item_id=chair_item_id,
+                        quantity=1,
+                    ),
+                ),
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_directional_plaintexts=(
+                ("server_to_client", chair_add.to_bytes()),
+                ("client_to_server", ChairSitRequest(chair_item_id).to_bytes()),
+                ("client_to_server", ChairRecoveryRequest().to_bytes()),
+                ("client_to_server", ChairStandRequest().to_bytes()),
+                ("client_to_server", ChairStandRequest().to_bytes()),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.chair_sit_requests, 1)
+        self.assertEqual(analysis.state.chair_sit_requests_by_item, {chair_item_id: 1})
+        self.assertEqual(analysis.state.chair_sit_setup_matches, 1)
+        self.assertEqual(analysis.state.chair_sit_setup_mismatches, 0)
+        self.assertEqual(analysis.state.chair_recovery_requests, 1)
+        self.assertEqual(analysis.state.chair_recovery_requests_with_open_sit, 1)
+        self.assertEqual(analysis.state.chair_stand_requests, 2)
+        self.assertEqual(analysis.state.chair_stand_requests_with_open_sit, 1)
+        self.assertEqual(analysis.state.chair_stand_requests_without_open_sit, 1)
+        self.assertIsNone(analysis.state.requested_chair_item_id)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"chair_sit_request", "chair_recovery_request", "chair_stand_request"}
+        ]
+        self.assertEqual(len(observations), 4)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                for observation in observations
+            )
+        )
+        chair_state = analysis.safe_dict()["state"]["chair"]
+        self.assertEqual(chair_state["sit_requests_by_item"], {chair_item_id: 1})
+        self.assertEqual(chair_state["recovery_requests_with_open_sit"], 1)
+        self.assertFalse(chair_state["server_acknowledgement_modeled"])
+
+    def test_field_change_clears_open_field_intents(self) -> None:
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            player_movement=True,
+            extra_directional_plaintexts=(
+                (
+                    "client_to_server",
+                    ClientNpcInteractionRequest(
+                        npc_object_id=NPC_OBJECT_ID,
+                        position_x=132,
+                        position_y=-168,
+                    ).to_bytes(),
+                ),
+                ("client_to_server", ChairSitRequest(3_010_370).to_bytes()),
+                (
+                    "client_to_server",
+                    ClientRecoveryRequest(
+                        hp_recovery=10,
+                        mp_recovery=0,
+                    ).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    FieldSnapshotEnvelope(
+                        opaque_snapshot=b"next-field"
+                    ).to_bytes(),
+                ),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.field_epoch, 2)
+        self.assertEqual(analysis.state.chair_sit_requests, 1)
+        self.assertIsNone(analysis.state.requested_chair_item_id)
+        self.assertEqual(analysis.state.npc_interaction_requests, 1)
+        self.assertEqual(analysis.state.pending_npc_interaction_requests, 0)
+        self.assertEqual(analysis.state.client_recovery_requests, 1)
+        self.assertEqual(analysis.state.pending_client_recovery_requests, 0)
+        self.assertFalse(
+            any(
+                "NPC interaction requests had no following" in warning
+                for warning in analysis.warnings
+            )
+        )
+        field_observations = [
+            observation
+            for observation in analysis.observations
+            if "cleared_chair_sit_intent" in observation.details
+        ]
+        self.assertEqual(len(field_observations), 2)
+        self.assertFalse(field_observations[0].details["cleared_chair_sit_intent"])
+        self.assertTrue(field_observations[1].details["cleared_chair_sit_intent"])
+        self.assertEqual(
+            field_observations[1].details["cleared_npc_interaction_requests"],
+            1,
+        )
+        self.assertEqual(
+            field_observations[1].details["cleared_client_recovery_requests"],
+            1,
+        )
+
     def test_correlates_item_pickup_effect_notice_and_removal_chains(self) -> None:
         analysis = analyze_gameplay_transcript(
             fixture_gameplay_transcript(
@@ -6972,12 +9640,26 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(analysis.valid)
         self.assertEqual(analysis.warnings, ())
         self.assertEqual(analysis.state.item_pickup_requests, 3)
+        self.assertEqual(analysis.state.item_pickup_compact_requests, 0)
         self.assertEqual(analysis.state.item_pickup_base_requests, 2)
         self.assertEqual(analysis.state.item_pickup_extended_requests, 1)
         self.assertEqual(analysis.state.item_pickup_field_epoch_matches, 3)
         self.assertEqual(analysis.state.item_pickup_field_epoch_mismatches, 0)
         self.assertEqual(analysis.state.item_pickup_known_drops, 3)
         self.assertEqual(analysis.state.item_pickup_unknown_drops, 0)
+        request_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "item_pickup_request"
+        ]
+        self.assertEqual(len(request_observations), 3)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                for observation in request_observations
+            )
+        )
         self.assertEqual(analysis.state.item_pickup_results, 3)
         self.assertEqual(
             analysis.state.item_pickup_results_by_kind,
@@ -7020,6 +9702,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.field_drop_removals_for_unknown_drop, 0)
         self.assertEqual(analysis.state.field_drops, {})
         self.assertEqual(analysis.state.mesos, 16)
+        drop_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind in {"field_drop_spawn", "field_drop_removal"}
+        ]
+        self.assertEqual(len(drop_observations), 8)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                for observation in drop_observations
+            )
+        )
         picked_item = next(
             item
             for item in analysis.state.inventory_items["etc"]
@@ -7046,6 +9741,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(request_events), 3)
         self.assertEqual(len(result_events), 3)
         self.assertEqual(len(removal_events), 3)
+        result_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "pickup_gain_notice"
+        ]
+        self.assertEqual(len(result_observations), 3)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                for observation in result_observations
+            )
+        )
         self.assertEqual(
             sum(event.kind == "field_drop_spawned" for event in analysis.events),
             3,
@@ -7068,6 +9776,299 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("drop_object_id", str(safe["packets"]))
         self.assertNotIn("actor_id", str(safe["events"]))
         self.assertNotIn("actor_id", str(safe["packets"]))
+
+    def test_coalesces_item_pickup_retries_for_one_active_drop(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                item_pickup=True,
+                item_pickup_retries=2,
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.item_pickup_requests, 5)
+        self.assertEqual(analysis.state.item_pickup_known_drops, 5)
+        self.assertEqual(analysis.state.item_pickup_request_chains, 3)
+        self.assertEqual(analysis.state.item_pickup_request_retries, 2)
+        self.assertEqual(analysis.state.item_pickup_admitted_drops, 3)
+        self.assertEqual(
+            dict(analysis.state.item_pickup_admitted_drops_by_kind),
+            {"item": 2, "mesos": 1},
+        )
+        self.assertEqual(
+            dict(analysis.state.item_pickup_admitted_item_templates),
+            {2_380_000: 1, 4_010_003: 1},
+        )
+        self.assertEqual(analysis.state.item_pickup_results, 3)
+        self.assertEqual(analysis.state.item_pickup_removal_matches, 3)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+
+        first_drop_requests = [
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_requested"
+            and event.details["drop"] == "drop:1"
+        ]
+        self.assertEqual(
+            [event.details["request_attempt"] for event in first_drop_requests],
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            [event.details["request_retry"] for event in first_drop_requests],
+            [False, True, True],
+        )
+        result = next(
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_result_received"
+            and event.details.get("drop") == "drop:1"
+        )
+        removal = next(
+            event
+            for event in analysis.events
+            if event.kind == "field_drop_removed"
+            and event.details.get("drop") == "drop:1"
+        )
+        self.assertEqual(result.details["request_attempts"], 3)
+        self.assertEqual(removal.details["request_attempts"], 3)
+        self.assertLess(
+            result.details["first_request_frame"], result.details["request_frame"]
+        )
+
+        safe_state = analysis.safe_dict()["state"]
+        self.assertEqual(safe_state["item_pickup_request_chains"], 3)
+        self.assertEqual(safe_state["item_pickup_request_retries"], 2)
+        self.assertEqual(safe_state["item_pickup_admitted_drops"], 3)
+        self.assertEqual(
+            safe_state["item_pickup_admitted_item_templates"],
+            {"2380000": 1, "4010003": 1},
+        )
+        self.assertIn(
+            "chains:3 retries:2 admitted_drops:3",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_annotates_pickup_admission_with_drop_and_release_ages(self) -> None:
+        drop_object_id = 40_005
+        spawn = fixture_field_drop_spawn(
+            spawn_mode=1,
+            drop_object_id=drop_object_id,
+            drop_kind=FieldDropSpawn.ITEM,
+            value=4_010_003,
+            position_x=100,
+            position_y=-200,
+        )
+        transcript = fixture_gameplay_transcript(
+            extra_directional_plaintexts=(
+                ("server_to_client", spawn.to_bytes()),
+                (
+                    "server_to_client",
+                    replace(spawn, spawn_mode=0).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    MobControllerChange(
+                        control_level=0,
+                        object_id=MOB_OBJECT_ID,
+                    ).to_bytes(),
+                ),
+                (
+                    "client_to_server",
+                    ItemPickupRequest(
+                        control_value=0,
+                        field_epoch=1,
+                        client_tick=102_100,
+                        position_x=100,
+                        position_y=-200,
+                        drop_object_id=drop_object_id,
+                        item_validation_token=1_352_639_939,
+                    ).to_bytes(),
+                ),
+                (
+                    "server_to_client",
+                    FieldDropRemoval(
+                        reason=1,
+                        drop_object_id=drop_object_id,
+                    ).to_bytes(),
+                ),
+            ),
+        )
+        transcript = replace(
+            transcript,
+            events=tuple(
+                replace(event, timestamp_ns=event.timestamp_ns * 1_000_000)
+                for event in transcript.events
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        spawned = next(
+            event
+            for event in analysis.events
+            if event.kind == "field_drop_spawned"
+        )
+        released = next(
+            event
+            for event in analysis.events
+            if event.kind == "mob_controller_changed"
+            and not event.details["has_spawn"]
+        )
+        requested = next(
+            event
+            for event in analysis.events
+            if event.kind == "item_pickup_requested"
+        )
+        self.assertEqual(
+            released.details["source_drop_release_delays_ms"],
+            {"drop:1": 2.0},
+        )
+        self.assertEqual(requested.details["drop_spawn_frame"], spawned.frame_index)
+        self.assertEqual(requested.details["drop_age_ms"], 3.0)
+        self.assertEqual(
+            requested.details["source_controller_release_frame"],
+            released.frame_index,
+        )
+        self.assertEqual(
+            requested.details["source_controller_release_age_ms"], 1.0
+        )
+
+    def test_closes_interrupted_pickup_chain_on_nonresult_removal(self) -> None:
+        request = ItemPickupRequest(
+            control_value=0,
+            field_epoch=1,
+            client_tick=102_100,
+            position_x=-863,
+            position_y=-1742,
+            drop_object_id=40_004,
+            item_validation_token=1_352_639_939,
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                active_item_drop=True,
+                extra_directional_plaintexts=(
+                    ("client_to_server", request.to_bytes()),
+                    (
+                        "server_to_client",
+                        FieldDropRemoval(
+                            reason=1,
+                            drop_object_id=40_004,
+                        ).to_bytes(),
+                    ),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.item_pickup_request_chains, 1)
+        self.assertEqual(analysis.state.item_pickup_interrupted_chains, 1)
+        self.assertEqual(analysis.state.item_pickup_removal_matches, 0)
+        self.assertEqual(analysis.state.item_pickup_removal_mismatches, 0)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+        removal = next(
+            event
+            for event in analysis.events
+            if event.kind == "field_drop_removed"
+        )
+        self.assertTrue(removal.details["matched_pickup_request"])
+        self.assertTrue(removal.details["pickup_chain_interrupted"])
+        self.assertFalse(removal.details["pickup_removal_matches"])
+        self.assertFalse(removal.details["result_confirmed"])
+        self.assertEqual(
+            analysis.safe_dict()["state"]["item_pickup_interrupted_chains"],
+            1,
+        )
+        self.assertIn("interrupted:1", render_gameplay_analysis(analysis))
+
+    def test_expected_pickup_removal_without_result_remains_mismatch(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                active_item_drop=True,
+                extra_directional_plaintexts=(
+                    (
+                        "client_to_server",
+                        ItemPickupRequest(
+                            control_value=0,
+                            field_epoch=1,
+                            client_tick=102_100,
+                            position_x=-863,
+                            position_y=-1742,
+                            drop_object_id=40_004,
+                            item_validation_token=1_352_639_939,
+                        ).to_bytes(),
+                    ),
+                    (
+                        "server_to_client",
+                        FieldDropRemoval(
+                            reason=5,
+                            drop_object_id=40_004,
+                            actor_id=CHARACTER_ID,
+                            trailing_value=0,
+                        ).to_bytes(),
+                    ),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.item_pickup_interrupted_chains, 0)
+        self.assertEqual(analysis.state.item_pickup_removal_mismatches, 1)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+        self.assertEqual(len(analysis.warnings), 1)
+        self.assertIn("did not complete", analysis.warnings[0])
+
+    def test_correlates_compact_item_pickup_requests(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                item_pickup=True,
+                compact_item_pickup=True,
+            )
+        )
+
+        self.assertTrue(analysis.valid)
+        self.assertEqual(analysis.warnings, ())
+        self.assertEqual(analysis.state.item_pickup_requests, 3)
+        self.assertEqual(analysis.state.item_pickup_compact_requests, 3)
+        self.assertEqual(analysis.state.item_pickup_base_requests, 0)
+        self.assertEqual(analysis.state.item_pickup_extended_requests, 0)
+        self.assertEqual(analysis.state.item_pickup_field_epoch_matches, 3)
+        self.assertEqual(analysis.state.item_pickup_known_drops, 3)
+        self.assertEqual(analysis.state.item_pickup_effect_matches, 3)
+        self.assertEqual(analysis.state.item_pickup_spawn_result_matches, 3)
+        self.assertEqual(analysis.state.item_pickup_removal_matches, 3)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+        compact_packets = [
+            observation
+            for observation in analysis.observations
+            if observation.opcode == 222
+        ]
+        self.assertEqual(len(compact_packets), 3)
+        self.assertTrue(
+            all(
+                observation.kind == "item_pickup_request"
+                and observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                and observation.details["shape"] == "compact"
+                and observation.details["control_value"] is None
+                for observation in compact_packets
+            )
+        )
+        self.assertEqual(
+            analysis.safe_dict()["state"]["item_pickup_compact_requests"],
+            3,
+        )
+        self.assertIn(
+            "item_pickup=requests:3 compact:3",
+            render_gameplay_analysis(analysis),
+        )
 
     def test_folds_safe_runtime_annotations_into_ordered_events(self) -> None:
         transcript = fixture_gameplay_transcript()
@@ -7263,7 +10264,43 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("field_became_active", event_kinds)
         self.assertIn("mob_movement_submitted", event_kinds)
         self.assertIn("mob_movement_acknowledged", event_kinds)
+        movement_event = next(
+            event
+            for event in analysis.events
+            if event.kind == "mob_movement_submitted"
+        )
+        self.assertEqual(movement_event.details["option_flags"], 0)
+        self.assertEqual(movement_event.details["activity_code"], -1)
+        self.assertEqual(movement_event.details["skill_id"], 0)
+        self.assertEqual(movement_event.details["skill_level"], 0)
+        self.assertEqual(movement_event.details["control_marker"], 0)
+        self.assertEqual(movement_event.details["control_value_1"], 0)
+        self.assertEqual(movement_event.details["control_value_2"], 0)
+        self.assertEqual(movement_event.details["control_value_3"], 0)
         self.assertEqual(event_kinds[-1], "session_ended")
+        broadcast_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "mob_movement_broadcast"
+        )
+        self.assertEqual(broadcast_observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(
+            {
+                field: broadcast_observation.details[field]
+                for field in (
+                    "control_flag_1",
+                    "control_flag_2",
+                    "control_selector",
+                    "control_value",
+                )
+            },
+            {
+                "control_flag_1": False,
+                "control_flag_2": False,
+                "control_selector": 0xFF,
+                "control_value": 0,
+            },
+        )
         self.assertEqual(
             [event.index for event in analysis.events],
             list(range(len(analysis.events))),
@@ -7322,7 +10359,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             fixture_gameplay_transcript(
                 player_movement=True,
                 attack_actions=True,
-                opcode_101_records=True,
+                recovery_requests=True,
                 opcode_13_messages=True,
                 opcode_217_records=True,
                 opcode_426_acknowledgement=True,
@@ -7337,7 +10374,7 @@ class GameplayStateFoldTest(unittest.TestCase):
 
         self.assertIn("kind=npc_spawned", report)
         self.assertIn("opcode=300 kind=npc_spawn coverage=full", report)
-        self.assertIn("opcode=279 kind=mob_enter_field coverage=partial", report)
+        self.assertIn("opcode=279 kind=mob_enter_field coverage=full", report)
         self.assertIn("mobs=active:1 entries:1 leaves:0", report)
         self.assertIn("matched_submission\":true", report)
         self.assertIn("command_types\":[0]", report)
@@ -7350,7 +10387,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertIn(
-            "opcode=47 kind=life_movement_submission coverage=partial",
+            "opcode=47 kind=life_movement_submission coverage=full",
             report,
         )
         self.assertEqual(analysis.state.client_opcode_13_messages, 3)
@@ -7373,28 +10410,47 @@ class GameplayStateFoldTest(unittest.TestCase):
             "opcode=13 kind=client_opcode_13_message coverage=partial",
             report,
         )
-        self.assertEqual(analysis.state.client_opcode_217_packets, 3)
-        self.assertEqual(analysis.state.client_opcode_217_compact_packets, 1)
-        self.assertEqual(analysis.state.client_opcode_217_record_sets, 2)
-        self.assertEqual(analysis.state.client_opcode_217_records, 4)
+        self.assertEqual(analysis.state.client_npc_state_submissions, 3)
         self.assertEqual(
-            analysis.state.client_opcode_217_records_by_format,
-            {0: 2, 2: 2},
+            analysis.state.client_npc_state_compact_submissions, 1
         )
         self.assertEqual(
-            analysis.state.client_opcode_217_record_counts,
-            {2: 2},
+            analysis.state.client_npc_state_movement_submissions, 2
         )
+        self.assertEqual(analysis.state.client_npc_state_commands, 3)
+        self.assertEqual(
+            analysis.state.client_npc_state_commands_by_type,
+            {0: 2, 2: 1},
+        )
+        self.assertEqual(
+            analysis.state.client_npc_state_command_counts,
+            {1: 1, 2: 1},
+        )
+        self.assertEqual(analysis.state.npc_state_submission_matches, 3)
+        self.assertEqual(analysis.state.pending_npc_state_submissions, 0)
         self.assertIn(
-            'client_opcode_217=packets:3 compact:1 record_sets:2 records:4 '
-            'records_by_format:{"0": 2, "2": 2} record_counts:{"2": 2}',
+            'npc_state_submissions=packets:3 compact:1 movement:2 '
+            'known_npcs:3 unknown_npcs:0 commands:3 commands_by_type:'
+            '{"0": 2, "2": 1} command_counts:{"1": 1, "2": 1} '
+            'matched:3 unmatched_updates:1 pending:0',
             report,
         )
         self.assertIn(
-            "opcode=217 kind=client_opcode_217_record_set coverage=partial",
+            "opcode=217 kind=npc_state_submission coverage=full",
             report,
         )
-        self.assertNotIn("prefix-002", report)
+        npc_state_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind in {"npc_state_submission", "npc_state_update"}
+        ]
+        self.assertTrue(npc_state_observations)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in npc_state_observations
+            )
+        )
         self.assertEqual(analysis.state.opcode_426_notifications, 1)
         self.assertEqual(analysis.state.opcode_309_acknowledgements, 1)
         self.assertEqual(
@@ -7432,6 +10488,15 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "54:flags=255:0": 1,
             },
         )
+        attack_observations = {
+            observation.opcode: observation
+            for observation in analysis.observations
+            if observation.kind == "client_attack_action"
+        }
+        self.assertEqual(attack_observations[50].coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(attack_observations[52].coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(attack_observations[54].coverage, ShapeCoverage.FULL)
+        self.assertEqual(attack_observations[54].issues, ())
         self.assertEqual(analysis.state.client_attack_targeted_actions, 3)
         self.assertEqual(analysis.state.client_attack_untargeted_actions, 2)
         self.assertEqual(
@@ -7600,7 +10665,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertIn(
-            "opcode=54 kind=client_attack_action coverage=partial",
+            "opcode=54 kind=client_attack_action coverage=full",
             report,
         )
         self.assertIn(
@@ -7632,32 +10697,23 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("987654321", report)
         self.assertNotIn(str(MOB_OBJECT_ID), report)
         self.assertNotIn(str(PLAYER_OBJECT_ID), report)
-        self.assertEqual(analysis.state.client_opcode_101_packets, 2)
+        self.assertEqual(analysis.state.client_recovery_requests, 2)
         self.assertEqual(
-            analysis.state.client_opcode_101_header_values, {0: 2}
+            analysis.state.client_recovery_requests_by_stat,
+            {"current_hp": 1, "current_mp": 1},
         )
-        self.assertEqual(
-            analysis.state.client_opcode_101_primary_values,
-            {20: 1, 0x0A00_0014: 1},
-        )
-        self.assertEqual(
-            analysis.state.client_opcode_101_flag_values, {0: 2}
-        )
-        self.assertEqual(
-            analysis.state.client_opcode_101_secondary_values, {0: 1, 3: 1}
-        )
-        self.assertEqual(
-            analysis.state.client_opcode_101_tail_values, {0: 2}
-        )
+        self.assertEqual(analysis.state.client_hp_recovery_amounts, {10: 1})
+        self.assertEqual(analysis.state.client_mp_recovery_amounts, {3: 1})
+        self.assertEqual(analysis.state.pending_client_recovery_requests, 2)
         self.assertIn(
-            'client_opcode_101=packets:2 header_values:{"0": 2} '
-            'primary_values:{"20": 1, "167772180": 1} '
-            'flag_values:{"0": 2} secondary_values:{"0": 1, "3": 1} '
-            'tail_values:{"0": 2}',
+            'client_recovery=requests:2 by_stat:{"current_hp": 1, '
+            '"current_mp": 1} hp_amounts:{"10": 1} '
+            'mp_amounts:{"3": 1} stat_update_matches:0 exact:0 '
+            'capped:0 unverified:0 pending:2 last_ms:None max_ms:None',
             report,
         )
         self.assertIn(
-            "opcode=101 kind=client_opcode_101_record coverage=partial",
+            "opcode=101 kind=client_recovery_request coverage=full",
             report,
         )
         self.assertNotIn("variable-thirteen", report)
@@ -7756,7 +10812,10 @@ class GameplayStateFoldTest(unittest.TestCase):
     def test_plans_stationary_mob_broadcast_from_runtime_spawn(self) -> None:
         stationary_evidence = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=(
@@ -7803,7 +10862,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             (broadcast.reference_x, broadcast.reference_y),
             (200, -200),
         )
-        self.assertEqual(broadcast.opaque_control.hex(), "0000ff00000000")
+        self.assertEqual(broadcast.control_prefix.hex(), "0000ff00000000")
         self.assertEqual(broadcast.commands[0].position, (200, -200))
         self.assertEqual(broadcast.commands[0].velocity, (0, 0))
         self.assertEqual(broadcast.commands[0].foothold_id, 8)
@@ -7844,7 +10903,10 @@ class GameplayStateFoldTest(unittest.TestCase):
     def test_translates_captured_multi_command_mob_path(self) -> None:
         source_path = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=(
@@ -8298,7 +11360,10 @@ class GameplayStateFoldTest(unittest.TestCase):
             midpoint_x = 100 + displacement_x // 2
             return MobMovementBroadcast(
                 object_id=MOB_OBJECT_ID,
-                opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                control_flag_1=False,
+                control_flag_2=False,
+                control_selector=0xFF,
+                control_value=0,
                 reference_x=100,
                 reference_y=-200,
                 commands=(
@@ -8353,7 +11418,10 @@ class GameplayStateFoldTest(unittest.TestCase):
 
         alternate_path = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=(

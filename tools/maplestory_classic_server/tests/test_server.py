@@ -45,8 +45,12 @@ from maple_server.server import (  # noqa: E402
     rewrite_channel_transition_world_from_selection,
 )
 from maple_server.gameplay import (  # noqa: E402
+    AbilityPointAllocationResponsePolicy,
+    ClientRecoveryResponsePolicy,
     FieldDropEntity,
     InventoryItemEntity,
+    InventoryMoveResponsePolicy,
+    ItemAcquisitionResponsePolicy,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
@@ -54,7 +58,9 @@ from maple_server.gameplay import (  # noqa: E402
     MobMovementBroadcastPlan,
     MobMovementBroadcastSequencePlan,
     MobMovementRelativeDecisionPolicy,
+    NpcStateResponsePolicy,
     ReactiveMobHealth,
+    SkillLevelChangeResponsePolicy,
     analyze_gameplay_transcript,
 )
 from maple_server.http_api import ServerPacketInjection  # noqa: E402
@@ -66,15 +72,22 @@ from maple_server.protocol import (  # noqa: E402
     shuffle_iv,
 )
 from maple_server.packets import (  # noqa: E402
+    AbilityPointAllocationEntry,
     ChannelTransitionResponse,
     CharacterStatUpdate,
+    ClientAbilityPointAllocationRequest,
+    ClientOpcode298ItemAcquisitionRequest,
+    ClientNpcStateSubmission,
+    ClientRecoveryRequest,
     ClientAttackAction,
     FieldDropRemoval,
     FieldDropSpawn,
     HeartbeatProbe,
     HeartbeatResponse,
+    InitialInventoryItem,
     InventoryChangeSet,
     InventoryModification,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     MobControllerChange,
@@ -87,11 +100,16 @@ from maple_server.packets import (  # noqa: E402
     MobMovementPath,
     MobMovementSubmission,
     MobSpawnData,
+    MobSpawnTemporaryStatus,
+    NpcSpawn,
     NpcStateUpdate,
     PlayerMovementCommand,
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    SkillLevelChangeRequest,
+    SkillRecordUpdate,
+    SkillRecordUpdateAcknowledgement,
     WorldHandoff,
     WorldSelection,
     VariableServerEntry,
@@ -610,6 +628,100 @@ class TranscriptTest(unittest.TestCase):
 
         self.assertTrue(arguments.reactive_item_use_responses)
 
+    def test_replay_parser_accepts_reactive_client_recovery_responses(
+        self,
+    ) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-client-recovery-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_client_recovery_responses)
+
+    def test_replay_parser_accepts_reactive_inventory_move_responses(
+        self,
+    ) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-inventory-move-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_inventory_move_responses)
+
+    def test_replay_parser_accepts_reactive_ability_point_responses(
+        self,
+    ) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-ability-point-allocation-responses",
+            ]
+        )
+
+        self.assertTrue(
+            arguments.reactive_ability_point_allocation_responses
+        )
+
+    def test_replay_parser_accepts_reactive_skill_level_responses(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-skill-level-change-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_skill_level_change_responses)
+
+    def test_replay_parser_accepts_reactive_item_acquisition_responses(
+        self,
+    ) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-item-acquisition-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_item_acquisition_responses)
+
+    def test_replay_parser_accepts_reactive_npc_state_responses(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-npc-state-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_npc_state_responses)
+
     def test_replay_parser_accepts_typed_item_pickup_options(self) -> None:
         arguments = build_parser().parse_args(
             [
@@ -637,6 +749,26 @@ class TranscriptTest(unittest.TestCase):
         self.assertTrue(arguments.reactive_item_pickup_responses)
         self.assertEqual(arguments.item_pickup_evidence_tcp_stream, 92)
         self.assertEqual(parse_i16_position("0x10:-0x20"), (16, -32))
+
+    def test_parser_accepts_latest_position_item_pickup_injection(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "inject-item-pickup",
+                "--transcript",
+                "world.jsonl",
+                "--evidence-pcap",
+                "111.pcapng",
+                "--wayland-display",
+                "wayland-3",
+            ]
+        )
+
+        self.assertEqual(arguments.evidence_tcp_stream, 92)
+        self.assertEqual(arguments.item_id, 4_000_004)
+        self.assertEqual(arguments.admission_index, 1)
+        self.assertEqual(arguments.pickup_key, "z")
+        self.assertEqual(arguments.pickup_key_hold_ms, 100)
+        self.assertEqual(arguments.verify_timeout_seconds, 10.0)
 
     def test_replay_parser_accepts_world_heartbeat_interval(self) -> None:
         arguments = build_parser().parse_args(
@@ -840,6 +972,8 @@ class TranscriptTest(unittest.TestCase):
                 "matched-heartbeat",
                 "--mob-movement-policy-cooldown-seconds",
                 "5",
+                "--mob-movement-policy-event-budget",
+                "1",
             ]
         )
 
@@ -857,6 +991,7 @@ class TranscriptTest(unittest.TestCase):
             arguments.mob_movement_policy_trigger, "matched-heartbeat"
         )
         self.assertEqual(arguments.mob_movement_policy_cooldown_seconds, 5)
+        self.assertEqual(arguments.mob_movement_policy_event_budget, 1)
         served_arguments = build_parser().parse_args(
             [
                 "replay",
@@ -1047,20 +1182,126 @@ class TranscriptTest(unittest.TestCase):
                     "keyboard-skill=28:2001004"
                 )
 
+    def test_pcap_plaintext_reference_can_zero_one_skill_selector(
+        self,
+    ) -> None:
+        bindings = [
+            VariableServerEntry(selector=0, value=0) for _ in range(89)
+        ]
+        bindings[71] = VariableServerEntry(selector=1, value=2_001_002)
+        original = VariableServerRecord(
+            opcode=385,
+            variant=0,
+            entries=tuple(bindings),
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@114:0?"
+                "keyboard-selector-zero=71"
+            )
+
+        parsed = VariableServerRecord.parse(payload)
+        self.assertEqual(parsed.entries[71].selector, 0)
+        self.assertEqual(parsed.entries[71].value, 2_001_002)
+        self.assertEqual(parsed.keyboard_skill_bindings.get(71), None)
+        self.assertEqual(parsed.entries[:71], tuple(bindings[:71]))
+        self.assertEqual(parsed.entries[72:], tuple(bindings[72:]))
+
+    def test_pcap_plaintext_reference_can_rewrite_one_captured_stat(
+        self,
+    ) -> None:
+        original = CharacterStatUpdate(
+            request_flag=False,
+            stat_mask=CharacterStatUpdate.EXPERIENCE,
+            experience=1_615,
+        ).to_bytes()
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@92:0?"
+                "character-stat=experience:1474"
+            )
+
+        parsed = CharacterStatUpdate.parse(payload)
+        self.assertEqual(parsed.experience, 1_474)
+        self.assertEqual(parsed.stat_mask, CharacterStatUpdate.EXPERIENCE)
+        self.assertFalse(parsed.request_flag)
+        self.assertFalse(parsed.trailing_flag)
+        self.assertIsNone(parsed.trailing_value)
+
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original,),
+        ):
+            with self.assertRaisesRegex(
+                argparse.ArgumentTypeError, "only captured stat field"
+            ):
+                parse_pcap_plaintext_reference(
+                    "/private/reference.pcapng@92:0?"
+                    "character-stat=current_mp:86"
+                )
+
+    def test_pcap_plaintext_reference_can_rewrite_drop_positions(
+        self,
+    ) -> None:
+        original_record = FieldDropSpawn(
+            spawn_mode=1,
+            drop_object_id=40_004,
+            drop_kind=FieldDropSpawn.ITEM,
+            value=4_000_004,
+            owner_value_1=300_001,
+            owner_value_2=300_001,
+            ownership_flag=0,
+            position_x=516,
+            position_y=1_006,
+            source_mob_object_id=20_001,
+            source_x=526,
+            source_y=1_058,
+            animation_duration_ms=450,
+            expiration_ticks=150_842_304_000_000_000,
+            final_flag=1,
+        )
+        with patch(
+            "maple_server.server._load_pcap_plaintexts",
+            return_value=(original_record.to_bytes(),),
+        ):
+            payload = parse_pcap_plaintext_reference(
+                "/private/reference.pcapng@92:0?"
+                "field-drop-position=633:-2677:633:-2677"
+            )
+
+        parsed = FieldDropSpawn.parse(payload)
+        self.assertEqual((parsed.position_x, parsed.position_y), (633, -2677))
+        self.assertEqual((parsed.source_x, parsed.source_y), (633, -2677))
+        self.assertEqual(parsed.drop_object_id, original_record.drop_object_id)
+        self.assertEqual(parsed.value, original_record.value)
+        self.assertEqual(parsed.owner_value_1, original_record.owner_value_1)
+        self.assertEqual(parsed.owner_value_2, original_record.owner_value_2)
+        self.assertEqual(
+            parsed.source_mob_object_id,
+            original_record.source_mob_object_id,
+        )
+
     def test_pcap_plaintext_reference_can_rewrite_typed_mob_spawn(self) -> None:
         original = MobEnterField(
             object_id=20_001,
             spawn=MobSpawnData(
                 spawn_marker=1,
                 template_id=100_100,
-                opaque_status=b"\x00" * 22,
+                temporary_status=MobSpawnTemporaryStatus(),
                 x=82,
                 y=234,
                 stance=3,
                 foothold_id=258,
                 origin_foothold_id=213,
-                spawn_effect=-1,
-                opaque_tail=b"\x00" * 4,
+                appear_type=-1,
+                team=0xFF,
+                effect_item_id=0,
             ),
         ).to_bytes()
         with patch(
@@ -1687,7 +1928,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.close()
             source = Transcript.load(source_writer.path)
             update = CharacterStatUpdate(
-                request_flag=0,
+                request_flag=False,
                 stat_mask=CharacterStatUpdate.CURRENT_HP,
                 current_hp=1,
             ).to_bytes()
@@ -1973,6 +2214,834 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 "item-use last-item removal response shape is not validated",
             )
 
+    async def test_replay_responds_to_client_recovery_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = CharacterStatUpdate(
+                request_flag=False,
+                stat_mask=(
+                    CharacterStatUpdate.CURRENT_HP
+                    | CharacterStatUpdate.MAX_HP
+                ),
+                current_hp=218,
+                max_hp=222,
+            ).to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-client-recovery", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = ClientRecoveryResponsePolicy(
+                current_hp=218,
+                max_hp=222,
+                current_mp=97,
+                max_mp=342,
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "client_recovery_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            client_recovery_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = ClientRecoveryRequest(
+                hp_recovery=10,
+                mp_recovery=0,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+            first_server_iv = shuffle_iv(server_iv)
+            stat_wire = await reader.readexactly(14)
+            stat_update = CharacterStatUpdate.parse(
+                crypt_payload(stat_wire[4:], first_server_iv)
+            )
+            self.assertEqual(stat_update.current_hp, 222)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            metrics = runtime_protocol["client_recovery_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["actual_increment"], 4)
+            self.assertTrue(
+                metrics["last_response"]["maximum_cap_applied"]
+            )
+            self.assertEqual(policy.current_hp, 222)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(
+                analysis.state.pending_client_recovery_requests, 0
+            )
+            self.assertEqual(
+                analysis.state.client_recovery_capped_amount_matches, 1
+            )
+            recovery_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("client_recovery_")
+            ]
+            self.assertEqual(
+                [event.kind for event in recovery_events],
+                [
+                    "client_recovery_request_observed",
+                    "client_recovery_response_completed",
+                ],
+            )
+            self.assertEqual(
+                recovery_events[-1].details["server_opcodes"], [41]
+            )
+
+    async def test_replay_responds_to_inventory_move_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"\x18\x00"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-inventory-move", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = InventoryMoveResponsePolicy(
+                equip_items={
+                    2: InventoryItemEntity(
+                        slot=2,
+                        record_type=1,
+                        item_id=1_332_066,
+                        cash_item=False,
+                        expires_at_ticks=150_842_304_000_000_000,
+                        quantity=None,
+                    )
+                },
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "inventory_move_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            inventory_move_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = InventoryMoveRequest(
+                client_tick=1_640_184,
+                inventory_type=1,
+                source_slot=2,
+                destination_slot=-11,
+                quantity=-1,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+            response_wire = await reader.readexactly(15)
+            response = InventoryChangeSet.parse(
+                crypt_payload(response_wire[4:], shuffle_iv(server_iv))
+            )
+            self.assertEqual(response.update_flag, 1)
+            self.assertEqual(response.modifications[0].move_flag, 2)
+            self.assertEqual(response.modifications[0].slot, 2)
+            self.assertEqual(response.modifications[0].destination_slot, -11)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            metrics = runtime_protocol["inventory_move_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["item_id"], 1_332_066)
+            self.assertNotIn(2, policy.equip_items)
+            self.assertEqual(policy.equip_items[-11].item_id, 1_332_066)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.inventory_move_request_matches, 1)
+            self.assertEqual(analysis.state.pending_inventory_move_requests, 0)
+            move_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("inventory_move_")
+            ]
+            self.assertEqual(
+                [event.kind for event in move_events],
+                [
+                    "inventory_move_request_observed",
+                    "inventory_move_response_completed",
+                ],
+            )
+            self.assertEqual(move_events[-1].details["server_opcodes"], [39])
+
+    async def test_replay_responds_to_ability_point_allocation_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = CharacterStatUpdate(
+                request_flag=False,
+                stat_mask=(
+                    CharacterStatUpdate.INTELLIGENCE
+                    | CharacterStatUpdate.LUCK
+                    | CharacterStatUpdate.ABILITY_POINTS
+                ),
+                intelligence=57,
+                luck=15,
+                ability_points=5,
+            ).to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-ability-points", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = AbilityPointAllocationResponsePolicy(
+                strength=4,
+                dexterity=4,
+                intelligence=57,
+                luck=15,
+                ability_points=5,
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "ability_point_allocation_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            ability_point_allocation_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = ClientAbilityPointAllocationRequest(
+                client_tick=564_468,
+                allocations=(
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=0,
+                    ),
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                        increment=1,
+                    ),
+                ),
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+            response_wire = await reader.readexactly(18)
+            response = CharacterStatUpdate.parse(
+                crypt_payload(response_wire[4:], shuffle_iv(server_iv))
+            )
+            self.assertEqual(response.request_flag, 1)
+            self.assertEqual(response.stat_mask, 0x0000_4300)
+            self.assertEqual(response.intelligence, 58)
+            self.assertEqual(response.luck, 15)
+            self.assertEqual(response.ability_points, 4)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            metrics = runtime_protocol[
+                "ability_point_allocation_responses"
+            ]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["ability_points_after"], 4)
+            self.assertEqual(policy.intelligence, 58)
+            self.assertEqual(policy.luck, 15)
+            self.assertEqual(policy.ability_points, 4)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(
+                analysis.state.ability_point_allocation_response_matches, 1
+            )
+            self.assertEqual(
+                analysis.state.pending_ability_point_allocations, 0
+            )
+            allocation_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("ability_point_allocation_")
+            ]
+            self.assertEqual(
+                [event.kind for event in allocation_events],
+                [
+                    "ability_point_allocation_request_observed",
+                    "ability_point_allocation_response_completed",
+                ],
+            )
+            self.assertEqual(
+                allocation_events[-1].details["server_opcodes"], [41]
+            )
+
+    async def test_replay_responds_to_skill_level_change_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = CharacterStatUpdate(
+                request_flag=False,
+                stat_mask=CharacterStatUpdate.SKILL_POINTS,
+                skill_points=1,
+            ).to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-skill-points", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = SkillLevelChangeResponsePolicy(
+                skill_points=1,
+                skill_levels={},
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "skill_level_change_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            skill_level_change_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = SkillLevelChangeRequest(
+                client_tick=200_000,
+                skill_id=2_001_005,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+
+            first_response_iv = shuffle_iv(server_iv)
+            stat_wire = await reader.readexactly(14)
+            stat_update = CharacterStatUpdate.parse(
+                crypt_payload(stat_wire[4:], first_response_iv)
+            )
+            skill_wire = await reader.readexactly(23)
+            skill_update = SkillRecordUpdate.parse(
+                crypt_payload(skill_wire[4:], shuffle_iv(first_response_iv))
+            )
+            self.assertEqual(stat_update.skill_points, 0)
+            self.assertEqual(skill_update.records[0].skill_id, 2_001_005)
+            self.assertEqual(skill_update.records[0].level, 1)
+            self.assertEqual(skill_update.trailing_value, 2)
+
+            acknowledgement = SkillRecordUpdateAcknowledgement(
+                control_value=346,
+                client_tick=200_450,
+                trailing_value=0,
+            ).to_bytes()
+            next_client_iv = shuffle_iv(client_iv)
+            writer.write(
+                encode_frame_header(len(acknowledgement), next_client_iv, 300)
+                + crypt_payload(acknowledgement, next_client_iv)
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            metrics = runtime_protocol["skill_level_change_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 2)
+            self.assertEqual(metrics["last_response"]["server_opcodes"], [41, 46])
+            self.assertEqual(policy.skill_points, 0)
+            self.assertEqual(policy.skill_levels, {2_001_005: 1})
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.skill_record_request_matches, 1)
+            self.assertEqual(
+                analysis.state.matched_skill_record_update_acknowledgements,
+                1,
+            )
+            skill_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("skill_level_change_")
+            ]
+            self.assertEqual(
+                [event.kind for event in skill_events],
+                [
+                    "skill_level_change_request_observed",
+                    "skill_level_change_response_completed",
+                ],
+            )
+
+    async def test_replay_responds_to_npc_state_during_hold_open(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            npc = NpcSpawn(
+                object_id=23_549,
+                template_id=1_001_000,
+                x=69,
+                cy=65,
+                facing_value=1,
+                foothold_id=89,
+                range_left=40,
+                range_right=120,
+                hidden=False,
+            )
+            captured_plaintext = npc.to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-npc-state", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = NpcStateResponsePolicy(
+                active_npc_ids={npc.object_id},
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "npc_state_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            npc_state_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = bytes.fromhex(
+                "d900fd5b000005ff3d004100020200000000040000003d00410000"
+                "0000005900048813003d0041003d004100"
+            )
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+
+            expected = b"\x2f\x01" + request[2:-9]
+            response_iv = shuffle_iv(server_iv)
+            response_wire = await reader.readexactly(4 + len(expected))
+            response = crypt_payload(response_wire[4:], response_iv)
+            self.assertEqual(response, expected)
+            self.assertEqual(
+                NpcStateUpdate.parse(response),
+                ClientNpcStateSubmission.parse(request).to_state_update(),
+            )
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            metrics = runtime_protocol["npc_state_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["server_opcodes"], [303])
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.npc_state_submission_matches, 1)
+            self.assertEqual(analysis.state.pending_npc_state_submissions, 0)
+            npc_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("npc_state_")
+            ]
+            self.assertEqual(
+                [event.kind for event in npc_events],
+                [
+                    "npc_state_request_observed",
+                    "npc_state_response_completed",
+                ],
+            )
+
+    async def test_replay_responds_to_item_acquisition_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = InventoryChangeSet(
+                update_flag=0,
+                modifications=(),
+            ).to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-item-acquisition", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = ItemAcquisitionResponsePolicy(
+                use_items={
+                    1: InventoryItemEntity(
+                        slot=1,
+                        record_type=2,
+                        item_id=2_000_000,
+                        cash_item=False,
+                        expires_at_ticks=150_842_304_000_000_000,
+                        quantity=1,
+                    )
+                },
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "item_acquisition_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            item_acquisition_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = ClientOpcode298ItemAcquisitionRequest(
+                control_value=0,
+                selection_index=10,
+                request_kind=1,
+                item_id=2_030_059,
+                quantity=10,
+                duration_value=0,
+                expires_at_ticks=150_842_304_000_000_000,
+                serial_value=0,
+                reserved_values=(0, 0, 0, 0, 0),
+                signed_sentinel_values=(-99, -99),
+                trailing_values=(0, 0),
+                flag_1=0,
+                flag_2=1,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+
+            response_iv = shuffle_iv(server_iv)
+            response_length = len(
+                InventoryChangeSet(
+                    update_flag=0,
+                    modifications=(
+                        InventoryModification(
+                            operation=InventoryModification.ADD,
+                            inventory_type=2,
+                            slot=2,
+                            item=(
+                                InitialInventoryItem.captured_permanent_stack(
+                                    slot=2,
+                                    item_id=2_030_059,
+                                    quantity=10,
+                                )
+                            ),
+                        ),
+                    ),
+                ).to_bytes()
+            )
+            response_wire = await reader.readexactly(4 + response_length)
+            response = InventoryChangeSet.parse(
+                crypt_payload(response_wire[4:], response_iv)
+            )
+            self.assertEqual(response.update_flag, 0)
+            self.assertEqual(len(response.modifications), 1)
+            modification = response.modifications[0]
+            self.assertEqual(modification.operation, InventoryModification.ADD)
+            self.assertEqual(modification.inventory_type, 2)
+            self.assertEqual(modification.slot, 2)
+            self.assertIsNotNone(modification.item)
+            assert modification.item is not None
+            self.assertEqual(modification.item.item_id, 2_030_059)
+            self.assertEqual(modification.item.quantity, 10)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            metrics = runtime_protocol["item_acquisition_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["destination_slot"], 2)
+            self.assertEqual(policy.use_items[2].item_id, 2_030_059)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.item_acquisition_matches, 1)
+            self.assertEqual(
+                analysis.state.item_acquisition_quantity_matches,
+                1,
+            )
+            self.assertEqual(
+                analysis.state.pending_item_acquisition_requests,
+                0,
+            )
+            acquisition_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("item_acquisition_")
+            ]
+            self.assertEqual(
+                [event.kind for event in acquisition_events],
+                [
+                    "item_acquisition_request_observed",
+                    "item_acquisition_response_completed",
+                ],
+            )
+
     async def test_replay_responds_to_modeled_item_pickup_during_hold_open(
         self,
     ) -> None:
@@ -2102,10 +3171,20 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(removal.reason, 5)
             self.assertEqual(removal.actor_id, 300_001)
 
+            compact_request = ItemPickupRequest(
+                control_value=None,
+                field_epoch=1,
+                client_tick=502_041,
+                position_x=633,
+                position_y=-2677,
+                drop_object_id=drop_object_id,
+                item_validation_token=0,
+                opcode=222,
+            ).to_bytes()
             next_client_iv = shuffle_iv(client_iv)
             writer.write(
-                encode_frame_header(len(request), next_client_iv, 300)
-                + crypt_payload(request, next_client_iv)
+                encode_frame_header(len(compact_request), next_client_iv, 300)
+                + crypt_payload(compact_request, next_client_iv)
             )
             await writer.drain()
             with self.assertRaises(TimeoutError):
@@ -2140,6 +3219,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(analysis.state.pending_item_pickups, 0)
             self.assertEqual(analysis.state.item_pickup_policy_rejections, 1)
+            self.assertEqual(analysis.state.item_pickup_compact_requests, 1)
             pickup_events = [
                 event
                 for event in analysis.events
@@ -2622,7 +3702,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             ) -> MobMovementBroadcast:
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -2824,7 +3907,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(complete["state"]["next_step"], None)
 
-    async def test_relative_mob_policy_waits_for_matched_heartbeat(
+    async def test_relative_mob_policy_enforces_heartbeat_event_budget(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2847,12 +3930,16 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             source_writer.data("server_to_client", greeting + captured_frame)
             source_writer.close()
             source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
             object_id = 20_001
 
             def broadcast(reference_x: int, target_x: int, stance: int):
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -2902,7 +3989,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 shortest_sequence_count=1,
             )
             relative_policy = MobMovementRelativeDecisionPolicy(
-                decision_count=1,
+                decision_count=2,
                 max_steps=2,
                 displacement_x=50,
                 displacement_y=0,
@@ -2935,6 +4022,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             writer,
                             source,
                             strict=False,
+                            transcript_directory=observed_directory,
                             post_transcript_server_frames=(
                                 first_broadcast.to_bytes(),
                             ),
@@ -2942,6 +4030,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             mob_movement_follow_up_policy=relative_policy,
                             mob_movement_evidence_transcript=source,
                             mob_movement_policy_trigger="matched_heartbeat",
+                            mob_movement_policy_event_budget=1,
                             hold_open_seconds=0.2,
                             world_heartbeat_interval_seconds=0.05,
                             runtime_protocol=runtime_protocol,
@@ -3017,6 +4106,37 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     second_broadcast,
                 )
                 planner.assert_called_once()
+
+                second_heartbeat_wire = await reader.readexactly(6)
+                second_heartbeat_iv = shuffle_iv(follow_iv)
+                self.assertEqual(
+                    HeartbeatProbe.parse(
+                        crypt_payload(
+                            second_heartbeat_wire[4:],
+                            second_heartbeat_iv,
+                        )
+                    ),
+                    HeartbeatProbe(),
+                )
+                second_response_iv = shuffle_iv(client_iv)
+                writer.write(
+                    encode_frame_header(
+                        len(response), second_response_iv, 300
+                    )
+                    + crypt_payload(response, second_response_iv)
+                )
+                await writer.drain()
+                await asyncio.sleep(0.01)
+                trigger_metrics = runtime_protocol[
+                    "mob_movement_broadcast"
+                ]["policy_trigger"]
+                self.assertEqual(trigger_metrics["matched_events_observed"], 2)
+                self.assertFalse(trigger_metrics["awaiting_event"])
+                self.assertEqual(
+                    trigger_metrics["last_event_outcome"],
+                    "rejected_by_event_budget",
+                )
+                planner.assert_called_once()
                 writer.close()
                 await writer.wait_closed()
                 await asyncio.gather(*tasks)
@@ -3025,14 +4145,41 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
 
             movement_metrics = runtime_protocol["mob_movement_broadcast"]
             self.assertEqual(movement_metrics["packets_sent"], 2)
-            self.assertEqual(movement_metrics["state"]["phase"], "complete")
+            self.assertEqual(movement_metrics["state"]["phase"], "planning")
             trigger_metrics = movement_metrics["policy_trigger"]
             self.assertFalse(trigger_metrics["awaiting_event"])
-            self.assertEqual(trigger_metrics["matched_events_observed"], 1)
+            self.assertEqual(trigger_metrics["matched_events_observed"], 2)
             self.assertEqual(trigger_metrics["decisions_started"], 1)
             self.assertEqual(trigger_metrics["decisions_completed"], 1)
+            self.assertEqual(trigger_metrics["event_budget"], 1)
+            self.assertEqual(trigger_metrics["event_budget_used"], 1)
+            self.assertEqual(trigger_metrics["event_budget_remaining"], 0)
+            self.assertEqual(trigger_metrics["events_rejected_by_budget"], 1)
+            self.assertEqual(
+                trigger_metrics["last_event_outcome"],
+                "rejected_by_event_budget",
+            )
             self.assertEqual(
                 trigger_metrics["events_ignored_after_completion"], 0
+            )
+            observed_path = next(observed_directory.glob("*.jsonl"))
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(observed_path)
+            )
+            budget_rejection = next(
+                event
+                for event in analysis.events
+                if event.kind == "mob_movement_policy_trigger_rejected"
+            )
+            self.assertEqual(
+                budget_rejection.details,
+                {
+                    "trigger": "matched_heartbeat",
+                    "reason": "event_budget",
+                    "event_budget": 1,
+                    "event_budget_remaining": 0,
+                    "cooldown_remaining_seconds": 0.0,
+                },
             )
 
     async def test_relative_mob_policy_waits_for_served_mob_movement(
@@ -3067,21 +4214,25 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 spawn=MobSpawnData(
                     spawn_marker=1,
                     template_id=template_id,
-                    opaque_status=b"\x00" * 22,
+                    temporary_status=MobSpawnTemporaryStatus(),
                     x=100,
                     y=-200,
                     stance=3,
                     foothold_id=7,
                     origin_foothold_id=7,
-                    spawn_effect=-1,
-                    opaque_tail=b"\x00" * 4,
+                    appear_type=-1,
+                    team=0xFF,
+                    effect_item_id=0,
                 ),
             ).to_bytes()
 
             def broadcast(reference_x: int, target_x: int, stance: int):
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -3567,7 +4718,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             def broadcast(reference_x: int, target_x: int, stance: int):
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -3846,19 +5000,23 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 spawn=MobSpawnData(
                     spawn_marker=1,
                     template_id=210_100,
-                    opaque_status=b"\x00" * 22,
+                    temporary_status=MobSpawnTemporaryStatus(),
                     x=100,
                     y=-200,
                     stance=3,
                     foothold_id=7,
                     origin_foothold_id=7,
-                    spawn_effect=-1,
-                    opaque_tail=b"\x00" * 4,
+                    appear_type=-1,
+                    team=0xFF,
+                    effect_item_id=0,
                 ),
             ).to_bytes()
             broadcast = MobMovementBroadcast(
                 object_id=object_id,
-                opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                control_flag_1=False,
+                control_flag_2=False,
+                control_selector=0xFF,
+                control_value=0,
                 reference_x=200,
                 reference_y=-200,
                 commands=(
@@ -4042,6 +5200,24 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 acknowledgement_events[0].details["path_end"], [110, -200]
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["option_flags"], 1
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["activity_code"], 0
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["control_marker"], 0
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["control_value_1"], 0
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["control_value_2"], 0
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["control_value_3"], 0
             )
             self.assertTrue(
                 acknowledgement_events[0].details["target_known"]

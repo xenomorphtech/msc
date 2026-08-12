@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use maple_il2cpp_packet_dump::il2cpp::{build_dump, deterministic_json};
 use maple_il2cpp_packet_dump::manifest::LoadedManifest;
+use maple_il2cpp_packet_dump::shape::ShapeOp;
 
 fn manifest() -> LoadedManifest {
     let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -16,9 +17,85 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 101);
-    assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 96);
-    assert_eq!(shapes.len(), 177);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 136);
+    assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
+    assert_eq!(shapes.len(), 199);
+
+    let life_submission = shapes
+        .iter()
+        .find(|shape| shape.name == "client_life_movement_relay")
+        .unwrap();
+    let command_repeat = life_submission
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            ShapeOp::Repeat { operations, .. } => Some(operations),
+            _ => None,
+        })
+        .unwrap();
+    let command_cases = command_repeat
+        .iter()
+        .find_map(|operation| match operation {
+            ShapeOp::Switch { cases, .. } => Some(cases),
+            _ => None,
+        })
+        .unwrap();
+    for command_type in 0..=17 {
+        let command_case = command_cases
+            .iter()
+            .find(|case| case.equals == command_type)
+            .unwrap();
+        assert!(
+            command_case
+                .operations
+                .iter()
+                .all(|operation| matches!(operation, ShapeOp::Read { .. }))
+        );
+    }
+    let tail_cases = life_submission
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            ShapeOp::Switch { field, cases } if field == "tail_type" => Some(cases),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        tail_cases
+            .iter()
+            .map(|case| (case.equals, case.operations.len()))
+            .collect::<Vec<_>>(),
+        [(17, 8), (18, 8), (21, 10), (24, 11)]
+    );
+    assert!(tail_cases.iter().all(|case| {
+        case.operations
+            .iter()
+            .all(|operation| matches!(operation, ShapeOp::Read { .. }))
+    }));
+
+    let chair_sit = shapes
+        .iter()
+        .find(|shape| shape.name == "chair_sit_request")
+        .unwrap();
+    assert_eq!(chair_sit.opcode, 49);
+    assert_eq!(chair_sit.length, Some(6));
+    assert_eq!(chair_sit.operations.len(), 2);
+
+    let chair_stand = shapes
+        .iter()
+        .find(|shape| shape.name == "chair_stand_request")
+        .unwrap();
+    assert_eq!(chair_stand.opcode, 48);
+    assert_eq!(chair_stand.length, Some(4));
+    assert_eq!(chair_stand.operations.len(), 2);
+
+    let chair_recovery = shapes
+        .iter()
+        .find(|shape| shape.name == "chair_recovery_request")
+        .unwrap();
+    assert_eq!(chair_recovery.opcode, 82);
+    assert_eq!(chair_recovery.length, Some(2));
+    assert_eq!(chair_recovery.operations.len(), 1);
 
     let shape = shapes
         .iter()
@@ -83,19 +160,19 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
 
     let opcode_43_identified = shapes
         .iter()
-        .find(|shape| shape.name == "client_opcode_43_identified_text")
+        .find(|shape| shape.name == "client_portal_field_transfer_request")
         .unwrap();
     assert_eq!(opcode_43_identified.opcode, 43);
     assert_eq!(opcode_43_identified.length, None);
-    assert_eq!(opcode_43_identified.operations.len(), 5);
+    assert_eq!(opcode_43_identified.operations.len(), 7);
 
     let opcode_43_compact = shapes
         .iter()
-        .find(|shape| shape.name == "client_opcode_43_compact")
+        .find(|shape| shape.name == "client_death_respawn_field_transfer_request")
         .unwrap();
     assert_eq!(opcode_43_compact.opcode, 43);
     assert_eq!(opcode_43_compact.length, Some(12));
-    assert_eq!(opcode_43_compact.operations.len(), 3);
+    assert_eq!(opcode_43_compact.operations.len(), 5);
 
     let opcode_114 = shapes
         .iter()
@@ -105,6 +182,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_114.length, None);
     assert_eq!(opcode_114.operations.len(), 4);
 
+    let inner_portal = shapes
+        .iter()
+        .find(|shape| shape.name == "client_inner_portal_request")
+        .unwrap();
+    assert_eq!(inner_portal.opcode, 115);
+    assert_eq!(inner_portal.length, Some(22));
+    assert_eq!(inner_portal.operations.len(), 7);
+
     let opcode_66 = shapes
         .iter()
         .find(|shape| shape.name == "client_opcode_66_server_348_acknowledgement")
@@ -112,6 +197,76 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_66.opcode, 66);
     assert_eq!(opcode_66.length, None);
     assert_eq!(opcode_66.operations.len(), 3);
+
+    let opcode_31 = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_31_record")
+        .unwrap();
+    assert_eq!(opcode_31.opcode, 31);
+    assert_eq!(opcode_31.length, None);
+    assert_eq!(opcode_31.operations.len(), 9);
+
+    let opcode_6 = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_6_record_set")
+        .unwrap();
+    assert_eq!(opcode_6.opcode, 6);
+    assert_eq!(opcode_6.length, None);
+    assert_eq!(opcode_6.operations.len(), 12);
+
+    let opcode_22 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_22_indexed_text_ledger")
+        .unwrap();
+    assert_eq!(opcode_22.opcode, 22);
+    assert_eq!(opcode_22.length, None);
+    assert_eq!(opcode_22.operations.len(), 3);
+
+    let opcode_0_probe = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_0_local_account_bootstrap_probe")
+        .unwrap();
+    assert_eq!(opcode_0_probe.opcode, 0);
+    assert_eq!(opcode_0_probe.length, Some(36));
+    assert_eq!(opcode_0_probe.operations.len(), 9);
+
+    for (name, opcode, length, operation_count) in [
+        ("login_server_opcode_3_generated_record", 3, Some(8), 4),
+        ("login_client_opcode_255_u32", 255, Some(6), 2),
+        ("login_server_opcode_390_u8", 390, Some(3), 2),
+        ("login_client_opcode_9_text_record", 9, None, 2),
+        ("login_server_opcode_6_text_record", 6, None, 3),
+    ] {
+        let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
+        assert_eq!(shape.opcode, opcode);
+        assert_eq!(shape.length, length);
+        assert_eq!(shape.operations.len(), operation_count);
+    }
+
+    for (name, opcode, length, operation_count) in [
+        ("login_server_opcode_35_text_record", 35, Some(24), 5),
+        ("client_opcode_10_character_creation_request", 10, None, 10),
+        ("server_opcode_7_character_creation_success", 7, None, 29),
+        (
+            "client_opcode_16_created_character_selection",
+            16,
+            Some(7),
+            3,
+        ),
+    ] {
+        let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
+        assert_eq!(shape.opcode, opcode);
+        assert_eq!(shape.length, length);
+        assert_eq!(shape.operations.len(), operation_count);
+    }
+
+    let opcode_274 = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_274_opaque_text_record")
+        .unwrap();
+    assert_eq!(opcode_274.opcode, 274);
+    assert_eq!(opcode_274.length, Some(1_698));
+    assert_eq!(opcode_274.operations.len(), 10);
 
     let opcode_147 = shapes
         .iter()
@@ -130,17 +285,31 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         ("client_world_exit_status_45", 45, 6, 2),
         ("client_world_exit_status_46", 46, 6, 2),
         ("client_opcode_75_empty_bootstrap_marker", 75, 2, 1),
+        ("client_npc_interaction_request", 64, 10, 4),
+        ("client_recovery_request", 101, 11, 7),
+        ("client_opcode_111_cash_slot_action", 111, 8, 3),
+        ("inventory_move_request", 79, 13, 6),
+        ("item_use_request", 80, 12, 4),
+        ("client_reactor_hit_request", 225, 16, 5),
+        ("compact_item_pickup_request", 222, 19, 7),
+        ("client_opcode_276_compact", 276, 9, 4),
+        ("client_opcode_276_grouped", 276, 210, 6),
+        ("client_item_acquisition_request", 298, 76, 20),
         ("server_opcode_135_bootstrap_ledger", 135, 3_725, 10),
         ("server_opcode_142_text_ledger_large", 142, 254, 5),
         ("server_opcode_142_text_ledger_compact", 142, 190, 5),
         ("server_opcode_394_text_envelope", 394, 119, 2),
         ("client_opcode_279_text_envelope", 279, 120, 3),
         ("client_world_exit_request", 241, 2, 1),
-        ("observed_client_to_server_opcode_100_length_26", 100, 26, 2),
-        ("observed_client_to_server_opcode_307_length_14", 307, 14, 2),
-        ("observed_client_to_server_opcode_308_length_74", 308, 74, 2),
-        ("client_opcode_310_live_fixed_record", 310, 41, 2),
-        ("observed_client_to_server_opcode_311_length_22", 311, 22, 2),
+        ("client_ability_point_allocation_request", 100, 26, 4),
+        ("client_opcode_307_neutral_record", 307, 14, 4),
+        ("client_opcode_310_text_record", 310, 41, 4),
+        ("client_opcode_308_periodic_record", 308, 74, 11),
+        ("client_opcode_311_periodic_record", 311, 22, 4),
+        ("login_server_opcode_20_u32", 20, 6, 2),
+        ("login_server_opcode_21_zero", 21, 3, 2),
+        ("login_server_opcode_23_zero", 23, 6, 2),
+        ("login_server_opcode_161_zero", 161, 3, 2),
         ("server_opcode_425_value_ledger", 425, 68, 7),
     ] {
         let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
@@ -148,6 +317,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         assert_eq!(shape.length, Some(length));
         assert_eq!(shape.operations.len(), operation_count);
     }
+
+    let opcode_158 = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_158_request")
+        .unwrap();
+    assert_eq!(opcode_158.opcode, 158);
+    assert_eq!(opcode_158.length, None);
+    assert_eq!(opcode_158.operations.len(), 4);
 
     for (name, opcode, length) in [
         ("server_opcode_228_u32_opaque_tail", 228, 10),
@@ -193,10 +370,22 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
             || shape.name == "observed_server_to_client_opcode_235_length_12"
             || shape.name == "observed_server_to_client_opcode_272_length_1056"
             || shape.name == "observed_server_to_client_opcode_276_length_3"
+            || shape.name == "observed_server_to_client_opcode_20_length_6"
+            || shape.name == "observed_server_to_client_opcode_21_length_3"
+            || shape.name == "observed_server_to_client_opcode_22_length_34447"
+            || shape.name == "observed_server_to_client_opcode_23_length_6"
+            || shape.name == "observed_server_to_client_opcode_161_length_3"
             || shape.name == "observed_client_to_server_opcode_46_length_6"
+            || shape.name == "observed_client_to_server_opcode_6_length_1836"
+            || shape.name == "observed_client_to_server_opcode_31_length_183"
             || shape.name == "observed_client_to_server_opcode_75_length_2"
+            || shape.name == "observed_client_to_server_opcode_274_length_1698"
             || shape.name == "observed_client_to_server_opcode_279_length_120"
             || shape.name == "observed_client_to_server_opcode_241_length_2"
+            || shape.name == "observed_client_to_server_opcode_100_length_26"
+            || shape.name == "observed_client_to_server_opcode_307_length_14"
+            || shape.name == "observed_client_to_server_opcode_308_length_74"
+            || shape.name == "observed_client_to_server_opcode_311_length_22"
             || shape.name == "observed_server_to_client_opcode_394_length_119"
             || shape.name == "observed_server_to_client_opcode_425_length_68"
     }));
@@ -213,7 +402,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 177);
+    assert_eq!(dump.packet_shapes.len(), 201);
     assert_eq!(
         dump.handlers
             .iter()

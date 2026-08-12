@@ -5,7 +5,10 @@ import hashlib
 from ipaddress import ip_address
 import json
 import math
+import os
 from pathlib import Path
+import subprocess
+import sys
 import time
 from typing import Callable
 from urllib.error import HTTPError
@@ -18,14 +21,22 @@ from .gameplay import (
     analyze_gameplay_transcript,
     plan_current_hp_stat_update,
 )
+from .gamestate import decode_transcript
 from .packets import (
+    FieldDropRemoval,
+    FieldDropSpawn,
+    InventoryChangeSet,
+    InventoryModification,
     MobEnterField,
+    MobControllerChange,
     MobLeaveField,
     MobTemporaryStatReset,
     MobTemporaryStatSet,
+    PickupGainNotice,
     SkillRecordEntry,
     SkillRecordUpdate,
 )
+from .pcap import load_pcap_tcp_stream
 from .transcript import Transcript
 
 
@@ -65,6 +76,152 @@ class CurrentHpLiveReplayResult:
                     "inventory_unchanged": True,
                     "progression_unchanged": True,
                     "player_stat_updates_delta_matches": True,
+                },
+            },
+        }
+
+
+@dataclass(frozen=True)
+class ItemPickupLiveReplayPlan:
+    drop_spawn: FieldDropSpawn = field(repr=False)
+    drop_refresh: FieldDropSpawn = field(repr=False)
+    controller_release: MobControllerChange = field(repr=False)
+    inventory_update: InventoryChangeSet = field(repr=False)
+    gain_notice: PickupGainNotice = field(repr=False)
+    cleanup: FieldDropRemoval = field(repr=False)
+    inventory: str
+    slot: int
+    item_id: int
+    quantity_before: int
+    quantity_delta: int
+    quantity_after: int
+    player_x: int
+    player_y: int
+    player_position_source: str
+    folded_trailer_x: int
+    folded_trailer_y: int
+    source_offset_x: int
+    source_offset_y: int
+    evidence_tcp_stream: int
+    evidence_admission_index: int
+    evidence_spawn_frame: int
+    evidence_refresh_frame: int
+    evidence_release_frame: int
+    evidence_request_frame: int
+    release_delay_seconds: float
+    admission_delay_seconds: float
+
+    def response_packets(self, request_opcode: int) -> tuple[bytes, bytes, bytes]:
+        if request_opcode not in {185, 222}:
+            raise ValueError("item-pickup response requires opcode 185 or 222")
+        removal = FieldDropRemoval(
+            reason=2 if request_opcode == 222 else 5,
+            drop_object_id=self.drop_spawn.drop_object_id,
+            actor_id=self.drop_spawn.owner_value_1,
+            trailing_value=None if request_opcode == 222 else 0,
+        )
+        return (
+            self.inventory_update.to_bytes(),
+            self.gain_notice.to_bytes(),
+            removal.to_bytes(),
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "runtime_object_ids_redacted": True,
+            "item_id": self.item_id,
+            "inventory": self.inventory,
+            "slot": self.slot,
+            "quantity_before": self.quantity_before,
+            "quantity_delta": self.quantity_delta,
+            "quantity_after": self.quantity_after,
+            "latest_player_position": {
+                "x": self.player_x,
+                "y": self.player_y,
+            },
+            "player_position_source": self.player_position_source,
+            "folded_trailer_position": {
+                "x": self.folded_trailer_x,
+                "y": self.folded_trailer_y,
+            },
+            "drop_position": {
+                "x": self.drop_spawn.position_x,
+                "y": self.drop_spawn.position_y,
+            },
+            "animated_source_offset": {
+                "x": self.source_offset_x,
+                "y": self.source_offset_y,
+            },
+            "evidence": {
+                "tcp_stream": self.evidence_tcp_stream,
+                "admission_index": self.evidence_admission_index,
+                "frames": {
+                    "spawn": self.evidence_spawn_frame,
+                    "refresh": self.evidence_refresh_frame,
+                    "release": self.evidence_release_frame,
+                    "request": self.evidence_request_frame,
+                },
+                "release_delay_ms": round(
+                    self.release_delay_seconds * 1000.0, 3
+                ),
+                "admission_delay_ms": round(
+                    self.admission_delay_seconds * 1000.0, 3
+                ),
+            },
+            "prediction": {
+                "server_opcodes": [311, 311, 281, 39, 49, 312],
+                "requires_authentic_client_request": True,
+                "inventory_quantity_delta": self.quantity_delta,
+                "active_field_drop_count_delta": 0,
+                "phase": "unchanged",
+                "field_epoch": "unchanged",
+                "map_id": "unchanged",
+                "player_state": "unchanged",
+                "progression": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class ItemPickupLiveReplayResult:
+    plan: ItemPickupLiveReplayPlan = field(repr=False)
+    api_responses: tuple[dict[str, object], ...]
+    observed_packets: tuple[dict[str, object], ...]
+    request_attempts: int
+    polls: int
+    pickup_key: str
+    pickup_input_delay_seconds: float
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "accepted": True,
+            "operation": "item_pickup",
+            "plan": self.plan.safe_dict(),
+            "api": list(self.api_responses),
+            "verification": {
+                "matched": True,
+                "polls": self.polls,
+                "pickup_key": self.pickup_key,
+                "pickup_input_delay_ms": round(
+                    self.pickup_input_delay_seconds * 1000.0, 3
+                ),
+                "request_attempts": self.request_attempts,
+                "observed_packets": list(self.observed_packets),
+                "checks": {
+                    "latest_player_position_used": True,
+                    "animated_pair_observed": True,
+                    "controller_release_observed": True,
+                    "authentic_client_request_observed": True,
+                    "inventory_effect_matched": True,
+                    "gain_result_matched": True,
+                    "drop_removal_matched": True,
+                    "pending_pickups_cleared": True,
+                    "phase_unchanged": True,
+                    "field_epoch_unchanged": True,
+                    "map_id_unchanged": True,
+                    "player_state_unchanged": True,
+                    "other_inventory_unchanged": True,
+                    "progression_unchanged": True,
                 },
             },
         }
@@ -181,7 +338,9 @@ class MobTemporaryStatLiveReplayPlan:
                 "stance": spawn.stance,
                 "foothold_id": spawn.foothold_id,
                 "origin_foothold_id": spawn.origin_foothold_id,
-                "spawn_effect": spawn.spawn_effect,
+                "appear_type": spawn.appear_type,
+                "team": spawn.team,
+                "effect_item_id": spawn.effect_item_id,
             },
             "set": {
                 "opcode": self.set_stat.opcode,
@@ -272,6 +431,21 @@ class _CapturedMobTemporaryStatLifecycle:
     protocol_version: int
 
 
+@dataclass(frozen=True)
+class _CapturedItemPickupAdmission:
+    drop_spawn: FieldDropSpawn
+    drop_refresh: FieldDropSpawn
+    controller_release: MobControllerChange
+    inventory: str
+    quantity_delta: int
+    spawn_frame: int
+    refresh_frame: int
+    release_frame: int
+    request_frame: int
+    release_delay_seconds: float
+    admission_delay_seconds: float
+
+
 def validate_packet_api_url(value: str) -> str:
     """Accept only the fixed plaintext-packet endpoint on loopback HTTP."""
     parsed = urlsplit(value)
@@ -334,6 +508,328 @@ def _post_plaintext_packet(
     if payload.get("plaintext_length") != len(plaintext):
         raise RuntimeError("packet API response length does not match the request")
     return payload
+
+
+def _captured_item_pickup_admission(
+    transcript: Transcript,
+    *,
+    item_id: int,
+    admission_index: int,
+) -> _CapturedItemPickupAdmission:
+    if not 0 <= item_id <= 0xFFFF_FFFF:
+        raise ValueError("item id must fit uint32")
+    if admission_index < 0:
+        raise ValueError("item-pickup admission index must be non-negative")
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("item-pickup evidence failed packet/state validation")
+    state = analysis.state
+    if (
+        state.item_pickup_effect_mismatches
+        or state.item_pickup_spawn_result_mismatches
+        or state.item_pickup_removal_mismatches
+        or state.pending_item_pickups
+    ):
+        raise ValueError("item-pickup evidence has incomplete or mismatched chains")
+    candidates = tuple(
+        observation
+        for observation in analysis.observations
+        if observation.direction == "client_to_server"
+        and observation.opcode in {185, 222}
+        and observation.kind == "item_pickup_request"
+        and observation.details.get("predicted_item_id") == item_id
+        and observation.details.get("request_attempt") == 1
+        and observation.details.get("known_drop") is True
+    )
+    if admission_index >= len(candidates):
+        raise ValueError(
+            f"item-pickup evidence has {len(candidates)} admitted chains for "
+            f"item {item_id}; index {admission_index} is unavailable"
+        )
+    request_observation = candidates[admission_index]
+    request_details = request_observation.details
+    drop_alias = request_details.get("drop")
+    spawn_frame = request_details.get("drop_spawn_frame")
+    release_frame = request_details.get("source_controller_release_frame")
+    if (
+        not isinstance(drop_alias, str)
+        or type(spawn_frame) is not int
+        or type(release_frame) is not int
+    ):
+        raise ValueError("admitted item-pickup evidence lacks spawn/release frames")
+    refresh_observations = tuple(
+        observation
+        for observation in analysis.observations
+        if observation.kind == "field_drop_spawn"
+        and spawn_frame < observation.frame_index < request_observation.frame_index
+        and observation.details.get("drop") == drop_alias
+        and observation.details.get("spawn_mode") == 0
+    )
+    if len(refresh_observations) != 1:
+        raise ValueError(
+            "admitted item-pickup evidence must have exactly one mode-0 refresh"
+        )
+    refresh_frame = refresh_observations[0].frame_index
+    decoded = decode_transcript(transcript)
+    required_frames = (
+        spawn_frame,
+        refresh_frame,
+        release_frame,
+        request_observation.frame_index,
+    )
+    if any(index < 0 or index >= len(decoded.frames) for index in required_frames):
+        raise ValueError("item-pickup evidence frame index is out of range")
+    spawn_decoded = decoded.frames[spawn_frame]
+    refresh_decoded = decoded.frames[refresh_frame]
+    release_decoded = decoded.frames[release_frame]
+    request_decoded = decoded.frames[request_observation.frame_index]
+    if (
+        spawn_decoded.direction != "server_to_client"
+        or refresh_decoded.direction != "server_to_client"
+        or release_decoded.direction != "server_to_client"
+        or request_decoded.direction != "client_to_server"
+    ):
+        raise ValueError("item-pickup evidence directions do not match the chain")
+    drop_spawn = FieldDropSpawn.parse(spawn_decoded.plaintext)
+    drop_refresh = FieldDropSpawn.parse(refresh_decoded.plaintext)
+    controller_release = MobControllerChange.parse(release_decoded.plaintext)
+    if (
+        drop_spawn.spawn_mode != 1
+        or drop_refresh.spawn_mode != 0
+        or drop_spawn.drop_object_id != drop_refresh.drop_object_id
+        or drop_spawn.value != item_id
+        or drop_refresh.value != item_id
+        or drop_spawn.source_mob_object_id
+        != drop_refresh.source_mob_object_id
+        or controller_release.control_level != 0
+        or controller_release.object_id != drop_spawn.source_mob_object_id
+    ):
+        raise ValueError("item-pickup evidence is not one matching pair/release chain")
+    effects = state.item_pickup_item_effects_by_template.get(item_id, set())
+    if len(effects) != 1:
+        raise ValueError(
+            "item-pickup evidence must prove exactly one inventory quantity effect"
+        )
+    inventory, quantity_delta = next(iter(effects))
+    if inventory not in {"use", "setup", "etc"} or quantity_delta <= 0:
+        raise ValueError("item-pickup evidence has an unsupported inventory effect")
+    release_delay_seconds = (
+        release_decoded.timestamp_ns - spawn_decoded.timestamp_ns
+    ) / 1_000_000_000
+    admission_delay_seconds = (
+        request_decoded.timestamp_ns - spawn_decoded.timestamp_ns
+    ) / 1_000_000_000
+    if release_delay_seconds < 0 or admission_delay_seconds <= 0:
+        raise ValueError("item-pickup evidence has invalid event timing")
+    return _CapturedItemPickupAdmission(
+        drop_spawn=drop_spawn,
+        drop_refresh=drop_refresh,
+        controller_release=controller_release,
+        inventory=inventory,
+        quantity_delta=quantity_delta,
+        spawn_frame=spawn_frame,
+        refresh_frame=refresh_frame,
+        release_frame=release_frame,
+        request_frame=request_observation.frame_index,
+        release_delay_seconds=release_delay_seconds,
+        admission_delay_seconds=admission_delay_seconds,
+    )
+
+
+def _occupied_runtime_object_ids(analysis: GameplayAnalysis) -> set[int]:
+    state = analysis.state
+    occupied = {
+        *state.npcs,
+        *state.mobs,
+        *state.observed_players,
+        *state.field_drops,
+        *state.reactors,
+    }
+    if state.entry_character_id is not None:
+        occupied.add(state.entry_character_id)
+    return occupied
+
+
+def _allocate_runtime_object_ids(
+    analysis: GameplayAnalysis,
+    count: int,
+) -> tuple[int, ...]:
+    if count <= 0:
+        raise ValueError("runtime object-id count must be positive")
+    occupied = _occupied_runtime_object_ids(analysis)
+    allocated: list[int] = []
+    for candidate in range(0x7FFF0001, 0x7FFE0000, -1):
+        if candidate in occupied:
+            continue
+        allocated.append(candidate)
+        occupied.add(candidate)
+        if len(allocated) == count:
+            return tuple(allocated)
+    raise ValueError("could not allocate collision-free runtime object ids")
+
+
+def _item_pickup_player_position(
+    analysis: GameplayAnalysis,
+) -> tuple[int, int, str]:
+    """Prefer the latest movement command endpoint for proximity admission."""
+    state = analysis.state
+    for observation in reversed(analysis.observations):
+        if (
+            observation.direction != "client_to_server"
+            or observation.opcode != 182
+            or observation.kind != "player_movement_submission"
+            or observation.details.get("field_epoch") != state.field_epoch
+        ):
+            continue
+        final_x = observation.details.get("final_x")
+        final_y = observation.details.get("final_y")
+        if type(final_x) is int and type(final_y) is int:
+            return final_x, final_y, "movement_command_final"
+    if state.player_x is None or state.player_y is None:
+        raise ValueError("live world state has no modeled player position")
+    return state.player_x, state.player_y, "folded_trailer_endpoint"
+
+
+def plan_item_pickup_live_replay(
+    analysis: GameplayAnalysis,
+    evidence_transcript: Transcript,
+    *,
+    evidence_tcp_stream: int = 92,
+    item_id: int = 4_000_004,
+    admission_index: int = 1,
+) -> ItemPickupLiveReplayPlan:
+    """Retarget an admitted drop to the latest proximity-relevant position."""
+    if not analysis.valid:
+        raise ValueError("live world transcript failed packet/state validation")
+    state = analysis.state
+    if state.phase.value != "active":
+        raise ValueError("live world state must be active")
+    if state.pending_item_pickups:
+        raise ValueError("live world state has a pending item-pickup chain")
+    if getattr(state, "pending_item_use_requests", 0):
+        raise ValueError("live world state has a pending item-use request")
+    if state.player_x is None or state.player_y is None:
+        raise ValueError("live world state has no modeled player position")
+    if state.entry_character_id is None:
+        raise ValueError("live world state has no entry character context")
+    if evidence_tcp_stream < 0:
+        raise ValueError("evidence TCP stream must be non-negative")
+    captured = _captured_item_pickup_admission(
+        evidence_transcript,
+        item_id=item_id,
+        admission_index=admission_index,
+    )
+    if (
+        captured.drop_spawn.source_x is None
+        or captured.drop_spawn.source_y is None
+    ):
+        raise ValueError("item-pickup evidence has no animated source position")
+    folded_trailer_x = state.player_x
+    folded_trailer_y = state.player_y
+    player_x, player_y, player_position_source = _item_pickup_player_position(
+        analysis
+    )
+    if not -0x8000 <= player_x <= 0x7FFF or not -0x8000 <= player_y <= 0x7FFF:
+        raise ValueError("latest player position exceeds int16 range")
+    source_offset_x = (
+        captured.drop_spawn.source_x - captured.drop_spawn.position_x
+    )
+    source_offset_y = (
+        captured.drop_spawn.source_y - captured.drop_spawn.position_y
+    )
+    source_x = player_x + source_offset_x
+    source_y = player_y + source_offset_y
+    if not -0x8000 <= source_x <= 0x7FFF or not -0x8000 <= source_y <= 0x7FFF:
+        raise ValueError("retargeted animated source position exceeds int16 range")
+    drop_object_id, source_object_id = _allocate_runtime_object_ids(analysis, 2)
+    rewrite = {
+        "drop_object_id": drop_object_id,
+        "owner_value_1": state.entry_character_id,
+        "owner_value_2": state.entry_character_id,
+        "position_x": player_x,
+        "position_y": player_y,
+        "source_mob_object_id": source_object_id,
+        "source_x": source_x,
+        "source_y": source_y,
+    }
+    drop_spawn = replace(captured.drop_spawn, **rewrite)
+    drop_refresh = replace(captured.drop_refresh, **rewrite)
+    controller_release = replace(
+        captured.controller_release,
+        object_id=source_object_id,
+    )
+    for packet_type, packet in (
+        (FieldDropSpawn, drop_spawn),
+        (FieldDropSpawn, drop_refresh),
+        (MobControllerChange, controller_release),
+    ):
+        plaintext = packet.to_bytes()
+        if packet_type.parse(plaintext).to_bytes() != plaintext:
+            raise ValueError("typed item-pickup admission packet did not round-trip")
+    matches = tuple(
+        item
+        for item in state.inventory_items.get(captured.inventory, ())
+        if item.item_id == item_id and item.quantity is not None
+    )
+    if len(matches) != 1:
+        raise ValueError(
+            f"live inventory has {len(matches)} matching {captured.inventory} "
+            "stacks; exactly one is required"
+        )
+    item = matches[0]
+    if item.quantity is None:
+        raise ValueError("item-pickup target stack has no quantity")
+    quantity_after = item.quantity + captured.quantity_delta
+    if not 1 <= quantity_after <= 0xFFFF:
+        raise ValueError("item-pickup target stack cannot accept the item")
+    inventory_types = {"use": 2, "setup": 3, "etc": 4}
+    inventory_update = InventoryChangeSet(
+        update_flag=0,
+        modifications=(
+            InventoryModification(
+                operation=InventoryModification.UPDATE_QUANTITY,
+                inventory_type=inventory_types[captured.inventory],
+                slot=item.slot,
+                quantity=quantity_after,
+            ),
+        ),
+    )
+    gain_notice = PickupGainNotice(
+        result_flag=0,
+        kind=PickupGainNotice.ITEM,
+        item_id=item_id,
+        quantity=captured.quantity_delta,
+    )
+    cleanup = FieldDropRemoval(reason=1, drop_object_id=drop_object_id)
+    return ItemPickupLiveReplayPlan(
+        drop_spawn=drop_spawn,
+        drop_refresh=drop_refresh,
+        controller_release=controller_release,
+        inventory_update=inventory_update,
+        gain_notice=gain_notice,
+        cleanup=cleanup,
+        inventory=captured.inventory,
+        slot=item.slot,
+        item_id=item_id,
+        quantity_before=item.quantity,
+        quantity_delta=captured.quantity_delta,
+        quantity_after=quantity_after,
+        player_x=player_x,
+        player_y=player_y,
+        player_position_source=player_position_source,
+        folded_trailer_x=folded_trailer_x,
+        folded_trailer_y=folded_trailer_y,
+        source_offset_x=source_offset_x,
+        source_offset_y=source_offset_y,
+        evidence_tcp_stream=evidence_tcp_stream,
+        evidence_admission_index=admission_index,
+        evidence_spawn_frame=captured.spawn_frame,
+        evidence_refresh_frame=captured.refresh_frame,
+        evidence_release_frame=captured.release_frame,
+        evidence_request_frame=captured.request_frame,
+        release_delay_seconds=captured.release_delay_seconds,
+        admission_delay_seconds=captured.admission_delay_seconds,
+    )
 
 
 def _progression_snapshot(analysis: GameplayAnalysis) -> tuple[object, ...]:
@@ -525,20 +1021,7 @@ def _captured_mob_temporary_stat_lifecycle(
 
 
 def _allocate_runtime_object_id(analysis: GameplayAnalysis) -> int:
-    state = analysis.state
-    occupied = {
-        *state.npcs,
-        *state.mobs,
-        *state.observed_players,
-        *state.field_drops,
-        *state.positioned_effect_entities,
-    }
-    if state.entry_character_id is not None:
-        occupied.add(state.entry_character_id)
-    for candidate in range(0x7FFF0001, 0x7FFE0000, -1):
-        if candidate not in occupied:
-            return candidate
-    raise ValueError("could not allocate a collision-free runtime mob object id")
+    return _allocate_runtime_object_ids(analysis, 1)[0]
 
 
 def _current_player_foothold(analysis: GameplayAnalysis) -> tuple[int, int, int]:
@@ -1266,6 +1749,385 @@ def _matching_current_hp_packet(
     return None
 
 
+def _inventory_item_snapshot(
+    analysis: GameplayAnalysis,
+) -> tuple[tuple[object, ...], ...]:
+    return tuple(
+        sorted(
+            (
+                inventory,
+                item.slot,
+                item.record_type,
+                item.item_id,
+                item.cash_item,
+                item.expires_at_ticks,
+                item.quantity,
+            )
+            for inventory, items in analysis.state.inventory_items.items()
+            for item in items
+        )
+    )
+
+
+def _safe_item_pickup_observation(observation: object) -> dict[str, object]:
+    details = observation.details
+    record: dict[str, object] = {
+        "frame_index": observation.frame_index,
+        "direction": observation.direction,
+        "opcode": observation.opcode,
+        "kind": observation.kind,
+        "coverage": observation.coverage.value,
+    }
+    for name in (
+        "drop",
+        "kind",
+        "item_id",
+        "spawn_mode",
+        "position_x",
+        "position_y",
+        "control_level",
+        "source_drop_count",
+        "shape",
+        "request_attempt",
+        "request_retry",
+        "drop_age_ms",
+        "source_controller_release_age_ms",
+        "predicted_item_id",
+        "predicted_result_kind",
+        "inventory",
+        "slot",
+        "quantity",
+        "quantity_delta",
+        "known_active_drop",
+        "matched_pickup_request",
+        "reason",
+        "variant",
+    ):
+        if name in details:
+            record[name] = details[name]
+    return record
+
+
+def _send_wayland_evdev_key(
+    key: str,
+    *,
+    hold_ms: int,
+    wayland_display: str,
+    runtime_directory: Path,
+) -> None:
+    if not key or any(character.isspace() for character in key):
+        raise ValueError("pickup key must be one non-whitespace token")
+    if not 0 <= hold_ms <= 10_000:
+        raise ValueError("pickup key hold must be between 0 and 10000 ms")
+    if not wayland_display:
+        raise ValueError("Wayland display cannot be empty")
+    helper = (
+        Path(__file__).resolve().parents[1]
+        / "tools"
+        / "send_wayland_evdev_key.py"
+    )
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                str(helper),
+                key,
+                "--hold-ms",
+                str(hold_ms),
+                "--wayland-display",
+                wayland_display,
+                "--runtime-directory",
+                str(runtime_directory),
+            ],
+            env=os.environ
+            | {
+                "XDG_RUNTIME_DIR": str(runtime_directory),
+                "WAYLAND_DISPLAY": wayland_display,
+            },
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("could not send the physical pickup key") from error
+
+
+def inject_item_pickup_live(
+    transcript_path: Path,
+    evidence_pcap_path: Path,
+    *,
+    evidence_tcp_stream: int = 92,
+    item_id: int = 4_000_004,
+    admission_index: int = 1,
+    pickup_key: str = "z",
+    pickup_key_hold_ms: int = 100,
+    wayland_display: str,
+    wayland_runtime_directory: Path | None = None,
+    pickup_input_delay_seconds: float | None = None,
+    api_url: str = DEFAULT_PACKET_API_URL,
+    api_timeout_seconds: float = 5.0,
+    verify_timeout_seconds: float = 10.0,
+) -> ItemPickupLiveReplayResult:
+    """Inject, admit, serve, and verify one proximity-correct item pickup."""
+    for name, value in (
+        ("API timeout", api_timeout_seconds),
+        ("verification timeout", verify_timeout_seconds),
+    ):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be positive")
+    if pickup_input_delay_seconds is not None and (
+        not math.isfinite(pickup_input_delay_seconds)
+        or pickup_input_delay_seconds < 0
+    ):
+        raise ValueError("pickup input delay must be non-negative")
+    validate_packet_api_url(api_url)
+    runtime_directory = wayland_runtime_directory or Path(
+        f"/run/user/{os.getuid()}"
+    )
+    baseline = analyze_gameplay_transcript(Transcript.load(transcript_path))
+    evidence = load_pcap_tcp_stream(
+        evidence_pcap_path,
+        evidence_tcp_stream,
+    )
+    plan = plan_item_pickup_live_replay(
+        baseline,
+        evidence,
+        evidence_tcp_stream=evidence_tcp_stream,
+        item_id=item_id,
+        admission_index=admission_index,
+    )
+    input_delay = (
+        plan.admission_delay_seconds
+        if pickup_input_delay_seconds is None
+        else pickup_input_delay_seconds
+    )
+    baseline_observation_count = len(baseline.observations)
+    baseline_inventory = _inventory_item_snapshot(baseline)
+    expected_inventory = list(baseline_inventory)
+    matching_inventory_indices = [
+        index
+        for index, entry in enumerate(expected_inventory)
+        if entry[0] == plan.inventory and entry[1] == plan.slot
+    ]
+    if len(matching_inventory_indices) != 1:
+        raise ValueError("planned item-pickup inventory stack is not unique")
+    inventory_index = matching_inventory_indices[0]
+    expected_inventory[inventory_index] = (
+        *expected_inventory[inventory_index][:-1],
+        plan.quantity_after,
+    )
+    expected_inventory_snapshot = tuple(sorted(expected_inventory))
+    baseline_progression = _progression_snapshot(baseline)
+    baseline_player = _player_state_snapshot(baseline)
+    baseline_position = (baseline.state.player_x, baseline.state.player_y)
+    baseline_drop_ids = set(baseline.state.field_drops)
+    api_responses: list[dict[str, object]] = []
+    polls = 0
+    drop_sent = False
+    removed = False
+    final = baseline
+    request_observation = None
+    runtime_drop_alias = None
+    try:
+        started_at = time.monotonic()
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.drop_spawn.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        drop_sent = True
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.drop_refresh.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        time.sleep(
+            max(
+                0.0,
+                plan.release_delay_seconds
+                - (time.monotonic() - started_at),
+            )
+        )
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.controller_release.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        time.sleep(max(0.0, input_delay - (time.monotonic() - started_at)))
+        _send_wayland_evdev_key(
+            pickup_key,
+            hold_ms=pickup_key_hold_ms,
+            wayland_display=wayland_display,
+            runtime_directory=runtime_directory,
+        )
+        request_deadline = time.monotonic() + verify_timeout_seconds
+        while time.monotonic() < request_deadline:
+            polls += 1
+            time.sleep(0.05)
+            candidate = analyze_gameplay_transcript(
+                Transcript.load(transcript_path)
+            )
+            if not candidate.valid:
+                raise RuntimeError(
+                    "item-pickup admission transcript failed validation"
+                )
+            observations = candidate.observations[baseline_observation_count:]
+            for observation in observations:
+                if (
+                    observation.direction == "server_to_client"
+                    and observation.opcode == 311
+                    and observation.kind == "field_drop_spawn"
+                    and observation.details.get("new_drop") is True
+                    and observation.details.get("item_id") == plan.item_id
+                    and observation.details.get("position_x") == plan.player_x
+                    and observation.details.get("position_y") == plan.player_y
+                ):
+                    runtime_drop_alias = observation.details.get("drop")
+                    break
+            if not isinstance(runtime_drop_alias, str):
+                continue
+            request_observation = next(
+                (
+                    observation
+                    for observation in observations
+                    if observation.direction == "client_to_server"
+                    and observation.opcode in {185, 222}
+                    and observation.kind == "item_pickup_request"
+                    and observation.details.get("drop") == runtime_drop_alias
+                    and observation.details.get("known_drop") is True
+                ),
+                None,
+            )
+            if request_observation is not None:
+                break
+        if request_observation is None:
+            raise TimeoutError(
+                "the latest-position drop was injected, but no authentic "
+                "item-pickup request arrived before the verification timeout"
+            )
+        for plaintext in plan.response_packets(request_observation.opcode):
+            api_responses.append(
+                _post_plaintext_packet(
+                    api_url,
+                    plaintext,
+                    timeout_seconds=api_timeout_seconds,
+                )
+            )
+        removed = True
+        completion_deadline = time.monotonic() + verify_timeout_seconds
+        while time.monotonic() < completion_deadline:
+            polls += 1
+            time.sleep(0.05)
+            final = analyze_gameplay_transcript(Transcript.load(transcript_path))
+            if not final.valid:
+                raise RuntimeError(
+                    "completed item-pickup transcript failed validation"
+                )
+            state = final.state
+            if (
+                state.pending_item_pickups == 0
+                and state.item_pickup_effect_matches
+                == baseline.state.item_pickup_effect_matches + 1
+                and state.item_pickup_spawn_result_matches
+                == baseline.state.item_pickup_spawn_result_matches + 1
+                and state.item_pickup_removal_matches
+                == baseline.state.item_pickup_removal_matches + 1
+            ):
+                break
+        else:
+            raise TimeoutError(
+                "item-pickup response packets were accepted, but the completed "
+                "chain did not fold before the verification timeout"
+            )
+    except BaseException:
+        if drop_sent and not removed:
+            try:
+                _post_plaintext_packet(
+                    api_url,
+                    plan.cleanup.to_bytes(),
+                    timeout_seconds=api_timeout_seconds,
+                )
+            except Exception:
+                pass
+        raise
+
+    state = final.state
+    request_attempts = (
+        state.item_pickup_requests - baseline.state.item_pickup_requests
+    )
+    counter_checks = {
+        "requests": request_attempts >= 1,
+        "chains": (
+            state.item_pickup_request_chains
+            == baseline.state.item_pickup_request_chains + 1
+        ),
+        "retries": (
+            state.item_pickup_request_retries
+            == baseline.state.item_pickup_request_retries
+            + request_attempts
+            - 1
+        ),
+        "effects": (
+            state.item_pickup_effect_matches
+            == baseline.state.item_pickup_effect_matches + 1
+        ),
+        "results": (
+            state.item_pickup_spawn_result_matches
+            == baseline.state.item_pickup_spawn_result_matches + 1
+        ),
+        "removals": (
+            state.item_pickup_removal_matches
+            == baseline.state.item_pickup_removal_matches + 1
+        ),
+        "pending": state.pending_item_pickups == 0,
+    }
+    invariant_checks = {
+        "field_drops": set(state.field_drops) == baseline_drop_ids,
+        "phase": state.phase == baseline.state.phase,
+        "field_epoch": state.field_epoch == baseline.state.field_epoch,
+        "map_id": state.map_id == baseline.state.map_id,
+        "player": _player_state_snapshot(final) == baseline_player,
+        "player_position": (state.player_x, state.player_y) == baseline_position,
+        "inventory": _inventory_item_snapshot(final)
+        == expected_inventory_snapshot,
+        "progression": _progression_snapshot(final) == baseline_progression,
+    }
+    failed = [
+        name
+        for name, matched in {**counter_checks, **invariant_checks}.items()
+        if not matched
+    ]
+    if failed:
+        raise RuntimeError(
+            "typed item-pickup replay violated predicted checks: "
+            + ", ".join(failed)
+        )
+    observed_packets = tuple(
+        _safe_item_pickup_observation(observation)
+        for observation in final.observations[baseline_observation_count:]
+        if observation.opcode in {39, 49, 185, 222, 281, 311, 312}
+        and (
+            observation.details.get("drop") == runtime_drop_alias
+            or observation.opcode in {39, 49, 281}
+        )
+    )
+    return ItemPickupLiveReplayResult(
+        plan=plan,
+        api_responses=tuple(api_responses),
+        observed_packets=observed_packets,
+        request_attempts=request_attempts,
+        polls=polls,
+        pickup_key=pickup_key,
+        pickup_input_delay_seconds=input_delay,
+    )
+
+
 def inject_current_hp_live(
     transcript_path: Path,
     current_hp: int,
@@ -1396,6 +2258,43 @@ def render_current_hp_live_replay(result: CurrentHpLiveReplayResult) -> str:
                 f"{result.observed_packet['frame_index']}"
             ),
             "  unchanged: phase, field epoch, map, inventory, progression",
+        )
+    )
+
+
+def render_item_pickup_live_replay(result: ItemPickupLiveReplayResult) -> str:
+    plan = result.plan.safe_dict()
+    evidence = plan["evidence"]
+    return "\n".join(
+        (
+            "live item-pickup replay: matched",
+            (
+                "  evidence: stream "
+                f"{evidence['tcp_stream']} admission "
+                f"{evidence['admission_index']} at "
+                f"{evidence['admission_delay_ms']} ms"
+            ),
+            (
+                "  placement: latest player position "
+                f"({plan['latest_player_position']['x']},"
+                f"{plan['latest_player_position']['y']}) from "
+                f"{plan['player_position_source']}"
+            ),
+            (
+                "  folded trailer: "
+                f"({plan['folded_trailer_position']['x']},"
+                f"{plan['folded_trailer_position']['y']})"
+            ),
+            (
+                "  observed: "
+                f"{result.request_attempts} authentic request attempt(s), "
+                f"{plan['inventory']} slot {plan['slot']} "
+                f"{plan['quantity_before']} -> {plan['quantity_after']}"
+            ),
+            (
+                "  unchanged: phase, field epoch, map, player, other inventory, "
+                "progression"
+            ),
         )
     )
 

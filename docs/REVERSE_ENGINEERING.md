@@ -347,16 +347,51 @@ claiming a false decode. All other 22 cross-corpus packets use the semantic
 switch shape. A live replay of variant `10` matched the predicted neutral fold,
 left core state unchanged, and kept the client and heartbeats active.
 
-Cross-corpus validation also corrected the automatic manifest's manual client
-opcode-`43` layer. Stream `92` alone made values `4`, `8`, and `12` look like
-compact discriminators, but stream `126` uses those same leading bytes in the
-counted UTF-16 form and continues through `35`. The byte is therefore retained
-as a neutral sequence. Two candidate shapes now share the opcode: a variable
-`u8, u32, counted UTF-16, zero, byte[6]` form and a fixed
-`u8, byte[9]` form. Total packet length distinguishes them without ambiguity.
-Native validation consumes all 45 client packets, and the existing fixed
-server shape consumes its three `u8, byte[16]` responses. The model does not
-name the redacted identifier, string, or opaque bytes as security state.
+Cross-corpus validation first corrected the automatic manifest's manual client
+opcode-`43` switch, then chronological correlation supplied the missing
+semantics. The leading byte equals the active field epoch in all 45 packets,
+and every request is followed by the next opcode-`157` field snapshot without
+an intervening transfer. The variable form is `u8 epoch, i32 -1, counted
+UTF-16 portal name, zero, i16 x, i16 y, u16 zero`: its 42 names are conventional
+portal identifiers such as `west00`, `east00`, `out00`, and `in01`. The three
+fixed forms are `u8 epoch + nine zero bytes`; each follows a same-epoch HP-zero
+stat update, bounding them as death respawns. Total length distinguishes the
+forms without ambiguity, and sentinel/zero guards reject shapes outside the
+corpus. Portal text stays redacted even though the field roles are now typed.
+
+The response boundary is server opcode `157`, not server opcode `43`: all 45
+transactions match, with `28.125..940.035` ms latency and no pending request.
+The fixed server opcode-`43` family remains separately neutral.
+
+Cross-corpus chronology also resolves the earlier neutral positioned-effect
+family as the field-reactor lifecycle. The pinned handler grouping and client
+strings (`Reactor/{0:D7}`, `reactorState`) identify the subsystem; the exact
+server shapes make opcode `322` spawn, `320` state update, and `323` removal.
+All 82 stream-`126` lifecycle records round-trip, and every update/removal
+references an active same-field object.
+
+Client opcode `225` closes the transaction. All 15 exact 16-byte requests
+reference an active reactor immediately after opcode-`50` attack, then
+FIFO-match the next same-object state update (12) or removal (3). The 12
+updates echo the request stance, every response arrives within
+`388.463..1,102.698` ms, and no request is left pending. This correlation
+supports typed reactor roles while keeping runtime object ids aliased and the
+character-position value build-specific.
+
+The same cross-version grammar check corrects client opcode `158` mode `0`.
+Its former nine-byte opaque tail is exactly one `u32 key, u8 binding type,
+i32 action` record after a count of one. Eleven stream-`126` packets exercise
+empty, skill, item, and action bindings across evdev Left Ctrl, Left Shift,
+Home, and keypad zero. Modes `1` and `2` remain the count-zero field-load
+sequence; one counted manifest shape consumes both branches exactly.
+
+Use independent client enums as semantic corroboration only after the local
+wire shape is exact. Here the legacy-client `KeyType` values `4`/`6` name the
+already captured opcode-`385` selector families as menu/face, and `KeyAction`
+keeps pickup/sit/attack/jump/interact consecutive at `50..54`. The current
+snapshot's seven selector-`6` values `100..106` and focused `M` menu control
+agree. This is enough to name safe state fields, but not to widen opcode-`158`
+mode-`0` beyond binding types `0/1/2/5` actually observed on the wire.
 
 Client opcode `114` is bounded directly from all 44 long-corpus packets rather
 than from a server handler. Offsets `3..4` are a little-endian UTF-16 code-unit
@@ -413,18 +448,29 @@ exit attempt did not emit opcode `241`; no server terminal packet was forced,
 so the live effect remains explicitly unproven.
 
 The remaining fixed-width outgoing records use the same capture-bounded rule.
-Opcodes `100`, `307`, `308`, and `311` have exact 26/14/74/22-byte packets in
-both sustained captures, so the codec can validate and round-trip their bodies
-without naming them. Timing supplies only a cadence observation: opcode `308`
-repeats near five minutes and opcode `311` near ten minutes after its first
-bootstrap-skewed interval. A later 592.004-second local opcode-`308` gap keeps
-that cadence observational rather than mandatory. Three controlled nested-
-Wayland menu confirmations in the local Wine session each emitted a 41-byte
-opcode-`310` record but no
-opcode `241` or phase change. The automatic manifest therefore adds a
-live-only opaque opcode-`310` shape, while the gameplay fold exposes only
-widths, counts, phase/epoch, and intervals. It does not promote timing or UI
-adjacency into a semantic or replay claim.
+Opcode `307` no longer retains an opaque body: two references and 28 live
+records all split as redacted `u32`, redacted `u32`, zero `u32`. Its second
+value is zero 26 times and page-aligned in all four nonzero samples, but both
+values and the record purpose stay neutral. Opcode `100` similarly no longer
+does: both 26-byte samples decode as client tick, count `2`, then LUK/INT
+stat-mask and increment pairs. The following opcode-`41` responses apply the
+requested `1/4` and `9/29` gains exactly while consuming the summed `5/38` AP,
+after 107.555/406.248 ms. Opcodes `308` and `311` also have stronger
+cross-capture boundaries. The 74-byte opcode-`308`
+record is two redacted doubles, two redacted `u64`s, a `u32` mirrored by two
+doubles, and fixed controls; all 24 reference/latest-live mirrors agree. The
+22-byte opcode-`311` record is zero `u64`, redacted `u32`, zero `u64` in all 13
+samples. Timing still supplies only a cadence observation: opcode `308` repeats
+near five minutes and opcode `311` near ten minutes after its first
+bootstrap-skewed interval. Longer paused-live gaps keep that cadence
+observational rather than mandatory. Three controlled nested-Wayland menu
+confirmations in the local Wine session each emitted a 41-byte opcode-`310`
+record with counted 16-unit UTF-16 and a zero-u32/zero-u8 suffix, but no opcode
+`241` or phase change. The automatic manifest therefore adds typed neutral
+`307/308/310/311` shapes. The gameplay fold redacts neutral values and exposes
+only structural aggregates,
+phase/epoch, and intervals. It does not promote timing or UI adjacency into a
+semantic or replay claim.
 
 The independent `1-10FS.pcapng` stream-`126` packet then exposed the compact
 marker-`26` branch without another debugger trace. Exact offline cursor
@@ -440,8 +486,13 @@ All 17 stream-`92` instances are exactly `u16 opcode, u32 tick, i16 Use slot,
 u32 item template` and round-trip. Their typed state correlations establish
 same-slot quantity `-1`, red-potion HP `+50`, and blue-potion MP `+80` with
 maximum capping. The live reactive test reproduced the predicted red-potion
-`2 -> 1` and HP `50 -> 100` effects. Keep the tick role and last-item
-remove-versus-zero behavior unnamed until independent evidence resolves them.
+`2 -> 1` and HP `50 -> 100` effects. The last-item remove-versus-zero behavior
+remains unnamed because the capture does not exercise it.
+Independent v79 handler source resolves the shared leading u32 by passing it
+to `updateTick` for both item movement and Use-item requests; the same item-
+move handler names the final signed short quantity. That source-level role
+confirmation promotes the already fully correlated opcode-`79` and opcode-
+`80` reference requests without expanding their responder policies.
 
 Client opcode `185` also no longer needs a primitive-reader trace for its
 captured boundary. Its 23-byte base and 35-byte extended forms, the three short
@@ -453,6 +504,21 @@ and field-load item/mesos variants; no additional primitive trace is required
 for its captured boundary. Keep the opcode `185` validation token, optional
 proof, opcode-`49` flags, and opcode-`312` reason/actor roles neutral.
 
+Client opcode `207` now applies the same source-and-capture boundary to its
+high-volume control prefix. The original v83 writer emits six one-byte action
+arguments followed by a reserved 13-byte region. Two independent server
+handlers support option/activity and skill-id/level placement, while differing
+on whether the final two bytes form one option or separate values. The codec
+therefore exposes option flags, signed activity code, skill id/level, and two
+neutral auxiliary bytes. Guida83 reads the remaining 13 bytes as `u8` plus
+three `u32` values, closing the source-backed structural boundary while leaving
+their behavior neutral. Across both captures, the marker is zero, the first
+u32 is `0/1`, and the final pair is `0x00ffddcc`. Stream `92` validates that
+split across 12,100 paths and stream `126` across another 22,855, all at full
+coverage; captured option flags are `0`, `1`, and `17`, while signed activities
+are mainly `-1` with `12`, `13`, and `24` also observed. Acknowledgement flag
+prediction now names the typed option field instead of indexing an opaque byte.
+
 ## Next debugger work
 
 1. Locate the inner character-record parser reached from the 170-byte server
@@ -462,7 +528,10 @@ proof, opcode-`49` flags, and opcode-`312` reason/actor roles neutral.
 3. Trace the remaining finite field-bootstrap opcodes `27`, `28`, `142`, and
    `425`, preferring a generated direct-read ledger where available. Trace the
    bounded five-byte player-movement type-`3` command only if a controlled
-   effect requires its semantics. The opcode-`41` stat-delta, opcode-`39`
+   effect requires its semantics. For life movement, the independently sourced
+   v83 parsers now cover captured command tags through `17`; keep unobserved
+   tags `18..22` neutral until a reference packet exercises them. The
+   opcode-`41` stat-delta, opcode-`39`
    inventory-effect, opcode-`80` consumable-use, opcode-`185` pickup-request,
    and opcode-`311` drop-spawn grammars are complete at their evidenced
    boundaries.

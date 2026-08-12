@@ -86,16 +86,25 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 101 semantic/manual shapes and 96 explicitly
+manifest currently declares 136 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
 fourteenth overlaps; opcode `135` adds the fifteenth. Opcode `169` adds a
 non-overlapping shape found only in `1-10FS`; server opcode `394` and client
 opcode `279` add the sixteenth and seventeenth overlaps. Client opcodes `46`,
-`75`, and `241` add overlaps 18 through 20. The live-only, non-overlapping
-opcode-`310` width adds one active shape. This leaves 177 active shapes and 76
-active opaque pins.
+`75`, and `241` add overlaps 18 through 20; opcode `115` adds the twenty-first.
+The live-only, non-overlapping opcode-`310` width, local opcode-`0` probe, and
+capture-backed client
+opcode-`64`/`79`/`111`/`222`/`225`/`276`/`298` layouts add ten active shapes.
+Five non-overlapping legacy-login layouts add the next five active shapes.
+The final four stream-`116` login layouts add four more. Typed opcode-`307`,
+opcode-`308`, opcode-`311`, and ability-point opcode-`100` layouts suppress four
+opaque pins without increasing the effective shape count. Live selector-`5`
+action-`51` controls add non-overlapping client chair sit/recovery/stand shapes
+for opcodes `49`, `82`, and `48`. Typed opcode `41` consolidates its three
+capture variants into one handler-exact conditional shape. This leaves 199
+active shapes and 63 active opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
 re-emits the sole 3,725-byte stream-`114` packet exactly; the checked-in shape
@@ -113,12 +122,140 @@ already declared for opcode `45`; both occur between opcode `241` and final
 server opcode `9` in their respective world streams. These three shapes
 suppress matching opaque pins without using the incoming-handler dump to claim
 outgoing-client semantics it cannot provide.
-Client opcodes `100`, `307`, `308`, and `311` remain exact-width opaque pins in
-the automatic manifest; the gameplay fold raises them to partial observations
-using only their validated widths, counts, and `308`/`311` cadence. Opcode
-`310` is separately pinned to the 41-byte packet repeated by three controlled
-local-Wine menu confirmations. Its 39-byte body and UI role remain opaque, and
-the manifest does not equate it with the captured opcode-`241` exit request.
+Client opcode `307` now suppresses its opaque pin with the cross-capture shape
+`redacted u32 + redacted u32 + zero u32`. Across two references and 28 live
+records, the second value is zero 26 times and every nonzero value is page-
+aligned; purpose and both values remain neutral/redacted. Opcode `100` also
+suppresses its opaque pin with a counted ability-point allocation shape: client
+tick, allocation count, and repeated stat-mask/increment pairs. Stream `92`
+requests LUK/INT `+1/+4`, then opcode `41` applies those exact gains and spends
+all five AP after 107.555 ms. Stream `126` independently requests `+9/+29` and
+applies those gains while spending 38 AP after 406.248 ms. Opcodes `308` and
+`311` also suppress their opaque pins with cross-capture typed shapes. Across 11
+reference and 13 active-live opcode-`308` records, the layout is two redacted
+`f64`s, two redacted `u64`s, one `u32` mirrored by two `f64`s, and fixed control
+values. All 24 mirrors agree. All six reference and seven live opcode-`311`
+records are `zero u64 + redacted u32 + zero u64`. Purpose remains neutral;
+cadence is observational. Opcode `310` is separately typed from three
+controlled local-Wine menu confirmations as counted 16-unit UTF-16 plus a
+zero-u32/zero-u8 suffix. Its text, purpose, and UI role remain redacted/neutral,
+and the manifest does not equate it with the captured opcode-`241` exit request.
+Client opcode `79` adds a 13-byte semantic shape from two stream-`126`
+transactions: `u32 client tick + u8 inventory type + i16 source + i16
+destination + i16 quantity`. Each request is followed by a server
+opcode-`39` move with the exact same inventory/source/destination tuple. Native
+validation consumes both records; independent v79 handler code confirms the
+tick and quantity roles rather than inferring them from the captured value
+`-1`.
+Client opcode `158` now uses one variable-length counted shape across all three
+reference streams. Modes `1` and `2` have zero changes and encode the field-
+load sequence. Mode `0` repeats `u32 key code + u8 binding type + i32 action`;
+all 11 stream-`126` packets carry one change and match the independent v83
+keymap-change grammar. Native validation consumes both 10-byte and 19-byte
+variants through the same manifest shape.
+Client opcode `225` adds one exact 16-byte reactor-hit shape for 15 stream-`126`
+records: signed/redacted reactor object id, signed character-position value,
+u16 stance, and a zero u32. Every request targets an active reactor introduced
+by server opcode `322`, immediately follows client opcode `50`, and matches the
+next same-reactor opcode-`320` state update or opcode-`323` removal. Native
+validation consumes all 15 requests and all 12 updates echo the request stance.
+Client opcode `298` adds one exact 76-byte shape for 12 stream-`126` item-
+acquisition requests. The manifest consumes the selection, kind, item,
+quantity, neutral duration, expiration, redacted serial, five reserved zeros,
+two `-99` sentinels, two trailing zeros, and `0/1` flags. All 12 records match
+the next same-epoch server opcode-`39` additions by kind-derived inventory and
+item template; native validation consumes the isolated 12-packet corpus with
+zero failures.
+Client opcode `276` adds two capture-bounded selector shapes. The active local-
+Wine transcript supplies selector `17` followed by three zero bytes; the sole
+stream-`126` selector-`24` packet supplies two redacted header values, five
+counted groups, and 19 redacted u32 pairs. Both shapes consume exactly without
+assigning roles to the selector, group, header, or pair values.
+Client opcode `222` adds the exact 19-byte compact branch of
+`ItemPickupRequest`: epoch, tick, signed position, drop id, and neutral token,
+without opcode `185`'s control word or optional proof. All six stream-`126`
+records resolve to known same-epoch drops and complete the matching inventory
+or mesos effect, gain notice, and removal chain. Isolated native validation
+consumes all six packets with zero failures.
+Client opcode `64` adds the exact 10-byte NPC-interaction request:
+`uint16 opcode, uint32 npc_object_id, int16 player_x, int16 player_y`. Both
+stream-`126` object ids resolve to active NPCs and both positions equal the last
+same-epoch client opcode-`47` movement endpoint; the next same-epoch server
+opcode `348` follows after `396.405..439.289` ms. Independent live
+action-`54`/Space input emitted three more requests for active NPC template
+`1032005`. Client opcode `111`
+adds an exact eight-byte record containing a neutral u32 and signed slot; its
+sole slot `3` matches the next opcode-`39` Cash remove/add after `486.349` ms.
+The opcode-`111` u32, its higher-level action role, and causality remain
+neutral. Isolated native validation consumes all three reference packets with
+zero failures.
+Client opcode `101` replaces its earlier five-neutral-value shape with the
+exact recovery request boundary: reserved zero, type `20`, reserved u16, HP
+recovery u16, MP recovery u16, and final zero. Stream `126` supplies 33 HP-`10`
+and 113 MP-`3` packets; stream `92` supplies seven HP-`10` and 66 MP-`5`
+packets. Python correlation matches all 219 to authoritative opcode-`41` stat
+updates, while isolated native validation consumes all 219 with zero failures.
+Client opcode `115` replaces its observed-opaque pin with the exact 22-byte
+inner-portal request shape: active field epoch, redacted four-code-unit UTF-16
+portal name with zero terminator, and signed source/destination positions. The
+two stream-`92` paths chain within one pixel and remain in the same field epoch.
+The native shape intentionally accepts only the captured four-code-unit width;
+isolated validation consumes both records with zero failures.
+Login client opcode `6` replaces its 1,836-byte observed-opaque pin with a
+variable shape containing nine neutral `u32` header fields, a `u32` record
+count, and repeated `(u16 index, u32 opaque value)` pairs. Stream `83` carries
+299 records while stream `116` and the current live login each carry 152; all
+three lengths satisfy `42 + 6*count`, and every Python-decoded sample has the
+complete unique `0..count-1` index set. Isolated native validation exactly
+consumes both capture records. Header and record values remain redacted and no
+higher-level role is assigned.
+Login client opcode `31` replaces its 183-byte observed-opaque pin with one
+variable redacted shape shared by stream `83`, stream `116`, and the current
+live login transcript. All three records have a 20-byte zero prefix, variant
+`2`, three trailing-zero UTF-16 fields, a `uint32` blob length fixed at `48`,
+the opaque blob, and a three-byte zero suffix. Their distinct total lengths
+`183/275/201` and text code-unit patterns `10/0/38`, `7/51/36`, and `1/51/5`
+exact-consume under the same grammar without assigning semantics or publishing
+the retained contents.
+Login client opcode `274` replaces its 1,698-byte observed-opaque pin with the
+sole captured fixed variant: redacted 768/74-code-unit text regions around
+captured constants `u32 2, u8 1, u8 1`, with both counted-text trailing bytes
+fixed to zero. The isolated stream-`83` record exact-consumes natively; its text
+contents and higher-level role remain neutral.
+The live-only 36-byte server opcode-`0` shape records the documented local
+account-bootstrap frame patch: result zero, one redacted `u32` id, three zero
+flags, a redacted four-code-unit UTF-16 region, and a 16-byte zero suffix. It is
+kept distinct from a complete account result and exact-consumes in isolated
+native validation.
+Legacy login server opcodes `3`, `390`, and `6` add generated-read-backed
+layouts of `u8 + i32 + bool`, `u8`, and trailing-zero counted UTF-16 plus `u8`.
+Client opcodes `255` and `9` add capture-bounded redacted `u32` and
+trailing-zero counted UTF-16 layouts. All five stream-`116` packets
+exact-consume in isolated native validation. The opcode-`6` text exactly echoes
+the preceding opcode-`9` text after 235.214 ms; the opcode-`255`/`390` adjacency
+at 238.384 ms remains evidence only, not a causal or semantic claim.
+The remaining stream-`116` shapes exact-consume server opcode `35`, client
+opcode `10`, server opcode `7`, and client opcode `16`. Opcode `35` is a neutral
+redacted counted-text prelude. Opcode `10` is counted name plus eight redacted
+`u32` values. Generated opcode-`7` handler `f2861e8a...` supplies the result
+byte; the captured success body exact-consumes as the existing character
+snapshot fields plus a fixed 49-byte compact-appearance variant. Its name and
+seven-field appearance fingerprint match opcode `10`. Opcode `16` repeats the
+created id and the next handoff repeats it again. All four isolated packets
+validate natively, leaving zero unknown observations in both login references.
+Login server opcodes `20`, `21`, `23`, and `161` replace four observed-opaque
+pins with exact fixed-record shapes. Both reference login streams contain all
+four: opcode `20` carries one neutral `uint32`, opcodes `21` and `161` carry a
+zero `uint8`, and opcode `23` carries a zero `uint32`. The live login supplies
+an independent opcode-`23` observation. Isolated native validation consumes
+all eight reference packets; safe Python state reports only widths, opcode
+counts, and zero status while the varying opcode-`20` value remains redacted.
+Login server opcode `22` replaces its 34,447-byte observed-opaque pin with one
+variable shape: `u32` entry count plus repeated trailing-zero counted UTF-16
+text and `u16` index. The 299-entry stream-`83` packet and 152-entry
+stream-`116` packet both exact-consume in isolated native validation; live is
+byte-identical to the latter. All three index sets are complete and match the
+later client opcode-`6` sets. Text and higher-level roles remain redacted.
 Opcode `94` is no longer an
 opaque width pin: its generated handler reads `bool + i32 + i32`, while opcode
 `60` reads one signed `i32` and opcode `379` selects between a one-byte short
@@ -134,12 +271,13 @@ Opcodes `60`, `94`, and `379` contribute 14 exact reference frames: ten in
 stream `126` and four across `111.pcapng` streams `92`/`114`.
 Targeted native validation also consumes all 23 opcode-`148` frames: 22 through
 the semantic shape and the one legacy body through its exact opaque pin.
-The client opcode-`43` shape is no longer a stream-`92` switch keyed by its
-leading byte. Two unambiguous candidates now describe the real cross-corpus
-boundary: `u8 + u32 + counted UTF-16 + zero + six bytes`, or the 12-byte
-compact `u8 + nine bytes` envelope. All 45 client packets validate natively,
-including sequences `13..35` from stream `126`; the existing 19-byte server
-shape covers the other three opcode-`43` packets.
+The client opcode-`43` shape is a field-transfer request, not a stream-`92`
+switch keyed by its leading byte. Two unambiguous candidates describe the
+cross-corpus boundary: a portal form with active `u8` field epoch, signed map
+sentinel `-1`, counted UTF-16 portal name, signed position, and zero `u16`; or a
+12-byte death-respawn form with the epoch plus nine zeros. All 45 client
+packets validate natively and correlate to the next opcode-`157` snapshot. The
+existing 19-byte server opcode-`43` shape remains a separate neutral family.
 Client opcode `114` adds one variable-width redacted shape: a neutral `u8`, a
 counted UTF-16 field with required zero terminator, and a trailing `u32`. It
 consumes all 44 stream-`126` packets at lengths `26`, `28`, and `32`; text and

@@ -23,6 +23,10 @@ from .gamestate import (
 from .gameplay import (
     MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     MAX_PLAYER_MOB_PROXIMITY_RADIUS,
+    AbilityPointAllocationResponsePolicy,
+    ClientRecoveryResponsePolicy,
+    InventoryMoveResponsePolicy,
+    ItemAcquisitionResponsePolicy,
     ItemPickupResponsePolicy,
     ItemUseResponsePolicy,
     MobHealthResponsePolicy,
@@ -32,13 +36,21 @@ from .gameplay import (
     MobMovementBroadcastScheduler,
     MobMovementPlanningContext,
     MobMovementRelativeDecisionPolicy,
+    NpcStateResponsePolicy,
     PlayerMobProximityPredicate,
+    SkillLevelChangeResponsePolicy,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
+    derive_ability_point_allocation_response_policy,
+    derive_client_recovery_response_policy,
+    derive_inventory_move_response_policy,
+    derive_item_acquisition_response_policy,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_health_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    derive_npc_state_response_policy,
+    derive_skill_level_change_response_policy,
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
@@ -61,18 +73,26 @@ from .http_api import (
 from .live_replay import (
     DEFAULT_PACKET_API_URL,
     inject_current_hp_live,
+    inject_item_pickup_live,
     inject_mob_temporary_stat_live,
     inject_skill_record_live,
     render_current_hp_live_replay,
+    render_item_pickup_live_replay,
     render_mob_temporary_stat_live_replay,
     render_skill_record_live_replay,
 )
 from .packets import (
     ChannelTransitionResponse,
     CharacterListEnvelope,
+    CharacterStatUpdate,
+    ClientAbilityPointAllocationRequest,
+    ClientOpcode298ItemAcquisitionRequest,
+    ClientNpcStateSubmission,
+    ClientRecoveryRequest,
     ClientAttackAction,
     FieldDropSpawn,
     HeartbeatProbe,
+    InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
     MobControllerChange,
@@ -80,6 +100,7 @@ from .packets import (
     MobMovementSubmission,
     PlayerMovementSubmission,
     PacketShapeError,
+    SkillLevelChangeRequest,
     VariableServerRecord,
     WorldHandoff,
     WorldSelection,
@@ -421,10 +442,25 @@ async def replay_connection(
     mob_movement_policy_trigger: str = "immediate",
     mob_movement_proximity_radius: int | None = None,
     mob_movement_policy_cooldown_seconds: float = 0.0,
+    mob_movement_policy_event_budget: int | None = None,
     mob_movement_evidence_transcript: Transcript | None = None,
     mob_movement_planning_context: MobMovementPlanningContext | None = None,
     item_pickup_response_policy: ItemPickupResponsePolicy | None = None,
     item_use_response_policy: ItemUseResponsePolicy | None = None,
+    client_recovery_response_policy: (
+        ClientRecoveryResponsePolicy | None
+    ) = None,
+    ability_point_allocation_response_policy: (
+        AbilityPointAllocationResponsePolicy | None
+    ) = None,
+    skill_level_change_response_policy: (
+        SkillLevelChangeResponsePolicy | None
+    ) = None,
+    item_acquisition_response_policy: (
+        ItemAcquisitionResponsePolicy | None
+    ) = None,
+    npc_state_response_policy: NpcStateResponsePolicy | None = None,
+    inventory_move_response_policy: InventoryMoveResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
     ) = None,
@@ -459,6 +495,41 @@ async def replay_connection(
     if item_use_response_policy is not None and hold_open_seconds <= 0:
         raise ValueError(
             "reactive item-use responses require a positive hold_open_seconds"
+        )
+    if client_recovery_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive client-recovery responses require a positive "
+            "hold_open_seconds"
+        )
+    if (
+        ability_point_allocation_response_policy is not None
+        and hold_open_seconds <= 0
+    ):
+        raise ValueError(
+            "reactive ability-point responses require a positive "
+            "hold_open_seconds"
+        )
+    if (
+        skill_level_change_response_policy is not None
+        and hold_open_seconds <= 0
+    ):
+        raise ValueError(
+            "reactive skill-level responses require a positive "
+            "hold_open_seconds"
+        )
+    if item_acquisition_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive item-acquisition responses require a positive "
+            "hold_open_seconds"
+        )
+    if npc_state_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive NPC-state responses require a positive hold_open_seconds"
+        )
+    if inventory_move_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive inventory-move responses require a positive "
+            "hold_open_seconds"
         )
     if item_pickup_response_policy is not None and hold_open_seconds <= 0:
         raise ValueError(
@@ -571,6 +642,26 @@ async def replay_connection(
         raise ValueError(
             "mob movement policy cooldown requires an event-driven trigger"
         )
+    if (
+        mob_movement_policy_event_budget is not None
+        and not (
+            1
+            <= mob_movement_policy_event_budget
+            <= MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS
+        )
+    ):
+        raise ValueError(
+            "mob movement policy event budget must be in "
+            f"1..{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS}"
+        )
+    if (
+        mob_movement_policy_event_budget is not None
+        and mob_movement_policy_trigger == "immediate"
+    ):
+        raise ValueError(
+            "mob movement policy event budget requires an event-driven "
+            "trigger"
+        )
     player_proximity_predicate = (
         PlayerMobProximityPredicate(mob_movement_proximity_radius)
         if mob_movement_proximity_radius is not None
@@ -601,11 +692,48 @@ async def replay_connection(
             "client opcode 80 cannot use both captured and modeled replies"
         )
     if (
-        item_pickup_response_policy is not None
-        and 185 in (client_opcode_replies or {})
+        client_recovery_response_policy is not None
+        and 101 in (client_opcode_replies or {})
     ):
         raise ValueError(
-            "client opcode 185 cannot use both captured and modeled replies"
+            "client opcode 101 cannot use both captured and modeled replies"
+        )
+    if (
+        ability_point_allocation_response_policy is not None
+        and 100 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 100 cannot use both captured and modeled replies"
+        )
+    if (
+        skill_level_change_response_policy is not None
+        and 103 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 103 cannot use both captured and modeled replies"
+        )
+    if (
+        item_acquisition_response_policy is not None
+        and 298 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 298 cannot use both captured and modeled replies"
+        )
+    if (
+        inventory_move_response_policy is not None
+        and 79 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 79 cannot use both captured and modeled replies"
+        )
+    if (
+        item_pickup_response_policy is not None
+        and any(
+            opcode in (client_opcode_replies or {}) for opcode in (185, 222)
+        )
+    ):
+        raise ValueError(
+            "client opcode 185/222 cannot use both captured and modeled replies"
         )
     if mob_health_response_policy is not None and any(
         opcode in (client_opcode_replies or {}) for opcode in (50, 52)
@@ -745,6 +873,71 @@ async def replay_connection(
     )
     if item_use_metrics is not None and not isinstance(item_use_metrics, dict):
         raise TypeError("runtime item_use_responses telemetry must be a dictionary")
+    client_recovery_metrics = (
+        runtime_protocol.get("client_recovery_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if client_recovery_metrics is not None and not isinstance(
+        client_recovery_metrics, dict
+    ):
+        raise TypeError(
+            "runtime client_recovery_responses telemetry must be a dictionary"
+        )
+    ability_point_metrics = (
+        runtime_protocol.get("ability_point_allocation_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if ability_point_metrics is not None and not isinstance(
+        ability_point_metrics, dict
+    ):
+        raise TypeError(
+            "runtime ability_point_allocation_responses telemetry must be a "
+            "dictionary"
+        )
+    skill_level_metrics = (
+        runtime_protocol.get("skill_level_change_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if skill_level_metrics is not None and not isinstance(
+        skill_level_metrics, dict
+    ):
+        raise TypeError(
+            "runtime skill_level_change_responses telemetry must be a dictionary"
+        )
+    item_acquisition_metrics = (
+        runtime_protocol.get("item_acquisition_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if item_acquisition_metrics is not None and not isinstance(
+        item_acquisition_metrics, dict
+    ):
+        raise TypeError(
+            "runtime item_acquisition_responses telemetry must be a dictionary"
+        )
+    npc_state_metrics = (
+        runtime_protocol.get("npc_state_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if npc_state_metrics is not None and not isinstance(npc_state_metrics, dict):
+        raise TypeError(
+            "runtime npc_state_responses telemetry must be a dictionary"
+        )
+    inventory_move_metrics = (
+        runtime_protocol.get("inventory_move_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if inventory_move_metrics is not None and not isinstance(
+        inventory_move_metrics, dict
+    ):
+        raise TypeError(
+            "runtime inventory_move_responses telemetry must be a dictionary"
+        )
     item_pickup_metrics = (
         runtime_protocol.get("item_pickup_responses")
         if runtime_protocol is not None
@@ -804,6 +997,16 @@ async def replay_connection(
         movement_policy_trigger_metrics["cooldown_seconds"] = (
             mob_movement_policy_cooldown_seconds
         )
+        movement_policy_trigger_metrics["event_budget"] = (
+            mob_movement_policy_event_budget
+        )
+        movement_policy_trigger_metrics["event_budget_used"] = 0
+        movement_policy_trigger_metrics["event_budget_remaining"] = (
+            mob_movement_policy_event_budget
+        )
+        movement_policy_trigger_metrics.setdefault(
+            "events_rejected_by_budget", 0
+        )
         movement_policy_trigger_metrics.setdefault(
             "events_rejected_by_cooldown", 0
         )
@@ -829,6 +1032,12 @@ async def replay_connection(
             or world_heartbeat_interval_seconds is not None
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
+            or client_recovery_response_policy is not None
+            or ability_point_allocation_response_policy is not None
+            or skill_level_change_response_policy is not None
+            or item_acquisition_response_policy is not None
+            or npc_state_response_policy is not None
+            or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
             or player_proximity_predicate is not None
@@ -917,8 +1126,29 @@ async def replay_connection(
                 "mob_movement_policy_cooldown_seconds": (
                     mob_movement_policy_cooldown_seconds
                 ),
+                "mob_movement_policy_event_budget": (
+                    mob_movement_policy_event_budget
+                ),
                 "reactive_item_use_responses": (
                     item_use_response_policy is not None
+                ),
+                "reactive_client_recovery_responses": (
+                    client_recovery_response_policy is not None
+                ),
+                "reactive_ability_point_allocation_responses": (
+                    ability_point_allocation_response_policy is not None
+                ),
+                "reactive_skill_level_change_responses": (
+                    skill_level_change_response_policy is not None
+                ),
+                "reactive_item_acquisition_responses": (
+                    item_acquisition_response_policy is not None
+                ),
+                "reactive_npc_state_responses": (
+                    npc_state_response_policy is not None
+                ),
+                "reactive_inventory_move_responses": (
+                    inventory_move_response_policy is not None
                 ),
                 "reactive_mob_movement_acknowledgements": (
                     mob_movement_acknowledgement_policy is not None
@@ -1035,6 +1265,12 @@ async def replay_connection(
             or world_heartbeat_interval_seconds is not None
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
+            or client_recovery_response_policy is not None
+            or ability_point_allocation_response_policy is not None
+            or skill_level_change_response_policy is not None
+            or item_acquisition_response_policy is not None
+            or npc_state_response_policy is not None
+            or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
             or (
@@ -1076,6 +1312,44 @@ async def replay_connection(
                 if item_use_metrics is not None:
                     item_use_metrics["state"] = (
                         item_use_response_policy.safe_dict()
+                    )
+            if client_recovery_response_policy is not None:
+                client_recovery_response_policy.apply_server_packet(plaintext)
+                if client_recovery_metrics is not None:
+                    client_recovery_metrics["state"] = (
+                        client_recovery_response_policy.safe_dict()
+                    )
+            if ability_point_allocation_response_policy is not None:
+                ability_point_allocation_response_policy.apply_server_packet(
+                    plaintext
+                )
+                if ability_point_metrics is not None:
+                    ability_point_metrics["state"] = (
+                        ability_point_allocation_response_policy.safe_dict()
+                    )
+            if skill_level_change_response_policy is not None:
+                skill_level_change_response_policy.apply_server_packet(plaintext)
+                if skill_level_metrics is not None:
+                    skill_level_metrics["state"] = (
+                        skill_level_change_response_policy.safe_dict()
+                    )
+            if item_acquisition_response_policy is not None:
+                item_acquisition_response_policy.apply_server_packet(plaintext)
+                if item_acquisition_metrics is not None:
+                    item_acquisition_metrics["state"] = (
+                        item_acquisition_response_policy.safe_dict()
+                    )
+            if npc_state_response_policy is not None:
+                npc_state_response_policy.apply_server_packet(plaintext)
+                if npc_state_metrics is not None:
+                    npc_state_metrics["state"] = (
+                        npc_state_response_policy.safe_dict()
+                    )
+            if inventory_move_response_policy is not None:
+                inventory_move_response_policy.apply_server_packet(plaintext)
+                if inventory_move_metrics is not None:
+                    inventory_move_metrics["state"] = (
+                        inventory_move_response_policy.safe_dict()
                     )
             if mob_health_response_policy is not None:
                 mob_health_response_policy.apply_server_packet(plaintext)
@@ -1194,6 +1468,7 @@ async def replay_connection(
                 packets_sent_this_call += 1
 
         movement_policy_cooldown_until = 0.0
+        movement_policy_event_budget_used = 0
 
         def record_runtime_event(
             kind: str,
@@ -1216,9 +1491,19 @@ async def replay_connection(
 
         async def observe_movement_policy_trigger_event() -> None:
             nonlocal movement_policy_cooldown_until
+            nonlocal movement_policy_event_budget_used
             now = asyncio.get_running_loop().time()
             cooldown_remaining = max(
                 0.0, movement_policy_cooldown_until - now
+            )
+            event_budget_remaining = (
+                None
+                if mob_movement_policy_event_budget is None
+                else max(
+                    0,
+                    mob_movement_policy_event_budget
+                    - movement_policy_event_budget_used,
+                )
             )
             if movement_policy_trigger_metrics is not None:
                 movement_policy_trigger_metrics["awaiting_event"] = False
@@ -1238,6 +1523,7 @@ async def replay_connection(
                     "cooldown_remaining_seconds": round(
                         cooldown_remaining, 6
                     ),
+                    "event_budget_remaining": event_budget_remaining,
                 },
             )
             if not isinstance(
@@ -1260,6 +1546,31 @@ async def replay_connection(
                     "mob_movement_policy_trigger_ignored",
                     {
                         "reason": "decision_queue_complete",
+                        "cooldown_remaining_seconds": round(
+                            cooldown_remaining, 6
+                        ),
+                    },
+                )
+                return
+            if event_budget_remaining == 0:
+                if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["awaiting_event"] = False
+                    movement_policy_trigger_metrics[
+                        "last_event_outcome"
+                    ] = "rejected_by_event_budget"
+                    movement_policy_trigger_metrics[
+                        "events_rejected_by_budget"
+                    ] = int(
+                        movement_policy_trigger_metrics.get(
+                            "events_rejected_by_budget", 0
+                        )
+                    ) + 1
+                record_movement_policy_runtime_event(
+                    "mob_movement_policy_trigger_rejected",
+                    {
+                        "reason": "event_budget",
+                        "event_budget": mob_movement_policy_event_budget,
+                        "event_budget_remaining": 0,
                         "cooldown_remaining_seconds": round(
                             cooldown_remaining, 6
                         ),
@@ -1298,7 +1609,23 @@ async def replay_connection(
                 )
                 and not movement_schedule.complete
             ):
+                movement_policy_event_budget_used += 1
+                event_budget_remaining = (
+                    None
+                    if mob_movement_policy_event_budget is None
+                    else max(
+                        0,
+                        mob_movement_policy_event_budget
+                        - movement_policy_event_budget_used,
+                    )
+                )
                 if movement_policy_trigger_metrics is not None:
+                    movement_policy_trigger_metrics["event_budget_used"] = (
+                        movement_policy_event_budget_used
+                    )
+                    movement_policy_trigger_metrics[
+                        "event_budget_remaining"
+                    ] = event_budget_remaining
                     movement_policy_trigger_metrics[
                         "decisions_started"
                     ] = int(
@@ -1334,6 +1661,7 @@ async def replay_connection(
                     )
                     movement_policy_trigger_metrics["awaiting_event"] = (
                         movement_schedule.has_unplanned_decision
+                        and event_budget_remaining != 0
                     )
                     movement_policy_trigger_metrics[
                         "last_event_outcome"
@@ -1345,6 +1673,7 @@ async def replay_connection(
                         "cooldown_seconds": (
                             mob_movement_policy_cooldown_seconds
                         ),
+                        "event_budget_remaining": event_budget_remaining,
                     },
                 )
                 movement_policy_cooldown_until = (
@@ -1549,7 +1878,435 @@ async def replay_connection(
                     if qualifies:
                         await observe_movement_policy_trigger_event()
                 if (
-                    opcode == 185
+                    opcode == 100
+                    and ability_point_allocation_response_policy is not None
+                ):
+                    request = ClientAbilityPointAllocationRequest.parse(
+                        client_plaintext
+                    )
+                    if ability_point_metrics is not None:
+                        ability_point_metrics["requests_observed"] = (
+                            int(
+                                ability_point_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "ability_point_allocation_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "available_points": (
+                                ability_point_allocation_response_policy
+                                .ability_points
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = (
+                            ability_point_allocation_response_policy.respond(
+                                request
+                            )
+                        )
+                    except ValueError as error:
+                        if ability_point_metrics is not None:
+                            ability_point_metrics["requests_rejected"] = (
+                                int(
+                                    ability_point_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            ability_point_metrics["last_rejection"] = str(error)
+                            ability_point_metrics["state"] = (
+                                ability_point_allocation_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "ability_point_allocation_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if client_recovery_response_policy is not None:
+                            client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if ability_point_metrics is not None:
+                        ability_point_metrics["requests_served"] = (
+                            int(
+                                ability_point_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        ability_point_metrics["response_packets_sent"] = (
+                            int(
+                                ability_point_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        ability_point_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        ability_point_metrics["state"] = (
+                            ability_point_allocation_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "ability_point_allocation_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode == 103
+                    and skill_level_change_response_policy is not None
+                ):
+                    request = SkillLevelChangeRequest.parse(client_plaintext)
+                    if skill_level_metrics is not None:
+                        skill_level_metrics["requests_observed"] = (
+                            int(
+                                skill_level_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "skill_level_change_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "available_points": (
+                                skill_level_change_response_policy.skill_points
+                            ),
+                            "modeled_level_before": (
+                                skill_level_change_response_policy.skill_levels.get(
+                                    request.skill_id
+                                )
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = (
+                            skill_level_change_response_policy.respond(request)
+                        )
+                    except ValueError as error:
+                        if skill_level_metrics is not None:
+                            skill_level_metrics["requests_rejected"] = (
+                                int(
+                                    skill_level_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            skill_level_metrics["last_rejection"] = str(error)
+                            skill_level_metrics["state"] = (
+                                skill_level_change_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "skill_level_change_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(plaintext)
+                        if client_recovery_response_policy is not None:
+                            client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if ability_point_allocation_response_policy is not None:
+                            (
+                                ability_point_allocation_response_policy
+                                .apply_server_packet(plaintext)
+                            )
+                    if skill_level_metrics is not None:
+                        skill_level_metrics["requests_served"] = (
+                            int(
+                                skill_level_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        skill_level_metrics["response_packets_sent"] = (
+                            int(
+                                skill_level_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        skill_level_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        skill_level_metrics["state"] = (
+                            skill_level_change_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "skill_level_change_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if opcode == 217 and npc_state_response_policy is not None:
+                    request = ClientNpcStateSubmission.parse(client_plaintext)
+                    if npc_state_metrics is not None:
+                        npc_state_metrics["requests_observed"] = (
+                            int(npc_state_metrics.get("requests_observed", 0))
+                            + 1
+                        )
+                    record_runtime_event(
+                        "npc_state_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "active_npc": (
+                                request.object_id
+                                in npc_state_response_policy.active_npc_ids
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = npc_state_response_policy.respond(request)
+                    except ValueError as error:
+                        if npc_state_metrics is not None:
+                            npc_state_metrics["requests_rejected"] = (
+                                int(
+                                    npc_state_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            npc_state_metrics["last_rejection"] = str(error)
+                            npc_state_metrics["state"] = (
+                                npc_state_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "npc_state_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                    if npc_state_metrics is not None:
+                        npc_state_metrics["requests_served"] = (
+                            int(npc_state_metrics.get("requests_served", 0)) + 1
+                        )
+                        npc_state_metrics["response_packets_sent"] = (
+                            int(
+                                npc_state_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        npc_state_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        npc_state_metrics["state"] = (
+                            npc_state_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "npc_state_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode == 298
+                    and item_acquisition_response_policy is not None
+                ):
+                    request = ClientOpcode298ItemAcquisitionRequest.parse(
+                        client_plaintext
+                    )
+                    if item_acquisition_metrics is not None:
+                        item_acquisition_metrics["requests_observed"] = (
+                            int(
+                                item_acquisition_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "item_acquisition_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "item_template_present": any(
+                                item.item_id == request.item_id
+                                for item in (
+                                    item_acquisition_response_policy
+                                    .use_items.values()
+                                )
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = (
+                            item_acquisition_response_policy.respond(request)
+                        )
+                    except ValueError as error:
+                        if item_acquisition_metrics is not None:
+                            item_acquisition_metrics["requests_rejected"] = (
+                                int(
+                                    item_acquisition_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            item_acquisition_metrics["last_rejection"] = str(
+                                error
+                            )
+                            item_acquisition_metrics["state"] = (
+                                item_acquisition_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "item_acquisition_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if item_pickup_response_policy is not None:
+                            item_pickup_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if item_acquisition_metrics is not None:
+                        item_acquisition_metrics["requests_served"] = (
+                            int(
+                                item_acquisition_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        item_acquisition_metrics["response_packets_sent"] = (
+                            int(
+                                item_acquisition_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        item_acquisition_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        item_acquisition_metrics["state"] = (
+                            item_acquisition_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "item_acquisition_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if opcode == 79 and inventory_move_response_policy is not None:
+                    request = InventoryMoveRequest.parse(client_plaintext)
+                    if inventory_move_metrics is not None:
+                        inventory_move_metrics["requests_observed"] = (
+                            int(
+                                inventory_move_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "inventory_move_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "source_modeled": (
+                                request.source_slot
+                                in inventory_move_response_policy.equip_items
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = inventory_move_response_policy.respond(
+                            request
+                        )
+                    except ValueError as error:
+                        if inventory_move_metrics is not None:
+                            inventory_move_metrics["requests_rejected"] = (
+                                int(
+                                    inventory_move_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            inventory_move_metrics["last_rejection"] = str(error)
+                            inventory_move_metrics["state"] = (
+                                inventory_move_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "inventory_move_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_pickup_response_policy is not None:
+                            item_pickup_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                    if inventory_move_metrics is not None:
+                        inventory_move_metrics["requests_served"] = (
+                            int(
+                                inventory_move_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        inventory_move_metrics["response_packets_sent"] = (
+                            int(
+                                inventory_move_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        inventory_move_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        inventory_move_metrics["state"] = (
+                            inventory_move_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "inventory_move_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode in {185, 222}
                     and item_pickup_response_policy is not None
                 ):
                     request = ItemPickupRequest.parse(client_plaintext)
@@ -1603,6 +2360,19 @@ async def replay_connection(
                         if item_use_response_policy is not None:
                             item_use_response_policy.apply_server_packet(
                                 plaintext
+                            )
+                        if client_recovery_response_policy is not None:
+                            client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if inventory_move_response_policy is not None:
+                            inventory_move_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if ability_point_allocation_response_policy is not None:
+                            (
+                                ability_point_allocation_response_policy
+                                .apply_server_packet(plaintext)
                             )
                     if item_pickup_metrics is not None:
                         item_pickup_metrics["requests_served"] = (
@@ -1672,6 +2442,19 @@ async def replay_connection(
                             item_pickup_response_policy.apply_server_packet(
                                 plaintext
                             )
+                        if client_recovery_response_policy is not None:
+                            client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if inventory_move_response_policy is not None:
+                            inventory_move_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if ability_point_allocation_response_policy is not None:
+                            (
+                                ability_point_allocation_response_policy
+                                .apply_server_packet(plaintext)
+                            )
                     if item_use_metrics is not None:
                         item_use_metrics["requests_served"] = (
                             int(item_use_metrics.get("requests_served", 0)) + 1
@@ -1692,6 +2475,65 @@ async def replay_connection(
                         )
                     record_runtime_event(
                         "item_use_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode == 101
+                    and client_recovery_response_policy is not None
+                ):
+                    request = ClientRecoveryRequest.parse(client_plaintext)
+                    if client_recovery_metrics is not None:
+                        client_recovery_metrics["requests_observed"] = (
+                            int(
+                                client_recovery_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "client_recovery_request_observed",
+                        request.safe_dict(),
+                    )
+                    response_plan = client_recovery_response_policy.respond(
+                        request
+                    )
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if ability_point_allocation_response_policy is not None:
+                            (
+                                ability_point_allocation_response_policy
+                                .apply_server_packet(plaintext)
+                            )
+                    if client_recovery_metrics is not None:
+                        client_recovery_metrics["requests_served"] = (
+                            int(
+                                client_recovery_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        client_recovery_metrics["response_packets_sent"] = (
+                            int(
+                                client_recovery_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        client_recovery_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        client_recovery_metrics["state"] = (
+                            client_recovery_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "client_recovery_response_completed",
                         response_plan.safe_dict(),
                     )
                 if (
@@ -1801,8 +2643,9 @@ async def replay_connection(
                         "sequence": movement.sequence,
                         "target_known": template_id is not None,
                         "template_id": template_id,
-                        "control_byte_0_nonzero": bool(
-                            movement_path.opaque_control[0]
+                        **movement_path.safe_control_dict(),
+                        "option_flags_nonzero": bool(
+                            movement_path.option_flags
                         ),
                         "command_count": len(movement_path.commands),
                         "reference_position": [
@@ -2474,6 +3317,101 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
         entries = list(record.entries)
         entries[key_code] = replace(original, value=skill_id)
         return replace(record, entries=tuple(entries)).to_bytes()
+    if transform.startswith("keyboard-selector-zero="):
+        key_code_text = transform.removeprefix(
+            "keyboard-selector-zero="
+        )
+        try:
+            key_code = int(key_code_text, 0)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero key code must be an integer"
+            ) from error
+        if not 0 <= key_code < VariableServerRecord.KEYBOARD_BINDING_COUNT:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero key code must be between 0 and 88"
+            )
+        try:
+            record = VariableServerRecord.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero transform requires an expanded "
+                "opcode-385 keyboard-binding packet"
+            ) from error
+        if record.opcode != 385 or record.variant:
+            raise argparse.ArgumentTypeError(
+                "keyboard-selector-zero transform requires an expanded "
+                "opcode-385 keyboard-binding packet"
+            )
+        original = record.entries[key_code]
+        if original.selector != VariableServerRecord.SKILL_BINDING_SELECTOR:
+            raise argparse.ArgumentTypeError(
+                f"keyboard key code {key_code} is not a captured skill binding"
+            )
+        entries = list(record.entries)
+        entries[key_code] = replace(original, selector=0)
+        return replace(record, entries=tuple(entries)).to_bytes()
+    if transform.startswith("character-stat="):
+        fields = transform.removeprefix("character-stat=").split(":")
+        if len(fields) != 2:
+            raise argparse.ArgumentTypeError(
+                "character-stat transform must use FIELD:VALUE"
+            )
+        field_name, value_text = fields
+        try:
+            value = int(value_text, 0)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "character-stat value must be an integer"
+            ) from error
+        try:
+            record = CharacterStatUpdate.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "character-stat transform requires a validated opcode-41 "
+                "character-stat packet"
+            ) from error
+        if set(record.values) != {field_name}:
+            raise argparse.ArgumentTypeError(
+                "character-stat transform field must be the packet's only "
+                "captured stat field"
+            )
+        try:
+            return replace(record, **{field_name: value}).to_bytes()
+        except (PacketShapeError, TypeError) as error:
+            raise argparse.ArgumentTypeError(
+                "character-stat value does not fit the captured stat field"
+            ) from error
+    if transform.startswith("field-drop-position="):
+        fields = transform.removeprefix("field-drop-position=").split(":")
+        if len(fields) not in {2, 4}:
+            raise argparse.ArgumentTypeError(
+                "field-drop-position transform must use X:Y or "
+                "X:Y:SOURCE_X:SOURCE_Y"
+            )
+        position_x, position_y = parse_i16_position(":".join(fields[:2]))
+        try:
+            drop = FieldDropSpawn.parse(payload)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                "field-drop-position transform requires a validated "
+                "opcode-311 field-drop packet"
+            ) from error
+        source_x = drop.source_x
+        source_y = drop.source_y
+        if len(fields) == 4:
+            if not drop.animated:
+                raise argparse.ArgumentTypeError(
+                    "field-drop source position requires an animated packet"
+                )
+            source_x, source_y = parse_i16_position(":".join(fields[2:]))
+        return replace(
+            drop,
+            position_x=position_x,
+            position_y=position_y,
+            source_x=source_x,
+            source_y=source_y,
+        ).to_bytes()
     if transform.startswith("mob-spawn="):
         fields = transform.removeprefix("mob-spawn=").split(":")
         if len(fields) not in {2, 4}:
@@ -2536,7 +3474,9 @@ def parse_pcap_plaintext_reference(specification: str) -> bytes:
         return replace(controller, spawn=rewritten_spawn).to_bytes()
     raise argparse.ArgumentTypeError(
         "unknown pcap frame transform; use opcode=N, handoff=IPV4:PORT, "
-        "character-list, keyboard-skill=KEY_CODE:SKILL_ID, or "
+        "character-list, keyboard-skill=KEY_CODE:SKILL_ID, "
+        "keyboard-selector-zero=KEY_CODE, character-stat=FIELD:VALUE, "
+        "field-drop-position=X:Y[:SOURCE_X:SOURCE_Y], or "
         "mob-spawn=X:Y[:FOOTHOLD:ORIGIN]"
     )
 
@@ -3124,10 +4064,62 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reactive-client-recovery-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer validated opcode-101 natural HP/MP "
+            "recovery requests with a typed, maximum-capped opcode-41 stat "
+            "update; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-inventory-move-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer modeled opcode-79 Equip moves with the "
+            "captured opcode-39 move shape; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-ability-point-allocation-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer modeled opcode-100 base-stat allocations "
+            "with the correlated opcode-41 update; requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-skill-level-change-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer modeled opcode-103 skill-level changes "
+            "with the correlated opcode-41/opcode-46 updates; requires "
+            "--keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-item-acquisition-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer the captured permanent opcode-298 Use "
+            "requests with a typed opcode-39 lowest-free-slot addition; "
+            "requires --keep-world-open"
+        ),
+    )
+    replay.add_argument(
+        "--reactive-npc-state-responses",
+        action="store_true",
+        help=(
+            "during hold-open, echo validated opcode-217 NPC state submissions "
+            "for active field NPCs as typed opcode-303 updates; requires "
+            "--keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--reactive-item-pickup-responses",
         action="store_true",
         help=(
-            "during hold-open, validate opcode-185 requests against active "
+            "during hold-open, validate opcode-185/222 requests against active "
             "drops and captured item-effect evidence, then emit typed "
             "opcode-39/opcode-49/opcode-312 responses; requires "
             "--keep-world-open"
@@ -3275,6 +4267,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "reject otherwise qualifying movement-policy events for up to "
             "3600 seconds after a decision completes"
+        ),
+    )
+    replay.add_argument(
+        "--mob-movement-policy-event-budget",
+        type=int,
+        metavar="EVENTS",
+        help=(
+            "accept at most EVENTS qualifying event-driven movement-policy "
+            "triggers, independently of the cooldown; EVENTS must be in "
+            f"1..{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS}"
         ),
     )
     replay.add_argument(
@@ -3520,6 +4522,64 @@ def build_parser() -> argparse.ArgumentParser:
         "--verify-timeout-seconds", type=float, default=5.0
     )
     live_skill_record_parser.add_argument("--json", action="store_true")
+
+    live_item_pickup_parser = subparsers.add_parser(
+        "inject-item-pickup",
+        help=(
+            "retarget one capture-admitted item-drop pair to the latest "
+            "same-field movement-command position, send physical pickup input, "
+            "serve the authentic request, and verify the completed gameplay fold"
+        ),
+    )
+    live_item_pickup_parser.add_argument(
+        "--transcript", required=True, type=Path
+    )
+    live_item_pickup_parser.add_argument(
+        "--evidence-pcap", required=True, type=Path
+    )
+    live_item_pickup_parser.add_argument(
+        "--evidence-tcp-stream", type=int, default=92
+    )
+    live_item_pickup_parser.add_argument(
+        "--item-id", type=int, default=4_000_004
+    )
+    live_item_pickup_parser.add_argument(
+        "--admission-index",
+        type=int,
+        default=1,
+        help="zero-based admitted chain index for the selected item",
+    )
+    live_item_pickup_parser.add_argument("--pickup-key", default="z")
+    live_item_pickup_parser.add_argument(
+        "--pickup-key-hold-ms", type=int, default=100
+    )
+    live_item_pickup_parser.add_argument(
+        "--wayland-display",
+        required=True,
+        help="nested compositor socket name, for example wayland-3",
+    )
+    live_item_pickup_parser.add_argument(
+        "--wayland-runtime-directory",
+        type=Path,
+        default=Path(f"/run/user/{os.getuid()}"),
+    )
+    live_item_pickup_parser.add_argument(
+        "--pickup-input-delay-seconds",
+        type=float,
+        help="override the capture-derived spawn-to-input delay",
+    )
+    live_item_pickup_parser.add_argument(
+        "--http-api-url",
+        default=DEFAULT_PACKET_API_URL,
+        help="loopback POST /api/v1/server-packets endpoint",
+    )
+    live_item_pickup_parser.add_argument(
+        "--api-timeout-seconds", type=float, default=5.0
+    )
+    live_item_pickup_parser.add_argument(
+        "--verify-timeout-seconds", type=float, default=10.0
+    )
+    live_item_pickup_parser.add_argument("--json", action="store_true")
 
     live_mob_stat_parser = subparsers.add_parser(
         "inject-mob-temporary-stat",
@@ -3930,6 +4990,117 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "last_response": None,
                 "last_rejection": None,
             }
+        client_recovery_response_policy = None
+        if arguments.reactive_client_recovery_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-client-recovery-responses requires "
+                    "--keep-world-open"
+                )
+            client_recovery_response_policy = (
+                derive_client_recovery_response_policy(transcript)
+            )
+            runtime_protocol["client_recovery_responses"] = {
+                **client_recovery_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+            }
+        inventory_move_response_policy = None
+        ability_point_allocation_response_policy = None
+        if arguments.reactive_ability_point_allocation_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-ability-point-allocation-responses requires "
+                    "--keep-world-open"
+                )
+            ability_point_allocation_response_policy = (
+                derive_ability_point_allocation_response_policy(transcript)
+            )
+            runtime_protocol["ability_point_allocation_responses"] = {
+                **ability_point_allocation_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
+        skill_level_change_response_policy = None
+        if arguments.reactive_skill_level_change_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-skill-level-change-responses requires "
+                    "--keep-world-open"
+                )
+            skill_level_change_response_policy = (
+                derive_skill_level_change_response_policy(transcript)
+            )
+            runtime_protocol["skill_level_change_responses"] = {
+                **skill_level_change_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
+        item_acquisition_response_policy = None
+        if arguments.reactive_item_acquisition_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-item-acquisition-responses requires "
+                    "--keep-world-open"
+                )
+            item_acquisition_response_policy = (
+                derive_item_acquisition_response_policy(transcript)
+            )
+            runtime_protocol["item_acquisition_responses"] = {
+                **item_acquisition_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
+        npc_state_response_policy = None
+        if arguments.reactive_npc_state_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-npc-state-responses requires --keep-world-open"
+                )
+            npc_state_response_policy = derive_npc_state_response_policy(
+                transcript
+            )
+            runtime_protocol["npc_state_responses"] = {
+                **npc_state_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
+        if arguments.reactive_inventory_move_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-inventory-move-responses requires "
+                    "--keep-world-open"
+                )
+            inventory_move_response_policy = (
+                derive_inventory_move_response_policy(transcript)
+            )
+            runtime_protocol["inventory_move_responses"] = {
+                **inventory_move_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
         if (
             arguments.item_pickup_evidence_transcript is not None
             or arguments.item_pickup_evidence_tcp_stream is not None
@@ -4245,11 +5416,11 @@ async def async_main(arguments: argparse.Namespace) -> None:
             )
         if (
             item_pickup_response_policy is not None
-            and 185 in client_opcode_replies
+            and any(opcode in client_opcode_replies for opcode in (185, 222))
         ):
             raise ValueError(
                 "--reactive-item-pickup-responses conflicts with a captured "
-                "client opcode 185 reply"
+                "client opcode 185/222 reply"
             )
         if mob_health_response_policy is not None and any(
             opcode in client_opcode_replies for opcode in (50, 52)
@@ -4305,6 +5476,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         )
         mob_movement_policy_cooldown_seconds = (
             arguments.mob_movement_policy_cooldown_seconds
+        )
+        mob_movement_policy_event_budget = (
+            arguments.mob_movement_policy_event_budget
         )
         if (
             mob_movement_follow_up_targets
@@ -4376,6 +5550,26 @@ async def async_main(arguments: argparse.Namespace) -> None:
         ):
             raise ValueError(
                 "--mob-movement-policy-cooldown-seconds requires an "
+                "event-driven --mob-movement-policy-trigger"
+            )
+        if (
+            mob_movement_policy_event_budget is not None
+            and not (
+                1
+                <= mob_movement_policy_event_budget
+                <= MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS
+            )
+        ):
+            raise ValueError(
+                "--mob-movement-policy-event-budget must be in "
+                f"1..{MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS}"
+            )
+        if (
+            mob_movement_policy_event_budget is not None
+            and mob_movement_policy_trigger == "immediate"
+        ):
+            raise ValueError(
+                "--mob-movement-policy-event-budget requires an "
                 "event-driven --mob-movement-policy-trigger"
             )
         if (
@@ -4569,6 +5763,12 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "cooldown_seconds": (
                     mob_movement_policy_cooldown_seconds
                 ),
+                "event_budget": mob_movement_policy_event_budget,
+                "event_budget_used": 0,
+                "event_budget_remaining": (
+                    mob_movement_policy_event_budget
+                ),
+                "events_rejected_by_budget": 0,
                 "events_rejected_by_cooldown": 0,
                 "last_event_outcome": None,
                 "last_cooldown_remaining_seconds": 0.0,
@@ -4668,6 +5868,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             mob_movement_policy_cooldown_seconds=(
                 mob_movement_policy_cooldown_seconds
             ),
+            mob_movement_policy_event_budget=(
+                mob_movement_policy_event_budget
+            ),
             mob_movement_evidence_transcript=(
                 movement_evidence_transcript
             ),
@@ -4676,6 +5879,20 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             item_pickup_response_policy=item_pickup_response_policy,
             item_use_response_policy=item_use_response_policy,
+            client_recovery_response_policy=(
+                client_recovery_response_policy
+            ),
+            ability_point_allocation_response_policy=(
+                ability_point_allocation_response_policy
+            ),
+            skill_level_change_response_policy=(
+                skill_level_change_response_policy
+            ),
+            item_acquisition_response_policy=(
+                item_acquisition_response_policy
+            ),
+            npc_state_response_policy=npc_state_response_policy,
+            inventory_move_response_policy=inventory_move_response_policy,
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
             ),
@@ -4722,6 +5939,24 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "reactive_item_use_responses": (
                 arguments.reactive_item_use_responses
             ),
+            "reactive_client_recovery_responses": (
+                arguments.reactive_client_recovery_responses
+            ),
+            "reactive_ability_point_allocation_responses": (
+                arguments.reactive_ability_point_allocation_responses
+            ),
+            "reactive_skill_level_change_responses": (
+                arguments.reactive_skill_level_change_responses
+            ),
+            "reactive_item_acquisition_responses": (
+                arguments.reactive_item_acquisition_responses
+            ),
+            "reactive_npc_state_responses": (
+                arguments.reactive_npc_state_responses
+            ),
+            "reactive_inventory_move_responses": (
+                arguments.reactive_inventory_move_responses
+            ),
             "reactive_item_pickup_responses": (
                 arguments.reactive_item_pickup_responses
             ),
@@ -4758,6 +5993,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "mob_movement_policy_cooldown_seconds": (
                 mob_movement_policy_cooldown_seconds
+            ),
+            "mob_movement_policy_event_budget": (
+                mob_movement_policy_event_budget
             ),
             "mob_movement_step_delay_seconds": (
                 arguments.mob_movement_step_delay_seconds
@@ -4856,6 +6094,36 @@ def main() -> None:
             )
         else:
             print(render_skill_record_live_replay(result))
+        return
+    if arguments.command == "inject-item-pickup":
+        result = inject_item_pickup_live(
+            arguments.transcript,
+            arguments.evidence_pcap,
+            evidence_tcp_stream=arguments.evidence_tcp_stream,
+            item_id=arguments.item_id,
+            admission_index=arguments.admission_index,
+            pickup_key=arguments.pickup_key,
+            pickup_key_hold_ms=arguments.pickup_key_hold_ms,
+            wayland_display=arguments.wayland_display,
+            wayland_runtime_directory=arguments.wayland_runtime_directory,
+            pickup_input_delay_seconds=(
+                arguments.pickup_input_delay_seconds
+            ),
+            api_url=arguments.http_api_url,
+            api_timeout_seconds=arguments.api_timeout_seconds,
+            verify_timeout_seconds=arguments.verify_timeout_seconds,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    result.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_item_pickup_live_replay(result))
         return
     if arguments.command == "inject-mob-temporary-stat":
         result = inject_mob_temporary_stat_live(

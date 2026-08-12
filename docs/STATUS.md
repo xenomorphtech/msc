@@ -1,4 +1,4 @@
-# Status as of 2026-08-10
+# Status as of 2026-08-12
 
 ## Working
 
@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 219 tests.
+- The tracked custom-server suite currently passes all 320 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -49,14 +49,15 @@
   server and 28-byte client transport preludes before the ordinary Maple
   greeting, then decrypts 71,100 frames. The fold now recognizes its
   marker-`26` level-1 character/inventory snapshot, 36 total field epochs, 436
-  drop spawns, and all 197 pickup requests with known drops and matching
-  epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
-  bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,661 full, 44,400 partial, 39 unknown-but-lossless, and zero invalid
-  packet observations. Stream `92` now reports 13,417 full, 21,788 partial,
-  2 unknown, and zero invalid; stream `114` reports 54/22/0/0. Seven
-  long-corpus state-correlation warnings remain: six pickup-effect mismatches
-  plus one aggregate warning for six one-HP combat prediction differences.
+  drop spawns, and all 203 pickup requests with known drops and matching
+  epochs. NPC-state movement paths and opcode-`158` mode-`0` keymap changes are
+  fully typed. Strict decoding now
+  succeeds across all 71,100 frames:
+  56,717 full, 14,383 partial, zero unknown, and zero invalid
+  packet observations. Stream `92` now reports 27,534 full, 7,673 partial,
+  zero unknown, and zero invalid; stream `114` reports 58/18/0/0. One
+  long-corpus state-correlation warning remains: the aggregate warning for six
+  one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
   `379` are separated into neutral, capture-bounded records. All 181 reference
   packets consume and round-trip exactly; typed branches add 81 full
@@ -196,11 +197,12 @@
   `92`, `114`, and `126` before the fixed-width client records below. The
   current game-menu attempt emitted no opcode `241`, so live terminal replay
   remains unclaimed.
-- Client opcodes `100`, `307`, `308`, and `311` now consume and round-trip at
-  exact packet widths `26`, `14`, `74`, and `22`. Streams `92`/`126` contain
+- Client opcodes `100`, `307`, `308`, and `311` first gained exact
+  consume-and-round-trip boundaries at packet widths `26`, `14`, `74`, and
+  `22`. Streams `92`/`126` contain
   `1/1`, `1/1`, `2/11`, and `2/6`; opcode `308` repeats near 300 seconds and
-  opcode `311` near 600 seconds after its first bootstrap-skewed gap. Bodies
-  remain redacted and partial. Three direct-Wayland menu confirmations in the
+  opcode `311` near 600 seconds after its first bootstrap-skewed gap. Three
+  direct-Wayland menu confirmations in the
   local Wine client independently emitted three 41-byte opcode-`310` records,
   not opcode `241`, and caused no phase transition. The safe fold reports only
   opcode/body-size counts and periodic intervals. Coverage is now
@@ -208,24 +210,186 @@
   transcript has zero unknown packets; after nine opcode-`308` gaps near 300
   seconds, one 592.004-second gap preceded a later unmodeled socket timeout.
   A fresh browser-free local-Wine launch traversed world/channel/character
-  selection by direct nested-Wayland input and re-entered map `101000000`.
-  Its new transcript is warning-free at `60/43/0/0`, runtime HTTP status shows
-  one active world connection, and the programmatic audio mute remains active.
-- Client/server opcode `43` now uses two redacted client envelopes and one
-  fixed server envelope instead of a sequence-keyed stream-specific switch.
-  All 45 client and three server packets across streams `92` and `126`
-  round-trip exactly as partial observations; sequence, variant, text length,
-  message type, and opaque-byte counts are safe, while identifiers, text, and
-  bodies remain omitted. An exact server packet live replay left core state
-  unchanged, advanced matched heartbeats `173 -> 176`, retained one active
-  connection with zero failures, and produced no client opcode-`43` response.
+  selection by direct nested-Wayland input and re-entered map `101000000`. At
+  the post-entry sample, transcript
+  `positioned_effect_actions_live_20260811/world/1786445521564813241_replay_12857.jsonl`
+  is warning-free at `62/41/0/0`, remains `active` at HP `50/222`, and matches
+  all 10 heartbeat probes with none pending. Runtime HTTP status shows one
+  active world connection, injection ready, and zero injection failures while
+  the typed initial snapshot, fixed/variable records, and NPC spawns are
+  generated. The programmatic audio mute remains active.
+- Periodic client opcodes `308` and `311` are no longer opaque bodies. All 11
+  stream-`126` and 13 latest-live opcode-`308` samples share two redacted
+  doubles, two redacted `u64`s, a `u32` copied exactly into two doubles, and
+  fixed controls `50/1/.../1/0`; the mirror holds in all 24 records. All six
+  reference and seven live opcode-`311` samples are exactly
+  `zero u64 + redacted u32 + zero u64`. The reference reports mirror values
+  `59/60` with variant `0`; live independently exercises `3/56/59/60` and
+  variants `0/1`. Purpose remains neutral and timing remains descriptive. The
+  fold now separates these typed aggregates under `client_periodic_records`
+  from the other client-neutral records, and isolated native validation consumes
+  all 17 reference packets. Together with both exact opcode-`307` records, all
+  19 now report full structural coverage while their values remain neutral or
+  redacted; neighboring redacted-text opcode `310` remains partial.
+- Client opcode `100` is now a full counted ability-point allocation request:
+  `u32 client tick + u32 allocation count + repeated (u32 stat mask, u32
+  increment)`. Stream `92` requests LUK/INT `+1/+4`; 107.555 ms later opcode
+  `41` raises those fields by exactly `1/4` and reduces AP `5 -> 0`. Stream
+  `126` independently requests `+9/+29`; 406.248 ms later the response applies
+  exactly `9/29` and reduces AP `38 -> 0`. Both correlations match with none
+  pending or mismatched. The fold publishes safe per-stat request totals,
+  response deltas, matches, and latency; isolated native validation consumes
+  both requests. Both strict reference analyses retain zero unknowns; current
+  coverage is `13,420/21,787/0/0` for stream `92` and
+  `26,662/44,438/0/0` for stream `126`. At this checkpoint only client opcodes
+  `307/310` remained fixed opaque records.
+- `--reactive-ability-point-allocation-responses` now serves opcode `100` with
+  one typed opcode-`41` update derived from mutable base-stat/AP state. It
+  rejects insufficient AP and `u16` overflow, emits request flag `1`, requested
+  stat bits plus AP, and the captured zero tail, and conflicts with configured
+  opcode-`100` replies. A fresh live auto-allocation exposed a new exact
+  count-`2` variant, `LUK +0, INT +1`; zero entries are admitted only when the
+  request total is positive. The handler served `1/1` with zero rejection,
+  kept LUK `15`, raised INT `57 -> 58`, and spent AP `1 -> 0`. Its independent
+  fold is warning-free at `159/133/0/0`, matches in `0.213` ms with none
+  pending, remains active on map `101000000`, and had `54/54` heartbeat pairs
+  at the proof sample.
+- `--reactive-skill-level-change-responses` now serves the ordinary positive-SP
+  branch of client opcode `103`. Stream `126` proves eight complete
+  request/opcode-`46`/opcode-`293` lifecycles: seven requests decrement raw SP
+  `7 -> 0` one point at a time, while the earlier skill-`1000` request succeeds
+  with raw SP unchanged at zero and remains an explicitly unserved beginner
+  exception. Every update raises only the requested skill, uses flags `1:0`
+  and auxiliary `0`, and its trailing byte is twice the folded skill-level sum.
+  The handler emits opcode `41` then opcode `46`, bounds id/level/trailing wire
+  ranges, publishes mutable state and request metrics, and conflicts with a
+  captured opcode-`103` reply. A fresh live UI request for skill `1001`, after
+  raw-SP-`1` injection, was served `1/1` with no rejection: raw SP `1 -> 0`,
+  level `0 -> 1`, trailing `30`, and visible counter `5 -> 4`. The client
+  returned opcode `293` with control `346` and tail `0`; independent analysis is
+  warning-free, matches in `0.383`/`2.762` ms with neither leg pending, remains
+  active on map `101000000`, and had `53/53` heartbeat pairs at the proof sample.
+- The final fixed-opaque client bucket is now gone. Opcode `307` is typed from
+  two reference and 28 live samples as `redacted u32 + redacted u32 + zero
+  u32`; the middle value is zero 26 times and page-aligned in all four nonzero
+  samples, but its purpose remains neutral. Opcode `310` is typed from three
+  controlled records as counted 16-unit redacted UTF-16 plus
+  `zero u32 + zero u8`; its text and UI role remain neutral. Safe state exposes
+  only packet counts, opcode-`307` nonzero counts, and opcode-`310` code-unit
+  counts under `client_neutral_records`. Strict reference/live analysis stays
+  valid, and isolated native validation consumes all 33 applicable records.
+- Client opcode `79` is now a typed 13-byte inventory-move request containing
+  a client tick, inventory type, signed source/destination slots, and signed
+  quantity. Both stream-`126`
+  requests are equip moves to slot `-11`; the server answers with an exact
+  same-inventory/same-slot opcode-`39` move after 13 frames/1,040.241 ms and
+  one frame/402.275 ms, respectively. The fold correlates both FIFO with zero
+  pending requests,
+  emits `inventory_move_requested`/`inventory_move_confirmed`, and exposes safe
+  request/match/pending/latency counters through analysis JSON. Native shape
+  validation consumes both packets exactly. Independent v79 handler code
+  confirms the tick and quantity roles, so both requests now have full
+  semantic coverage.
+- `--reactive-inventory-move-responses` now serves that correlated family
+  during hold-open. It reconstructs signed Equip state from initial equipment
+  groups, admits only inventory type `1`, quantity `-1`, and a modeled
+  source slot, then emits one opcode-`39` move with capture constants
+  `update_flag=1` and `move_flag=2`. Occupied destinations swap in policy
+  state; configured opcode-`79` replies are mutually exclusive. A fresh live
+  UI control independently moved occupied slot `3` to occupied slot `1`,
+  served `1/1` requests with zero rejection, and swapped templates
+  `1302000`/`1002053`. Its transcript folds warning-free at `342/323/0/0`,
+  with one matched move, none pending, active map `101000000`, `67/67`
+  recovery replies, and `222/222` heartbeat pairs at the proof sample.
+- Client opcode `225` and server opcodes `322`/`320`/`323` are now modeled as
+  the field-reactor hit and spawn/update/removal lifecycle. All 15 requests
+  target active same-epoch reactors and FIFO-match 12 state updates plus three
+  removals in `388.463..1,102.698` ms; every update echoes the request stance.
+  The 82 lifecycle packets remain exact full observations, removals now delete
+  the active reactor, no request targets an inactive reactor, and safe output
+  uses redacted `reactor:N` aliases. Native validation consumes every request
+  exactly. Stream `126` reaches
+  `27,203/43,897/0/0`; streams `92` and `114` remain unchanged.
+- Client opcode `298` now models all 12 exact 76-byte item-acquisition
+  requests. Request kinds `1`/`2` correlate with Use/Cash additions, and every
+  request matches the next same-epoch server opcode-`39` addition by inventory
+  and item template in `388.332..711.700` ms. Nine Use quantities match
+  exactly, including one request split across two slots; two Cash quantities
+  differ and one Cash response has no quantity, so those are reported without
+  treating them as validation failures. Three nonzero serials stay redacted.
+  Python/native codecs consume all 12 exactly, safe analysis exposes bounded
+  request/match/quantity/pending/latency counters, and stream `126` advances to
+  `26,661/44,429/10/0` while streams `92` and `114` remain unchanged. Exact
+  structural consumption now promotes all 12 to full coverage without
+  assigning semantics to the remaining neutral fields.
+- `--reactive-item-acquisition-responses` now serves the five capture-proven
+  permanent, zero-serial Use tuples with one lowest-positive-free-slot
+  opcode-`39` addition. It rejects timed/Cash/unknown/duplicate requests and
+  reports current eligibility plus mutable inventory state. The encrypted
+  integration test covers the full handler. A clean official-client
+  response-side check visibly accepted item `2000079` quantity `100` at slot
+  `25`; its fold is valid and warning-free at `156/133/0/0`, with `60/60`
+  heartbeats and one active connection. The ordinary UI emitted no opcode
+  `298`, so live request triggering remains explicitly unproven.
+- Client opcode `276` now has exact compact and grouped envelopes. The sole
+  stream-`126` selector-`24` packet contains two redacted headers, five counted
+  groups, and 19 redacted u32 pairs in 210 bytes. The active local-Wine client
+  independently emitted a nine-byte selector-`17` form with three reserved
+  zero bytes; the transcript closes warning-free after the configured two-hour
+  hold with zero unknown packets, all `1,440/1,440` heartbeats matched, and a
+  final gameplay phase in map `101000000` at HP `50/222`. Safe telemetry
+  exposes only selectors, shapes, group/pair counts, and epoch. Python and
+  isolated native validation consume both forms exactly, and stream
+  `126` advances to `26,661/44,430/9/0` without assigning higher-level roles.
+  Both forms now report full structural coverage.
+- Client opcode `222` now extends the typed item-pickup chain as a compact
+  19-byte request. All six stream-`126` records carry the folded field epoch,
+  ordered client tick, signed player position, known active drop id, and zero
+  neutral validation token. Every request matches its opcode-`39` inventory or
+  opcode-`41` mesos effect, opcode-`49` result, and exact-id opcode-`312`
+  removal. Compact removals use captured reason `2` instead of opcode-`185`
+  reason `5`; the source of that distinction remains neutral. Python/native
+  codecs consume all six exactly, the fold validates 203/203 pickup chains and
+  removes all six pickup warnings, and stream `126` advances to
+  `26,661/44,436/3/0` with only the unrelated one-HP combat aggregate warning.
+- Client opcode `64` is now a full NPC-interaction request. Both stream-`126`
+  object ids resolve to active NPC templates (`2003`, `22000`), signed player
+  coordinates match the last same-epoch client opcode-`47` movement endpoints,
+  and the next server opcode `348` follows in `396.405..439.289` ms. An
+  independent physical Space/action-`54` control emitted three requests for
+  active object `3294`, template `1032005`, at `(677,-2695)`. Client opcode
+  `111` consumes its sole exact eight-byte record;
+  signed slot `3` matches the next opcode-`39` Cash remove/add after `486.349`
+  ms, while its u32 and action purpose remain neutral. Python/native validation
+  consumes all three records; reference NPC target/position/pending mismatch
+  counters are zero, and stream `126` reaches `26,664/44,436/0/0`.
+- Client opcode `115` now consumes both exact 22-byte stream-`92` inner-portal
+  requests. Each carries active field epoch `7`, a redacted four-code-unit
+  portal name, and signed source/destination positions. The two paths chain
+  within one pixel and are followed by same-epoch visibility changes without a
+  field transition. Python/native validation consumes both records exactly,
+  epoch mismatches are zero, and stream `92` reaches
+  `13,419/21,788/0/0` with no warnings. All three reference gameplay streams
+  now have zero unknown and zero invalid packets.
+- Client opcode `43` is now a field-transfer request. All 45 packets carry the
+  active field epoch and match the next opcode-`157` snapshot. Forty-two portal
+  requests use map sentinel `-1`, a redacted portal name, signed position, and
+  zero reserved word; three death-respawn requests use nine zeros and follow an
+  HP-zero stat update. All 45 now fold as full observations with
+  `28.125..940.035` ms transition latency. Coverage reaches
+  `13,505/21,702/0/0` for stream `92`, `27,188/43,912/0/0` for stream `126`,
+  and remains `54/22/0/0` for stream `114`. Server opcode `43` stays a separate
+  neutral fixed envelope; its earlier live replay remains a non-stalling
+  acceptance check, not the transfer-response boundary.
 - Client opcode `114` now consumes and round-trips all 44 long-corpus packets
   as a redacted `u8 + counted UTF-16 + zero + u32` envelope. Text lengths
   `8/9/11` explain the exact `26/28/32` packet widths. Safe state/events expose
   only control and text-length distributions plus an omitted-value count;
   indirect tutorial/UI timing is documented as a hypothesis, not a semantic
   name. The active idle custom-server client emits none, so no reverse-direction
-  replay is claimed.
+  replay is claimed. Exact counted-text consumption and independent validation
+  now promote all 44 records to full structural coverage without exposing or
+  semantically naming the redacted fields.
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly, every leave matches the
   current field epoch, and all opcode-`202`/`217` movement broadcasts now
@@ -260,10 +424,10 @@
   one exact `instructional_dialogue_requested` event, stays active on map
   `101000000`, and matches all 11 heartbeat pairs without assigning meanings
   to the three numeric values.
-- Server opcodes `320`/`322`/`323` are exact positioned-effect records with an
-  aliased primary key, typed i16 coordinates, and neutral controls. All 82
-  stream-`126` packets round-trip at full coverage, producing 36 field-scoped
-  aliases and 46 updates with no unknown opcode-`323` update. In the live A/B,
+- Server opcodes `320`/`322`/`323` are exact field-reactor state-update/spawn/
+  removal records with an aliased object id, typed template/state/coordinates,
+  and bounded control bytes. All 82 stream-`126` packets round-trip at full
+  coverage with no update/removal for an inactive reactor. In the live A/B,
   an exact off-screen opcode-`322` had no visible effect; changing only its
   coordinates to the folded player position produced a transient blue `10`
   over the sprite at 100 ms, gone by one second. The pair folded as one alias
@@ -317,8 +481,15 @@
   MP `158/285`, EXP `980`, and mesos `1472`.
 - The same corpus expands opcode-`39` to equipment adds, cash-tab stack adds,
   and operation-`2` equip moves. All 256 change sets and 232 modifications
-  decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
-  spawns also validate after preserving the facing byte values `0/1/2/4/5`.
+  decode and fold with zero unknown-slot mutations. Coverage is now
+  observation-specific: 221 empty/fixed-layout change sets across streams
+  `126`/`92`/`114` are full, while all 106 packets containing add-item metadata
+  remain partial. An independent raw-byte walk exact-consumes every promoted
+  packet. Stream `126` reaches `67,290/3,810/0/0`, stream `92` reaches
+  `33,573/1,634/0/0`, stream `114` reaches `61/15/0/0`, and the active
+  transcript remains valid at `1,538/1,496/0/0` with one full fixed-layout
+  change and one partial add. Its 78 opcode-`300` NPC spawns also validate
+  after preserving the facing byte values `0/1/2/4/5`.
 - The common fixed-width server family now has complete typed codecs for
   opcodes `11`, `24`, `45`, `56`, `58`, `59`, `60`, `71`, `72`, `74`, `76`,
   `89`, `96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
@@ -341,7 +512,50 @@
   traces and exact capture round trips close both former opaque tails without
   assigning security semantics. A controlled A/B/A further proves opcode-`385`
   tuple indices are keyboard key codes, selector `1` is a skill binding, and
-  index `29` is evdev Left Ctrl.
+  index `29` is evdev Left Ctrl. A fresh selector-only key-`71` A/B/A now proves
+  selector `0` is an empty binding: preserving value `2001002` while changing
+  only `1 -> 0` suppressed opcode `104`, and exact restoration restored it.
+  Selector counts moved `45 -> 46 -> 45`, binding counts `2 -> 1 -> 2`, and
+  the warning-free active fold kept 437/437 matched heartbeats. A later
+  one-entry Z-key control identifies selector `5` as an action binding and
+  value `50` as pickup: replacing key `44`'s `5/50` with selector `1`/skill
+  `2001002` produced authentic opcode `104`, while exact restoration plus an
+  admitted nearby drop produced opcode `185`. Folded action/skill counts moved
+  `6/2 -> 5/3 -> 6/2`, and pickup keys moved `(44,78) -> (78) -> (44,78)`.
+  Later physical-input controls identify action `53`/Left Alt as jump and
+  action `54`/Space as NPC interaction. An independent legacy-client enum
+  names selectors `4`/`6` as menu/face-expression and action `52` as attack;
+  its exact numeric layout matches the Protocol-300 snapshot. Focused `M`
+  opened the local `GAME MENU` without emitting an action packet. The fold,
+  JSON, text report, replay plan, and HTTP emitter telemetry now expose menu/
+  face maps plus pickup/sit/attack/jump/NPC-interaction key sets. Opcode-`158`
+  remains strict to the observed `0/1/2/5` types.
+- Client opcode `158` mode `0` is now the counted keymap-change request. Its
+  11 stream-`126` packets all carry one `u32 key, u8 type, i32 action` change;
+  types `0/1/2/5` are empty, skill, item, and action bindings. The updates use
+  evdev Left Ctrl/Left Shift/Home/keypad-zero and fold into the same keyboard
+  state established by server opcode `385`. Modes `1` and `2` retain their
+  existing count-zero field-load roles. Stream `126` advances by 11 full
+  observations with no new warning.
+- Physical X at key `45` now identifies selector-`5` action `51` as chair sit.
+  The client rendered Setup-slot-`1` item `3010370` and sent opcode `49` with
+  that exact u32 item id, followed 20,006 ms later by empty recovery opcode
+  `82`. A second X and a later Right attempt sent the exact opcode-`48`,
+  signed-`-1` stand request twice because the custom server has no chair
+  acknowledgement. Typed codecs/fold events correlate the known Setup item,
+  open sit intent, recovery, and stand attempts while explicitly leaving the
+  server response unmodeled; a field snapshot clears stale open intent. The
+  active live transcript is valid,
+  warning-free, and again has zero unknown packets.
+- Physical Left Alt at key `56` now identifies action `53` as jump without a
+  dedicated packet. Physical Space at key `57` identifies action `54` as NPC
+  interaction and emitted three full opcode-`64` requests for active NPC
+  template `1032005`. The current live fold resolves all three targets and
+  movement positions, with one expected warning because the custom replay does
+  not serve their opcode-`348` response. Keypad-zero is the captured action-
+  `52` attack binding. Its controlled input emitted no dedicated packet in the
+  empty-platform state; the adjacent blue `10` display and typed opcode-`101`
+  HP/MP recovery cadence were automatic, not caused by that input.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -375,6 +589,16 @@
   `0 -> 1 -> 0`, rendered and removed template `3210800`, and retained
   1,424/1,424 heartbeat pairs. No unique visual marker distinguished the set
   interval, so the bit's specific client-visible meaning remains neutral.
+- Server mob-entry opcode `279` and spawn-bearing controller opcode `281` no
+  longer retain opaque status/tail bytes. Pinned handler structure plus a live
+  primitive-reader trace prove four temporary-status mask words, an optional
+  `i16/i32/i16` tuple, common `i32/bool/bool` controls, and the final
+  appear-type/team/effect-item fields. All 1,884 spawn-bearing reference
+  packets now round-trip at full coverage. Stream `126` reaches
+  `68,527/2,573/0/0`, stream `92` reaches
+  `34,220/987/0/0`, and stream `114` remains `61/15/0/0`; a fresh active
+  transcript also accepted and fully folded injected common and extended
+  opcode-`279` packets with zero unknown observations.
 - `?keyboard-skill=KEY_CODE:SKILL_ID` now performs a typed single-value change
   to an existing opcode-`385` selector-`1` binding. On a fresh client, Left Ctrl
   under `2001005` emitted opcode-`52` variant `18` with two hits `[27,32]`;
@@ -393,6 +617,14 @@
   learned skills and current bindings, and emits `client_skill_use_submitted`.
   The frozen run remains active and valid with 38 matched heartbeats; its only
   warning is the final shutdown-raced pending probe.
+- A fresh response-free opcode-`104` control emitted the same modeled skill
+  request twice, 10,684.712 ms apart, with only two periodic opcode-`10`
+  heartbeat probes and no non-heartbeat server packet between. The second
+  request proves that an immediate gameplay response is unnecessary for repeat
+  dispatch; the warning-free active snapshot retained 275/275 matched
+  heartbeats and none pending. Analyzer events/state now expose this exact
+  interval and same-skill response-free-repeat relation without claiming the
+  skill's client-visible effect.
 - Server opcode `42` now has partial structural coverage rather than a raw hex
   dump. Static client inspection and a live parser trace establish four
   `uint32` mask words; the all-zero branch then reads two `uint8` values and
@@ -426,11 +658,14 @@
 - Client opcode `47` and server opcode `217` are now structurally exact
   life-movement relay/broadcast packets. Stream `126` validates 2,585 client
   submissions with 8,189 commands and 347 server broadcasts with 1,399
-  commands; 344 broadcasts name an already active player and three precede
-  player discovery. Stream `92` independently validates all four observed
-  client-tail variants and additional command tags. The fold emits redacted
-  events and command/tail distributions; opaque command bodies and field roles
-  keep the family at partial semantic coverage.
+  commands; all 347 broadcasts name an already active player. Stream `92`
+  independently validates all four observed client-tail variants and
+  additional command tags. Independent v83 movement parsers now name the
+  absolute, relative, equipment-change, chair, teleport-like, and jump-down
+  layouts. The tail variants are fixed tuples of neutral byte-sized state
+  values. Every captured packet uses a typed command tag and is now full
+  structural coverage; disputed higher-level roles stay neutral, while a
+  future use of opaque tags `18..22` remains partial.
 - Client opcode `13` is now decoded on world connections using the same neutral
   family as login. Stream `126` has 970 exact 11-byte type-`1` envelopes;
   stream `92` has 446 type-`1`, 104 length-prefixed type-`6`, and five
@@ -446,12 +681,23 @@
   control/value, and opaque-byte distributions; captured text is omitted from
   safe reports and HTTP status.
 - Client opcode `217`, separate from the same-numbered server life-movement
-  broadcast, now has exact compact and counted record-set boundaries. Stream
-  `126` contains 345 eight-byte compact packets and 592 record sets: format `0`
-  contributes 1,539 fixed 14-byte records, and format `2` contributes 114 fixed
-  11-byte records. All 937 packets round-trip. The fold exposes only redacted
-  structural distributions; absent mob-id and timely opcode-`219` correlations,
-  the family is neither attack-named nor replayed.
+  broadcast, is now modeled as an NPC state submission paired with server
+  opcode `303`. Stream `126` contains 345 compact and 592 movement-bearing
+  requests, all exact round-trips. The latter carry 1,596 absolute type-`0` and
+  57 relative type-`2` commands plus a nine-byte client-only path trailer. Exact
+  FIFO body matching correlates 930 request/update pairs (339 compact and 591
+  movement); each server packet changes only the opcode and removes that trailer.
+  The fold now tracks matches, latency, active NPCs, command distributions, and
+  final positions. The opt-in hold-open responder applies the same bounded
+  transformation only for active field NPCs; its encrypted integration test
+  verifies the emitted opcode `303` and independently folds the observed pair.
+  The absolute/relative command layouts match the pinned movement parser,
+  promoting all 937 requests and 1,279 updates to full coverage while
+  action/parameter intent remains neutral. Coverage is now
+  `53,785/17,315/0/0` for stream `126`; streams `92` and `114` remain
+  `26,266/8,941/0/0` and `57/19/0/0` at that checkpoint. Typed life movement
+  subsequently raises the current totals to `56,717/14,383/0/0`,
+  `27,534/7,673/0/0`, and `58/18/0/0` respectively.
 - Empty server opcode `426` and empty client opcode `309` are now a fully typed,
   temporally correlated notification/acknowledgement pair. Stream `126` has
   299 matches, stream `92` has 61, and stream `114` has one; all 361 server
@@ -459,12 +705,22 @@
   Pinned handler code independently constructs opcode `309` in response to
   `426`. The higher-level purpose remains neutral and distinct from heartbeat
   opcodes `10`/`23`.
-- Client opcode `101` now has an exact 11-byte, five-value numeric shape.
-  Stream `126` contributes 146 packets and stream `92` another 73; all consume
-  exactly and round-trip. Only two primary/secondary pairs occur in each
-  corpus, while the outer byte fields remain zero. The primary value is not
-  monotonic, so the fold exposes neutral distributions rather than retaining
-  the shape manifest's tentative `client_tick` name.
+- Client opcode `101` is now a full HP/MP recovery request: zero, type `20`,
+  zero u16, HP recovery u16, MP recovery u16, and final zero. Stream `126`
+  contains 33 HP-`10` and 113 MP-`3` requests; all `146/146` match same-field
+  opcode-`41` updates (`136` exact, `6` max-HP capped, `4` baseline-unverified).
+  Stream `92` contains seven HP-`10` and 66 MP-`5` requests, all `73/73` exact.
+  No reference request remains pending. Full coverage is now
+  `26,810/44,290/0/0` for stream `126` and `13,493/21,714/0/0` for stream `92`.
+  At the earlier no-response checkpoint, 178 HP-`10` and 274 MP-`5` requests
+  remain explicitly pending without adding a warning. The current opt-in
+  responder derives the validated replay's HP/MP bounds and emits one typed
+  opcode-`41` update per request with maximum-stat capping. A fresh local
+  login/world proof served `39/39` requests; its independent fold matched `38`
+  exact increments plus one capped HP `220 -> 222` update, left zero pending,
+  and remained active with `42/42` matched heartbeats. HTTP/runtime status
+  exposes only source evidence, counters, the last safe response, and mutable
+  identifier-free HP/MP state.
 - Client opcodes `50`/`52`/`54` now fold as one attack-action family. Stream
   `126` contributes 552/130/120 packets and stream `92` contributes 0/128/31.
   Extended `50`/`52` variants and every opcode-`54` action carry a mob object
@@ -476,7 +732,10 @@
   responses, clears 21 and 11 terminal hits at lifecycle boundaries, skips the
   seven zero-damage stream-`92` entries, and finishes with zero pending effects.
   Reports alias targets and redact client tokens while keeping control/value
-  and target prefix/tail roles neutral.
+  and target prefix/tail roles neutral. The 151 fixed-scalar opcode-`54`
+  records now have full structural coverage and pass independent exact
+  validation; opcodes `50`/`52` stay partial because their target prefix/tail
+  bytes remain opaque.
 - The official client's WZJS-v5 mob records provide `info/maxHP` for all 11
   templates attacked in the references. Opcode `293` is modeled as floor
   integer percentage, yielding an authoritative current-HP interval and a
@@ -573,16 +832,24 @@
   exposes the identifier-free plan and patch count.
 - Player movement is now distinct from mob movement: client opcode `182` and
   server opcode `202` parse and re-encode all 644 stream-`92` packets and all
-  4,281 commands. Fixed command tags `0/1/3/5` have payload lengths
-  `13/7/5/13`; typed absolute/relative fields are emitted while type `3`
-  remains a bounded five-byte semantic unknown. The game-state fold records
+  4,281 commands. Fixed command tags `0/1/3/4/5` have payload lengths
+  `13/7/9/9/13`; tags `3` and `4` expose their parser-proven position,
+  capture-neutral signed value, stance, and duration fields. Stream `126`
+  independently exact-consumes 2,435 packets and 11,147 commands with the
+  same layouts. The game-state fold records
   local path endpoint `(633,-2677)` in both reference streams, maintains
   identifier-safe remote-player positions, and emits local submission and
   remote broadcast events. Both streams remain valid with no warnings.
 - Server opcode `41` is now a typed masked stat delta. All 333 stream-`92`
   packets and 324 conditional values round-trip across observed INT, LUK, HP,
   MP, AP, EXP, and 64-bit mesos bits; combined masks preserve bit-order field
-  layout. Request-flag and zero-mask tail roles remain neutral. The fold ends
+  layout. Its pinned receive path proves the request flag and trailing flag as
+  booleans, with a conditional trailing u8 only when the latter is true; their
+  behavioral roles remain neutral. All 333 stream-`92`, 841 stream-`126`, and
+  one stream-`114` packets are therefore full coverage, and independent
+  manifest validation consumes every opcode-`41` packet exactly. This moves
+  stream `92` to 33,151 full / 2,056 partial, stream `126` to 65,640 full /
+  5,460 partial, and stream `114` to 59 full / 17 partial. The fold ends
   at HP `50`, MP `97`, EXP `1464`, mesos `4567`, and emits previous/current
   field changes. A generated stream-`114` HP packet changed the real HUD and
   independently observed active fold from `50/222` to `1/222`, kept MP/EXP and
@@ -612,6 +879,10 @@
   frozen fold is valid and warning-free with two requests, one matched
   inventory/effect pair, one policy rejection, zero pending uses, and 90/90
   heartbeats.
+  Independent v79 handler code confirms that the leading u32 updates the
+  character tick, so all 21 reference item-use requests now have full semantic
+  coverage; effects outside the two captured potion templates remain outside
+  the responder policy.
 - Client opcode `185`, server opcode `49`, and server opcode `312` now form a
   typed item-pickup chain. All 54 stream-`92` requests round-trip (48 base and
   six extended), match their folded field epoch, inventory/mesos/special
@@ -619,18 +890,81 @@
   the 54 local chains have zero effect/removal mismatches and zero pending
   requests. Reactive pickup tests additionally prove ordered
   request/completion events and nonfatal rejection after the modeled drop has
-  already been removed.
+  already been removed. Handler-confirmed branching and independent exact
+  validation promote all 257 reference-corpus pickup-result notices to full
+  structural coverage while retaining neutral labels for unresolved roles.
+  The corresponding 234 base, 17 extended-proof, and six compact requests also
+  pass exact independent validation and now have full structural coverage;
+  control/token/proof roles and contents remain neutral or redacted.
 - Server opcode `311` is typed across animated item/mesos, field-load item,
   and field-load mesos variants. Stream `92` has 125 packets/66 drop
   lifecycles; the level-1-to-10 corpus adds four exact 30-byte mode-`2` mesos
-  records. A guarded stream-`114` rewrite can change the final drop position
-  and/or make both neutral owner words equal the initial player id without
-  exposing identifiers through the runtime API.
+  records. Pinned-handler control flow and exact independent validation now
+  promote all 562 reference-corpus spawn packets to full structural coverage;
+  owner/flag/expiration roles remain deliberately neutral. A guarded
+  stream-`114` rewrite can change the final drop position and/or make both
+  neutral owner words equal the initial player id without exposing identifiers
+  through the runtime API.
 - The corresponding real-client owner/proximity hypothesis was falsified:
   neither a mode-`2` owner rewrite nor a captured-shaped mode-`1`/mode-`0`
   pair at the player position caused opcode `185`, despite verified pickup-key
-  binding and direct Wayland input. Runtime prediction now explicitly says
-  that owner equality requires additional client conditions.
+  binding and direct Wayland input. Fresh typed source-mob controls also stayed
+  negative after delayed leave, an immediate enter/leave-to-drop sequence, and
+  an explicit controller release. The warning-free active fold contains zero
+  opcode-`185`/`222` requests and had 141/141 heartbeats at the bounded control
+  snapshot. Runtime prediction now explicitly says that
+  owner/proximity/source history and lifecycle timing require additional client
+  conditions. The first capture-timed combat/reward control also stayed
+  negative, but a later object-level audit found that its exact reference drop
+  was never picked up; it bounded an unpicked family rather than official
+  admission. The corrected control replayed the first stream-`92` `4000004`
+  family with a proven request, including its attack/death/reward order,
+  animated source offset, and approximately 450 ms controller release. A real
+  active-target opcode-`52` attack received its first health response in
+  53.681 ms versus 58.892 ms officially, then physical pickup input emitted a
+  base opcode-`185` request for the exact known drop. One evidence-derived
+  `[39,49,312]` response advanced Etc slot `7` from `74 -> 75` and removed the
+  drop. The client retried at three-second intervals until that response; the
+  updated fold preserves all 62 wire requests as one admitted chain plus 61
+  retries and is warning-free with 900/900 heartbeats. Safe state now exposes
+  raw/chain/retry counts and admitted drop-kind/item-template aggregates while
+  keeping object ids aliased. A second officially admitted `4000004` pair then
+  produced opcode `185` without its source-mob/combat/reward prefix and before
+  fresh input: the first request arrived 1,584.485 ms after live spawn versus
+  1,591.279 ms officially. A reason-`1` cleanup closed that deliberately
+  unanswered ten-attempt request as an interrupted chain; reinjection produced
+  another request in 1,595.243 ms and completed `75 -> 76`. The fold now
+  distinguishes interrupted from malformed expected removals and is
+  warning-free with 76 requests, three admitted chains, 73 retries, two
+  completions, one interruption, no pending pickup, and 1,064/1,064
+  heartbeats. This proves the admitted pair does not require the combat/reward
+  prefix. A subsequent cold client/world connection used the same second pair
+  released at 394.575 ms, while the full first admitted family was calibrated
+  to a 64.085-ms first HP response
+  plus a 450.850-ms release, but capture-timed physical input produced zero
+  opcode-`185`/`222` requests in both cases. After cleanup, the fold is active,
+  valid, and warning-free with no pickup chains/pending work, one baseline
+  field-load drop, and 180/180 heartbeats. A later coordinate audit invalidated
+  the hidden-state interpretation: those negative controls used the global
+  folded trailer `(633,-2677)`, not the same movement record's command-final
+  `(633,-2693)`. `inject-item-pickup` now derives the admitted pair and timing
+  from stream `92`, allocates safe runtime ids, prefers the latest same-field
+  opcode-`182` command-final position, exposes the folded trailer separately,
+  sends physical input, withholds `[39,49,312]` until a matching authentic
+  request, verifies all state invariants, and cleans up on timeout. The primed
+  session's actual `(675,-2693)` placement produced opcode `185` in 1,607.298
+  ms and completed Etc slot `7` `75 -> 76`. The decisive untouched client had
+  only one movement record—command-final `(633,-2693)`, trailer
+  `(633,-2677)`—and needed no movement, key-map, or skill preflight: corrected
+  placement produced authentic opcode `185` in 1,572.761 ms at `(633,-2694)`
+  and completed `74 -> 75`. The suspected readiness boundary was a
+  coordinate-source bug.
+  Request events now report first-spawn and source-release ages, and release
+  events report aliased source-drop delays. Official `4000004` admission ages
+  are 1,591.279-4,124.092 ms and the primed live ages are
+  1,517.335-1,595.243 ms. Typed PCAP transforms support sole-field
+  opcode-`41` stat replacement and opcode-`311` destination/source-position
+  replacement.
 - Stream `83` validates five 60-channel world records, world `4`/channel `23`
   selection, character selection, and a matching `43.142.194.150:8587`
   handoff. Its private numeric identifiers are redacted in normal output.
@@ -778,6 +1112,26 @@ acknowledgements matched, with no pending/unmatched movement, no analysis
 issues or warnings, and 7/7 matched heartbeats. Unknown-object tests prove
 the rejection event remains nonfatal and produces no guessed response.
 
+The client-opcode-`207` request model now resolves its first six control bytes
+as option flags, signed activity code, skill id/level, and two neutral action
+auxiliaries. Its remaining 13 bytes now use the independent handler's exact
+`u8 + u32 + u32 + u32` boundary with neutral names: all markers are zero, the
+first u32 is `0/1`, and the final pair is `0x00ffddcc`. This source-backed split
+round-trips all 12,100 stream-`92` and 22,855 stream-`126` submissions at full
+coverage; fold/runtime reports expose every structural field, and generated
+opcode-`283` flags derive from the named option field.
+
+Server opcode `282` is now fully structural rather than partial. The pinned
+receive path proves its former seven-byte control prefix as two booleans, one
+u8 selector, and one u32 value; the command cases expose their signed
+position/velocity, foothold, stance, and duration scalars. Both reference
+captures validate all 13,366 broadcasts independently: 5,284 in stream `92`
+and 8,082 in stream `126`, with zero unsupported or consumption failures.
+Fold events expose the four neutral control fields and no longer report opaque
+control metadata. This moves stream `92` to 32,818 full and 2,389 partial
+packets, and stream `126` to 64,799 full and 6,301 partial packets, with no
+unknown or invalid packets in either stream.
+
 One state-driven opcode-`282` primitive is now proven too. From 5,284 stream-
 `92` broadcasts, the planner accepts only the dominant control prefix and exact
 one-command stationary placement shape. A live stream-`114` run introduced a
@@ -910,6 +1264,15 @@ predicted `(1025,-2677)`, and contains five broadcasts/twenty-five type-`0`
 commands plus 16/16 matched heartbeats. The HTTP status route remains
 read-only.
 
+Event-driven movement policies now also accept an optional connection-local
+`1..8` event budget independent of the cooldown. Accepted triggers consume one
+unit before planning; qualifying events after exhaustion are counted and
+annotated with `reason: event_budget` but emit no movement. Safe status reports
+configured, used, remaining, and rejected counts. An encrypted two-heartbeat
+integration test with a two-decision policy and budget one proves that only
+the first decision is planned/sent and that the second remains explicitly
+budget-blocked. The immediate trigger rejects this option.
+
 Replay transcripts now make policy decisions directly auditable. Bounded,
 JSON-safe `runtime_event` records capture trigger observations, decision
 starts/completions, cooldown rejections, and completed-queue ignores without
@@ -935,23 +1298,120 @@ and entered gameplay. Its closed login transcript is
 the strict fold is `handoff_ready`, character count `1`, full opcode-`4`
 coverage, and zero issues/warnings.
 
+Login opcode `23` is no longer an unknown packet boundary. The existing exact
+codec consumes its fixed eight-byte opaque token, while the login fold now
+queues empty server opcode-`10` probes and reports matched/unmatched/pending
+responses plus round-trip timing. Stream `83` has one matched pair at 14.107
+ms; stream `116` has four probes, three matches, one final pending probe, and a
+14.445-ms maximum; the current local login has eight matches, zero unmatched
+or pending responses, and a 2,594.990-ms replay-paced maximum. Its remaining
+unknown client inventory was one opcode `6` and one opcode `31`.
+
+Login opcode `31` is now a structurally exact, semantically partial redacted
+record: 20 zero bytes, variant `2`, three terminated counted UTF-16 fields, a
+`uint32` length and 48-byte opaque blob, then three zero bytes. Stream `83`,
+stream `116`, and the current local login supply distinct packet lengths
+`183/275/201` and text-length patterns `10/0/38`, `7/51/36`, and `1/51/5` while
+agreeing on every fixed field. All three consume and round-trip exactly; safe
+analysis exposes only lengths and counts. The live login's remaining unknown
+client inventory was then only its opcode-`6` record.
+
+Login opcode `6` is now structurally bounded as nine redacted `uint32` header
+fields, a `uint32` record count, and repeated `(uint16 index, uint32 opaque
+value)` entries. Zero-based fields `1` and `5` of the header are zero in all
+three samples. Stream `83` has 299 entries/1,836 bytes; stream `116` and the
+current live login each have 152 entries/954 bytes. Every sample contains the
+complete unique index set `0..count-1`, in non-sequential wire order, and
+round-trips exactly. Safe analysis retains only structural counts/checks, so
+the current live login now has zero unknown client packets without exposing header or
+record values or assigning a higher-level role.
+
+The login fold now also reuses the existing exact server opcode-`27` integer/
+text-ledger and opcode-`28` paired-text-ledger codecs. Stream `83` contributes
+18 and 5 entries (`1,056/260` bytes); stream `116` contributes 1 and 4
+(`27/164` bytes), and the live login independently contains the same four-entry
+opcode-`28` variant. All five observations round-trip exactly at full coverage.
+Login JSON/text state publishes only entry-count patterns and text code-unit
+totals, retaining the established numeric/text redaction and neutral roles.
+
+Login server opcodes `20`, `21`, `23`, and `161` are promoted from exact-width
+opaque pins to typed fixed records. Both reference sessions contain all four:
+opcode `20` carries a varying redacted `uint32`, opcodes `21`/`161` carry zero
+`uint8` values, and opcode `23` carries a zero `uint32`. The live login adds an
+independent opcode-`23` sample. All eight reference packets exact-consume under
+the native manifest and all nine samples round-trip in Python; safe output
+reports only opcode/width and zero-value aggregates.
+
+Login server opcode `22` is now an exact variable indexed-text ledger rather
+than a 34,447-byte opaque pin. Stream `83` carries 299 entries; stream `116`
+and live share a byte-identical 152-entry, 21,770-byte record. Each entry is
+trailing-zero counted UTF-16 plus a `uint16` index, and every sample has a
+complete unique `0..count-1` index set. The later client opcode-`6` record has
+the same set in all three sessions. Safe output retains only counts, text
+code-unit totals, and set-match status. Both reference packets exact-consume
+natively. Stream `83` now has only client opcode `274` unknown, while live has
+only its shortened server opcode `0` account record unknown.
+
+The remaining stream-`83` client opcode `274` is now a single capture-bounded
+opaque-text record: trailing-zero UTF-16 fields of 768 and 74 code units around
+the captured constants `uint32 2` and two `uint8 1` flags. The full 1,698-byte
+packet round-trips without publishing either text value, and isolated native
+validation consumes it exactly. Successful reference stream `83` therefore
+has zero unknown login packets; the live login's shortened server opcode `0`
+account record is the only remaining unknown in the active transcript.
+
+The active live transcript's final unknown is now classified as the exact
+documented local opcode-`0` account-bootstrap probe, not as a production account
+result. Its 36 bytes contain a result/account prefix, a redacted four-code-unit
+name, and a 16-byte zero suffix. The fold keeps it partial and explicitly does
+not authenticate from it; the later full opcode-`1` record still does. Python
+round-trips the probe and isolated native validation exact-consumes it. The
+successful stream-`83` reference and active live login now both have zero
+unknown packet observations.
+
+Legacy stream `116` now exact-decodes five of its nine residuals without naming
+their higher-level roles. Generated reads bound server opcode `3` to
+`uint8 + int32 + bool`, opcode `390` to one `uint8`, and opcode `6` to
+trailing-zero counted UTF-16 plus `uint8`. Capture bounds client opcode `255` to
+one redacted `uint32` and opcode `9` to one redacted trailing-zero counted
+UTF-16 field. The opcode-`6` text exactly matches the client opcode-`9` field
+235.214 ms earlier; opcode `390` is merely adjacent to opcode `255` at 238.384
+ms, with no causal claim. Python is warning-free and isolated native validation
+consumes all five records. Four legacy unknowns remain: server `35/7` and client
+`10/16`.
+
+Those last four legacy records are now exact as well. Stream `116` advertises
+an empty character list, then client opcode `10` submits a redacted counted name
+and eight redacted `uint32` values. Generated server opcode `7` reads a result
+byte and the successful capture reuses the existing `InitialCharacterSnapshot`
+codec plus a compact appearance. Its name and seven-field
+gender/face/hair/equipment fingerprint match the request after 271.948 ms.
+Client opcode `16` repeats the created character id after 3,994.739 ms, and the
+existing world handoff repeats it after another 597.284 ms. Server opcode `35`
+is independently bounded to constants `0/1`, redacted seven-code-unit text, and
+a three-zero-byte suffix; its higher-level pre-account role remains neutral.
+Python is warning-free and isolated native validation consumes all four. Both
+reference login streams and the active live transcript now have zero unknown
+packet observations.
+
 Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Use the owner/proximity negative controls to isolate the remaining
-   client-side drop eligibility condition; serve a reactive pickup only after
-   observing an authentic opcode-`185` request.
-2. Determine whether client opcode `104` requires a modeled server response,
-   then use one-field controls to test whether opcode-`385` selector `0` is an
-   empty binding without assigning meanings to selectors `2/4/5/6`.
+1. Preserve the newly typed life-movement command-final coordinate selector
+   and its pickup folded-trailer fallback as a regression boundary. Extend
+   command tags `18..22` only from independently observed packets.
+2. Preserve the pickup-specific command-final coordinate selector and its
+   folded-trailer fallback as a regression boundary. Extend pickup handling to
+   additional item/request shapes only from independently admitted evidence,
+   and continue serving `[39,49,312]` only after an authentic opcode-`185` or
+   compact opcode-`222` request.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
-4. Add a bounded per-trigger event budget so repeated valid gameplay events
-   can be rate-limited independently of the shared cooldown while keeping
-   packet injection an explicit, loopback-only opt-in.
+4. Keep packet injection an explicit loopback-only opt-in while expanding
+   stateful handlers only from independently validated evidence.
 
 ## Useful proof artifacts
 
@@ -959,6 +1419,8 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 /home/sdancer/ms/downloads/maple_custom_server_replay.png
 /home/sdancer/ms/downloads/maple_direct_current_screen.png
 /home/sdancer/ms/downloads/maple_tw_postgate_screen.png
+/home/sdancer/ms/downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/login/1786477737308800256_replay_12082.jsonl
+/home/sdancer/ms/downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786477769036931470_replay_12857.jsonl
 /home/sdancer/ms/downloads/maple_protocol_captures/
 /home/sdancer/ms/downloads/maple_protocol_captures/hk_official_reference_20260808/
 /home/sdancer/ms/downloads/maple_custom_server_observed/

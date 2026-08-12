@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -13,18 +14,28 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from maple_server.gamestate import ShapeCoverage  # noqa: E402
-from maple_server.gameplay import GameplayPhase  # noqa: E402
+from maple_server.gameplay import (  # noqa: E402
+    GameplayPhase,
+    InventoryItemEntity,
+)
 from maple_server.live_replay import (  # noqa: E402
     DEFAULT_PACKET_API_URL,
+    _CapturedItemPickupAdmission,
+    _item_pickup_player_position,
     inject_current_hp_live,
+    inject_item_pickup_live,
     inject_skill_record_live,
+    plan_item_pickup_live_replay,
     plan_mob_temporary_stat_live_replay,
     plan_skill_record_update_live,
     validate_packet_api_url,
 )
 from maple_server.packets import (  # noqa: E402
+    FieldDropSpawn,
     MobEnterField,
+    MobControllerChange,
     MobSpawnData,
+    MobSpawnTemporaryStatus,
     MobTemporaryStatReset,
     MobTemporaryStatSet,
     SkillRecordUpdate,
@@ -217,6 +228,259 @@ class LiveReplayTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not present"):
             plan_skill_record_update_live(analysis, skill_id=9_999_999)
 
+    def test_item_pickup_plan_prefers_latest_movement_command_position(
+        self,
+    ) -> None:
+        captured_drop = FieldDropSpawn(
+            spawn_mode=1,
+            drop_object_id=1234,
+            drop_kind=FieldDropSpawn.ITEM,
+            value=4_000_004,
+            owner_value_1=99,
+            owner_value_2=99,
+            ownership_flag=0,
+            position_x=-536,
+            position_y=1757,
+            source_mob_object_id=5678,
+            source_x=-526,
+            source_y=1754,
+            animation_duration_ms=450,
+            expiration_ticks=150842304000000000,
+            final_flag=1,
+        )
+        captured = _CapturedItemPickupAdmission(
+            drop_spawn=captured_drop,
+            drop_refresh=replace(captured_drop, spawn_mode=0),
+            controller_release=MobControllerChange(
+                control_level=0,
+                object_id=5678,
+            ),
+            inventory="etc",
+            quantity_delta=1,
+            spawn_frame=26024,
+            refresh_frame=26025,
+            release_frame=26045,
+            request_frame=26071,
+            release_delay_seconds=0.398819,
+            admission_delay_seconds=1.591279,
+        )
+        plan_state = SimpleNamespace(
+            phase=GameplayPhase.ACTIVE,
+            pending_item_pickups=0,
+            pending_item_use_requests=0,
+            field_epoch=1,
+            player_x=675,
+            player_y=-2693,
+            entry_character_id=42,
+            inventory_items={
+                "etc": (
+                    InventoryItemEntity(
+                        slot=7,
+                        record_type=2,
+                        item_id=4_000_004,
+                        cash_item=False,
+                        expires_at_ticks=150842304000000000,
+                        quantity=74,
+                    ),
+                )
+            },
+            npcs={},
+            mobs={},
+            observed_players={},
+            field_drops={},
+            reactors={},
+        )
+        movement_observation = SimpleNamespace(
+            direction="client_to_server",
+            opcode=182,
+            kind="player_movement_submission",
+            details={
+                "field_epoch": 1,
+                "final_x": 676,
+                "final_y": -2695,
+                "path_end_x": 675,
+                "path_end_y": -2693,
+            },
+        )
+        analysis = SimpleNamespace(
+            valid=True,
+            state=plan_state,
+            observations=(movement_observation,),
+        )
+
+        with patch(
+            "maple_server.live_replay._captured_item_pickup_admission",
+            return_value=captured,
+        ):
+            plan = plan_item_pickup_live_replay(
+                analysis,
+                object(),
+                evidence_tcp_stream=92,
+            )
+
+        report = plan.safe_dict()
+        self.assertEqual(
+            report["latest_player_position"],
+            {"x": 676, "y": -2695},
+        )
+        self.assertEqual(report["drop_position"], {"x": 676, "y": -2695})
+        self.assertEqual(report["player_position_source"], "movement_command_final")
+        self.assertEqual(
+            report["folded_trailer_position"],
+            {"x": 675, "y": -2693},
+        )
+        self.assertEqual(
+            report["animated_source_offset"],
+            {"x": 10, "y": -3},
+        )
+        self.assertEqual(plan.drop_spawn.source_x, 686)
+        self.assertEqual(plan.drop_spawn.source_y, -2698)
+        self.assertEqual(plan.drop_spawn.owner_value_1, 42)
+        self.assertEqual(plan.drop_spawn.owner_value_2, 42)
+        self.assertEqual(
+            plan.drop_spawn.source_mob_object_id,
+            plan.controller_release.object_id,
+        )
+        self.assertNotEqual(plan.drop_spawn.drop_object_id, 1234)
+        self.assertEqual(plan.inventory_update.modifications[0].quantity, 75)
+        self.assertEqual(plan.gain_notice.quantity, 1)
+        self.assertEqual(
+            [
+                int.from_bytes(packet[:2], "little")
+                for packet in plan.response_packets(185)
+            ],
+            [39, 49, 312],
+        )
+
+    def test_item_pickup_position_falls_back_to_folded_trailer(self) -> None:
+        analysis = SimpleNamespace(
+            state=SimpleNamespace(
+                field_epoch=2,
+                player_x=10,
+                player_y=20,
+            ),
+            observations=(
+                SimpleNamespace(
+                    direction="client_to_server",
+                    opcode=182,
+                    kind="player_movement_submission",
+                    details={
+                        "field_epoch": 1,
+                        "final_x": 30,
+                        "final_y": 40,
+                    },
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            _item_pickup_player_position(analysis),
+            (10, 20, "folded_trailer_endpoint"),
+        )
+
+    def test_item_pickup_timeout_removes_the_injected_drop(self) -> None:
+        def packet(opcode: int) -> SimpleNamespace:
+            return SimpleNamespace(
+                to_bytes=lambda: opcode.to_bytes(2, "little")
+            )
+
+        plan = SimpleNamespace(
+            drop_spawn=packet(311),
+            drop_refresh=packet(311),
+            controller_release=packet(281),
+            cleanup=packet(312),
+            inventory="etc",
+            slot=7,
+            item_id=4_000_004,
+            quantity_after=75,
+            player_x=633,
+            player_y=-2677,
+            release_delay_seconds=0.0,
+            admission_delay_seconds=0.0,
+        )
+        baseline = SimpleNamespace(
+            valid=True,
+            observations=(),
+            state=SimpleNamespace(
+                player_x=633,
+                player_y=-2677,
+                field_drops={},
+            ),
+        )
+        observed_spawn = SimpleNamespace(
+            direction="server_to_client",
+            opcode=311,
+            kind="field_drop_spawn",
+            details={
+                "new_drop": True,
+                "item_id": 4_000_004,
+                "position_x": 633,
+                "position_y": -2677,
+                "drop": "drop:2",
+            },
+        )
+        candidate = SimpleNamespace(
+            valid=True,
+            observations=(observed_spawn,),
+        )
+        inventory_snapshot = (
+            ("etc", 7, 2, 4_000_004, False, 150842304000000000, 74),
+        )
+
+        with (
+            patch("maple_server.live_replay.Transcript.load", return_value=object()),
+            patch(
+                "maple_server.live_replay.analyze_gameplay_transcript",
+                side_effect=(baseline, candidate),
+            ),
+            patch(
+                "maple_server.live_replay.load_pcap_tcp_stream",
+                return_value=object(),
+            ),
+            patch(
+                "maple_server.live_replay.plan_item_pickup_live_replay",
+                return_value=plan,
+            ),
+            patch(
+                "maple_server.live_replay._inventory_item_snapshot",
+                return_value=inventory_snapshot,
+            ),
+            patch(
+                "maple_server.live_replay._progression_snapshot",
+                return_value=("progression",),
+            ),
+            patch(
+                "maple_server.live_replay._player_state_snapshot",
+                return_value=("player",),
+            ),
+            patch(
+                "maple_server.live_replay._post_plaintext_packet",
+                return_value={"accepted": True},
+            ) as post,
+            patch("maple_server.live_replay._send_wayland_evdev_key") as send_key,
+        ):
+            with self.assertRaisesRegex(
+                TimeoutError,
+                "no authentic item-pickup request",
+            ):
+                inject_item_pickup_live(
+                    Path("live.jsonl"),
+                    Path("111.pcapng"),
+                    wayland_display="wayland-3",
+                    verify_timeout_seconds=0.001,
+                )
+
+        self.assertEqual(
+            [call.args[1][:2] for call in post.call_args_list],
+            [
+                (311).to_bytes(2, "little"),
+                (311).to_bytes(2, "little"),
+                (281).to_bytes(2, "little"),
+                (312).to_bytes(2, "little"),
+            ],
+        )
+        send_key.assert_called_once()
+
     def test_live_skill_record_injection_requires_update_and_ack_fold(self) -> None:
         baseline = SimpleNamespace(
             valid=True,
@@ -320,14 +584,20 @@ class LiveReplayTest(unittest.TestCase):
             spawn=MobSpawnData(
                 spawn_marker=1,
                 template_id=3210800,
-                opaque_status=bytes(30),
+                temporary_status=MobSpawnTemporaryStatus(
+                    mask_words=(0, 0, 0, 0x8800_0080),
+                    value=1,
+                    source_skill_id=3_101_005,
+                    duration_units=0,
+                ),
                 x=371,
                 y=-562,
                 stance=4,
                 foothold_id=134,
                 origin_foothold_id=134,
-                spawn_effect=-1,
-                opaque_tail=bytes(4),
+                appear_type=-1,
+                team=0xFF,
+                effect_item_id=0,
             ),
         )
         set_stat = MobTemporaryStatSet(
@@ -344,14 +614,15 @@ class LiveReplayTest(unittest.TestCase):
             spawn=MobSpawnData(
                 spawn_marker=1,
                 template_id=3210800,
-                opaque_status=bytes(22),
+                temporary_status=MobSpawnTemporaryStatus(),
                 x=1348,
                 y=-562,
                 stance=4,
                 foothold_id=110,
                 origin_foothold_id=110,
-                spawn_effect=-1,
-                opaque_tail=bytes(4),
+                appear_type=-1,
+                team=0xFF,
+                effect_item_id=0,
             ),
         )
         short_set = MobTemporaryStatSet(
@@ -430,7 +701,7 @@ class LiveReplayTest(unittest.TestCase):
         plan_state.mobs = {}
         plan_state.observed_players = {}
         plan_state.field_drops = {}
-        plan_state.positioned_effect_entities = {}
+        plan_state.reactors = {}
         plan_state.entry_character_id = 42
         analysis = SimpleNamespace(
             valid=True,
