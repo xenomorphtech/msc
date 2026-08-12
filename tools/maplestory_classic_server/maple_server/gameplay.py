@@ -2261,6 +2261,216 @@ class SkillLevelChangeResponsePolicy:
         return plan
 
 
+CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS = frozenset(
+    {
+        (22, 2_000_031, 300),
+        (10, 2_030_059, 10),
+        (9, 2_000_079, 100),
+        (6, 2_000_018, 100),
+        (5, 2_000_016, 100),
+    }
+)
+
+
+@dataclass(frozen=True)
+class ItemAcquisitionResponsePlan:
+    request: ClientOpcode298ItemAcquisitionRequest = field(repr=False)
+    inventory_update: InventoryChangeSet = field(repr=False)
+    destination_slot: int
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.inventory_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "destination_slot": self.destination_slot,
+            "response_quantity": self.request.quantity,
+            "update_flag": self.inventory_update.update_flag,
+            "server_opcodes": [self.inventory_update.opcode],
+        }
+
+
+@dataclass
+class ItemAcquisitionResponsePolicy:
+    use_items: dict[int, InventoryItemEntity] = field(repr=False)
+    field_epoch: int
+
+    def _eligible_requests(self) -> tuple[tuple[int, int, int], ...]:
+        existing_item_ids = {item.item_id for item in self.use_items.values()}
+        return tuple(
+            signature
+            for signature in sorted(
+                CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+            )
+            if signature[1] not in existing_item_ids
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "modeled_use_item_count": len(self.use_items),
+            "modeled_use_slots": sorted(self.use_items),
+            "captured_permanent_use_requests": [
+                {
+                    "selection_index": selection_index,
+                    "item_id": item_id,
+                    "quantity": quantity,
+                }
+                for selection_index, item_id, quantity in sorted(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                )
+            ],
+            "currently_eligible_requests": [
+                {
+                    "selection_index": selection_index,
+                    "item_id": item_id,
+                    "quantity": quantity,
+                }
+                for selection_index, item_id, quantity in (
+                    self._eligible_requests()
+                )
+            ],
+            "source_evidence": {
+                "permanent_use_transactions": len(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                ),
+                "lowest_free_slot_matches": len(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                ),
+                "quantity_matches": len(
+                    CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS
+                ),
+            },
+            "admission": {
+                "inventory": "use",
+                "duration_value": 0,
+                "serial_value": 0,
+                "request_tuple": "captured",
+                "existing_item_template": "absent",
+                "destination_slot": "lowest_positive_free",
+            },
+            "prediction": {
+                "server_opcodes": [39],
+                "update_flag": 0,
+                "operation": "add",
+                "record_type": 2,
+                "cash_item": False,
+                "expiration": "permanent_sentinel",
+                "quantity": "requested",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 39:
+            return
+        change_set = InventoryChangeSet.parse(plaintext)
+        for modification in change_set.modifications:
+            if modification.inventory_type != 2:
+                continue
+            if modification.operation == InventoryModification.ADD:
+                if modification.item is None:
+                    raise PacketShapeError(
+                        "item-acquisition policy saw add without an item"
+                    )
+                self.use_items[modification.slot] = (
+                    InventoryItemEntity.from_initial(modification.item)
+                )
+            elif (
+                modification.operation
+                == InventoryModification.UPDATE_QUANTITY
+            ):
+                item = self.use_items.get(modification.slot)
+                if item is None:
+                    continue
+                self.use_items[modification.slot] = replace(
+                    item, quantity=modification.quantity
+                )
+            elif modification.operation == InventoryModification.MOVE:
+                destination_slot = modification.destination_slot
+                item = self.use_items.pop(modification.slot, None)
+                if item is None or destination_slot is None:
+                    continue
+                destination_item = self.use_items.pop(destination_slot, None)
+                self.use_items[destination_slot] = replace(
+                    item, slot=destination_slot
+                )
+                if destination_item is not None:
+                    self.use_items[modification.slot] = replace(
+                        destination_item, slot=modification.slot
+                    )
+            else:
+                self.use_items.pop(modification.slot, None)
+
+    def respond(
+        self, request: ClientOpcode298ItemAcquisitionRequest
+    ) -> ItemAcquisitionResponsePlan:
+        if request.request_kind != 1:
+            raise ValueError(
+                "item-acquisition responder admits only captured Use requests"
+            )
+        if request.duration_value != 0:
+            raise ValueError(
+                "item-acquisition responder admits only permanent requests"
+            )
+        if request.serial_value != 0:
+            raise ValueError(
+                "item-acquisition responder requires the captured zero serial"
+            )
+        signature = (
+            request.selection_index,
+            request.item_id,
+            request.quantity,
+        )
+        if signature not in CAPTURED_PERMANENT_USE_ACQUISITION_REQUESTS:
+            raise ValueError(
+                "item-acquisition request tuple is outside captured evidence"
+            )
+        if any(
+            item.item_id == request.item_id
+            for item in self.use_items.values()
+        ):
+            raise ValueError(
+                "item-acquisition item template already has a modeled Use stack"
+            )
+        destination_slot = next(
+            (
+                candidate
+                for candidate in range(1, 0x100)
+                if candidate not in self.use_items
+            ),
+            None,
+        )
+        if destination_slot is None:
+            raise ValueError("item-acquisition responder has no free Use slot")
+        item = InitialInventoryItem.captured_permanent_stack(
+            slot=destination_slot,
+            item_id=request.item_id,
+            quantity=request.quantity,
+        )
+        inventory_update = InventoryChangeSet(
+            update_flag=0,
+            modifications=(
+                InventoryModification(
+                    operation=InventoryModification.ADD,
+                    inventory_type=2,
+                    slot=destination_slot,
+                    item=item,
+                ),
+            ),
+        )
+        plan = ItemAcquisitionResponsePlan(
+            request=request,
+            inventory_update=inventory_update,
+            destination_slot=destination_slot,
+        )
+        self.apply_server_packet(inventory_update.to_bytes())
+        return plan
+
+
 @dataclass(frozen=True)
 class InventoryMoveResponsePlan:
     request: InventoryMoveRequest
@@ -12297,6 +12507,26 @@ def derive_skill_level_change_response_policy(
         source_acknowledgements=(
             state.matched_skill_record_update_acknowledgements
         ),
+    )
+
+
+def derive_item_acquisition_response_policy(
+    transcript: Transcript,
+) -> ItemAcquisitionResponsePolicy:
+    """Build mutable permanent-Use acquisition state from a world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.inventory_region_bytes is None:
+        raise ValueError("world transcript has no modeled inventory snapshot")
+    use_items = {
+        item.slot: item for item in state.inventory_items.get("use", ())
+    }
+    return ItemAcquisitionResponsePolicy(
+        use_items=use_items,
+        field_epoch=state.field_epoch,
     )
 
 

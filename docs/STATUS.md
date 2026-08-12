@@ -317,6 +317,15 @@
   Python/native codecs consume all 12 exactly, safe analysis exposes bounded
   request/match/quantity/pending/latency counters, and stream `126` advances to
   `26,661/44,429/10/0` while streams `92` and `114` remain unchanged.
+- `--reactive-item-acquisition-responses` now serves the five capture-proven
+  permanent, zero-serial Use tuples with one lowest-positive-free-slot
+  opcode-`39` addition. It rejects timed/Cash/unknown/duplicate requests and
+  reports current eligibility plus mutable inventory state. The encrypted
+  integration test covers the full handler. A clean official-client
+  response-side check visibly accepted item `2000079` quantity `100` at slot
+  `25`; its fold is valid and warning-free at `156/133/0/0`, with `60/60`
+  heartbeats and one active connection. The ordinary UI emitted no opcode
+  `298`, so live request triggering remains explicitly unproven.
 - Client opcode `276` now has exact compact and grouped envelopes. The sole
   stream-`126` selector-`24` packet contains two redacted headers, five counted
   groups, and 19 redacted u32 pairs in 210 bytes. The active local-Wine client

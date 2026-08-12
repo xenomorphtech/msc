@@ -1162,6 +1162,33 @@ distributions, nonzero-serial counts, match/quantity/pending counters, and
 last/maximum response latency. Coverage advances from
 `26,661/44,417/22/0` to `26,661/44,429/10/0`.
 
+`--reactive-item-acquisition-responses` serves only the five permanent Use
+transactions for which the capture proves an exact construction rule:
+`(selection,item,quantity)` values `(5,2000016,100)`, `(6,2000018,100)`,
+`(9,2000079,100)`, `(10,2030059,10)`, and `(22,2000031,300)`. An admitted
+request must retain kind `1`, duration `0`, serial `0`, all fixed fields, and
+an item template absent from the modeled Use inventory. The response is one
+opcode-`39` add with update flag `0`, inventory type `2`, the lowest positive
+free slot, record type `2`, requested quantity, zero-length owner, captured
+zero metadata, and both permanent/sentinel timestamps. Timed Use and all Cash
+requests remain unserved because their expirations, serials, quantities, and
+record variants require additional policy evidence.
+
+The encrypted replay integration test drives opcode `298` through the actual
+hold-open reader and validates the generated opcode `39`, mutable policy state,
+runtime events, and immutable transcript fold. The reference account already
+owns four of the five permanent templates, leaving only item `2000079`
+currently eligible. Its ordinary UI did not expose the captured acquisition
+action, so the real-client check independently validates the response side:
+after a typed removal cleared an earlier permanent-stack probe, the exact
+eligible item-`2000079`, quantity-`100`, slot-`25` addition appeared in the
+open Use inventory without disconnecting. The clean transcript
+`downloads/maple_custom_server_observed/item_acquisition_live_20260812_clean/world/1786499171269565791_replay_12857.jsonl`
+remained valid and warning-free at `156/133/0/0`, folded 25 Use items including
+the exact slot/template/quantity, and matched `60/60` heartbeats with none
+pending. This proves client acceptance of the response shape, not a genuine
+live opcode-`298` request; the encrypted integration test is the handler proof.
+
 ## Redacted text envelope (`348`)
 
 The pinned version-300 opcode-`348` handler performs four common primitive

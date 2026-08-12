@@ -160,6 +160,18 @@ counters. Python and native codecs consume all 12 records exactly, moving the
 long corpus to `26,661/44,429/10/0` without claiming the higher-level source of
 the acquisition.
 
+The opt-in `--reactive-item-acquisition-responses` path intentionally serves
+only the five permanent, zero-serial Use tuples whose captured opcode-`39`
+responses all add the requested quantity at the lowest positive free slot. It
+rejects timed requests, Cash records, tuples outside that evidence set, and
+templates already present in the modeled Use inventory. The encrypted replay
+test covers the complete request/response handler. In a clean held-open real
+client, an independently submitted eligible item-`2000079`, quantity-`100`
+response was visibly accepted at slot `25`; typed removal/addition packets left
+the transcript warning-free at `156/133/0/0`, with `60/60` heartbeats and one
+active connection. The standard UI did not emit opcode `298`, so this live
+check proves the response shape rather than a real-client request trigger.
+
 Client opcode `276` now has two capture-bounded selector branches. The sole
 stream-`126` packet is selector `24`, two redacted header values, five counted
 groups, and 19 redacted u32 pairs; it round-trips exactly as 210 bytes. The

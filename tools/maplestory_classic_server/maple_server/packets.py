@@ -2286,6 +2286,49 @@ class InitialInventoryItem:
     quantity: int | None
     raw_record: bytes
 
+    @classmethod
+    def captured_permanent_stack(
+        cls, *, slot: int, item_id: int, quantity: int
+    ) -> "InitialInventoryItem":
+        """Build the zero-owner permanent stack shape observed in opcode 39."""
+
+        if not 1 <= slot <= 0xFF:
+            raise PacketShapeError(
+                f"permanent stack item slot is out of range: {slot}"
+            )
+        if not 1 <= item_id <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                f"permanent stack item id is out of range: {item_id}"
+            )
+        if not 1 <= quantity <= 0xFFFF:
+            raise PacketShapeError(
+                f"permanent stack quantity is out of range: {quantity}"
+            )
+        raw_record = b"".join(
+            (
+                struct.pack(
+                    "<BIBqH",
+                    2,
+                    item_id,
+                    0,
+                    PERMANENT_ITEM_EXPIRATION_TICKS,
+                    quantity,
+                ),
+                b"\x00\x00\x00",
+                b"\x00" * 10,
+                struct.pack("<qI", INITIAL_ITEM_SENTINEL_TICKS, 0),
+            )
+        )
+        return cls(
+            slot=slot,
+            record_type=2,
+            item_id=item_id,
+            cash_item=False,
+            expires_at_ticks=PERMANENT_ITEM_EXPIRATION_TICKS,
+            quantity=quantity,
+            raw_record=raw_record,
+        )
+
     def to_bytes(self) -> bytes:
         if not 1 <= self.slot <= 0xFF:
             raise PacketShapeError(

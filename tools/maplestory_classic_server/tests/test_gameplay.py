@@ -26,6 +26,7 @@ from maple_server.gameplay import (  # noqa: E402
     derive_ability_point_allocation_response_policy,
     derive_client_recovery_response_policy,
     derive_inventory_move_response_policy,
+    derive_item_acquisition_response_policy,
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
@@ -8494,6 +8495,63 @@ class GameplayStateFoldTest(unittest.TestCase):
                     skill_id=2_001_005,
                 )
             )
+
+    def test_derives_captured_permanent_use_acquisition_response(self) -> None:
+        source = fixture_gameplay_transcript(initial_snapshot=True)
+        policy = derive_item_acquisition_response_policy(source)
+        request = ClientOpcode298ItemAcquisitionRequest(
+            control_value=0,
+            selection_index=10,
+            request_kind=1,
+            item_id=2_030_059,
+            quantity=10,
+            duration_value=0,
+            expires_at_ticks=150_842_304_000_000_000,
+            serial_value=0,
+            reserved_values=(0, 0, 0, 0, 0),
+            signed_sentinel_values=(-99, -99),
+            trailing_values=(0, 0),
+            flag_1=0,
+            flag_2=1,
+        )
+
+        plan = policy.respond(request)
+
+        self.assertEqual(plan.destination_slot, 2)
+        self.assertEqual(
+            plan.plaintexts,
+            (
+                bytes.fromhex(
+                    "270000010002020002ebf91e0000008005bb46e61702"
+                    "0a00000000000000000000000000000040e0fd3b374f"
+                    "0100000000"
+                ),
+            ),
+        )
+        response = InventoryChangeSet.parse(plan.plaintexts[0])
+        modification = response.modifications[0]
+        self.assertEqual(response.update_flag, 0)
+        self.assertEqual(modification.operation, InventoryModification.ADD)
+        self.assertEqual(modification.inventory_type, 2)
+        self.assertEqual(modification.slot, 2)
+        self.assertIsNotNone(modification.item)
+        assert modification.item is not None
+        self.assertEqual(modification.item.item_id, 2_030_059)
+        self.assertEqual(modification.item.quantity, 10)
+        self.assertEqual(policy.use_items[2].item_id, 2_030_059)
+        self.assertEqual(plan.safe_dict()["server_opcodes"], [39])
+        self.assertNotIn(
+            2_030_059,
+            {
+                candidate["item_id"]
+                for candidate in policy.safe_dict()[
+                    "currently_eligible_requests"
+                ]
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "permanent requests"):
+            policy.respond(replace(request, duration_value=10_080))
 
     def test_projects_initial_equipment_groups_into_signed_slots(self) -> None:
         equipped = InventoryItemEntity(

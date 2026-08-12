@@ -531,6 +531,29 @@ control `346`, and tail `0`. The independent live fold is warning-free,
 matches in `0.383`/`2.762` ms with neither leg pending, stays active on map
 `101000000`, and had `53/53` heartbeat pairs at the proof sample.
 
+`--reactive-item-acquisition-responses` answers only the five captured
+permanent, zero-serial Use request tuples during hold-open. It requires the
+requested item template to be absent, chooses the lowest positive free Use
+slot, and emits one opcode-`39` permanent record-type-`2` addition with the
+requested quantity. Timed Use, Cash, unknown tuples, duplicate templates, and
+a full modeled slot range are rejected. The option requires
+`--keep-world-open` with a positive hold duration and cannot share opcode `298`
+with a captured reply. Add it as:
+
+```sh
+--reactive-item-acquisition-responses
+```
+
+Stream `126` proves the five admitted construction points. The encrypted
+server integration test exercises the request handler, response cipher, state
+fold, and runtime events. The reference account already owns four admitted
+templates, so runtime telemetry lists only item `2000079` as currently
+eligible. A clean real-client response-side check displayed that item at Use
+slot `25` with quantity `100`, stayed connected, and folded warning-free at
+`156/133/0/0` with `60/60` heartbeats. The ordinary UI emitted no opcode `298`;
+that live check proves response acceptance, while the integration test proves
+the complete reactive transaction.
+
 `--rewrite-final-field-drop-position X:Y` changes only the typed position in
 the final field's sole active mode-`2` item-drop packet.
 `--rewrite-final-field-drop-owner-to-player` independently rewrites only its
@@ -1848,6 +1871,11 @@ When reactive skill-level change responses are enabled,
 capture evidence, the bounded admission and packet prediction, observed/served/
 rejected counts, response packet count, last response or rejection, and current
 mutable state.
+When reactive item-acquisition responses are enabled,
+`protocol.item_acquisition_responses` reports the five captured permanent-Use
+tuples, which tuples remain eligible against current inventory, the bounded
+admission/prediction, observed/served/rejected counts, response packet count,
+last response or rejection, and current modeled Use slots.
 When the final drop position is rewritten,
 `protocol.final_field_drop_position_rewrite` reports its alias/template,
 original and rewritten coordinates, field epoch, server-frame index, patch
@@ -2359,3 +2387,8 @@ preserve distinct Unity scan codes in this setup.
     HP/MP bounds, publish safe HTTP/runtime telemetry, and validate a fresh
     local login with `39/39` responses, one live HP cap, zero pending requests,
     and `42/42` heartbeats.
+97. Add an opt-in opcode-`298` acquisition responder for the five captured
+    permanent, zero-serial Use tuples, construct the exact lowest-free-slot
+    opcode-`39` stack addition, validate the encrypted request handler, and
+    prove official-client response acceptance with an independently folded
+    slot-`25` item while leaving timed and Cash policy branches unserved.
