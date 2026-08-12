@@ -1619,7 +1619,7 @@ def fixture_gameplay_transcript(
     append("server_to_client", HeartbeatProbe().to_bytes())
     append(
         "client_to_server",
-        HeartbeatResponse(opaque_token=b"\x00" * 8).to_bytes(),
+        HeartbeatResponse(response_value=0).to_bytes(),
     )
     if compact_transition:
         append(
@@ -4544,7 +4544,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
     def test_transport_envelopes_and_heartbeat_round_trip(self) -> None:
         probe = HeartbeatProbe()
-        response = HeartbeatResponse(opaque_token=b"response")
+        response = HeartbeatResponse(
+            response_value=int.from_bytes(b"response", "little")
+        )
         notification = ServerOpcode426Notification()
         acknowledgement = ClientOpcode309Acknowledgement()
         recovery_request = ClientRecoveryRequest(
@@ -4615,6 +4617,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             HeartbeatResponse.parse(response.to_bytes()), response
         )
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            HeartbeatResponse(response_value=-1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            HeartbeatResponse(response_value=1 << 64).to_bytes()
         self.assertEqual(
             ServerOpcode426Notification.parse(notification.to_bytes()),
             notification,
@@ -5781,7 +5787,9 @@ class GameplayStateFoldTest(unittest.TestCase):
                 ("server_to_client", HeartbeatProbe().to_bytes()),
                 (
                     "client_to_server",
-                    HeartbeatResponse(opaque_token=b"response").to_bytes(),
+                    HeartbeatResponse(
+                        response_value=int.from_bytes(b"response", "little")
+                    ).to_bytes(),
                 ),
                 ("client_to_server", second_request.to_bytes()),
                 ("server_to_client", temporary_stat.to_bytes()),

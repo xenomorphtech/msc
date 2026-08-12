@@ -1696,7 +1696,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
 
             next_server_iv = shuffle_iv(server_iv)
             next_client_iv = client_iv
-            for token in (b"first!!!", b"second!!"):
+            for response_value in (1, 2):
                 encrypted_probe = await reader.readexactly(6)
                 probe_plaintext = crypt_payload(
                     encrypted_probe[4:], next_server_iv
@@ -1706,7 +1706,9 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 )
                 next_server_iv = shuffle_iv(next_server_iv)
 
-                response = HeartbeatResponse(opaque_token=token).to_bytes()
+                response = HeartbeatResponse(
+                    response_value=response_value
+                ).to_bytes()
                 writer.write(
                     encode_frame_header(len(response), next_client_iv, 300)
                     + crypt_payload(response, next_client_iv)
@@ -4101,7 +4103,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     HeartbeatProbe(),
                 )
                 response = HeartbeatResponse(
-                    opaque_token=b"policy!!"
+                    response_value=int.from_bytes(b"policy!!", "little")
                 ).to_bytes()
                 writer.write(
                     encode_frame_header(len(response), client_iv, 300)

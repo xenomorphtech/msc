@@ -729,6 +729,16 @@ seven zero-damage words while leaving no pending effects. All 961 client attack
 actions now report full structural coverage and pass independent exact
 validation. The still-neutral target-state field roles do not hide any bytes
 or prevent round-trip serialization.
+
+Periodic world liveness uses the exact empty server opcode-`10` probe and a
+ten-byte client opcode-`23` response containing one neutral little-endian
+`uint64`. Across reference gameplay streams `126`, `92`, and `114`, all 380
+responses match the oldest pending probe and round-trip at full coverage. The
+values are all nonzero and unique but have no established higher-level meaning,
+so transcript reports and runtime HTTP telemetry redact them. The active-world
+proof transcript matches 343/343 pairs without warnings; the current listener
+aggregate at `protocol.world_heartbeat` reports 3,369 probes/responses and none
+pending while exposing only interval, counters, and last/maximum latency.
 Server opcodes `218`/`219`
 likewise fold as 140 and 43 attack relays, with aliased actors and packed
 target/hit counts. Their bodies expose 194 target records and 254 damage words,

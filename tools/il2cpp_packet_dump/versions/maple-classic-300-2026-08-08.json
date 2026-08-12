@@ -389,10 +389,10 @@
     },
     {
       "name":"heartbeat_response","direction":"client_to_server","opcode":23,"length":10,
-      "source":"packets.py:HeartbeatResponse; capture 111 stream 92",
+      "source":"packets.py:HeartbeatResponse; 1-10FS stream 126 and 111 streams 92/114; 380 values are nonzero and unique but have no established higher-level meaning",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":23},
-        {"op":"bytes","name":"opaque_token","length":8}
+        {"op":"read","name":"response_value","kind":"u64"}
       ]
     },
     {

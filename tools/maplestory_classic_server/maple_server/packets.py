@@ -13699,21 +13699,24 @@ class ServerOpcode426Notification:
 class HeartbeatResponse:
     """Client response to an opcode-10 server heartbeat probe."""
 
-    opaque_token: bytes
+    response_value: int = field(repr=False)
     opcode: int = 23
 
     @classmethod
     def parse(cls, payload: bytes) -> "HeartbeatResponse":
         reader = PacketReader(payload, packet_name="heartbeat_response")
         _expect_opcode(reader, 23)
-        opaque_token = reader.bytes(8, "opaque_token")
+        response_value = reader.u64("response_value")
         reader.finish()
-        return cls(opaque_token=opaque_token)
+        return cls(response_value=response_value)
 
     def to_bytes(self) -> bytes:
-        if len(self.opaque_token) != 8:
-            raise PacketShapeError("heartbeat token must contain exactly 8 bytes")
-        return struct.pack("<H", self.opcode) + self.opaque_token
+        try:
+            return struct.pack("<HQ", self.opcode, self.response_value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"heartbeat response value is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)

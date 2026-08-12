@@ -78,7 +78,7 @@ client 255 redacted uint32 record
 server 10  empty heartbeat probe
 client 6   redacted indexed record set
 client 274 fixed 768/74-code-unit redacted text record
-client 23  8-byte opaque-token heartbeat response
+client 23  neutral uint64 heartbeat response value
 client 31  three redacted UTF-16 fields and a 48-byte opaque blob
 client 13  typed opcode-13 envelope or status message
 server 13  typed opcode-13 envelope or three-byte acknowledgment
@@ -137,13 +137,14 @@ Together these records reduce successful stream `116` to zero unknown packets.
 
 The login fold now reuses the world transport heartbeat shapes: server opcode
 `10` is exactly two bytes and client opcode `23` is exactly ten bytes, carrying
-an eight-byte token whose contents remain opaque. Every observed response
+one little-endian `uint64` response value whose higher-level meaning remains
+unknown. Every observed response
 immediately follows a probe. Successful stream `83` has one matched pair at
 14.107 ms. Stream `116` has four probes, three matched responses at 10.006,
 0.349, and 14.445 ms, and one final pending probe. The current local login has
 eight matched pairs, zero unmatched/pending responses, and a maximum 2,594.990
-ms round trip caused by replay pacing. Safe output exposes only token byte
-count, pair counters, and round-trip timing.
+ms round trip caused by replay pacing. Safe output exposes only response-value
+presence, pair counters, and round-trip timing; the value itself is redacted.
 
 Client opcode `6` is a variable indexed record set with an exact shared
 boundary across stream `83`, stream `116`, and the current live login:
@@ -4121,6 +4122,32 @@ opcode `280` or a field transition. Stream `126` correlates 399 hit responses
 and clears 21 terminal hits. Stream `92` correlates 208, clears 11, and skips
 seven zero-damage words. Both finish with zero pending effects. The fold does
 not expose client tokens or raw target ids.
+
+## Heartbeat transport (`server 10` -> `client 23`)
+
+The server probe is the exact two-byte opcode with no body. The client response
+has one complete fixed layout:
+
+```text
+uint16 opcode = 23
+uint64 response_value
+```
+
+The response value is a neutral wire field, not an echoed challenge: the probe
+has no value to echo, and the 380 gameplay samples are all nonzero and unique
+without forming a monotonic sequence. Stream `126` contributes 304 responses,
+stream `92` contributes 75, and stream `114` contributes one. Every response
+matches the oldest pending probe, with no unmatched response or final pending
+probe in those three sessions. The fixed layout round-trips and independently
+validates at full coverage, moving stream `126` to `69,653/1,447/0/0`, stream
+`92` to `34,466/741/0/0`, and stream `114` to `62/14/0/0`.
+
+Safe packet details report only `response_value_present`, probe matching, and
+round-trip timing. The current active-world transcript independently folds
+343/343 pairs at full coverage with no warnings or pending probe. The running
+listener's `GET /api/v1/status` aggregate reports 3,369 probes and 3,369
+responses across its completed connections, with none pending; the HTTP model
+publishes counters and latency only, never the response values.
 
 ## Attack relays (`server 218` and `219`)
 

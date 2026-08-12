@@ -739,11 +739,12 @@ length-prefixed type-`6`/type-`7` envelopes are structurally bounded and
 intentionally reported as opaque. They use neutral opcode-envelope names
 because adjacency in one capture does not establish security semantics.
 Login heartbeat traffic is also folded: empty server opcode `10` queues a
-probe and fixed ten-byte client opcode `23` consumes it while retaining the
-eight-byte token as opaque. Stream `83` has one matched pair, stream `116` has
+probe and fixed ten-byte client opcode `23` consumes it while decoding one
+neutral little-endian `uint64` response value. Stream `83` has one matched
+pair, stream `116` has
 four probes/three matches/one final pending probe, and the current local login
 has eight matched pairs. JSON/text state reports match/pending counts and
-round-trip timing without exposing token bytes.
+round-trip timing without exposing response values.
 
 Client opcode `6` is a shared variable indexed-record grammar across successful
 stream `83`, stream `116`, and the current live login: nine redacted `uint32`
@@ -1128,7 +1129,8 @@ The gameplay fold currently models these capture-backed boundaries:
   both codecs store typed metadata and target records without an opaque body,
 - client opcode `301`: the world-bootstrap acknowledgement envelope,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
-  opcode `23`: a response with an opaque eight-byte token,
+  opcode `23`: one neutral, redacted `uint64` response value; all 380 gameplay
+  samples FIFO-match probes and validate at full coverage,
 - server opcode `426`: an exact empty notification followed one-for-one by the
   exact empty client opcode-`309` acknowledgement; the fold tracks ordering and
   round-trip time without assigning a broader gameplay role,
@@ -1884,7 +1886,9 @@ connection and configured-protocol telemetry rather than continuously
 refolding an incomplete transcript, and neither route exposes plaintext.
 When periodic world heartbeats are enabled,
 `protocol.world_heartbeat` reports the interval, probes sent, responses
-observed, pending probes, and last/maximum round-trip milliseconds.
+observed, pending probes, and last/maximum round-trip milliseconds. The client
+response value is intentionally absent from this read-only HTTP model because
+its higher-level meaning is unknown and liveness needs only pair/timing state.
 When the baseline initial snapshot is generated,
 `protocol.initial_field_snapshot_emitter` reports its frame index, emitter,
 inventory group/item counts, skill count, progression shape/variant,

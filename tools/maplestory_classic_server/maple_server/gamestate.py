@@ -1386,17 +1386,16 @@ class LoginStateFold:
             self.state.heartbeat_responses += 1
             details: dict[str, object] = {
                 "matched_probe": matched_probe,
-                "opaque_token_bytes": 8,
+                "response_value_present": True,
             }
             if round_trip_ms is not None:
                 details["round_trip_ms"] = round(round_trip_ms, 3)
             return self._observation(
                 frame,
                 kind="heartbeat_response",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=response,
                 details=details,
-                issues=("heartbeat response token remains opaque",),
             )
         if opcode == 13:
             if len(payload) >= 3 and payload[2] == 15:

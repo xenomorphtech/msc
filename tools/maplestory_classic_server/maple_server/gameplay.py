@@ -7616,7 +7616,7 @@ class GameplayStateFold:
             self.state.heartbeat_responses += 1
             details = {
                 "matched_probe": matched_probe,
-                "opaque_token_bytes": 8,
+                "response_value_present": True,
             }
             if round_trip_ms is not None:
                 details["round_trip_ms"] = round(round_trip_ms, 3)
@@ -7626,10 +7626,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="heartbeat_response",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=response,
                 details=details,
-                issues=("heartbeat response token remains opaque",),
             )
         if opcode in {50, 52}:
             return self._fold_client_attack(

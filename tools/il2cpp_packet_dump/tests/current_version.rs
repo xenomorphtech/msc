@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use maple_il2cpp_packet_dump::il2cpp::{build_dump, deterministic_json};
 use maple_il2cpp_packet_dump::manifest::LoadedManifest;
-use maple_il2cpp_packet_dump::shape::ShapeOp;
+use maple_il2cpp_packet_dump::shape::{ReadKind, ShapeOp};
 
 fn manifest() -> LoadedManifest {
     let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -72,6 +72,26 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
             .iter()
             .all(|operation| matches!(operation, ShapeOp::Read { .. }))
     }));
+
+    let heartbeat_response = shapes
+        .iter()
+        .find(|shape| shape.name == "heartbeat_response")
+        .unwrap();
+    assert!(matches!(
+        heartbeat_response.operations.as_slice(),
+        [
+            ShapeOp::Read {
+                kind: ReadKind::U16,
+                equals: Some(23),
+                ..
+            },
+            ShapeOp::Read {
+                name,
+                kind: ReadKind::U64,
+                equals: None,
+            }
+        ] if name == "response_value"
+    ));
 
     let chair_sit = shapes
         .iter()

@@ -274,7 +274,7 @@ def fixture_login_transcript(
         append(
             "client_to_server",
             HeartbeatResponse(
-                opaque_token=round_index.to_bytes(8, "little")
+                response_value=round_index
             ).to_bytes(),
         )
     if pending_heartbeat_probe:
@@ -903,12 +903,16 @@ class GameStateFoldTest(unittest.TestCase):
             all(response.details["round_trip_ms"] == 1.0 for response in responses)
         )
         self.assertTrue(
-            all(response.coverage == ShapeCoverage.PARTIAL for response in responses)
+            all(response.coverage == ShapeCoverage.FULL for response in responses)
         )
         self.assertTrue(
             all(
                 set(response.details)
-                == {"matched_probe", "opaque_token_bytes", "round_trip_ms"}
+                == {
+                    "matched_probe",
+                    "response_value_present",
+                    "round_trip_ms",
+                }
                 for response in responses
             )
         )

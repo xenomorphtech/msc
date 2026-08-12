@@ -775,6 +775,16 @@
   round-trip and pass the independent manifest: stream `126` advances to
   `69,349/1,751/0/0`, stream `92` to `34,391/816/0/0`, and stream `114`
   remains `61/15/0/0`.
+- Client opcode `23` now types its complete ten-byte heartbeat response as
+  opcode plus one neutral, redacted `uint64`; the empty opcode-`10` probe has
+  no challenge value to echo. All 380 gameplay values are nonzero and unique,
+  and all 304/75/1 responses in streams `126`/`92`/`114` FIFO-match a pending
+  probe. Independent validation and byte-for-byte round trips promote them to
+  full coverage, moving the streams to `69,653/1,447/0/0`,
+  `34,466/741/0/0`, and `62/14/0/0`. An active-world transcript independently
+  matches 343/343 at full coverage without warnings; current read-only HTTP
+  telemetry reports a 3,369/3,369 listener aggregate with none pending and
+  never exposes the response values.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits
