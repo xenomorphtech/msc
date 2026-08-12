@@ -1504,6 +1504,36 @@ heartbeats. Independent transcript analysis is warning-free at
 `159/133/0/0`, matches the response in `0.213` ms, and leaves none pending on
 map `101000000`.
 
+## Reactive skill-level change validation
+
+`--reactive-skill-level-change-responses` serves client opcode `103` from
+mutable raw SP and skill-level state during hold-open. It admits only one
+modeled available point, a non-negative `int32` skill id and result level, and
+a twice-level-sum trailing value that fits `uint8`. It then emits opcode `41`
+with request flag `0`, the skill-point mask, and SP minus one, followed by one
+opcode-`46` record for the requested skill at level plus one with flags `1:0`
+and auxiliary value `0`. The option requires `--keep-world-open`, cannot share
+opcode `103` with a captured reply, and publishes telemetry at
+`protocol.skill_level_change_responses`.
+
+Stream `126` proves eight request/update/acknowledgement lifecycles. Seven
+ordinary requests decrement raw SP `7 -> 0` one point at a time. The earlier
+skill-`1000` request succeeds while raw SP remains zero, so that captured
+beginner exception stays explicitly unserved. Across all eight responses the
+opcode-`46` trailing byte is twice the folded sum of skill levels; its broader
+semantic role remains neutral.
+
+The live client independently exercised the admitted branch. After a typed
+raw-SP-`1` injection, clicking the skill UI sent opcode `103` for skill `1001`.
+The responder served `1/1` with zero rejection, emitted opcodes `41,46`, moved
+raw SP `1 -> 0` and level `0 -> 1`, and used trailing value `30`; the visible
+skill counter changed `5 -> 4`. The client returned opcode `293` with control
+`346` and tail `0`. Independent analysis of
+`downloads/maple_custom_server_observed/skill_level_live_20260812/world/1786494416311300328_replay_12857.jsonl`
+is warning-free, matches the update in `0.383` ms and acknowledgement in
+`2.762` ms, leaves neither leg pending, stays active on map `101000000`, and
+had `53/53` heartbeat pairs at the proof sample.
+
 ## Pickup request/effect validation
 
 The gameplay analyzer now decodes the complete capture-observed pickup chain:

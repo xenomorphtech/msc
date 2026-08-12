@@ -130,6 +130,7 @@ from .packets import (
     ServerOpcode426Notification,
     ServerU32OpaqueTailEnvelope,
     SkillLevelChangeRequest,
+    SkillRecordEntry,
     SkillRecordUpdate,
     SkillRecordUpdateAcknowledgement,
     TutorialUiInstruction,
@@ -2111,6 +2112,152 @@ class AbilityPointAllocationResponsePolicy:
             stat_values_after=stat_values_after,
         )
         self.apply_server_packet(stat_update.to_bytes())
+        return plan
+
+
+@dataclass(frozen=True)
+class SkillLevelChangeResponsePlan:
+    request: SkillLevelChangeRequest = field(repr=False)
+    stat_update: CharacterStatUpdate = field(repr=False)
+    skill_update: SkillRecordUpdate = field(repr=False)
+    skill_points_before: int
+    skill_points_after: int
+    level_before: int
+    level_after: int
+
+    @property
+    def plaintexts(self) -> tuple[bytes, bytes]:
+        return (self.stat_update.to_bytes(), self.skill_update.to_bytes())
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "skill_points_before": self.skill_points_before,
+            "skill_points_after": self.skill_points_after,
+            "level_before": self.level_before,
+            "level_after": self.level_after,
+            "stat_request_flag": self.stat_update.request_flag,
+            "stat_mask": f"0x{self.stat_update.stat_mask:08x}",
+            "skill_flags": (
+                f"{int(self.skill_update.flag_a)}:"
+                f"{int(self.skill_update.flag_b)}"
+            ),
+            "auxiliary_value": self.skill_update.records[0].auxiliary_value,
+            "trailing_value": self.skill_update.trailing_value,
+            "server_opcodes": [
+                self.stat_update.opcode,
+                self.skill_update.opcode,
+            ],
+        }
+
+
+@dataclass
+class SkillLevelChangeResponsePolicy:
+    skill_points: int
+    skill_levels: dict[int, int] = field(repr=False)
+    field_epoch: int = 0
+    source_requests: int = 0
+    source_matches: int = 0
+    source_acknowledgements: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "skill_points": self.skill_points,
+            "modeled_skill_count": len(self.skill_levels),
+            "modeled_level_sum": sum(self.skill_levels.values()),
+            "skill_levels": dict(sorted(self.skill_levels.items())),
+            "source_evidence": {
+                "requests": self.source_requests,
+                "matches": self.source_matches,
+                "acknowledgements": self.source_acknowledgements,
+            },
+            "admission": {
+                "points": "one_modeled_point",
+                "skill_id": "non_negative_int32",
+                "result_level": "int32",
+                "trailing_value": "twice_modeled_level_sum_fits_uint8",
+                "zero_point_beginner_exception": "not_served",
+            },
+            "prediction": {
+                "server_opcodes": [41, 46],
+                "stat_request_flag": 0,
+                "stat_mask": "skill_points",
+                "stat_tail": "00",
+                "skill_flags": "1:0",
+                "auxiliary_value": 0,
+                "trailing_value": "twice_modeled_level_sum",
+                "client_acknowledgement_opcode": 293,
+                "client_acknowledgement_control_value": 346,
+                "client_acknowledgement_trailing_value": 0,
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 41:
+            update = CharacterStatUpdate.parse(plaintext)
+            skill_points = update.values.get("skill_points")
+            if skill_points is not None:
+                self.skill_points = skill_points
+            return
+        if opcode == 46:
+            update = SkillRecordUpdate.parse(plaintext)
+            for record in update.records:
+                self.skill_levels[record.skill_id] = record.level
+
+    def respond(
+        self, request: SkillLevelChangeRequest
+    ) -> SkillLevelChangeResponsePlan:
+        if request.skill_id > 0x7FFF_FFFF:
+            raise ValueError("skill id does not fit a non-negative int32")
+        if self.skill_points < 1:
+            raise ValueError(
+                "skill-level change requires one modeled available skill point"
+            )
+        level_before = self.skill_levels.get(request.skill_id, 0)
+        level_after = level_before + 1
+        if level_after > 0x7FFF_FFFF:
+            raise ValueError("skill-level change result does not fit int32")
+        modeled_level_sum_after = (
+            sum(self.skill_levels.values()) - level_before + level_after
+        )
+        trailing_value = modeled_level_sum_after * 2
+        if trailing_value > 0xFF:
+            raise ValueError(
+                "skill-level change trailing value does not fit uint8"
+            )
+        skill_points_after = self.skill_points - 1
+        stat_update = CharacterStatUpdate(
+            request_flag=0,
+            stat_mask=CharacterStatUpdate.SKILL_POINTS,
+            skill_points=skill_points_after,
+        )
+        skill_update = SkillRecordUpdate(
+            flag_a=True,
+            flag_b=False,
+            records=(
+                SkillRecordEntry(
+                    skill_id=request.skill_id,
+                    level=level_after,
+                    auxiliary_value=0,
+                ),
+            ),
+            trailing_value=trailing_value,
+        )
+        plan = SkillLevelChangeResponsePlan(
+            request=request,
+            stat_update=stat_update,
+            skill_update=skill_update,
+            skill_points_before=self.skill_points,
+            skill_points_after=skill_points_after,
+            level_before=level_before,
+            level_after=level_after,
+        )
+        for plaintext in plan.plaintexts:
+            self.apply_server_packet(plaintext)
         return plan
 
 
@@ -12112,6 +12259,44 @@ def derive_ability_point_allocation_response_policy(
         source_requests=state.ability_point_allocation_requests,
         source_matches=state.ability_point_allocation_response_matches,
         source_points=state.ability_points_requested,
+    )
+
+
+def derive_skill_level_change_response_policy(
+    transcript: Transcript,
+) -> SkillLevelChangeResponsePolicy:
+    """Build mutable SP/skill-level state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_skill_level_change_requests:
+        raise ValueError(
+            "world transcript has unresolved skill-level change requests"
+        )
+    if state.skill_record_request_matches != state.skill_level_change_requests:
+        raise ValueError(
+            "world transcript has unmatched skill-level change requests"
+        )
+    if state.pending_skill_record_update_acknowledgements:
+        raise ValueError(
+            "world transcript has unacknowledged skill-record updates"
+        )
+    if state.skill_points is None:
+        raise ValueError("world transcript has no modeled skill-point state")
+    if any(level < 0 for level in state.skill_levels.values()):
+        raise ValueError("world transcript has negative modeled skill levels")
+
+    return SkillLevelChangeResponsePolicy(
+        skill_points=state.skill_points,
+        skill_levels=dict(state.skill_levels),
+        field_epoch=state.field_epoch,
+        source_requests=state.skill_level_change_requests,
+        source_matches=state.skill_record_request_matches,
+        source_acknowledgements=(
+            state.matched_skill_record_update_acknowledgements
+        ),
     )
 
 

@@ -58,6 +58,7 @@ from maple_server.gameplay import (  # noqa: E402
     MobMovementBroadcastSequencePlan,
     MobMovementRelativeDecisionPolicy,
     ReactiveMobHealth,
+    SkillLevelChangeResponsePolicy,
     analyze_gameplay_transcript,
 )
 from maple_server.http_api import ServerPacketInjection  # noqa: E402
@@ -99,6 +100,9 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementPath,
     PlayerMovementSubmission,
     PickupGainNotice,
+    SkillLevelChangeRequest,
+    SkillRecordUpdate,
+    SkillRecordUpdateAcknowledgement,
     WorldHandoff,
     WorldSelection,
     VariableServerEntry,
@@ -666,6 +670,20 @@ class TranscriptTest(unittest.TestCase):
         self.assertTrue(
             arguments.reactive_ability_point_allocation_responses
         )
+
+    def test_replay_parser_accepts_reactive_skill_level_responses(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-skill-level-change-responses",
+            ]
+        )
+
+        self.assertTrue(arguments.reactive_skill_level_change_responses)
 
     def test_replay_parser_accepts_typed_item_pickup_options(self) -> None:
         arguments = build_parser().parse_args(
@@ -2555,6 +2573,144 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 allocation_events[-1].details["server_opcodes"], [41]
+            )
+
+    async def test_replay_responds_to_skill_level_change_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = CharacterStatUpdate(
+                request_flag=0,
+                stat_mask=CharacterStatUpdate.SKILL_POINTS,
+                skill_points=1,
+            ).to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-skill-points", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = SkillLevelChangeResponsePolicy(
+                skill_points=1,
+                skill_levels={},
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "skill_level_change_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            skill_level_change_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = SkillLevelChangeRequest(
+                client_tick=200_000,
+                skill_id=2_001_005,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+
+            first_response_iv = shuffle_iv(server_iv)
+            stat_wire = await reader.readexactly(14)
+            stat_update = CharacterStatUpdate.parse(
+                crypt_payload(stat_wire[4:], first_response_iv)
+            )
+            skill_wire = await reader.readexactly(23)
+            skill_update = SkillRecordUpdate.parse(
+                crypt_payload(skill_wire[4:], shuffle_iv(first_response_iv))
+            )
+            self.assertEqual(stat_update.skill_points, 0)
+            self.assertEqual(skill_update.records[0].skill_id, 2_001_005)
+            self.assertEqual(skill_update.records[0].level, 1)
+            self.assertEqual(skill_update.trailing_value, 2)
+
+            acknowledgement = SkillRecordUpdateAcknowledgement(
+                control_value=346,
+                client_tick=200_450,
+                trailing_value=0,
+            ).to_bytes()
+            next_client_iv = shuffle_iv(client_iv)
+            writer.write(
+                encode_frame_header(len(acknowledgement), next_client_iv, 300)
+                + crypt_payload(acknowledgement, next_client_iv)
+            )
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            metrics = runtime_protocol["skill_level_change_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 2)
+            self.assertEqual(metrics["last_response"]["server_opcodes"], [41, 46])
+            self.assertEqual(policy.skill_points, 0)
+            self.assertEqual(policy.skill_levels, {2_001_005: 1})
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.skill_record_request_matches, 1)
+            self.assertEqual(
+                analysis.state.matched_skill_record_update_acknowledgements,
+                1,
+            )
+            skill_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("skill_level_change_")
+            ]
+            self.assertEqual(
+                [event.kind for event in skill_events],
+                [
+                    "skill_level_change_request_observed",
+                    "skill_level_change_response_completed",
+                ],
             )
 
     async def test_replay_responds_to_modeled_item_pickup_during_hold_open(

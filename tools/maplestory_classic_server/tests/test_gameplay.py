@@ -29,6 +29,7 @@ from maple_server.gameplay import (  # noqa: E402
     derive_item_pickup_response_policy,
     derive_item_use_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    derive_skill_level_change_response_policy,
     logical_equip_inventory,
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
@@ -8440,6 +8441,57 @@ class GameplayStateFoldTest(unittest.TestCase):
                             increment=5,
                         ),
                     ),
+                )
+            )
+
+    def test_derives_captured_skill_level_change_response(self) -> None:
+        source = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            skill_record_lifecycle=True,
+            extra_server_plaintexts=(
+                CharacterStatUpdate(
+                    request_flag=0,
+                    stat_mask=CharacterStatUpdate.SKILL_POINTS,
+                    skill_points=5,
+                ).to_bytes(),
+            ),
+        )
+        policy = derive_skill_level_change_response_policy(source)
+
+        plan = policy.respond(
+            SkillLevelChangeRequest(
+                client_tick=200_900,
+                skill_id=2_001_005,
+            )
+        )
+
+        self.assertEqual(
+            plan.plaintexts,
+            (
+                bytes.fromhex("29000000800000040000"),
+                bytes.fromhex(
+                    "2e00010001006d881e00080000000000000012"
+                ),
+            ),
+        )
+        stat_update = CharacterStatUpdate.parse(plan.plaintexts[0])
+        skill_update = SkillRecordUpdate.parse(plan.plaintexts[1])
+        self.assertEqual(stat_update.request_flag, 0)
+        self.assertEqual(stat_update.skill_points, 4)
+        self.assertEqual(skill_update.records[0].skill_id, 2_001_005)
+        self.assertEqual(skill_update.records[0].level, 8)
+        self.assertEqual(skill_update.records[0].auxiliary_value, 0)
+        self.assertEqual(skill_update.trailing_value, 18)
+        self.assertEqual(policy.skill_points, 4)
+        self.assertEqual(policy.skill_levels[2_001_005], 8)
+        self.assertEqual(plan.safe_dict()["server_opcodes"], [41, 46])
+
+        policy.skill_points = 0
+        with self.assertRaisesRegex(ValueError, "available skill point"):
+            policy.respond(
+                SkillLevelChangeRequest(
+                    client_tick=200_901,
+                    skill_id=2_001_005,
                 )
             )
 

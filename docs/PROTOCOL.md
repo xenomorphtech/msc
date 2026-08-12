@@ -2151,11 +2151,21 @@ is `691.152` ms and the maximum update-to-acknowledgement interval is `16.933`
 ms. Folding the records yields skill levels `{12:0, 1000:1, 2001004:1,
 2001005:6}` with no pending requests or acknowledgements.
 
+Seven ordinary allocations are preceded by opcode-`41` skill-point changes
+`7 -> 6` through `1 -> 0`; each opcode-`46` record raises only the requested
+skill by one, uses flags `1:0` and auxiliary value `0`, and carries trailing
+values `4,6,8,10,12,14,16`. The earlier beginner request for skill `1000` is
+the bounded exception: opcode `41` reasserts `0`, yet opcode `46` still creates
+level `1` with trailing value `2`. Across all eight responses, including that
+exception, the trailing byte equals twice the folded sum of skill levels. This
+is used only as a capture-bounded construction rule; the field's higher-level
+role remains neutral and it is not labeled as skill points.
+
 The fold gives all three packets full structural coverage, emits
 `skill_level_change_requested`, `skill_records_updated`, and
 `skill_record_update_acknowledged`, and reports request/ack correlations and
-timing. The opcode-`46` trailing byte is deliberately not interpreted as skill
-points: surrounding opcode-`41` stat updates independently change that stat.
+timing. Surrounding opcode-`41` stat updates independently change skill points;
+the opcode-`46` trailing byte remains a separate field.
 
 A browser-free real-client stream-`114` replay then tested the server packet in
 both captured forms. Two zero-record packets and two one-record packets that
@@ -2167,6 +2177,26 @@ levels, player state, inventory, and all other progression unchanged, while
 61/61 generated heartbeats were paired. `inject-skill-record` now automates
 typed construction, API submission, acknowledgement correlation, and these
 invariant checks for either the empty form or one existing skill.
+
+`--reactive-skill-level-change-responses` serves the ordinary positive-SP
+branch during hold-open. It requires one modeled skill point, a non-negative
+`int32` skill id and level result, and a twice-level-sum trailing value that fits
+`uint8`; it deliberately rejects the captured zero-SP beginner exception.
+An admitted opcode `103` emits opcode `41` first (request flag `0`, mask
+`0x00008000`, SP minus one, one-zero tail), then opcode `46` (flags `1:0`, one
+requested-skill record at level plus one, auxiliary `0`, captured trailing
+rule). The option cannot share opcode `103` with a configured captured reply,
+and telemetry is published at `protocol.skill_level_change_responses`.
+
+The browser-free real client supplied an independent live proof after a typed
+one-point injection. Clicking a skill sent opcode `103` for skill `1001`; the
+handler moved raw SP `1 -> 0`, level `0 -> 1`, and emitted trailing value `30`.
+The visible skill counter changed `5 -> 4`, and the client acknowledged opcode
+`46` with opcode `293`, control `346`, and tail `0`. Independent analysis of
+`downloads/maple_custom_server_observed/skill_level_live_20260812/world/1786494416311300328_replay_12857.jsonl`
+is warning-free, matches the response in `0.383` ms and the acknowledgement in
+`2.762` ms, leaves no request or acknowledgement pending, remains active on map
+`101000000`, and paired `53/53` heartbeats at the proof sample.
 
 ## Client skill-use request (`104`)
 

@@ -36,6 +36,7 @@ from .gameplay import (
     MobMovementPlanningContext,
     MobMovementRelativeDecisionPolicy,
     PlayerMobProximityPredicate,
+    SkillLevelChangeResponsePolicy,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
     derive_ability_point_allocation_response_policy,
@@ -45,6 +46,7 @@ from .gameplay import (
     derive_item_use_response_policy,
     derive_mob_health_response_policy,
     derive_mob_movement_acknowledgement_policy,
+    derive_skill_level_change_response_policy,
     plan_composed_mob_movement_broadcasts,
     plan_mob_movement_broadcast,
     plan_current_hp_stat_update,
@@ -92,6 +94,7 @@ from .packets import (
     MobMovementSubmission,
     PlayerMovementSubmission,
     PacketShapeError,
+    SkillLevelChangeRequest,
     VariableServerRecord,
     WorldHandoff,
     WorldSelection,
@@ -444,6 +447,9 @@ async def replay_connection(
     ability_point_allocation_response_policy: (
         AbilityPointAllocationResponsePolicy | None
     ) = None,
+    skill_level_change_response_policy: (
+        SkillLevelChangeResponsePolicy | None
+    ) = None,
     inventory_move_response_policy: InventoryMoveResponsePolicy | None = None,
     mob_movement_acknowledgement_policy: (
         MobMovementAcknowledgementPolicy | None
@@ -491,6 +497,11 @@ async def replay_connection(
     ):
         raise ValueError(
             "reactive ability-point responses require a positive "
+            "hold_open_seconds"
+        )
+    if skill_level_change_response_policy is not None and hold_open_seconds <= 0:
+        raise ValueError(
+            "reactive skill-level responses require a positive "
             "hold_open_seconds"
         )
     if inventory_move_response_policy is not None and hold_open_seconds <= 0:
@@ -673,6 +684,13 @@ async def replay_connection(
             "client opcode 100 cannot use both captured and modeled replies"
         )
     if (
+        skill_level_change_response_policy is not None
+        and 103 in (client_opcode_replies or {})
+    ):
+        raise ValueError(
+            "client opcode 103 cannot use both captured and modeled replies"
+        )
+    if (
         inventory_move_response_policy is not None
         and 79 in (client_opcode_replies or {})
     ):
@@ -849,6 +867,17 @@ async def replay_connection(
             "runtime ability_point_allocation_responses telemetry must be a "
             "dictionary"
         )
+    skill_level_metrics = (
+        runtime_protocol.get("skill_level_change_responses")
+        if runtime_protocol is not None
+        else None
+    )
+    if skill_level_metrics is not None and not isinstance(
+        skill_level_metrics, dict
+    ):
+        raise TypeError(
+            "runtime skill_level_change_responses telemetry must be a dictionary"
+        )
     inventory_move_metrics = (
         runtime_protocol.get("inventory_move_responses")
         if runtime_protocol is not None
@@ -956,6 +985,7 @@ async def replay_connection(
             or item_use_response_policy is not None
             or client_recovery_response_policy is not None
             or ability_point_allocation_response_policy is not None
+            or skill_level_change_response_policy is not None
             or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
@@ -1056,6 +1086,9 @@ async def replay_connection(
                 ),
                 "reactive_ability_point_allocation_responses": (
                     ability_point_allocation_response_policy is not None
+                ),
+                "reactive_skill_level_change_responses": (
+                    skill_level_change_response_policy is not None
                 ),
                 "reactive_inventory_move_responses": (
                     inventory_move_response_policy is not None
@@ -1177,6 +1210,7 @@ async def replay_connection(
             or item_use_response_policy is not None
             or client_recovery_response_policy is not None
             or ability_point_allocation_response_policy is not None
+            or skill_level_change_response_policy is not None
             or inventory_move_response_policy is not None
             or mob_movement_acknowledgement_policy is not None
             or mob_health_response_policy is not None
@@ -1233,6 +1267,12 @@ async def replay_connection(
                 if ability_point_metrics is not None:
                     ability_point_metrics["state"] = (
                         ability_point_allocation_response_policy.safe_dict()
+                    )
+            if skill_level_change_response_policy is not None:
+                skill_level_change_response_policy.apply_server_packet(plaintext)
+                if skill_level_metrics is not None:
+                    skill_level_metrics["state"] = (
+                        skill_level_change_response_policy.safe_dict()
                     )
             if inventory_move_response_policy is not None:
                 inventory_move_response_policy.apply_server_packet(plaintext)
@@ -1855,6 +1895,100 @@ async def replay_connection(
                         )
                     record_runtime_event(
                         "ability_point_allocation_response_completed",
+                        response_plan.safe_dict(),
+                    )
+                if (
+                    opcode == 103
+                    and skill_level_change_response_policy is not None
+                ):
+                    request = SkillLevelChangeRequest.parse(client_plaintext)
+                    if skill_level_metrics is not None:
+                        skill_level_metrics["requests_observed"] = (
+                            int(
+                                skill_level_metrics.get(
+                                    "requests_observed", 0
+                                )
+                            )
+                            + 1
+                        )
+                    record_runtime_event(
+                        "skill_level_change_request_observed",
+                        {
+                            **request.safe_dict(),
+                            "available_points": (
+                                skill_level_change_response_policy.skill_points
+                            ),
+                            "modeled_level_before": (
+                                skill_level_change_response_policy.skill_levels.get(
+                                    request.skill_id
+                                )
+                            ),
+                        },
+                    )
+                    try:
+                        response_plan = (
+                            skill_level_change_response_policy.respond(request)
+                        )
+                    except ValueError as error:
+                        if skill_level_metrics is not None:
+                            skill_level_metrics["requests_rejected"] = (
+                                int(
+                                    skill_level_metrics.get(
+                                        "requests_rejected", 0
+                                    )
+                                )
+                                + 1
+                            )
+                            skill_level_metrics["last_rejection"] = str(error)
+                            skill_level_metrics["state"] = (
+                                skill_level_change_response_policy.safe_dict()
+                            )
+                        record_runtime_event(
+                            "skill_level_change_request_rejected",
+                            {
+                                **request.safe_dict(),
+                                "reason": str(error),
+                            },
+                        )
+                        continue
+                    for plaintext in response_plan.plaintexts:
+                        await send_server_plaintext(plaintext)
+                        if item_use_response_policy is not None:
+                            item_use_response_policy.apply_server_packet(plaintext)
+                        if client_recovery_response_policy is not None:
+                            client_recovery_response_policy.apply_server_packet(
+                                plaintext
+                            )
+                        if ability_point_allocation_response_policy is not None:
+                            (
+                                ability_point_allocation_response_policy
+                                .apply_server_packet(plaintext)
+                            )
+                    if skill_level_metrics is not None:
+                        skill_level_metrics["requests_served"] = (
+                            int(
+                                skill_level_metrics.get(
+                                    "requests_served", 0
+                                )
+                            )
+                            + 1
+                        )
+                        skill_level_metrics["response_packets_sent"] = (
+                            int(
+                                skill_level_metrics.get(
+                                    "response_packets_sent", 0
+                                )
+                            )
+                            + len(response_plan.plaintexts)
+                        )
+                        skill_level_metrics["last_response"] = (
+                            response_plan.safe_dict()
+                        )
+                        skill_level_metrics["state"] = (
+                            skill_level_change_response_policy.safe_dict()
+                        )
+                    record_runtime_event(
+                        "skill_level_change_response_completed",
                         response_plan.safe_dict(),
                     )
                 if opcode == 79 and inventory_move_response_policy is not None:
@@ -3724,6 +3858,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--reactive-skill-level-change-responses",
+        action="store_true",
+        help=(
+            "during hold-open, answer modeled opcode-103 skill-level changes "
+            "with the correlated opcode-41/opcode-46 updates; requires "
+            "--keep-world-open"
+        ),
+    )
+    replay.add_argument(
         "--reactive-item-pickup-responses",
         action="store_true",
         help=(
@@ -4635,6 +4778,25 @@ async def async_main(arguments: argparse.Namespace) -> None:
                 "last_response": None,
                 "last_rejection": None,
             }
+        skill_level_change_response_policy = None
+        if arguments.reactive_skill_level_change_responses:
+            if not arguments.keep_world_open:
+                raise ValueError(
+                    "--reactive-skill-level-change-responses requires "
+                    "--keep-world-open"
+                )
+            skill_level_change_response_policy = (
+                derive_skill_level_change_response_policy(transcript)
+            )
+            runtime_protocol["skill_level_change_responses"] = {
+                **skill_level_change_response_policy.safe_dict(),
+                "requests_observed": 0,
+                "requests_served": 0,
+                "requests_rejected": 0,
+                "response_packets_sent": 0,
+                "last_response": None,
+                "last_rejection": None,
+            }
         if arguments.reactive_inventory_move_responses:
             if not arguments.keep_world_open:
                 raise ValueError(
@@ -5437,6 +5599,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ability_point_allocation_response_policy=(
                 ability_point_allocation_response_policy
             ),
+            skill_level_change_response_policy=(
+                skill_level_change_response_policy
+            ),
             inventory_move_response_policy=inventory_move_response_policy,
             mob_movement_acknowledgement_policy=(
                 mob_movement_acknowledgement_policy
@@ -5489,6 +5654,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
             ),
             "reactive_ability_point_allocation_responses": (
                 arguments.reactive_ability_point_allocation_responses
+            ),
+            "reactive_skill_level_change_responses": (
+                arguments.reactive_skill_level_change_responses
             ),
             "reactive_inventory_move_responses": (
                 arguments.reactive_inventory_move_responses

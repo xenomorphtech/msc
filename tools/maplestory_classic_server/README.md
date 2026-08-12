@@ -508,6 +508,29 @@ rejection and one mask-`0x00004300` response, kept LUK `15`, raised INT
 at `159/133/0/0`, matches in `0.213` ms with none pending, stays active on map
 `101000000`, and had `54/54` heartbeat pairs at the proof sample.
 
+`--reactive-skill-level-change-responses` answers modeled opcode-`103`
+skill-level changes during hold-open. It consumes one modeled raw skill point,
+raises only the requested non-negative-`int32` skill id by one, and requires the
+result level and twice-modeled-level-sum trailing byte to fit their wire fields.
+It emits opcode `41` with request flag `0` and the skill-point mask, followed by
+opcode `46` with flags `1:0`, one record, and auxiliary value `0`. The option
+requires `--keep-world-open` with a positive hold duration, cannot be combined
+with a captured opcode-`103` reply, and deliberately excludes the captured
+zero-SP beginner exception. Add it as:
+
+```sh
+--reactive-skill-level-change-responses
+```
+
+Stream `126` proves all eight request/update/acknowledgement lifecycles and the
+trailing-value rule. A fresh UI control, after a typed raw-SP-`1` injection,
+sent skill `1001`; the responder served `1/1` with zero rejection, moved raw SP
+`1 -> 0` and level `0 -> 1`, and emitted trailing value `30`. The visible
+counter changed `5 -> 4`, and the client acknowledged with opcode `293`,
+control `346`, and tail `0`. The independent live fold is warning-free,
+matches in `0.383`/`2.762` ms with neither leg pending, stays active on map
+`101000000`, and had `53/53` heartbeat pairs at the proof sample.
+
 `--rewrite-final-field-drop-position X:Y` changes only the typed position in
 the final field's sole active mode-`2` item-drop packet.
 `--rewrite-final-field-drop-owner-to-player` independently rewrites only its
@@ -985,6 +1008,11 @@ The gameplay fold currently models these capture-backed boundaries:
   `310` is counted redacted UTF-16 plus a zero-u32/zero-u8 suffix in three
   controlled direct-Wayland confirmations, with no opcode-`241` or phase
   transition,
+- client opcode `103`, server opcode `46`, and client opcode `293`: a complete
+  skill-level request/update/acknowledgement lifecycle. Ordinary responses
+  spend one raw SP with opcode `41`, raise only the requested skill, and use
+  flags `1:0`, auxiliary `0`, plus the capture-bounded twice-level-sum trailing
+  byte; the zero-SP beginner request remains a separately bounded exception,
 - server opcode `142`: a boolean-gated header and counted keyed text/control
   records with two raw-byte-preserving IL2CPP booleans and two signed values per
   entry; zero is false and every nonzero byte is true, and the three-byte
@@ -1815,6 +1843,11 @@ When reactive ability-point allocation responses are enabled,
 `protocol.ability_point_allocation_responses` reports the modeled base-stat/AP
 state, capture evidence, admission rule, observed/served/rejected counts,
 response packet count, and last response or rejection.
+When reactive skill-level change responses are enabled,
+`protocol.skill_level_change_responses` reports modeled raw SP/skill levels,
+capture evidence, the bounded admission and packet prediction, observed/served/
+rejected counts, response packet count, last response or rejection, and current
+mutable state.
 When the final drop position is rewritten,
 `protocol.final_field_drop_position_rewrite` reports its alias/template,
 original and rewritten coordinates, field epoch, server-frame index, patch

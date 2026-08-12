@@ -251,6 +251,21 @@
   fold is warning-free at `159/133/0/0`, matches in `0.213` ms with none
   pending, remains active on map `101000000`, and had `54/54` heartbeat pairs
   at the proof sample.
+- `--reactive-skill-level-change-responses` now serves the ordinary positive-SP
+  branch of client opcode `103`. Stream `126` proves eight complete
+  request/opcode-`46`/opcode-`293` lifecycles: seven requests decrement raw SP
+  `7 -> 0` one point at a time, while the earlier skill-`1000` request succeeds
+  with raw SP unchanged at zero and remains an explicitly unserved beginner
+  exception. Every update raises only the requested skill, uses flags `1:0`
+  and auxiliary `0`, and its trailing byte is twice the folded skill-level sum.
+  The handler emits opcode `41` then opcode `46`, bounds id/level/trailing wire
+  ranges, publishes mutable state and request metrics, and conflicts with a
+  captured opcode-`103` reply. A fresh live UI request for skill `1001`, after
+  raw-SP-`1` injection, was served `1/1` with no rejection: raw SP `1 -> 0`,
+  level `0 -> 1`, trailing `30`, and visible counter `5 -> 4`. The client
+  returned opcode `293` with control `346` and tail `0`; independent analysis is
+  warning-free, matches in `0.383`/`2.762` ms with neither leg pending, remains
+  active on map `101000000`, and had `53/53` heartbeat pairs at the proof sample.
 - The final fixed-opaque client bucket is now gone. Opcode `307` is typed from
   two reference and 28 live samples as `redacted u32 + redacted u32 + zero
   u32`; the middle value is zero 26 times and page-aligned in all four nonzero
