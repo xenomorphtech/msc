@@ -36,6 +36,11 @@ pub enum ShapeOp {
         name: String,
         length_from: String,
     },
+    RemainingBytes {
+        name: String,
+        #[serde(default)]
+        min_length: Option<usize>,
+    },
     Utf16 {
         name: String,
         #[serde(default)]
@@ -194,6 +199,17 @@ impl<'a> Cursor<'a> {
                 }
                 ShapeOp::BytesFrom { name, length_from } => {
                     self.execute_bytes_from(name, length_from)?;
+                }
+                ShapeOp::RemainingBytes { name, min_length } => {
+                    let remaining = self.payload.len().saturating_sub(self.offset);
+                    if let Some(minimum) = min_length
+                        && remaining < *minimum
+                    {
+                        return Err(format!(
+                            "{name} has {remaining} remaining bytes, expected at least {minimum}"
+                        ));
+                    }
+                    self.take(remaining, name)?;
                 }
                 ShapeOp::Utf16 {
                     name,
@@ -735,5 +751,29 @@ mod tests {
         };
         cursor.execute(&operations).unwrap();
         assert_eq!(cursor.offset, payload.len());
+    }
+
+    #[test]
+    fn remaining_bytes_consumes_a_bounded_opaque_suffix() {
+        let shape = ShapeSpec {
+            name: "remaining".into(),
+            direction: Direction::ServerToClient,
+            opcode: 189,
+            length: None,
+            source: "test".into(),
+            operations: vec![
+                ShapeOp::Read {
+                    name: "prefix".into(),
+                    kind: ReadKind::U8,
+                    equals: Some(1),
+                },
+                ShapeOp::RemainingBytes {
+                    name: "opaque_body".into(),
+                    min_length: Some(2),
+                },
+            ],
+        };
+        assert_eq!(validate_raw(&[1, 0xaa, 0xbb], &shape), "ok");
+        assert!(validate_raw(&[1, 0xaa], &shape).contains("at least 2"));
     }
 }

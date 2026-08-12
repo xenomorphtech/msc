@@ -596,7 +596,12 @@ class GameplayGameState:
     remote_player_movement_broadcasts_for_unknown_players: int = 0
     remote_player_entries: int = 0
     remote_player_refreshes: int = 0
+    remote_player_entry_typed_bytes: int = 0
     remote_player_entry_opaque_bytes: int = 0
+    remote_player_entry_secondary_texts: int = 0
+    remote_player_entry_nonzero_headers: int = 0
+    remote_player_entry_visible_appearance_records: int = 0
+    remote_player_entry_masked_appearance_records: int = 0
     remote_player_leaves: int = 0
     remote_player_unknown_leaves: int = 0
     remote_player_mob_value_records: int = 0
@@ -4518,8 +4523,23 @@ class GameplayAnalysis:
                 ),
                 "remote_player_entries": self.state.remote_player_entries,
                 "remote_player_refreshes": self.state.remote_player_refreshes,
+                "remote_player_entry_typed_bytes": (
+                    self.state.remote_player_entry_typed_bytes
+                ),
                 "remote_player_entry_opaque_bytes": (
                     self.state.remote_player_entry_opaque_bytes
+                ),
+                "remote_player_entry_secondary_texts": (
+                    self.state.remote_player_entry_secondary_texts
+                ),
+                "remote_player_entry_nonzero_headers": (
+                    self.state.remote_player_entry_nonzero_headers
+                ),
+                "remote_player_entry_visible_appearance_records": (
+                    self.state.remote_player_entry_visible_appearance_records
+                ),
+                "remote_player_entry_masked_appearance_records": (
+                    self.state.remote_player_entry_masked_appearance_records
                 ),
                 "remote_player_leaves": self.state.remote_player_leaves,
                 "remote_player_unknown_leaves": (
@@ -11390,8 +11410,23 @@ class GameplayStateFold:
                 )
             )
             self.state.remote_player_entries += 1
-            self.state.remote_player_entry_opaque_bytes += len(
-                entered.opaque_body
+            self.state.remote_player_entry_typed_bytes += (
+                entered.body.typed_bytes
+            )
+            self.state.remote_player_entry_opaque_bytes += (
+                entered.body.opaque_bytes
+            )
+            self.state.remote_player_entry_secondary_texts += bool(
+                entered.body.secondary_text
+            )
+            self.state.remote_player_entry_nonzero_headers += bool(
+                entered.body.header_nonzero_fields
+            )
+            self.state.remote_player_entry_visible_appearance_records += len(
+                entered.body.appearance.visible_entries
+            )
+            self.state.remote_player_entry_masked_appearance_records += len(
+                entered.body.appearance.masked_entries
             )
             if existing is not None:
                 self.state.remote_player_refreshes += 1
@@ -11399,7 +11434,7 @@ class GameplayStateFold:
                 "entity": alias,
                 "level": entered.level,
                 "name_code_units": entered.name_code_units,
-                "opaque_body_bytes": len(entered.opaque_body),
+                **entered.body.safe_dict(),
                 "previously_observed": existing is not None,
                 "field_epoch": self.state.field_epoch,
             }
@@ -11416,8 +11451,8 @@ class GameplayStateFold:
                 parsed=entered,
                 details=details,
                 issues=(
-                    "remote-player entry body remains version-specific and "
-                    "opaque",
+                    "remote-player entry pre-appearance and tail regions "
+                    "remain version-specific and opaque",
                 ),
             )
         if opcode == 190:
@@ -15170,6 +15205,15 @@ def render_gameplay_analysis(
             f"remote_unknown_leaves:{state.remote_player_unknown_leaves} "
             "remote_entry_opaque_bytes:"
             f"{state.remote_player_entry_opaque_bytes} "
+            "remote_entry_typed_bytes:"
+            f"{state.remote_player_entry_typed_bytes} "
+            "remote_entry_secondary_texts:"
+            f"{state.remote_player_entry_secondary_texts} "
+            "remote_entry_nonzero_headers:"
+            f"{state.remote_player_entry_nonzero_headers} "
+            "remote_entry_appearance_records:"
+            f"{state.remote_player_entry_visible_appearance_records},"
+            f"{state.remote_player_entry_masked_appearance_records} "
             "remote_broadcasts:"
             f"{state.remote_player_movement_broadcasts} "
             "remote_known_broadcasts:"

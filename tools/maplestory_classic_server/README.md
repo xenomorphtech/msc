@@ -964,9 +964,12 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `202`: remote-player movement with an aliased object id, the
   same control value and command stream, and no client-only trailer,
 - server opcode `189`: remote-player entry with an aliased object id, level,
-  redacted counted UTF-16 name, and a losslessly retained version-specific
-  body; server opcode `190` is the exact object-id removal, and the fold now
-  requires movement broadcasts to reference a current-field entry,
+  a redacted name, second redacted terminated counted UTF-16 string, a fixed
+  four-value header, and a typed appearance island between capture-bounded
+  opaque regions; all 114 reference entries select exactly one appearance at
+  native-relative offset `130` or `131` and round-trip losslessly, while server
+  opcode `190` is the exact object-id removal and the fold requires movement
+  broadcasts to reference a current-field entry,
 - server opcode `224`: exact remote-player/mob-template value record with a
   fixed `0xff` marker, a repeated neutral u32 value, flag `0`/`1`, and zero
   reserved u16; the fold requires no meaning for the value but correlates the

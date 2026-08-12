@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 147 semantic/manual shapes and 88 explicitly
+manifest currently declares 148 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -105,8 +105,9 @@ opcode-`308`, opcode-`311`, and ability-point opcode-`100` layouts suppress four
 opaque pins without increasing the effective shape count. Live selector-`5`
 action-`51` controls add non-overlapping client chair sit/recovery/stand shapes
 for opcodes `49`, `82`, and `48`. Typed opcode `41` consolidates its three
-capture variants into one handler-exact conditional shape. This leaves 202
-active shapes and 63 active opaque pins.
+capture variants into one handler-exact conditional shape. Opcode `189` then
+replaces 26 width-specific remote-player entry pins with one variable semantic
+prefix/body shape. This leaves 177 active shapes and 29 active opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
 re-emits the sole 3,725-byte stream-`114` packet exactly; the checked-in shape
@@ -353,5 +354,12 @@ isolated validation passes `11/11`. The 150- and 158-byte shapes then consume
 metadata bytes, first sentinel/`-1`, eight metadata bytes, and second sentinel/
 zero. Isolated validation passes `2/2`; the 75 metadata bytes per record keep
 their neutral opaque role.
+Server opcode `189` replaces its 26 stream-`92`/`114` exact-width opaque pins
+with one generated-handler-backed variable shape: `u32 object id`, `u8 level`,
+terminated counted UTF-16 name, then at least 267 delegated bytes. Isolated
+validation exact-consumes all 114 entries across streams `92`, `114`, and `126`
+with no width-specific fallback. Python further types a second terminated
+string, four-value header, and one capture-bounded appearance island while
+retaining the two unresolved regions as opaque.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

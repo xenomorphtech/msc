@@ -17,9 +17,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 147);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 148);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
-    assert_eq!(shapes.len(), 202);
+    assert_eq!(shapes.len(), 177);
 
     let life_submission = shapes
         .iter()
@@ -217,10 +217,22 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
 
     let shape = shapes
         .iter()
-        .find(|shape| shape.name == "observed_server_to_client_opcode_189_length_326")
+        .find(|shape| shape.name == "server_opcode_189_remote_player_entry")
         .unwrap();
-    assert_eq!(shape.length, Some(326));
-    assert_eq!(shape.operations.len(), 2);
+    assert_eq!(shape.length, None);
+    assert_eq!(shape.operations.len(), 5);
+    assert!(matches!(
+        shape.operations.last(),
+        Some(ShapeOp::RemainingBytes {
+            min_length: Some(267),
+            ..
+        })
+    ));
+    assert!(!shapes.iter().any(|shape| {
+        shape
+            .name
+            .starts_with("observed_server_to_client_opcode_189_")
+    }));
 
     let skill_update = shapes
         .iter()
@@ -637,7 +649,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 196);
+    assert_eq!(dump.packet_shapes.len(), 177);
     assert_eq!(
         dump.handlers
             .iter()

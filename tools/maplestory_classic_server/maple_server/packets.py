@@ -9691,13 +9691,168 @@ class MobMovementAcknowledgement:
 
 
 @dataclass(frozen=True)
+class RemotePlayerEntryBody:
+    """Capture-bounded typed islands in an opcode-189 player body."""
+
+    secondary_text: str = field(repr=False)
+    header_u16_1: int
+    header_u8_1: int
+    header_u16_2: int
+    header_u8_2: int
+    opaque_pre_appearance: bytes = field(repr=False)
+    appearance: CharacterListAppearance = field(repr=False)
+    opaque_tail: bytes = field(repr=False)
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "RemotePlayerEntryBody":
+        reader = PacketReader(payload, packet_name="remote_player_entry_body")
+        secondary_text = reader.utf16_string(
+            "secondary_text", trailing_byte=True
+        )
+        header_u16_1 = reader.u16("header_u16_1")
+        header_u8_1 = reader.u8("header_u8_1")
+        header_u16_2 = reader.u16("header_u16_2")
+        header_u8_2 = reader.u8("header_u8_2")
+
+        candidates: list[
+            tuple[int, int, CharacterListAppearance]
+        ] = []
+        for opaque_length in (130, 131):
+            appearance_offset = reader.offset + opaque_length
+            if appearance_offset >= len(payload):
+                continue
+            appearance_reader = PacketReader(
+                payload[appearance_offset:],
+                packet_name="remote_player_entry_appearance",
+            )
+            try:
+                appearance = CharacterListAppearance.parse_from(
+                    appearance_reader
+                )
+            except PacketShapeError:
+                continue
+            if (
+                not appearance.visible_entries
+                or appearance.visible_entries[0].slot != 0
+            ):
+                continue
+            candidates.append(
+                (appearance_offset, appearance_reader.offset, appearance)
+            )
+        if len(candidates) != 1:
+            raise PacketShapeError(
+                "remote-player entry body does not contain exactly one "
+                "capture-bounded appearance record"
+            )
+        appearance_offset, appearance_length, appearance = candidates[0]
+        record = cls(
+            secondary_text=secondary_text,
+            header_u16_1=header_u16_1,
+            header_u8_1=header_u8_1,
+            header_u16_2=header_u16_2,
+            header_u8_2=header_u8_2,
+            opaque_pre_appearance=payload[reader.offset:appearance_offset],
+            appearance=appearance,
+            opaque_tail=payload[appearance_offset + appearance_length :],
+        )
+        record._validate()
+        return record
+
+    @property
+    def secondary_text_code_units(self) -> int:
+        return len(self.secondary_text.encode("utf-16-le")) // 2
+
+    @property
+    def opaque_bytes(self) -> int:
+        return len(self.opaque_pre_appearance) + len(self.opaque_tail)
+
+    @property
+    def typed_bytes(self) -> int:
+        return len(self.to_bytes()) - self.opaque_bytes
+
+    @property
+    def header_nonzero_fields(self) -> int:
+        return sum(
+            value != 0
+            for value in (
+                self.header_u16_1,
+                self.header_u8_1,
+                self.header_u16_2,
+                self.header_u8_2,
+            )
+        )
+
+    def _validate(self) -> None:
+        if len(self.opaque_pre_appearance) not in {130, 131}:
+            raise PacketShapeError(
+                "remote-player entry pre-appearance region must be 130 or "
+                "131 bytes"
+            )
+        if not self.opaque_tail:
+            raise PacketShapeError(
+                "remote-player entry post-appearance region cannot be empty"
+            )
+        if (
+            not self.appearance.visible_entries
+            or self.appearance.visible_entries[0].slot != 0
+        ):
+            raise PacketShapeError(
+                "remote-player entry appearance must begin with hair slot 0"
+            )
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "secondary_text_code_units": self.secondary_text_code_units,
+            "header_nonzero_fields": self.header_nonzero_fields,
+            "appearance_visible_entries": len(
+                self.appearance.visible_entries
+            ),
+            "appearance_masked_entries": len(
+                self.appearance.masked_entries
+            ),
+            "typed_body_bytes": self.typed_bytes,
+            "opaque_pre_appearance_bytes": len(
+                self.opaque_pre_appearance
+            ),
+            "opaque_tail_bytes": len(self.opaque_tail),
+            "opaque_body_bytes": self.opaque_bytes,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            header = struct.pack(
+                "<HBHB",
+                self.header_u16_1,
+                self.header_u8_1,
+                self.header_u16_2,
+                self.header_u8_2,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player entry header is out of range: {error}"
+            ) from error
+        return b"".join(
+            (
+                encode_utf16_string(
+                    self.secondary_text, trailing_byte=True
+                ),
+                header,
+                bytes(self.opaque_pre_appearance),
+                self.appearance.to_bytes(),
+                bytes(self.opaque_tail),
+            )
+        )
+
+
+@dataclass(frozen=True)
 class RemotePlayerEnterField:
-    """Opcode-189 remote-player prefix plus its version-specific body."""
+    """Opcode-189 remote-player identity plus a partially typed body."""
 
     object_id: int = field(repr=False)
     level: int
     name: str = field(repr=False)
-    opaque_body: bytes = field(repr=False)
+    body: RemotePlayerEntryBody = field(repr=False)
     opcode: int = 189
 
     @classmethod
@@ -9707,8 +9862,10 @@ class RemotePlayerEnterField:
         record = cls(
             object_id=reader.u32("object_id"),
             level=reader.u8("level"),
-            name=reader.utf16_string("name", trailing_byte=False),
-            opaque_body=reader.bytes(reader.remaining, "opaque_body"),
+            name=reader.utf16_string("name", trailing_byte=True),
+            body=RemotePlayerEntryBody.parse(
+                reader.bytes(reader.remaining, "body")
+            ),
         )
         reader.finish()
         record._validate()
@@ -9723,17 +9880,14 @@ class RemotePlayerEnterField:
             raise PacketShapeError(
                 "remote-player enter-field opcode must be 189"
             )
-        if not self.opaque_body:
-            raise PacketShapeError(
-                "remote-player enter-field body cannot be empty"
-            )
+        self.body._validate()
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
             "object_id_redacted": True,
             "level": self.level,
             "name_code_units": self.name_code_units,
-            "opaque_body_length": len(self.opaque_body),
+            **self.body.safe_dict(),
         }
 
     def to_bytes(self) -> bytes:
@@ -9746,8 +9900,8 @@ class RemotePlayerEnterField:
             ) from error
         return (
             prefix
-            + encode_utf16_string(self.name, trailing_byte=False)
-            + bytes(self.opaque_body)
+            + encode_utf16_string(self.name, trailing_byte=True)
+            + self.body.to_bytes()
         )
 
 

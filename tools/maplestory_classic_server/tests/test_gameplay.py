@@ -56,6 +56,8 @@ from maple_server.packets import (  # noqa: E402
     ChairRecoveryRequest,
     ChairSitRequest,
     ChairStandRequest,
+    CharacterListAppearance,
+    CharacterLookEntry,
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
@@ -149,6 +151,7 @@ from maple_server.packets import (  # noqa: E402
     PlayerMovementSubmission,
     PickupGainNotice,
     RemotePlayerEnterField,
+    RemotePlayerEntryBody,
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
     ServerAttackRelay,
@@ -315,6 +318,35 @@ def fixture_npc() -> NpcSpawn:
         range_left=-300,
         range_right=200,
         hidden=False,
+    )
+
+
+def fixture_remote_player_entry_body(
+    *,
+    secondary_text: str = "",
+    header_values: tuple[int, int, int, int] = (0, 0, 0, 0),
+    opaque_pre_appearance_length: int = 130,
+    opaque_tail_length: int = 124,
+) -> RemotePlayerEntryBody:
+    return RemotePlayerEntryBody(
+        secondary_text=secondary_text,
+        header_u16_1=header_values[0],
+        header_u8_1=header_values[1],
+        header_u16_2=header_values[2],
+        header_u8_2=header_values[3],
+        opaque_pre_appearance=b"\x00" * opaque_pre_appearance_length,
+        appearance=CharacterListAppearance(
+            gender=0,
+            skin=0,
+            face_id=20_000,
+            visible_entries=(
+                CharacterLookEntry(slot=0, item_id=30_000),
+            ),
+            masked_entries=(),
+            cash_weapon_id=0,
+            opaque_style_values=(0, 0, 0, 0, 0, 0, 0),
+        ),
+        opaque_tail=b"\x00" * opaque_tail_length,
     )
 
 
@@ -3367,7 +3399,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             object_id=302_104,
             level=12,
             name="小慧22",
-            opaque_body=b"\x00" * 309,
+            body=fixture_remote_player_entry_body(),
         )
         left = RemotePlayerLeaveField(object_id=302_104)
 
@@ -3379,13 +3411,18 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         )
         self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
+        self.assertEqual(entered.body.typed_bytes, 54)
+        self.assertEqual(entered.body.opaque_bytes, 254)
         self.assertEqual(left.to_bytes().hex(), "be00189c0400")
         self.assertEqual(RemotePlayerLeaveField.parse(left.to_bytes()), left)
         self.assertNotIn("302104", str(entered.safe_dict()))
         self.assertNotIn("小慧22", str(entered.safe_dict()))
 
         with self.assertRaisesRegex(PacketShapeError, "cannot be empty"):
-            replace(entered, opaque_body=b"").to_bytes()
+            replace(
+                entered,
+                body=replace(entered.body, opaque_tail=b""),
+            ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "needs 8 bytes"):
             RemotePlayerEnterField.parse(bytes.fromhex("bd00010000000c0400"))
 
@@ -8510,19 +8547,30 @@ class GameplayStateFoldTest(unittest.TestCase):
             object_id=987_654_321,
             level=12,
             name="CaptureName",
-            opaque_body=b"\xaa\xbb",
+            body=fixture_remote_player_entry_body(),
         )
         player_b = RemotePlayerEnterField(
             object_id=123_456_789,
             level=9,
             name="Other",
-            opaque_body=b"\xcc",
+            body=fixture_remote_player_entry_body(
+                secondary_text="OtherTwo",
+                header_values=(1002, 11, 4018, 1),
+                opaque_pre_appearance_length=131,
+            ),
         )
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_server_plaintexts=(
                 player_a.to_bytes(),
-                replace(player_a, level=13, opaque_body=b"\xdd").to_bytes(),
+                replace(
+                    player_a,
+                    level=13,
+                    body=replace(
+                        player_a.body,
+                        opaque_tail=b"\xdd" + player_a.body.opaque_tail[1:],
+                    ),
+                ).to_bytes(),
                 player_b.to_bytes(),
                 RemotePlayerLeaveField(
                     object_id=player_a.object_id
@@ -8536,7 +8584,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(analysis.state.remote_player_entries, 3)
         self.assertEqual(analysis.state.remote_player_refreshes, 1)
-        self.assertEqual(analysis.state.remote_player_entry_opaque_bytes, 4)
+        self.assertEqual(
+            analysis.state.remote_player_entry_opaque_bytes,
+            3 * (130 + 124) + 1,
+        )
+        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 178)
+        self.assertEqual(analysis.state.remote_player_entry_secondary_texts, 1)
+        self.assertEqual(analysis.state.remote_player_entry_nonzero_headers, 1)
+        self.assertEqual(
+            analysis.state.remote_player_entry_visible_appearance_records, 3
+        )
+        self.assertEqual(
+            analysis.state.remote_player_entry_masked_appearance_records, 0
+        )
         self.assertEqual(analysis.state.remote_player_leaves, 2)
         self.assertEqual(analysis.state.remote_player_unknown_leaves, 1)
         self.assertEqual(list(analysis.state.observed_players), [player_b.object_id])
@@ -8558,6 +8618,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         safe = analysis.safe_dict()
         self.assertNotIn("987654321", str(safe))
         self.assertNotIn("CaptureName", str(safe))
+        self.assertNotIn("OtherTwo", str(safe))
         self.assertEqual(safe["state"]["observed_remote_player_count"], 1)
         event_kinds = [event.kind for event in analysis.events]
         self.assertEqual(event_kinds.count("remote_player_entered_field"), 3)
@@ -8652,7 +8713,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             object_id=987_654_321,
             level=12,
             name="CaptureName",
-            opaque_body=b"\xaa",
+            body=fixture_remote_player_entry_body(),
         )
         records = (
             RemotePlayerMobValueRecord(
@@ -8748,7 +8809,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             object_id=PLAYER_OBJECT_ID,
             level=12,
             name="Player",
-            opaque_body=b"\x00",
+            body=fixture_remote_player_entry_body(),
         ).to_bytes()
         relay_payload = ServerAttackRelay.parse(
             struct.pack("<HIB", 219, PLAYER_OBJECT_ID, 0x12)

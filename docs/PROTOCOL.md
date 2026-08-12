@@ -852,9 +852,12 @@ The marker-`26` sequences span `2..36`; its observed final neutral values are
 ## Remote-player field lifecycle (`189`, `190`)
 
 The pinned version-300 IL2CPP opcode-`189` handler reads a u32 object id, a u8
-level, and a counted UTF-16 name before delegating the remaining player body.
-The adjacent opcode-`190` handler reads exactly one u32 object id and removes
-that player:
+level, and a terminated counted UTF-16 name before delegating the remaining
+player body. Native control flow in the delegate then reads a second terminated
+counted UTF-16 string, a fixed `u16/u8/u16/u8` header, and a separately
+delegated appearance record. The bytes between those reads are not assigned a
+meaning. The adjacent opcode-`190` handler reads exactly one u32 object id and
+removes that player:
 
 ```text
 opcode 189:
@@ -863,7 +866,17 @@ opcode 189:
     uint8 level
     uint16 name_code_units
     utf16le[name_code_units] name    # retained only for re-emission
-    byte[] opaque_player_body
+    uint8 zero_name_terminator
+    uint16 secondary_text_code_units
+    utf16le[secondary_text_code_units] secondary_text  # redacted
+    uint8 zero_secondary_text_terminator
+    uint16 header_value_1
+    uint8 header_value_2
+    uint16 header_value_3
+    uint8 header_value_4
+    byte[130 or 131] opaque_pre_appearance
+    CharacterListAppearance appearance
+    byte[] opaque_tail
 
 opcode 190:
     uint16 opcode
@@ -871,19 +884,35 @@ opcode 190:
 ```
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
-packets round-trip exactly. The entry prefixes are structurally bounded and
-their 36,450 remaining body bytes stay explicit, so the 114 entries are
-partial; the 39 exact removals are full. Every removal references a player
-introduced in the same field epoch. More importantly, all 563 opcode-`202`
-player-movement broadcasts and all 652 server opcode-`217` life-movement
+packets round-trip exactly. Across all 114 entries, the body grammar types
+9,901 bytes and leaves 26,435 bytes explicit: a 130-byte pre-appearance region
+in 112 records, its 131-byte variant in two stream-`92` records, and tails of
+63..151 bytes. Exactly three records exercise a five-code-unit secondary text,
+and one of those independently exercises all four nonzero header fields
+(`1002/11/4018/1`); the other 113 headers are zero. Appearance records contain
+473 visible and 35 masked slot/template pairs in stream `92`, 32 visible and
+zero masked pairs in stream `114`, and 298 visible and 19 masked pairs in
+stream `126`. Identifiers, strings, face/style values, and item templates
+remain redacted from safe output.
+
+The appearance boundary is capture-bounded rather than inferred from byte
+frequency: parsing at the native-delegate-relative 130/131-byte offsets and
+requiring the appearance's leading hair slot yields exactly one valid record
+in every entry across all three streams. The residual regions keep entries at
+partial coverage; the 39 exact removals are full. Every removal references a
+player introduced in the same field epoch. More importantly, all 563 opcode-
+`202` player-movement broadcasts and all 652 server opcode-`217` life-movement
 broadcasts now correlate with a prior entry instead of creating players from
 movement alone.
 
 The fold emits `remote_player_entered_field` and
 `remote_player_left_field`, clears active players at field transitions, and
 preserves entry metadata when later movement supplies a position. Safe state
-exposes only an alias, level, name-code-unit count, position when known, and
-opaque-byte count. It never emits the captured object id or name.
+exposes only an alias, level, both string-code-unit counts, appearance entry
+counts, typed/opaque byte counts, header-presence counts, and position when
+known. It never emits a captured object id, string, or appearance identifier.
+The saved active custom-server transcript remains valid with four entries,
+356 typed body bytes, and 970 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode
