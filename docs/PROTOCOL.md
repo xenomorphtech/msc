@@ -2587,15 +2587,17 @@ controls `0/1/4/7` and terminal values `0/1`. Those short records now have full
 coverage. The two remaining variant-`8` records are distinct 117-byte wrappers
 around the existing equipment-item grammar. They expose slots `1`/`22`, item
 templates `1372012`/`1050018`, non-cash permanent expiration, and both validated
-filetime sentinels. Each still contains 75 bytes of equipment metadata with no
-assigned field roles, so the two observations stay partial with 150 opaque
-bytes total.
+filetime sentinels. The delegated native item reader additionally fixes two
+upgrade bytes, 15 `i16` stat values, a terminated owner string, an `i16` flag,
+two neutral bytes, two neutral `i32` values, a 12-byte extension block, an
+optional non-Cash `i64`, and both timestamp/value tails. Both wrappers are now
+full with zero opaque item-metadata bytes.
 
 Stream `92` contributes variants `3/4/5/8 = 152/13/9/6`, stream `114`
 contributes `1/1/0/0`, and level-1-through-10 stream `126` contributes
-`276/37/13/7`. Every packet reparses and round-trips exactly: 513 observations
-are full and two are partial. The strict stream totals are
-`34,552/655/0/0`, `64/12/0/0`, and `69,948/1,152/0/0`, respectively. Isolated
+`276/37/13/7`. Every packet reparses and round-trips exactly: all 515
+observations are full. At this checkpoint the strict stream totals move to
+`34,553/654/0/0`, `64/12/0/0`, and `69,949/1,151/0/0`, respectively. Isolated
 native validation consumes all 11 promoted short records without a failure or
 unsupported shape; a separate two-record native corpus consumes both long item
 wrappers exactly. The active saved transcript contains no variant-`8` record;
@@ -2695,13 +2697,14 @@ packets containing only quantity updates, moves, or removals are structurally
 complete. Across both sustained captures, all 39 record-type-`2` stack
 additions carry a ten-byte reserved-zero metadata field. All 66 record-type-`3`
 Cash additions instead carry a neutral `u32` at their former four-byte metadata
-boundary. Those branches now have zero opaque metadata bytes. Only the four
-stream-`126` equipment additions remain partial, each with 75 opaque bytes
-between its typed prefix and two validated sentinels. Across streams `126`,
-`92`, and `114`, 322 packets (`252 + 69 + 1`) are therefore full and four are
-partial. Exact native validation consumes all 325 sustained-capture opcode-`39`
-packets. The active saved transcript independently promotes its Cash add,
-moving to `764/18/0/0`.
+boundary. Those branches now have zero opaque metadata bytes. The delegated
+native equipment-item override fixes the remaining suffix fields and its
+optional non-Cash identity; all 18 initial-snapshot equipment records and all
+four stream-`126` equipment additions independently match and round-trip.
+Across streams `126`, `92`, and `114`, all 327 captured change sets are
+therefore full. Exact native validation consumes all 327 sustained-capture
+opcode-`39` packets. The active saved transcript independently keeps its Cash
+add full at `764/18/0/0`.
 
 Stream `92` contains 69 packets and 71 modifications: `add:16`,
 `update_quantity:40`, and `remove:15`, all under update flag zero. Thirteen

@@ -932,7 +932,7 @@
     },
     {
       "name":"inventory_change_set","direction":"server_to_client","opcode":39,
-      "source":"InventoryChangeSet/InventoryModification; all cross-capture stack-add records carry ten reserved-zero metadata bytes, while Cash metadata is a neutral u32; equipment metadata remains capture-bounded opaque",
+      "source":"InventoryChangeSet/InventoryModification; the delegated native equipment reader and 22 snapshot/opcode-39 records bound the shared equipment suffix, including its optional non-Cash identity; stack adds carry ten reserved-zero metadata bytes and Cash metadata is a neutral u32",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":39},{"op":"read","name":"update_flag","kind":"u8"},
         {"op":"read","name":"modification_count","kind":"u8"},
@@ -944,7 +944,19 @@
               {"op":"switch","field":"cash_flag","cases":[{"equals":0,"operations":[]},{"equals":1,"operations":[{"op":"read","name":"cash_id","kind":"u64"}]}]},
               {"op":"read","name":"expires_at_ticks","kind":"i64"},
               {"op":"switch","field":"inventory_type","cases":[
-                {"equals":1,"operations":[{"op":"bytes","name":"equipment_metadata","length":67},{"op":"read","name":"first_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_sentinel_tail","kind":"i32","equals":-1},{"op":"bytes","name":"interstitial_metadata","length":8},{"op":"read","name":"second_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_sentinel_tail","kind":"u32","equals":0}]},
+                {"equals":1,"operations":[
+                  {"op":"read","name":"upgrade_slots","kind":"u8"},{"op":"read","name":"upgrade_level","kind":"u8"},
+                  {"op":"read","name":"stat_01","kind":"i16"},{"op":"read","name":"stat_02","kind":"i16"},{"op":"read","name":"stat_03","kind":"i16"},{"op":"read","name":"stat_04","kind":"i16"},{"op":"read","name":"stat_05","kind":"i16"},
+                  {"op":"read","name":"stat_06","kind":"i16"},{"op":"read","name":"stat_07","kind":"i16"},{"op":"read","name":"stat_08","kind":"i16"},{"op":"read","name":"stat_09","kind":"i16"},{"op":"read","name":"stat_10","kind":"i16"},
+                  {"op":"read","name":"stat_11","kind":"i16"},{"op":"read","name":"stat_12","kind":"i16"},{"op":"read","name":"stat_13","kind":"i16"},{"op":"read","name":"stat_14","kind":"i16"},{"op":"read","name":"stat_15","kind":"i16"},
+                  {"op":"utf16","name":"owner","trailing_zero":true},{"op":"read","name":"equipment_flags","kind":"i16"},
+                  {"op":"read","name":"metadata_flag_1","kind":"u8"},{"op":"read","name":"metadata_flag_2","kind":"u8"},{"op":"read","name":"metadata_value_1","kind":"i32"},{"op":"read","name":"metadata_value_2","kind":"i32"},
+                  {"op":"read","name":"extension_flag_1","kind":"u8"},{"op":"read","name":"extension_flag_2","kind":"u8"},
+                  {"op":"read","name":"extension_value_1","kind":"i16"},{"op":"read","name":"extension_value_2","kind":"i16"},{"op":"read","name":"extension_value_3","kind":"i16"},{"op":"read","name":"extension_value_4","kind":"i16"},{"op":"read","name":"extension_value_5","kind":"i16"},
+                  {"op":"switch","field":"cash_flag","cases":[{"equals":0,"operations":[{"op":"read","name":"optional_identity","kind":"i64"}]},{"equals":1,"operations":[]}]},
+                  {"op":"read","name":"first_timestamp_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_value","kind":"i32","equals":-1},{"op":"read","name":"interstitial_value","kind":"i64"},
+                  {"op":"read","name":"second_timestamp_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_value","kind":"i32","equals":0}
+                ]},
                 {"equals":2,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"reserved_zero_metadata","length":10,"equals_hex":"00000000000000000000"},{"op":"read","name":"sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"tail","kind":"u32"}]},
                 {"equals":3,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"reserved_zero_metadata","length":10,"equals_hex":"00000000000000000000"},{"op":"read","name":"sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"tail","kind":"u32"}]},
                 {"equals":4,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"reserved_zero_metadata","length":10,"equals_hex":"00000000000000000000"},{"op":"read","name":"sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"tail","kind":"u32"}]},
@@ -1203,24 +1215,26 @@
     },
     {
       "name":"typed_notice_equipment_item_150","direction":"server_to_client","opcode":77,"length":150,
-      "source":"the stream-126 long type-8 branch reuses the opcode-39 equipment-item record grammar after a reserved zero, slot, and inventory type; both filetime sentinels and tails validate while 75 metadata bytes retain no assigned role",
+      "source":"the stream-126 long type-8 branch reuses the now-bounded opcode-39 equipment-item record grammar after a reserved zero, slot, and inventory type; its 113-byte item exactly follows the delegated native equipment reader",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":77},{"op":"read","name":"notice_type","kind":"u8","equals":8},{"op":"utf16","name":"label","trailing_zero":false},
         {"op":"read","name":"reserved_zero","kind":"u8","equals":0},{"op":"read","name":"slot","kind":"u16"},{"op":"read","name":"inventory_type","kind":"u8","equals":1},
         {"op":"read","name":"record_type","kind":"u8","equals":1},{"op":"read","name":"item_id","kind":"u32"},{"op":"read","name":"cash_flag","kind":"u8","equals":0},{"op":"read","name":"expires_at_ticks","kind":"i64","equals":150842304000000000},
-        {"op":"bytes","name":"equipment_metadata","length":67},{"op":"read","name":"first_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_sentinel_tail","kind":"i32","equals":-1},
-        {"op":"bytes","name":"interstitial_metadata","length":8},{"op":"read","name":"second_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_sentinel_tail","kind":"u32","equals":0}
+        {"op":"read","name":"upgrade_slots","kind":"u8"},{"op":"read","name":"upgrade_level","kind":"u8"},{"op":"bytes","name":"stat_values","length":30},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"read","name":"equipment_flags","kind":"i16"},
+        {"op":"read","name":"metadata_flag_1","kind":"u8"},{"op":"read","name":"metadata_flag_2","kind":"u8"},{"op":"read","name":"metadata_value_1","kind":"i32"},{"op":"read","name":"metadata_value_2","kind":"i32"},{"op":"read","name":"extension_flag_1","kind":"u8"},{"op":"read","name":"extension_flag_2","kind":"u8"},{"op":"bytes","name":"extension_values","length":10},{"op":"read","name":"optional_identity","kind":"i64"},
+        {"op":"read","name":"first_timestamp_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_value","kind":"i32","equals":-1},{"op":"read","name":"interstitial_value","kind":"i64"},{"op":"read","name":"second_timestamp_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_value","kind":"i32","equals":0}
       ]
     },
     {
       "name":"typed_notice_equipment_item_158","direction":"server_to_client","opcode":77,"length":158,
-      "source":"the stream-92 long type-8 branch independently reuses the same opcode-39 equipment-item record grammar after an 18-code-unit label; both filetime sentinels and tails validate while 75 metadata bytes retain no assigned role",
+      "source":"the stream-92 long type-8 branch independently reuses the same bounded opcode-39 equipment-item record grammar after an 18-code-unit label; its 113-byte item exactly follows the delegated native equipment reader",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":77},{"op":"read","name":"notice_type","kind":"u8","equals":8},{"op":"utf16","name":"label","trailing_zero":false},
         {"op":"read","name":"reserved_zero","kind":"u8","equals":0},{"op":"read","name":"slot","kind":"u16"},{"op":"read","name":"inventory_type","kind":"u8","equals":1},
         {"op":"read","name":"record_type","kind":"u8","equals":1},{"op":"read","name":"item_id","kind":"u32"},{"op":"read","name":"cash_flag","kind":"u8","equals":0},{"op":"read","name":"expires_at_ticks","kind":"i64","equals":150842304000000000},
-        {"op":"bytes","name":"equipment_metadata","length":67},{"op":"read","name":"first_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_sentinel_tail","kind":"i32","equals":-1},
-        {"op":"bytes","name":"interstitial_metadata","length":8},{"op":"read","name":"second_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_sentinel_tail","kind":"u32","equals":0}
+        {"op":"read","name":"upgrade_slots","kind":"u8"},{"op":"read","name":"upgrade_level","kind":"u8"},{"op":"bytes","name":"stat_values","length":30},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"read","name":"equipment_flags","kind":"i16"},
+        {"op":"read","name":"metadata_flag_1","kind":"u8"},{"op":"read","name":"metadata_flag_2","kind":"u8"},{"op":"read","name":"metadata_value_1","kind":"i32"},{"op":"read","name":"metadata_value_2","kind":"i32"},{"op":"read","name":"extension_flag_1","kind":"u8"},{"op":"read","name":"extension_flag_2","kind":"u8"},{"op":"bytes","name":"extension_values","length":10},{"op":"read","name":"optional_identity","kind":"i64"},
+        {"op":"read","name":"first_timestamp_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_value","kind":"i32","equals":-1},{"op":"read","name":"interstitial_value","kind":"i64"},{"op":"read","name":"second_timestamp_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_value","kind":"i32","equals":0}
       ]
     },
     {

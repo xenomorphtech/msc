@@ -489,10 +489,13 @@
   decode and fold with zero unknown-slot mutations. Coverage is now
   observation-specific. All 39 stack adds validate ten reserved-zero metadata
   bytes, and all 66 Cash records type the former four-byte metadata as a neutral
-  `u32`. Only four equipment adds remain partial with 75 opaque bytes each.
-  Thus 322 change sets across streams `126`/`92`/`114` are full and four are
-  partial; native validation exact-consumes all 325 sustained-capture packets.
-  Current strict totals are `70,033/1,067/0/0`, `34,568/639/0/0`, and
+  `u32`. The delegated native equipment-item override now fixes the common
+  upgrade/stat/owner/flag core, neutral extension scalars, optional non-Cash
+  identity, and timestamp/value tails. All 18 initial-snapshot records, four
+  equipment additions, and both long opcode-`77` wrappers round-trip exactly
+  with zero opaque metadata. All 327 change sets across streams
+  `126`/`92`/`114` are now full. Current strict totals are
+  `70,073/1,027/0/0`, `34,569/638/0/0`, and
   `64/12/0/0`. The active saved transcript's Cash add is also full, moving it
   to `764/18/0/0`. Its 78 opcode-`300` NPC spawns also validate
   after preserving the facing byte values `0/1/2/4/5`.
@@ -691,10 +694,10 @@
   counted UTF-16 fields, optional terminator, fixed controls, and neutral
   terminal value. Eleven short variant-`8` records also bind a reserved-zero
   byte, neutral control byte, and neutral `u16`. The two distinct long records
-  reuse the typed equipment-item grammar and retain only 75 opaque metadata
-  bytes each. Streams `92`, `114`, and `126` contribute
-  180, 2, and 333 exact round-trips respectively, with 513 observations full
-  and two partial. State/events expose only variant, text-length,
+  reuse the now-bounded equipment-item grammar. Streams `92`, `114`, and `126`
+  contribute 180, 2, and 333 exact round-trips respectively, with all 515
+  observations full and zero opaque item metadata. State/events expose only
+  variant, text-length,
   control/value, and opaque-byte distributions; captured text is omitted from
   safe reports and HTTP status.
 - Client opcode `217`, separate from the same-numbered server life-movement
@@ -987,9 +990,11 @@
   and one stream-`92` stack records validate ten reserved-zero bytes; all 51
   stream-`126` and 15 stream-`92` Cash records expose a neutral `u32`. This
   promotes 85/16 reference packets plus the active saved Cash addition to full
-  coverage. Four equipment additions remain partial at 75 opaque bytes each.
-  Native validation passes all 325 opcode-`39` packets, and safe events/HTTP
-  expose only metadata shape/lengths and the existing typed item fields.
+  coverage. The delegated native reader now fully bounds the four equipment
+  additions plus 18 initial-snapshot items and both long opcode-`77` wrappers.
+  Native validation passes all 327 reference opcode-`39` packets, and safe
+  events/HTTP expose only structural metadata counts and the existing typed
+  item fields.
 - Client opcode `80` is now a typed 12-byte Use-item request and is correlated
   with server opcode-`39` quantity and opcode-`41` potion-stat effects. All 17
   stream-`92` requests match their modeled slot/template, quantity decrement,

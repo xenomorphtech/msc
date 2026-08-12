@@ -350,10 +350,11 @@ Server opcode `77` variant `8` distinguishes its repeated short branch from two
 long item wrappers. All 11 short records across streams `126` and `92` consume
 as counted UTF-16 followed by `zero u8 + neutral control u8 + neutral u16`;
 isolated validation passes `11/11`. The 150- and 158-byte shapes then consume
-`zero u8 + slot u16 + Equip u8` plus the shared equipment-item prefix, 67
-metadata bytes, first sentinel/`-1`, eight metadata bytes, and second sentinel/
-zero. Isolated validation passes `2/2`; the 75 metadata bytes per record keep
-their neutral opaque role.
+`zero u8 + slot u16 + Equip u8` plus the shared equipment-item record. The
+delegated native reader fixes its suffix as two upgrade bytes, 15 `i16` stats,
+a terminated owner string, one `i16` flag, two neutral bytes, two `i32` values,
+a 12-byte extension block, an optional non-Cash `i64`, and two timestamp/value
+pairs. Isolated validation passes `2/2` with zero opaque bytes.
 Server opcode `189` replaces its 26 stream-`92`/`114` exact-width opaque pins
 with one generated-handler-backed variable shape: `u32 object id`, `u8 level`,
 terminated counted UTF-16 name, then at least 267 delegated bytes. Isolated

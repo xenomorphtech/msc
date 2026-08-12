@@ -2275,6 +2275,170 @@ PERMANENT_ITEM_EXPIRATION_TICKS = 150_842_304_000_000_000
 
 
 @dataclass(frozen=True)
+class EquipmentItemMetadata:
+    """Capture- and native-reader-backed equipment record suffix."""
+
+    upgrade_slots: int
+    upgrade_level: int
+    stat_values: tuple[int, ...]
+    owner: str = field(repr=False)
+    flags: int
+    metadata_flag_1: int
+    metadata_flag_2: int
+    metadata_value_1: int
+    metadata_value_2: int
+    extension_flag_1: int
+    extension_flag_2: int
+    extension_values: tuple[int, ...]
+    optional_identity: int | None
+    first_timestamp_ticks: int
+    first_value: int
+    interstitial_value: int
+    second_timestamp_ticks: int
+    second_value: int
+
+    STAT_COUNT = 15
+    EXTENSION_VALUE_COUNT = 5
+
+    @classmethod
+    def parse_from(
+        cls,
+        reader: PacketReader,
+        *,
+        cash_item: bool,
+        field_prefix: str,
+    ) -> "EquipmentItemMetadata":
+        metadata = cls(
+            upgrade_slots=reader.u8(f"{field_prefix}.upgrade_slots"),
+            upgrade_level=reader.u8(f"{field_prefix}.upgrade_level"),
+            stat_values=tuple(
+                reader.i16(f"{field_prefix}.stat_values[{index}]")
+                for index in range(cls.STAT_COUNT)
+            ),
+            owner=reader.utf16_string(
+                f"{field_prefix}.owner", trailing_byte=True
+            ),
+            flags=reader.i16(f"{field_prefix}.flags"),
+            metadata_flag_1=reader.u8(f"{field_prefix}.metadata_flag_1"),
+            metadata_flag_2=reader.u8(f"{field_prefix}.metadata_flag_2"),
+            metadata_value_1=reader.i32(f"{field_prefix}.metadata_value_1"),
+            metadata_value_2=reader.i32(f"{field_prefix}.metadata_value_2"),
+            extension_flag_1=reader.u8(
+                f"{field_prefix}.extension_flag_1"
+            ),
+            extension_flag_2=reader.u8(
+                f"{field_prefix}.extension_flag_2"
+            ),
+            extension_values=tuple(
+                reader.i16(f"{field_prefix}.extension_values[{index}]")
+                for index in range(cls.EXTENSION_VALUE_COUNT)
+            ),
+            optional_identity=(
+                None
+                if cash_item
+                else reader.i64(f"{field_prefix}.optional_identity")
+            ),
+            first_timestamp_ticks=reader.i64(
+                f"{field_prefix}.first_timestamp_ticks"
+            ),
+            first_value=reader.i32(f"{field_prefix}.first_value"),
+            interstitial_value=reader.i64(
+                f"{field_prefix}.interstitial_value"
+            ),
+            second_timestamp_ticks=reader.i64(
+                f"{field_prefix}.second_timestamp_ticks"
+            ),
+            second_value=reader.i32(f"{field_prefix}.second_value"),
+        )
+        metadata._validate(cash_item=cash_item)
+        return metadata
+
+    def _validate(self, *, cash_item: bool) -> None:
+        if len(self.stat_values) != self.STAT_COUNT:
+            raise PacketShapeError(
+                f"equipment metadata needs {self.STAT_COUNT} stat values"
+            )
+        if len(self.extension_values) != self.EXTENSION_VALUE_COUNT:
+            raise PacketShapeError(
+                "equipment metadata needs five extension values"
+            )
+        if cash_item != (self.optional_identity is None):
+            raise PacketShapeError(
+                "equipment optional identity presence does not match cash flag"
+            )
+        if self.first_timestamp_ticks != INITIAL_ITEM_SENTINEL_TICKS:
+            raise PacketShapeError(
+                "equipment first timestamp does not match the 1900 sentinel"
+            )
+        if self.second_timestamp_ticks != INITIAL_ITEM_SENTINEL_TICKS:
+            raise PacketShapeError(
+                "equipment second timestamp does not match the 1900 sentinel"
+            )
+        if self.first_value != -1:
+            raise PacketShapeError(
+                "equipment first timestamp value must be minus one"
+            )
+        if self.second_value != 0:
+            raise PacketShapeError(
+                "equipment second timestamp value must be zero"
+            )
+
+    @property
+    def owner_code_units(self) -> int:
+        return len(self.owner.encode("utf-16-le")) // 2
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "upgrade_slots": self.upgrade_slots,
+            "upgrade_level": self.upgrade_level,
+            "stat_value_count": len(self.stat_values),
+            "nonzero_stat_values": sum(
+                value != 0 for value in self.stat_values
+            ),
+            "owner_code_units": self.owner_code_units,
+            "flags": self.flags,
+            "optional_identity_present": self.optional_identity is not None,
+        }
+
+    def to_bytes(self) -> bytes:
+        cash_item = self.optional_identity is None
+        self._validate(cash_item=cash_item)
+        try:
+            body = b"".join(
+                (
+                    struct.pack("<BB", self.upgrade_slots, self.upgrade_level),
+                    struct.pack("<15h", *self.stat_values),
+                    encode_utf16_string(self.owner, trailing_byte=True),
+                    struct.pack(
+                        "<hBBiiBB5h",
+                        self.flags,
+                        self.metadata_flag_1,
+                        self.metadata_flag_2,
+                        self.metadata_value_1,
+                        self.metadata_value_2,
+                        self.extension_flag_1,
+                        self.extension_flag_2,
+                        *self.extension_values,
+                    ),
+                )
+            )
+            if self.optional_identity is not None:
+                body += struct.pack("<q", self.optional_identity)
+            return body + struct.pack(
+                "<qiqqi",
+                self.first_timestamp_ticks,
+                self.first_value,
+                self.interstitial_value,
+                self.second_timestamp_ticks,
+                self.second_value,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                "equipment metadata fields do not fit their integer widths"
+            ) from error
+
+
+@dataclass(frozen=True)
 class InitialInventoryItem:
     """Inventory item boundary with common fields and lossless record bytes."""
 
@@ -2289,7 +2453,8 @@ class InitialInventoryItem:
     @property
     def metadata_shape(self) -> str:
         if self.record_type == 1:
-            return "equipment_opaque"
+            self.equipment_metadata
+            return "equipment_bounded"
         if self.record_type == 2:
             return (
                 "stack_reserved_zero"
@@ -2303,15 +2468,8 @@ class InitialInventoryItem:
     @property
     def opaque_metadata_bytes(self) -> int:
         if self.record_type == 1:
-            sentinel = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
-                8, "little", signed=True
-            )
-            prefix_length = 14 + (8 if self.cash_item else 0)
-            first = self.raw_record.find(sentinel, prefix_length)
-            second = self.raw_record.find(sentinel, first + 8)
-            if first < 0 or second < 0:
-                return len(self.raw_record)
-            return (first - prefix_length) + (second - first - 12)
+            self.equipment_metadata
+            return 0
         if self.record_type == 2 and self._stack_metadata != b"\x00" * 10:
             return len(self._stack_metadata)
         return 0
@@ -2330,6 +2488,23 @@ class InitialInventoryItem:
         code_units = int.from_bytes(self.raw_record[offset : offset + 2], "little")
         metadata_start = offset + 2 + code_units * 2 + 1
         return self.raw_record[metadata_start : metadata_start + 10]
+
+    @property
+    def equipment_metadata(self) -> EquipmentItemMetadata | None:
+        if self.record_type != 1:
+            return None
+        prefix_length = 14 + (8 if self.cash_item else 0)
+        reader = PacketReader(
+            self.raw_record[prefix_length:],
+            packet_name="equipment_item_metadata",
+        )
+        metadata = EquipmentItemMetadata.parse_from(
+            reader,
+            cash_item=self.cash_item,
+            field_prefix="metadata",
+        )
+        reader.finish()
+        return metadata
 
     @classmethod
     def captured_permanent_stack(
@@ -2389,6 +2564,8 @@ class InitialInventoryItem:
             raise PacketShapeError(
                 "initial inventory item template id does not match record bytes"
             )
+        if self.record_type == 1:
+            self.equipment_metadata
         return bytes((self.slot,)) + self.raw_record
 
 
@@ -2468,9 +2645,6 @@ class InitialInventorySnapshot:
         cls, reader: PacketReader, *, name: str
     ) -> InitialInventoryGroup:
         items: list[InitialInventoryItem] = []
-        sentinel_bytes = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
-            8, "little", signed=True
-        )
         while True:
             slot = reader.u8(f"{name}.slot")
             if slot == 0:
@@ -2478,42 +2652,12 @@ class InitialInventorySnapshot:
             record_start, cash_item, item_id, expires_at_ticks = (
                 cls._read_common_item_prefix(reader, expected_type=1)
             )
-            first_sentinel = reader.payload.find(sentinel_bytes, reader.offset)
-            if first_sentinel < 0:
-                raise PacketShapeError(
-                    f"initial inventory {name} item lacks its first sentinel"
-                )
-            second_sentinel = reader.payload.find(
-                sentinel_bytes, first_sentinel + len(sentinel_bytes)
+            EquipmentItemMetadata.parse_from(
+                reader,
+                cash_item=cash_item,
+                field_prefix=f"{name}.equipment_metadata",
             )
-            if second_sentinel < 0:
-                raise PacketShapeError(
-                    f"initial inventory {name} item lacks its second sentinel"
-                )
-            record_end = second_sentinel + len(sentinel_bytes) + 4
-            if record_end > len(reader.payload):
-                raise PacketShapeError(
-                    f"initial inventory {name} item tail is truncated"
-                )
-            if (
-                reader.payload[first_sentinel + 8 : first_sentinel + 12]
-                != b"\xff" * 4
-            ):
-                raise PacketShapeError(
-                    f"initial inventory {name} first sentinel tail is not -1"
-                )
-            if (
-                reader.payload[second_sentinel + 8 : record_end]
-                != b"\x00" * 4
-            ):
-                raise PacketShapeError(
-                    f"initial inventory {name} second sentinel tail is not zero"
-                )
-            reader.bytes(
-                record_end - reader.offset,
-                f"{name}.item_record_tail",
-            )
-            raw_record = reader.payload[record_start:record_end]
+            raw_record = reader.payload[record_start : reader.offset]
             items.append(
                 InitialInventoryItem(
                     slot=slot,
@@ -4605,8 +4749,16 @@ class ServerOpcode77Envelope:
     def fully_bounded(self) -> bool:
         return self.variant in self.FULLY_BOUNDED_VARIANTS or (
             self.variant == 8
-            and self.variant_8_control is not None
-            and self.variant_8_value is not None
+            and (
+                (
+                    self.variant_8_control is not None
+                    and self.variant_8_value is not None
+                )
+                or (
+                    self.variant_8_item is not None
+                    and not self.variant_8_item.opaque_metadata_bytes
+                )
+            )
             and not self.opaque_tail
         )
 
@@ -4614,17 +4766,9 @@ class ServerOpcode77Envelope:
     def opaque_bytes(self) -> int:
         opaque_bytes = len(self.opaque_tail)
         item = self.variant_8_item
-        if item is None or item.record_type != 1:
+        if item is None:
             return opaque_bytes
-        sentinel = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
-            8, "little", signed=True
-        )
-        prefix_length = 14 + (8 if item.cash_item else 0)
-        first = item.raw_record.find(sentinel, prefix_length)
-        second = item.raw_record.find(sentinel, first + 8)
-        if first < 0 or second < 0:
-            return opaque_bytes + len(item.raw_record)
-        return opaque_bytes + (first - prefix_length) + (second - first - 12)
+        return opaque_bytes + item.opaque_metadata_bytes
 
     @property
     def text_code_unit_counts(self) -> tuple[int, ...]:
@@ -4745,6 +4889,7 @@ class ServerOpcode77Envelope:
     def safe_dict(self) -> dict[str, object]:
         variant_8_item = None
         if self.variant_8_item is not None:
+            equipment_metadata = self.variant_8_item.equipment_metadata
             variant_8_item = {
                 "inventory": InventoryModification.INVENTORY_NAMES.get(
                     self.variant_8_inventory_type, "unknown"
@@ -4755,6 +4900,12 @@ class ServerOpcode77Envelope:
                 "cash_item": self.variant_8_item.cash_item,
                 "expires_at_ticks": self.variant_8_item.expires_at_ticks,
                 "record_bytes": len(self.variant_8_item.raw_record),
+                "metadata_shape": self.variant_8_item.metadata_shape,
+                "equipment_metadata": (
+                    None
+                    if equipment_metadata is None
+                    else equipment_metadata.safe_dict()
+                ),
             }
         return {
             "variant": self.variant,
@@ -5073,43 +5224,10 @@ class InventoryModification:
         )
         quantity: int | None = None
         if record_type == 1:
-            sentinel_bytes = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
-                8, "little", signed=True
-            )
-            first_sentinel = reader.payload.find(sentinel_bytes, reader.offset)
-            if first_sentinel < 0:
-                raise PacketShapeError(
-                    "inventory equipment item lacks its first sentinel"
-                )
-            second_sentinel = reader.payload.find(
-                sentinel_bytes, first_sentinel + len(sentinel_bytes)
-            )
-            if second_sentinel < 0:
-                raise PacketShapeError(
-                    "inventory equipment item lacks its second sentinel"
-                )
-            record_end = second_sentinel + len(sentinel_bytes) + 4
-            if record_end > len(reader.payload):
-                raise PacketShapeError(
-                    "inventory equipment item tail is truncated"
-                )
-            if (
-                reader.payload[first_sentinel + 8 : first_sentinel + 12]
-                != b"\xff" * 4
-            ):
-                raise PacketShapeError(
-                    "inventory equipment first sentinel tail is not -1"
-                )
-            if (
-                reader.payload[second_sentinel + 8 : record_end]
-                != b"\x00" * 4
-            ):
-                raise PacketShapeError(
-                    "inventory equipment second sentinel tail is not zero"
-                )
-            reader.bytes(
-                record_end - reader.offset,
-                f"{field_prefix}.item.equipment_metadata",
+            EquipmentItemMetadata.parse_from(
+                reader,
+                cash_item=bool(cash_flag),
+                field_prefix=f"{field_prefix}.item.equipment_metadata",
             )
         elif record_type == 2:
             quantity = reader.u16(f"{field_prefix}.item.quantity")
@@ -5213,6 +5331,7 @@ class InventoryModification:
         if self.quantity is not None:
             details["quantity"] = self.quantity
         if self.item is not None:
+            equipment_metadata = self.item.equipment_metadata
             details["item"] = {
                 "record_type": self.item.record_type,
                 "item_id": self.item.item_id,
@@ -5225,6 +5344,11 @@ class InventoryModification:
                     self.item.reserved_zero_metadata_bytes
                 ),
                 "opaque_metadata_bytes": self.item.opaque_metadata_bytes,
+                "equipment_metadata": (
+                    None
+                    if equipment_metadata is None
+                    else equipment_metadata.safe_dict()
+                ),
             }
         if self.destination_slot is not None:
             details["destination_slot"] = self.destination_slot

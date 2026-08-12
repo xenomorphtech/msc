@@ -872,8 +872,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `39`: inventory change sets with empty, add, stack-quantity,
   equip-slot move, and remove operations plus lossless equipment, stack, and
   cash item records; stack adds validate ten reserved-zero metadata bytes and
-  Cash adds type the same boundary as a neutral `u32`, leaving only four
-  equipment records partial with 75 opaque metadata bytes each,
+  Cash adds type the same boundary as a neutral `u32`; the delegated native
+  reader and 24 cross-capture records fully bound both Cash and non-Cash
+  equipment suffixes with zero opaque metadata bytes,
 - client opcode `79`: exact 13-byte inventory-move requests with typed client
   tick, inventory type, signed source/destination slots, and signed quantity;
   both long-corpus requests FIFO-match the authoritative
@@ -903,9 +904,9 @@ The gameplay fold currently models these capture-backed boundaries:
   counted UTF-16 fields plus their fixed neutral controls/value; the repeated
   short variant-`8` branch binds `zero u8 + control u8 + neutral u16`, while
   its two distinct 117-byte bodies reuse the typed equipment-item grammar and
-  retain 75 opaque metadata bytes each. Safe state, events, JSON, text output,
-  and HTTP status expose typed item fields and lengths/distributions but never
-  captured text or metadata bytes,
+  now have zero opaque metadata. Safe state, events, JSON, text output, and HTTP
+  status expose typed item fields and structural counts but never captured text
+  or raw metadata bytes,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
   to local pickup requests by the exact aliased drop id, with full structural
   coverage for all three reason-selected branches,
@@ -2561,3 +2562,9 @@ preserve distinct Unity scan codes in this setup.
     reserved-zero bytes in all 39 stack additions, type the four-byte Cash
     metadata in all 66 Cash additions as a neutral `u32`, and retain partial
     coverage only for four equipment additions with 75 opaque bytes each.
+118. Follow opcode `39`'s delegated equipment-item reader through its virtual
+    override and type the common upgrade/stat/owner/flag core, neutral extension
+    scalars, optional non-Cash identity, and two timestamp/value pairs. Validate
+    all 18 initial-snapshot items, four opcode-`39` additions, and two long
+    opcode-`77` wrappers; promote all six residual packet observations to full
+    coverage with zero equipment metadata bytes left opaque.

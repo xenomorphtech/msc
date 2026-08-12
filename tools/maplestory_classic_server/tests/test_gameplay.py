@@ -577,11 +577,17 @@ def fixture_equipment_inventory_item(
     raw_record = b"".join(
         (
             struct.pack("<BIBq", 1, item_id, 0, expires_at_ticks),
-            b"\x00" * 12,
-            struct.pack("<q", item_sentinel_ticks),
-            b"\xff" * 4,
-            b"\x00" * 8,
-            struct.pack("<qI", item_sentinel_ticks, 0),
+            struct.pack("<BB15h", 0, 0, *(0,) * 15),
+            b"\x00\x00\x00",
+            struct.pack("<hBBiiBB5hq", *(0,) * 13),
+            struct.pack(
+                "<qiqqi",
+                item_sentinel_ticks,
+                -1,
+                0,
+                item_sentinel_ticks,
+                0,
+            ),
         )
     )
     return InitialInventoryItem(
@@ -1914,7 +1920,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         long_variant_8 = ServerOpcode77Envelope.parse(captured_long_variant_8)
         self.assertEqual(long_variant_8.to_bytes(), captured_long_variant_8)
-        self.assertFalse(long_variant_8.fully_bounded)
+        self.assertTrue(long_variant_8.fully_bounded)
         self.assertEqual(long_variant_8.variant_8_slot, 1)
         self.assertEqual(long_variant_8.variant_8_inventory_type, 1)
         self.assertIsNotNone(long_variant_8.variant_8_item)
@@ -1922,9 +1928,22 @@ class GameplayPacketShapeTest(unittest.TestCase):
             self.fail("captured long variant-8 item was not parsed")
         self.assertEqual(long_variant_8.variant_8_item.item_id, 1_372_012)
         self.assertEqual(len(long_variant_8.variant_8_item.raw_record), 113)
+        metadata = long_variant_8.variant_8_item.equipment_metadata
+        self.assertIsNotNone(metadata)
+        if metadata is None:
+            self.fail("captured long variant-8 equipment metadata was not parsed")
+        self.assertEqual(metadata.upgrade_slots, 0)
+        self.assertEqual(metadata.upgrade_level, 7)
+        self.assertEqual(len(metadata.stat_values), 15)
+        self.assertEqual(sum(value != 0 for value in metadata.stat_values), 3)
+        self.assertEqual(metadata.owner, "")
+        self.assertEqual(metadata.flags, 0)
+        self.assertEqual(metadata.optional_identity, 2_522_015_902_996_629_214)
+        self.assertEqual(metadata.first_value, -1)
+        self.assertEqual(metadata.interstitial_value, 0)
         self.assertEqual(long_variant_8.safe_dict()["opaque_tail_length"], 0)
         self.assertEqual(
-            long_variant_8.safe_dict()["opaque_item_metadata_length"], 75
+            long_variant_8.safe_dict()["opaque_item_metadata_length"], 0
         )
 
         invalid_reserved = bytearray(captured_variant_8)
@@ -1935,6 +1954,18 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(envelopes[-1], variant_8_value=None).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "slot does not match"):
             replace(long_variant_8, variant_8_slot=2).to_bytes()
+        invalid_first_timestamp = bytearray(captured_long_variant_8)
+        invalid_first_timestamp[-31] ^= 1
+        with self.assertRaisesRegex(PacketShapeError, "first timestamp"):
+            ServerOpcode77Envelope.parse(bytes(invalid_first_timestamp))
+        invalid_first_value = bytearray(captured_long_variant_8)
+        invalid_first_value[-23] = 0
+        with self.assertRaisesRegex(PacketShapeError, "minus one"):
+            ServerOpcode77Envelope.parse(bytes(invalid_first_value))
+        invalid_second_value = bytearray(captured_long_variant_8)
+        invalid_second_value[-1] = 1
+        with self.assertRaisesRegex(PacketShapeError, "second timestamp value"):
+            ServerOpcode77Envelope.parse(bytes(invalid_second_value))
 
         captured_variant_5 = bytes.fromhex(
             "4d000521005300490044005f0057004f0052004c0044004e004f005400490043"
@@ -2316,8 +2347,35 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         self.assertEqual(cash_stack_item.reserved_zero_metadata_bytes, 10)
         self.assertEqual(cash_stack_item.opaque_metadata_bytes, 0)
-        self.assertEqual(equipment_item.metadata_shape, "equipment_opaque")
-        self.assertEqual(equipment_item.opaque_metadata_bytes, 20)
+        self.assertEqual(equipment_item.metadata_shape, "equipment_bounded")
+        self.assertEqual(equipment_item.opaque_metadata_bytes, 0)
+        captured_cash_equipment = InitialInventoryItem(
+            slot=5,
+            record_type=1,
+            item_id=1_802_054,
+            cash_item=True,
+            expires_at_ticks=PERMANENT_ITEM_EXPIRATION,
+            quantity=None,
+            raw_record=bytes.fromhex(
+                "01467f1b00017528150000000000008005bb46e617020a00000000000000"
+                "000000000000000000000000000000000000000000000000000000000000"
+                "0000000000000000000000000000000000000000000040e0fd3b374f01ff"
+                "ffffff00000000000000000040e0fd3b374f0100000000"
+            ),
+        )
+        cash_equipment_metadata = captured_cash_equipment.equipment_metadata
+        self.assertIsNotNone(cash_equipment_metadata)
+        if cash_equipment_metadata is None:
+            self.fail("captured cash equipment metadata was not parsed")
+        self.assertIsNone(cash_equipment_metadata.optional_identity)
+        self.assertEqual(
+            captured_cash_equipment.metadata_shape, "equipment_bounded"
+        )
+        self.assertEqual(captured_cash_equipment.opaque_metadata_bytes, 0)
+        self.assertEqual(
+            captured_cash_equipment.to_bytes()[1:],
+            captured_cash_equipment.raw_record,
+        )
         self.assertEqual(
             changes.modifications[5].safe_dict(),
             {
@@ -6150,7 +6208,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.server_opcode_77_text_code_units,
             expected_code_units,
         )
-        self.assertEqual(analysis.state.server_opcode_77_opaque_bytes, 75)
+        self.assertEqual(analysis.state.server_opcode_77_opaque_bytes, 0)
         observations = [
             observation
             for observation in analysis.observations
@@ -6158,7 +6216,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            ["full", "full", "full", "full", "partial"],
+            ["full", "full", "full", "full", "full"],
         )
         events = [
             event
@@ -9181,13 +9239,8 @@ class GameplayStateFoldTest(unittest.TestCase):
             for observation in analysis.observations
             if observation.kind == "inventory_change_set"
         )
-        self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
-        self.assertEqual(
-            observation.issues,
-            (
-                "inventory add records retain 20 opaque item-metadata bytes",
-            ),
-        )
+        self.assertEqual(observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(observation.issues, ())
         self.assertEqual(event.details["applied_modifications"], 4)
         self.assertEqual(
             event.details["modifications"][0]["previous_quantity"], 3
@@ -9250,7 +9303,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage for observation in inventory_observations],
-            [ShapeCoverage.PARTIAL, ShapeCoverage.FULL],
+            [ShapeCoverage.FULL, ShapeCoverage.FULL],
         )
         self.assertEqual(inventory_observations[1].issues, ())
         self.assertIn(
