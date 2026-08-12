@@ -989,12 +989,14 @@ The gameplay fold currently models these capture-backed boundaries:
 - client opcode `276`: a live nine-byte selector-`17` compact form with three
   reserved zero bytes and a 210-byte stream-`126` selector-`24` form with two
   redacted headers, five counted groups, and 19 redacted u32 pairs; safe output
-  exposes only selector/shape/group/pair counts and field epoch,
+  exposes only selector/shape/group/pair counts and field epoch, and both forms
+  have full structural coverage,
 - client opcode `298`: exact 76-byte item-acquisition requests whose kind,
   item template, and quantity correlate with same-epoch server opcode-`39`
   additions; all 12 match by kind-derived inventory and item template, serials
   stay redacted, and safe state distinguishes nine exact Use quantities from
-  two differing and one unavailable Cash response quantities,
+  two differing and one unavailable Cash response quantities; all 12 have full
+  structural coverage,
 - server opcode `169`: selector `3` followed by one redacted, terminated
   counted UTF-16 value; the automatic dump plus native jump-table arm proves
   exact consumption, while safe state/events expose only selector, code-unit

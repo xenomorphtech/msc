@@ -6702,7 +6702,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(
             opcode_64.details["position_matches_last_life_movement"]
         )
-        self.assertEqual(opcode_111.coverage.value, "partial")
+        self.assertEqual(opcode_111.coverage, ShapeCoverage.FULL)
+        self.assertEqual(opcode_111.issues, ())
         server_response = next(
             event
             for event in analysis.events
@@ -7444,9 +7445,20 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(observations), 4)
         self.assertTrue(
             all(
-                observation.coverage.value == "partial"
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
                 for observation in observations
             )
+        )
+        neutral_observations = {
+            observation.opcode: observation
+            for observation in analysis.observations
+            if observation.kind.endswith("_neutral_record")
+        }
+        self.assertEqual(neutral_observations[307].coverage, ShapeCoverage.FULL)
+        self.assertEqual(neutral_observations[307].issues, ())
+        self.assertEqual(
+            neutral_observations[310].coverage, ShapeCoverage.PARTIAL
         )
         event_counts = Counter(event.kind for event in analysis.events)
         self.assertEqual(event_counts["client_neutral_record_submitted"], 2)
@@ -9248,6 +9260,13 @@ class GameplayStateFoldTest(unittest.TestCase):
             if event.kind == "inventory_item_acquisition_requested"
         )
         self.assertEqual(request.details["item_id"], 2_433_928)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_item_acquisition_request"
+        )
+        self.assertEqual(request_observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(request_observation.issues, ())
         confirmation = next(
             event
             for event in analysis.events
@@ -9334,7 +9353,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(observations), 2)
         self.assertTrue(
             all(
-                observation.coverage.value == "partial"
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
                 for observation in observations
             )
         )

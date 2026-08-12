@@ -228,7 +228,9 @@
   variants `0/1`. Purpose remains neutral and timing remains descriptive. The
   fold now separates these typed aggregates under `client_periodic_records`
   from the other client-neutral records, and isolated native validation consumes
-  all 17 reference packets.
+  all 17 reference packets. Together with both exact opcode-`307` records, all
+  19 now report full structural coverage while their values remain neutral or
+  redacted; neighboring redacted-text opcode `310` remains partial.
 - Client opcode `100` is now a full counted ability-point allocation request:
   `u32 client tick + u32 allocation count + repeated (u32 stat mask, u32
   increment)`. Stream `92` requests LUK/INT `+1/+4`; 107.555 ms later opcode
@@ -317,7 +319,9 @@
   treating them as validation failures. Three nonzero serials stay redacted.
   Python/native codecs consume all 12 exactly, safe analysis exposes bounded
   request/match/quantity/pending/latency counters, and stream `126` advances to
-  `26,661/44,429/10/0` while streams `92` and `114` remain unchanged.
+  `26,661/44,429/10/0` while streams `92` and `114` remain unchanged. Exact
+  structural consumption now promotes all 12 to full coverage without
+  assigning semantics to the remaining neutral fields.
 - `--reactive-item-acquisition-responses` now serves the five capture-proven
   permanent, zero-serial Use tuples with one lowest-positive-free-slot
   opcode-`39` addition. It rejects timed/Cash/unknown/duplicate requests and
@@ -337,6 +341,7 @@
   exposes only selectors, shapes, group/pair counts, and epoch. Python and
   isolated native validation consume both forms exactly, and stream
   `126` advances to `26,661/44,430/9/0` without assigning higher-level roles.
+  Both forms now report full structural coverage.
 - Client opcode `222` now extends the typed item-pickup chain as a compact
   19-byte request. All six stream-`126` records carry the folded field epoch,
   ordered client tick, signed player position, known active drop id, and zero

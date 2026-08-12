@@ -1124,6 +1124,9 @@ count, and field epoch. Header, group-selector, and pair values remain present
 for exact re-emission but are omitted from safe state and events. Both Python
 branches round-trip exactly, the native manifest keeps distinct nine- and
 210-byte shapes, and isolated native validation exact-consumes both packets.
+The reference grouped record and independently observed compact record now have
+full structural coverage; redacted headers, group selectors, pair values, and
+higher-level purpose remain neutral.
 No request/response, UI, or gameplay meaning is assigned from the shared opcode
 alone. The long corpus moves from the opcode-`298` checkpoint
 `26,661/44,429/10/0` to `26,661/44,430/9/0`; the held-open live transcript
@@ -1171,7 +1174,9 @@ acquisition. Empty opcode-`39` change sets immediately before some additions
 do not prematurely close a request.
 
 The Python codec, fold, and native manifest consume and re-emit all 12 records
-exactly. Safe analysis adds request counts by inventory/kind, neutral duration
+exactly. All 12 now report full structural coverage while neutral control,
+selection, duration, serial, sentinel, and flag roles remain neutrally named or
+redacted. Safe analysis adds request counts by inventory/kind, neutral duration
 distributions, nonzero-serial counts, match/quantity/pending counters, and
 last/maximum response latency. Coverage advances from
 `26,661/44,417/22/0` to `26,661/44,429/10/0`.
@@ -2599,6 +2604,8 @@ and removes then re-adds Cash inventory slot `3`. The fold queues the action
 and correlates only an opcode-`39` modification with inventory type Cash and
 the exact signed slot. It reports one match, no pending action, and no warning.
 The Python codec and native manifest consume and re-emit the record exactly.
+The record now reports full structural coverage without assigning a role to its
+neutral u32 or to the higher-level Cash-slot action.
 The automatic dump proves only that the opcode enum exists; it supplies no
 outgoing client handler or shape. The u32 value, action purpose, and causal
 relationship to the authoritative inventory change therefore remain neutral.

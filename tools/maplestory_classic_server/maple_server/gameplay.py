@@ -6600,12 +6600,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind=f"client_opcode_{opcode}_periodic_record",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=record,
                 details=details,
-                issues=(
-                    f"client opcode-{opcode} periodic values remain neutral",
-                ),
             )
         if opcode == 100:
             request = ClientAbilityPointAllocationRequest.parse(payload)
@@ -6679,11 +6676,17 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind=f"client_opcode_{opcode}_neutral_record",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.FULL
+                    if opcode == 307
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=record,
                 details=details,
                 issues=(
-                    f"client opcode-{opcode} record purpose remains neutral",
+                    ("client opcode-310 record purpose remains neutral",)
+                    if opcode == 310
+                    else ()
                 ),
             )
         if opcode == 241:
@@ -7427,13 +7430,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="client_opcode_276_envelope",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=envelope,
                 details=details,
-                issues=(
-                    "client opcode-276 selector, header, group, and pair roles "
-                    "remain neutral",
-                ),
             )
         if opcode == 279:
             envelope = ClientOpcode279TextEnvelope.parse(payload)
@@ -7555,13 +7554,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="inventory_item_acquisition_request",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=request,
                 details=details,
-                issues=(
-                    "client opcode-298 control, selection, duration, serial, "
-                    "sentinel, and flag roles remain neutral",
-                ),
             )
         if opcode == 309:
             acknowledgement = ClientOpcode309Acknowledgement.parse(payload)
@@ -8033,13 +8028,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="client_opcode_111_cash_slot_action",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=action,
                 details=details,
-                issues=(
-                    "client opcode-111 neutral value and higher-level Cash-"
-                    "slot action remain unresolved",
-                ),
             )
         if opcode == 66:
             acknowledgement = ClientOpcode66Acknowledgement.parse(payload)

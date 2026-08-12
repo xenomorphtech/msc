@@ -189,7 +189,7 @@ with all `1,440/1,440` heartbeats matched; its final gameplay phase remains map
 compact/grouped shape, group count, pair count, and field epoch. Python and
 isolated native validation exact-consume both branches. Header, group-selector,
 pair, and higher-level opcode roles remain neutral. The long corpus advances to
-`26,661/44,430/9/0`.
+`26,661/44,430/9/0`. Both branches now report full structural coverage.
 
 Client opcode `222` is now the compact branch of the existing item-pickup
 request. Its six exact 19-byte stream-`126` records omit the opcode-`185`
@@ -224,7 +224,8 @@ next same-epoch server opcode-`39` change set removes and re-adds Cash slot `3`
 after `486.349` ms. The fold correlates only an exact Cash-slot modification,
 keeps the u32 and higher-level action purpose neutral, and exposes bounded
 match/pending/latency telemetry. Python and native codecs consume the record
-exactly. With opcode `64` promoted to full coverage, stream `126` currently
+exactly and it now reports full structural coverage without assigning a role to
+the neutral u32. With opcode `64` promoted to full coverage, stream `126` currently
 measures `26,664/44,436/0/0` with only the
 unrelated one-HP combat aggregate warning.
 
@@ -507,7 +508,9 @@ requests `+9/+29` and receives exact gains while AP falls `38 -> 0` after
 samples as two redacted doubles, two redacted `u64`s, a
 `u32` mirrored by two doubles, and fixed controls. Opcode `311` is typed across
 six reference and seven live samples as `zero u64 + redacted u32 + zero u64`.
-All 24 opcode-`308` mirrors agree; meaning and cadence remain neutral. The fold
+All 24 opcode-`308` mirrors agree; meaning and cadence remain neutral. Exact
+opcodes `307`, `308`, and `311` now report full structural coverage; adjacent
+redacted-text opcode `310` remains partial. The fold
 publishes opcode `100` request/response totals and latency under
 `ability_point_allocation`, redacted `307/310` structure under
 `client_neutral_records`, typed periodic structure and intervals under
