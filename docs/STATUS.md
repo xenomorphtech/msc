@@ -481,8 +481,15 @@
   MP `158/285`, EXP `980`, and mesos `1472`.
 - The same corpus expands opcode-`39` to equipment adds, cash-tab stack adds,
   and operation-`2` equip moves. All 256 change sets and 232 modifications
-  decode and fold with zero unknown-slot mutations. Its 78 opcode-`300` NPC
-  spawns also validate after preserving the facing byte values `0/1/2/4/5`.
+  decode and fold with zero unknown-slot mutations. Coverage is now
+  observation-specific: 221 empty/fixed-layout change sets across streams
+  `126`/`92`/`114` are full, while all 106 packets containing add-item metadata
+  remain partial. An independent raw-byte walk exact-consumes every promoted
+  packet. Stream `126` reaches `67,290/3,810/0/0`, stream `92` reaches
+  `33,573/1,634/0/0`, stream `114` reaches `61/15/0/0`, and the active
+  transcript remains valid at `1,538/1,496/0/0` with one full fixed-layout
+  change and one partial add. Its 78 opcode-`300` NPC spawns also validate
+  after preserving the facing byte values `0/1/2/4/5`.
 - The common fixed-width server family now has complete typed codecs for
   opcodes `11`, `24`, `45`, `56`, `58`, `59`, `60`, `71`, `72`, `74`, `76`,
   `89`, `96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,

@@ -8749,16 +8749,25 @@ class GameplayStateFold:
             if opcode_111_response is not None:
                 details["client_opcode_111_response"] = opcode_111_response
             self._event(frame, "inventory_change_set_received", details=details)
+            has_extended_item_metadata = any(
+                modification.operation == InventoryModification.ADD
+                for modification in change_set.modifications
+            )
             return self._observation(
                 frame,
                 kind="inventory_change_set",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.PARTIAL
+                    if has_extended_item_metadata
+                    else ShapeCoverage.FULL
+                ),
                 parsed=change_set,
                 details=details,
                 issues=(
-                    "inventory update flag and extended item metadata roles "
-                    "remain neutral",
-                ),
+                    "inventory add records retain opaque extended item metadata",
+                )
+                if has_extended_item_metadata
+                else (),
             )
         if opcode == 42:
             header = LocalTemporaryStatSetHeader.parse(payload)

@@ -8888,6 +8888,18 @@ class GameplayStateFoldTest(unittest.TestCase):
             for event in analysis.events
             if event.kind == "inventory_change_set_received"
         )
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_change_set"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(
+            observation.issues,
+            (
+                "inventory add records retain opaque extended item metadata",
+            ),
+        )
         self.assertEqual(event.details["applied_modifications"], 4)
         self.assertEqual(
             event.details["modifications"][0]["previous_quantity"], 3
@@ -8943,6 +8955,16 @@ class GameplayStateFoldTest(unittest.TestCase):
             if event.kind == "inventory_change_set_received"
             and event.details["modifications"][0]["operation"] == "move"
         )
+        inventory_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_change_set"
+        ]
+        self.assertEqual(
+            [observation.coverage for observation in inventory_observations],
+            [ShapeCoverage.PARTIAL, ShapeCoverage.FULL],
+        )
+        self.assertEqual(inventory_observations[1].issues, ())
         self.assertIn(
             "inventory_move_request_frame",
             inventory_event.details["modifications"][0],
@@ -9407,6 +9429,13 @@ class GameplayStateFoldTest(unittest.TestCase):
             if observation.kind == "item_use_request"
         )
         self.assertEqual(request_observation.coverage, ShapeCoverage.FULL)
+        inventory_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_change_set"
+        )
+        self.assertEqual(inventory_observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(inventory_observation.issues, ())
         stat_event = next(
             event for event in analysis.events if event.kind == "player_stats_updated"
         )

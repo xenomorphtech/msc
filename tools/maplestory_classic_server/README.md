@@ -2472,3 +2472,8 @@ preserve distinct Unity scan codes in this setup.
     exact compatibility with the Protocol-300 snapshot, expose the maps and
     named action key sets in safe analysis/HTTP emitter telemetry, and retain
     opcode-`158` validation at the four selector types observed on the wire.
+103. Make server opcode-`39` coverage observation-specific: promote all 221
+    empty, quantity-update, move, and remove change sets whose fixed layouts
+    consume exactly, while retaining partial coverage for all 106 packets with
+    lossless but opaque add-item metadata. Revalidate both reference captures
+    and the active transcript with zero unknown or invalid observations.

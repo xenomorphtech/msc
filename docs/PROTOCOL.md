@@ -2565,6 +2565,16 @@ record. The observed operation-`2` records move equipped items from positive
 bag slots to negative equipped slots with move flag `2`; the fold swaps an
 occupied destination and otherwise moves the source item.
 
+Coverage is assigned per change set rather than per opcode. Empty packets and
+packets containing only quantity updates, moves, or removals are structurally
+complete: the neutral `update_flag` and `move_flag` names do not leave bytes
+unparsed. Any packet containing an add remains partial because the lossless
+item record still retains opaque equipment/stack/Cash metadata. Across streams
+`126`, `92`, and `114`, this promotes 221 fixed-layout packets
+(`167 + 53 + 1`) to full coverage while all 106 add-bearing packets
+(`89 + 16 + 1`) remain partial. An independent raw-payload walk consumes every
+promoted packet at its exact end.
+
 Stream `92` contains 69 packets and 71 modifications: `add:16`,
 `update_quantity:40`, and `remove:15`, all under update flag zero. Thirteen
 packets have an empty change list. Inventory types are `use:20`, `etc:21`, and
@@ -2579,6 +2589,9 @@ Stream `126` expands the grammar to 256 packets and 232 modifications:
 `add:93`, `update_quantity:79`, `move:2`, and `remove:58`. It contains four
 equipment adds, two cash-inventory stack adds, and two equip moves. Every
 change set round-trips and the fold reports zero unknown-slot modifications.
+The resulting stream totals are `67,290` full, `3,810` partial, and zero
+unknown or invalid observations; stream `92` reaches `33,573/1,634/0/0` and
+stream `114` reaches `61/15/0/0`.
 
 The state-driven quantity emitter requires an existing stack item and sends a
 single operation-`1` change. A real stream-`114` client accepted generated
