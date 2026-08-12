@@ -2286,6 +2286,51 @@ class InitialInventoryItem:
     quantity: int | None
     raw_record: bytes
 
+    @property
+    def metadata_shape(self) -> str:
+        if self.record_type == 1:
+            return "equipment_opaque"
+        if self.record_type == 2:
+            return (
+                "stack_reserved_zero"
+                if self._stack_metadata == b"\x00" * 10
+                else "stack_opaque"
+            )
+        if self.record_type == 3:
+            return "cash_neutral_u32"
+        return "unknown"
+
+    @property
+    def opaque_metadata_bytes(self) -> int:
+        if self.record_type == 1:
+            sentinel = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
+                8, "little", signed=True
+            )
+            prefix_length = 14 + (8 if self.cash_item else 0)
+            first = self.raw_record.find(sentinel, prefix_length)
+            second = self.raw_record.find(sentinel, first + 8)
+            if first < 0 or second < 0:
+                return len(self.raw_record)
+            return (first - prefix_length) + (second - first - 12)
+        if self.record_type == 2 and self._stack_metadata != b"\x00" * 10:
+            return len(self._stack_metadata)
+        return 0
+
+    @property
+    def reserved_zero_metadata_bytes(self) -> int:
+        return 10 if self.metadata_shape == "stack_reserved_zero" else 0
+
+    @property
+    def _stack_metadata(self) -> bytes:
+        if self.record_type != 2:
+            return b""
+        offset = 14 + (8 if self.cash_item else 0) + 2
+        if offset + 2 > len(self.raw_record):
+            return b""
+        code_units = int.from_bytes(self.raw_record[offset : offset + 2], "little")
+        metadata_start = offset + 2 + code_units * 2 + 1
+        return self.raw_record[metadata_start : metadata_start + 10]
+
     @classmethod
     def captured_permanent_stack(
         cls, *, slot: int, item_id: int, quantity: int
@@ -5072,7 +5117,7 @@ class InventoryModification:
             reader.u16(f"{field_prefix}.item.opaque_u16_1")
             reader.u8(f"{field_prefix}.item.opaque_flag_2")
             reader.i64(f"{field_prefix}.item.opaque_timestamp")
-            reader.bytes(4, f"{field_prefix}.item.opaque_metadata")
+            reader.u32(f"{field_prefix}.item.neutral_metadata_u32")
             reader.u32(f"{field_prefix}.item.opaque_u32_1")
             reader.u16(f"{field_prefix}.item.opaque_u16_2")
             reader.u8(f"{field_prefix}.item.opaque_flag_3")
@@ -5158,6 +5203,11 @@ class InventoryModification:
                 "expires_at_ticks": self.item.expires_at_ticks,
                 "quantity": self.item.quantity,
                 "record_bytes": len(self.item.raw_record),
+                "metadata_shape": self.item.metadata_shape,
+                "reserved_zero_metadata_bytes": (
+                    self.item.reserved_zero_metadata_bytes
+                ),
+                "opaque_metadata_bytes": self.item.opaque_metadata_bytes,
             }
         if self.destination_slot is not None:
             details["destination_slot"] = self.destination_slot

@@ -871,7 +871,9 @@ The gameplay fold currently models these capture-backed boundaries:
   changes (`u32 key`, `u8 type`, `i32 action`) to the active keymap state,
 - server opcode `39`: inventory change sets with empty, add, stack-quantity,
   equip-slot move, and remove operations plus lossless equipment, stack, and
-  cash item records; cash-tab adds accept both captured stack and cash records,
+  cash item records; stack adds validate ten reserved-zero metadata bytes and
+  Cash adds type the same boundary as a neutral `u32`, leaving only four
+  equipment records partial with 75 opaque metadata bytes each,
 - client opcode `79`: exact 13-byte inventory-move requests with typed client
   tick, inventory type, signed source/destination slots, and signed quantity;
   both long-corpus requests FIFO-match the authoritative
@@ -2542,3 +2544,7 @@ preserve distinct Unity scan codes in this setup.
     the existing equipment-item grammar for both long wrappers, validate their
     zero/slot/inventory prefix and both time sentinels, and reduce their opaque
     metadata from 117 to 75 bytes each without changing partial coverage.
+117. Split opcode-`39` add metadata by record grammar: validate the ten
+    reserved-zero bytes in all 39 stack additions, type the four-byte Cash
+    metadata in all 66 Cash additions as a neutral `u32`, and retain partial
+    coverage only for four equipment additions with 75 opaque bytes each.

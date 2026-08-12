@@ -906,7 +906,7 @@
     },
     {
       "name":"inventory_change_set","direction":"server_to_client","opcode":39,
-      "source":"InventoryChangeSet/InventoryModification; all four capture-111 widths exercise empty, quantity, stack-add, and cash-add/remove branches",
+      "source":"InventoryChangeSet/InventoryModification; all cross-capture stack-add records carry ten reserved-zero metadata bytes, while Cash metadata is a neutral u32; equipment metadata remains capture-bounded opaque",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":39},{"op":"read","name":"update_flag","kind":"u8"},
         {"op":"read","name":"modification_count","kind":"u8"},
@@ -918,13 +918,18 @@
               {"op":"switch","field":"cash_flag","cases":[{"equals":0,"operations":[]},{"equals":1,"operations":[{"op":"read","name":"cash_id","kind":"u64"}]}]},
               {"op":"read","name":"expires_at_ticks","kind":"i64"},
               {"op":"switch","field":"inventory_type","cases":[
-                {"equals":2,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"metadata","length":10},{"op":"read","name":"sentinel_ticks","kind":"i64"},{"op":"read","name":"tail","kind":"u32"}]},
-                {"equals":3,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"metadata","length":10},{"op":"read","name":"sentinel_ticks","kind":"i64"},{"op":"read","name":"tail","kind":"u32"}]},
-                {"equals":4,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"metadata","length":10},{"op":"read","name":"sentinel_ticks","kind":"i64"},{"op":"read","name":"tail","kind":"u32"}]},
-                {"equals":5,"operations":[{"op":"utf16","name":"owner","trailing_zero":true},{"op":"read","name":"flag_1","kind":"u8"},{"op":"read","name":"value_1","kind":"u16"},{"op":"read","name":"flag_2","kind":"u8"},{"op":"read","name":"timestamp","kind":"i64"},{"op":"bytes","name":"metadata","length":4},{"op":"read","name":"value_2","kind":"u32"},{"op":"read","name":"value_3","kind":"u16"},{"op":"read","name":"flag_3","kind":"u8"},{"op":"read","name":"value_4","kind":"u32"},{"op":"read","name":"value_5","kind":"u16"},{"op":"read","name":"value_6","kind":"u32"}]}
+                {"equals":1,"operations":[{"op":"bytes","name":"equipment_metadata","length":67},{"op":"read","name":"first_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_sentinel_tail","kind":"i32","equals":-1},{"op":"bytes","name":"interstitial_metadata","length":8},{"op":"read","name":"second_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_sentinel_tail","kind":"u32","equals":0}]},
+                {"equals":2,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"reserved_zero_metadata","length":10,"equals_hex":"00000000000000000000"},{"op":"read","name":"sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"tail","kind":"u32"}]},
+                {"equals":3,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"reserved_zero_metadata","length":10,"equals_hex":"00000000000000000000"},{"op":"read","name":"sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"tail","kind":"u32"}]},
+                {"equals":4,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"reserved_zero_metadata","length":10,"equals_hex":"00000000000000000000"},{"op":"read","name":"sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"tail","kind":"u32"}]},
+                {"equals":5,"operations":[{"op":"switch","field":"record_type","cases":[
+                  {"equals":2,"operations":[{"op":"read","name":"quantity","kind":"u16"},{"op":"utf16","name":"owner","trailing_zero":true},{"op":"bytes","name":"reserved_zero_metadata","length":10,"equals_hex":"00000000000000000000"},{"op":"read","name":"sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"tail","kind":"u32"}]},
+                  {"equals":3,"operations":[{"op":"utf16","name":"owner","trailing_zero":true},{"op":"read","name":"flag_1","kind":"u8"},{"op":"read","name":"value_1","kind":"u16"},{"op":"read","name":"flag_2","kind":"u8"},{"op":"read","name":"timestamp","kind":"i64"},{"op":"read","name":"neutral_metadata_u32","kind":"u32"},{"op":"read","name":"value_2","kind":"u32"},{"op":"read","name":"value_3","kind":"u16"},{"op":"read","name":"flag_3","kind":"u8"},{"op":"read","name":"value_4","kind":"u32"},{"op":"read","name":"value_5","kind":"u16"},{"op":"read","name":"value_6","kind":"u32"}]}
+                ]}]}
               ]}
             ]},
             {"equals":1,"operations":[{"op":"read","name":"quantity","kind":"u16"}]},
+            {"equals":2,"operations":[{"op":"read","name":"destination_slot","kind":"i16"},{"op":"read","name":"move_flag","kind":"u8"}]},
             {"equals":3,"operations":[]}
           ]}
         ]}

@@ -2656,13 +2656,16 @@ occupied destination and otherwise moves the source item.
 
 Coverage is assigned per change set rather than per opcode. Empty packets and
 packets containing only quantity updates, moves, or removals are structurally
-complete: the neutral `update_flag` and `move_flag` names do not leave bytes
-unparsed. Any packet containing an add remains partial because the lossless
-item record still retains opaque equipment/stack/Cash metadata. Across streams
-`126`, `92`, and `114`, this promotes 221 fixed-layout packets
-(`167 + 53 + 1`) to full coverage while all 106 add-bearing packets
-(`89 + 16 + 1`) remain partial. An independent raw-payload walk consumes every
-promoted packet at its exact end.
+complete. Across both sustained captures, all 39 record-type-`2` stack
+additions carry a ten-byte reserved-zero metadata field. All 66 record-type-`3`
+Cash additions instead carry a neutral `u32` at their former four-byte metadata
+boundary. Those branches now have zero opaque metadata bytes. Only the four
+stream-`126` equipment additions remain partial, each with 75 opaque bytes
+between its typed prefix and two validated sentinels. Across streams `126`,
+`92`, and `114`, 322 packets (`252 + 69 + 1`) are therefore full and four are
+partial. Exact native validation consumes all 325 sustained-capture opcode-`39`
+packets. The active saved transcript independently promotes its Cash add,
+moving to `764/18/0/0`.
 
 Stream `92` contains 69 packets and 71 modifications: `add:16`,
 `update_quantity:40`, and `remove:15`, all under update flag zero. Thirteen

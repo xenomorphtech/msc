@@ -2277,6 +2277,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(cash_item.raw_record), 58)
         self.assertEqual(changes.modifications[3].item, equipment_item)
         self.assertEqual(changes.modifications[4].item, cash_stack_item)
+        self.assertEqual(cash_item.metadata_shape, "cash_neutral_u32")
+        self.assertEqual(cash_item.opaque_metadata_bytes, 0)
+        self.assertEqual(
+            cash_stack_item.metadata_shape, "stack_reserved_zero"
+        )
+        self.assertEqual(cash_stack_item.reserved_zero_metadata_bytes, 10)
+        self.assertEqual(cash_stack_item.opaque_metadata_bytes, 0)
+        self.assertEqual(equipment_item.metadata_shape, "equipment_opaque")
+        self.assertEqual(equipment_item.opaque_metadata_bytes, 20)
         self.assertEqual(
             changes.modifications[5].safe_dict(),
             {
@@ -9100,7 +9109,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             observation.issues,
             (
-                "inventory add records retain opaque extended item metadata",
+                "inventory add records retain 20 opaque item-metadata bytes",
             ),
         )
         self.assertEqual(event.details["applied_modifications"], 4)

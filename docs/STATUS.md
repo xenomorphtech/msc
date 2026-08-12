@@ -482,13 +482,14 @@
 - The same corpus expands opcode-`39` to equipment adds, cash-tab stack adds,
   and operation-`2` equip moves. All 256 change sets and 232 modifications
   decode and fold with zero unknown-slot mutations. Coverage is now
-  observation-specific: 221 empty/fixed-layout change sets across streams
-  `126`/`92`/`114` are full, while all 106 packets containing add-item metadata
-  remain partial. An independent raw-byte walk exact-consumes every promoted
-  packet. Stream `126` reaches `67,290/3,810/0/0`, stream `92` reaches
-  `33,573/1,634/0/0`, stream `114` reaches `61/15/0/0`, and the active
-  transcript remains valid at `1,538/1,496/0/0` with one full fixed-layout
-  change and one partial add. Its 78 opcode-`300` NPC spawns also validate
+  observation-specific. All 39 stack adds validate ten reserved-zero metadata
+  bytes, and all 66 Cash records type the former four-byte metadata as a neutral
+  `u32`. Only four equipment adds remain partial with 75 opaque bytes each.
+  Thus 322 change sets across streams `126`/`92`/`114` are full and four are
+  partial; native validation exact-consumes all 325 sustained-capture packets.
+  Current strict totals are `70,033/1,067/0/0`, `34,568/639/0/0`, and
+  `64/12/0/0`. The active saved transcript's Cash add is also full, moving it
+  to `764/18/0/0`. Its 78 opcode-`300` NPC spawns also validate
   after preserving the facing byte values `0/1/2/4/5`.
 - The common fixed-width server family now has complete typed codecs for
   opcodes `11`, `24`, `45`, `56`, `58`, `59`, `60`, `71`, `72`, `74`, `76`,
@@ -968,6 +969,13 @@
   `1`; the real inventory UI and independently folded event showed `1`, all
   counts/player state remained unchanged, and all 18 heartbeat pairs matched.
   Runtime status reported one planned and one sent opcode-`39` packet.
+- Opcode-`39` add-item metadata is now observation-specific. All 38 stream-`126`
+  and one stream-`92` stack records validate ten reserved-zero bytes; all 51
+  stream-`126` and 15 stream-`92` Cash records expose a neutral `u32`. This
+  promotes 85/16 reference packets plus the active saved Cash addition to full
+  coverage. Four equipment additions remain partial at 75 opaque bytes each.
+  Native validation passes all 325 opcode-`39` packets, and safe events/HTTP
+  expose only metadata shape/lengths and the existing typed item fields.
 - Client opcode `80` is now a typed 12-byte Use-item request and is correlated
   with server opcode-`39` quantity and opcode-`41` potion-stat effects. All 17
   stream-`92` requests match their modeled slot/template, quantity decrement,

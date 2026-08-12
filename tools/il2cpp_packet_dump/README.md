@@ -147,6 +147,12 @@ opcode-`39` move with the exact same inventory/source/destination tuple. Native
 validation consumes both records; independent v79 handler code confirms the
 tick and quantity roles rather than inferring them from the captured value
 `-1`.
+The opcode-`39` inventory change shape now validates metadata by actual item
+record type. All 39 cross-capture stack additions contain ten reserved-zero
+bytes; all 66 Cash additions expose one neutral `u32`; equipment additions keep
+their two capture-bounded metadata regions. The same manifest shape exact-
+consumes all 325 opcode-`39` packets across streams `126` and `92` with zero
+unsupported or consumption failures.
 Client opcode `158` now uses one variable-length counted shape across all three
 reference streams. Modes `1` and `2` have zero changes and encode the field-
 load sequence. Mode `0` repeats `u32 key code + u8 binding type + i32 action`;
