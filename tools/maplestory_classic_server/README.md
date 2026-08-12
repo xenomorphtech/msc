@@ -2510,3 +2510,7 @@ preserve distinct Unity scan codes in this setup.
     empty-name/serial/position/stance/foothold body, independently validate all
     46 reference packets, and expose only owner aliases and non-identifying
     structural/gameplay fields through events and HTTP-derived analysis.
+110. Bound all 258 server opcode-`49` variant-`3` numeric records by their
+    marker and exact width-specific reserved constants, promote them to full
+    coverage after native validation, and leave only the two six-byte variant-
+    `4` records partial without assigning semantics to their values.

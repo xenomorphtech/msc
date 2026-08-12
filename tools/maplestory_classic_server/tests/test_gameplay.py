@@ -1923,6 +1923,27 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 self.assertEqual(
                     ServerOpcode49Envelope.parse(payload).to_bytes(), payload
                 )
+        for reserved_tail in (
+            b"\x00" * 28,
+            b"\x01" + b"\x00" * 28,
+            b"\x00" * 36,
+        ):
+            envelope = ServerOpcode49Envelope(
+                variant=3,
+                record_marker=1,
+                record_value=8,
+                opaque_tail=reserved_tail,
+            )
+            self.assertEqual(
+                ServerOpcode49Envelope.parse(envelope.to_bytes()), envelope
+            )
+            self.assertTrue(envelope.fully_bounded)
+        with self.assertRaisesRegex(PacketShapeError, "marker must be one"):
+            replace(envelopes[2], record_marker=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "28, 29, or 36"):
+            replace(envelopes[2], opaque_tail=b"\x00" * 27).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "capture-bounded constant"):
+            replace(envelopes[2], opaque_tail=b"\x00" * 27 + b"\x01").to_bytes()
 
         with self.assertRaisesRegex(PacketShapeError, "pickup gain notice"):
             ServerOpcode49Envelope.parse(
@@ -6077,7 +6098,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 envelope.text_code_unit_count or 0 for envelope in envelopes
             ),
         )
-        self.assertEqual(analysis.state.server_opcode_49_opaque_bytes, 31)
+        self.assertEqual(analysis.state.server_opcode_49_opaque_bytes, 3)
         observations = [
             observation
             for observation in analysis.observations
@@ -6085,7 +6106,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            ["full", "full", "partial", "partial", "full", "full", "full"],
+            ["full", "full", "full", "partial", "full", "full", "full"],
         )
         self.assertEqual(
             len(

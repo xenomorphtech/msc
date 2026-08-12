@@ -2431,7 +2431,7 @@ variant 1:
 variant 3:
     uint8 record_marker             # observed 1
     uint32 record_value
-    bytes opaque_tail               # observed lengths 28, 29, or 36
+    bytes reserved_constant         # observed lengths 28, 29, or 36
 
 variant 4:
     bytes opaque_body               # three bytes in both samples
@@ -2453,13 +2453,22 @@ variant 12:
 Stream `92` contributes variants `3/10/12 = 44/101/7`. Level-1-through-10
 stream `126` contributes variants `1/3/4/6/10/12 = 128/214/2/1/1/5`; variant
 `1` divides into 98 terminated strings and 30 u64 values. Thus all 503
-non-pickup packets parse to their exact ends and round-trip byte-for-byte: 243
-move from unknown to full coverage and 260 move from unknown to partial. The
-partial records retain 7,607 opaque bytes. The fold emits
+non-pickup packets parse to their exact ends and round-trip byte-for-byte. The
+258 variant-`3` packets further divide into exact total widths `36/37/44` with
+counts `189/25/44`: all use marker `1`; widths `36` and `44` end in 28 and 36
+zero bytes, while width `37` ends in constant byte `1` plus 28 zero bytes.
+These capture-bounded constants promote all variant-`3` observations from
+partial to full coverage. The family now provides 501 full observations and
+only the two variant-`4` records remain partial, retaining six opaque bytes.
+Reference coverage advances to `69,933/1,167/0/0` and
+`34,538/669/0/0` in streams `126` and `92`; stream `114` remains
+`64/12/0/0`. The fold emits
 `server_opcode_49_received` and tracks variant, neutral shape, text-code-unit,
-and opaque-byte distributions. Text is retained only in the typed object for
-exact re-emission and is omitted from safe JSON, events, text reports, and
-HTTP-derived analysis.
+reserved-constant-length, and opaque-byte distributions. Text is retained only
+in the typed object for exact re-emission and is omitted from safe JSON,
+events, text reports, and HTTP-derived analysis. The 258 exact-width records
+also pass the independent native manifest validator while the record value
+retains a deliberately neutral name.
 
 ## Redacted server opcode-`77` envelope
 

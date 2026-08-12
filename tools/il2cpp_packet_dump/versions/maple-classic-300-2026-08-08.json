@@ -1151,6 +1151,21 @@
       ]
     },
     {
+      "name":"server_opcode_49_status_36","direction":"server_to_client","opcode":49,"length":36,
+      "source":"generated opcode-49 handler db07bb07... reads the u8 discriminator; all 189 captured variant-3 width-36 packets contain marker 1, one u32 value, and 28 reserved-zero bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":49},{"op":"read","name":"notice_type","kind":"u8","equals":3},{"op":"read","name":"status","kind":"u8","equals":1},{"op":"read","name":"status_value","kind":"u32"},{"op":"bytes","name":"reserved_constant","length":28,"equals_hex":"00000000000000000000000000000000000000000000000000000000"}]
+    },
+    {
+      "name":"server_opcode_49_status_37","direction":"server_to_client","opcode":49,"length":37,
+      "source":"generated opcode-49 handler db07bb07... reads the u8 discriminator; all 25 captured variant-3 width-37 packets contain marker 1, one u32 value, then reserved byte 1 and 28 reserved-zero bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":49},{"op":"read","name":"notice_type","kind":"u8","equals":3},{"op":"read","name":"status","kind":"u8","equals":1},{"op":"read","name":"status_value","kind":"u32"},{"op":"bytes","name":"reserved_constant","length":29,"equals_hex":"0100000000000000000000000000000000000000000000000000000000"}]
+    },
+    {
+      "name":"server_opcode_49_status_44","direction":"server_to_client","opcode":49,"length":44,
+      "source":"generated opcode-49 handler db07bb07... reads the u8 discriminator; all 44 captured variant-3 width-44 packets contain marker 1, one u32 value, and 36 reserved-zero bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":49},{"op":"read","name":"notice_type","kind":"u8","equals":3},{"op":"read","name":"status","kind":"u8","equals":1},{"op":"read","name":"status_value","kind":"u32"},{"op":"bytes","name":"reserved_constant","length":36,"equals_hex":"000000000000000000000000000000000000000000000000000000000000000000000000"}]
+    },
+    {
       "name":"typed_notice_binary_variant","direction":"server_to_client","opcode":77,"length":158,
       "source":"capture-111 type-8 binary notice branch; exact comparison isolates an 18-character UTF-16 label followed by 117 binary bytes",
       "operations":[

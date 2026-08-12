@@ -9475,9 +9475,12 @@ class GameplayStateFold:
                 self.state.server_opcode_49_text_code_units += (
                     envelope.text_code_unit_count
                 )
-            self.state.server_opcode_49_opaque_bytes += len(
-                envelope.opaque_tail
+            opaque_tail_length = (
+                0
+                if envelope.variant == 3 and envelope.fully_bounded
+                else len(envelope.opaque_tail)
             )
+            self.state.server_opcode_49_opaque_bytes += opaque_tail_length
             details = {
                 **envelope.safe_dict(),
                 "field_epoch": self.state.field_epoch,
@@ -9499,7 +9502,7 @@ class GameplayStateFold:
                 issues=(
                     (
                         f"variant {envelope.variant} retains "
-                        f"{len(envelope.opaque_tail)} opaque bytes"
+                        f"{opaque_tail_length} opaque bytes"
                     ),
                 )
                 if partial

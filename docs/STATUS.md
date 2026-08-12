@@ -802,6 +802,15 @@
   active saved transcript adds one full accepted pet activation and remains
   warning-free with 1,440/1,440 heartbeats. Safe JSON and HTTP-derived analysis
   expose aliases and structural fields, never owner ids, serial ids, or names.
+- Server opcode `49` variant `3` now has three exact capture-bounded layouts:
+  189/25/44 packets at widths 36/37/44, each with marker `1`, one neutral u32,
+  and a fixed 28/29/36-byte reserved suffix. All 258 packets round-trip and
+  independently validate, promoting them to full coverage. Only two variant-
+  `4` opcode-`49` records remain partial, with six opaque bytes total. Reference
+  coverage is now `69,933/1,167/0/0`, `34,538/669/0/0`, and `64/12/0/0`.
+  The active saved transcript remains warning-free at `2,980/54/0/0`; safe
+  JSON and HTTP-derived analysis report structural lengths and the neutrally
+  named numeric value, not the raw constant bytes.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

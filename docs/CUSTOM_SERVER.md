@@ -251,11 +251,15 @@ Server opcode `49` is explicitly split by its byte discriminator: variant `0`
 is the existing pickup-gain notice, while variants `1/3/4/6/10/12` use a
 separate neutral envelope and cannot enter pickup correlation. Across streams
 `92` and `126`, all 503 non-pickup packets now round-trip exactly. Keyed/text,
-keyed-u64, u64, and text branches provide 243 full observations; the 258
-variant-`3` numeric records and two variant-`4` records retain 7,607 total
-opaque bytes and provide 260 partial observations. Decoded text is kept only
-for re-emission: events, reports, safe JSON, and HTTP-derived analysis expose
-its code-unit count but never its contents.
+keyed-u64, u64, and text branches provide 243 full observations. All 258
+variant-`3` numeric records are additionally bounded by their marker and three
+exact reserved-constant layouts, independently validate, and are now full;
+only two variant-`4` records remain partial with six opaque bytes total.
+Decoded text is kept only for re-emission: events, reports, safe JSON, and
+HTTP-derived analysis expose its code-unit count but never its contents. For
+variant `3`, those surfaces expose the reserved-constant length and zero opaque
+bytes, plus the deliberately neutral numeric value; they do not expose the
+constant bytes or assign them higher-level semantics.
 Server opcode `77` is a separate redacted envelope family. Across streams
 `92`, `114`, and `126`, variants `3/4/5/8` contribute 515 exact round trips.
 Variants `3`, `4`, and `5` fully bound their counted UTF-16 fields and neutral

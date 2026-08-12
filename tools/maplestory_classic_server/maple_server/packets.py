@@ -5442,6 +5442,9 @@ class ServerOpcode49Envelope:
     TEXT_VALUE = 1
     U64_VALUE = 2
     FULLY_BOUNDED_VARIANTS = frozenset({6, 10, 12})
+    VARIANT_3_RESERVED_TAILS = frozenset(
+        (b"\x00" * 28, b"\x01" + b"\x00" * 28, b"\x00" * 36)
+    )
 
     @property
     def text_code_unit_count(self) -> int | None:
@@ -5453,6 +5456,11 @@ class ServerOpcode49Envelope:
     def fully_bounded(self) -> bool:
         return (
             self.variant in self.FULLY_BOUNDED_VARIANTS
+            or (
+                self.variant == 3
+                and self.record_marker == 1
+                and self.opaque_tail in self.VARIANT_3_RESERVED_TAILS
+            )
             or (
                 self.variant == 1
                 and self.value_kind in {self.TEXT_VALUE, self.U64_VALUE}
@@ -5469,7 +5477,7 @@ class ServerOpcode49Envelope:
                 return "keyed_u64"
             return "keyed_opaque"
         return {
-            3: "numeric_record_opaque",
+            3: "numeric_record_reserved_constants",
             4: "opaque_record",
             6: "u64",
             10: "text",
@@ -5533,9 +5541,34 @@ class ServerOpcode49Envelope:
                 reader.remaining, "opaque_body"
             )
         reader.finish()
-        return cls(variant=variant, **values)
+        envelope = cls(variant=variant, **values)
+        envelope._validate_variant_3()
+        return envelope
+
+    def _validate_variant_3(self) -> None:
+        if self.variant != 3:
+            return
+        if self.record_marker != 1:
+            raise PacketShapeError(
+                "server opcode-49 variant 3 marker must be one"
+            )
+        if len(self.opaque_tail) not in {28, 29, 36}:
+            raise PacketShapeError(
+                "server opcode-49 variant 3 reserved tail length must be "
+                "28, 29, or 36 bytes"
+            )
+        if self.opaque_tail not in self.VARIANT_3_RESERVED_TAILS:
+            raise PacketShapeError(
+                "server opcode-49 variant 3 reserved tail must match its "
+                "capture-bounded constant"
+            )
 
     def safe_dict(self) -> dict[str, int | str | bool | None]:
+        reserved_constant_length = (
+            len(self.opaque_tail)
+            if self.variant == 3 and self.fully_bounded
+            else 0
+        )
         return {
             "variant": self.variant,
             "shape": self.shape_name,
@@ -5548,7 +5581,8 @@ class ServerOpcode49Envelope:
             "text_present": self.text_value is not None,
             "text_code_units": self.text_code_unit_count,
             "text_redacted": self.text_value is not None,
-            "opaque_tail_length": len(self.opaque_tail),
+            "reserved_constant_length": reserved_constant_length,
+            "opaque_tail_length": len(self.opaque_tail) - reserved_constant_length,
         }
 
     def to_bytes(self) -> bytes:
@@ -5620,6 +5654,7 @@ class ServerOpcode49Envelope:
                     raise PacketShapeError(
                         "server opcode-49 variant 3 requires marker and value"
                     )
+                self._validate_variant_3()
                 return header + struct.pack(
                     "<BI", self.record_marker, self.record_value
                 ) + bytes(self.opaque_tail)
@@ -5665,6 +5700,8 @@ class ServerOpcode49Envelope:
                 )
             reject_fields()
             return header + bytes(self.opaque_tail)
+        except PacketShapeError:
+            raise
         except (struct.error, TypeError, ValueError) as error:
             raise PacketShapeError(
                 "server opcode-49 numeric fields must fit their unsigned widths"
