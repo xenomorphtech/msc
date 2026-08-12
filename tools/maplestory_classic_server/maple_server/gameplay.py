@@ -20,9 +20,9 @@ from .packets import (
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
+    ClientFieldTransferRequest,
     ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
-    ClientOpcode43Envelope,
     ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
@@ -358,6 +358,13 @@ class PendingNpcStateSubmission:
     request_timestamp_ns: int
     field_epoch: int
     request: ClientNpcStateSubmission
+
+
+@dataclass(frozen=True)
+class PendingFieldTransfer:
+    request_frame_index: int
+    request_timestamp_ns: int
+    request: ClientFieldTransferRequest
 
 
 @dataclass
@@ -955,13 +962,21 @@ class GameplayGameState:
     server_opcode_13_opaque_lengths: Counter[int] = field(
         default_factory=Counter
     )
-    client_opcode_43_packets: int = 0
-    client_opcode_43_sequences: Counter[int] = field(default_factory=Counter)
-    client_opcode_43_variants: Counter[str] = field(default_factory=Counter)
-    client_opcode_43_text_code_units: Counter[int] = field(
+    client_field_transfer_requests: int = 0
+    client_field_transfer_variants: Counter[str] = field(
         default_factory=Counter
     )
-    client_opcode_43_opaque_bytes: int = 0
+    client_field_transfer_epoch_matches: int = 0
+    client_field_transfer_epoch_mismatches: int = 0
+    client_field_transfer_portal_name_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
+    client_field_transfer_redacted_portal_names: int = 0
+    matched_client_field_transfers: int = 0
+    client_field_transfers_cleared_on_field_change: int = 0
+    pending_client_field_transfers: int = 0
+    last_client_field_transfer_response_ms: float | None = None
+    max_client_field_transfer_response_ms: float | None = None
     server_opcode_43_packets: int = 0
     server_opcode_43_message_types: Counter[int] = field(
         default_factory=Counter
@@ -5259,14 +5274,52 @@ class GameplayAnalysis:
                     ),
                     "body_redacted": True,
                 },
-                "client_opcode_43": {
-                    "packet_count": self.state.client_opcode_43_packets,
-                    "sequences": dict(self.state.client_opcode_43_sequences),
-                    "variants": dict(self.state.client_opcode_43_variants),
-                    "text_code_units": dict(
-                        self.state.client_opcode_43_text_code_units
+                "client_field_transfer": {
+                    "request_count": (
+                        self.state.client_field_transfer_requests
                     ),
-                    "opaque_bytes": self.state.client_opcode_43_opaque_bytes,
+                    "variants": dict(
+                        self.state.client_field_transfer_variants
+                    ),
+                    "field_epoch_matches": (
+                        self.state.client_field_transfer_epoch_matches
+                    ),
+                    "field_epoch_mismatches": (
+                        self.state.client_field_transfer_epoch_mismatches
+                    ),
+                    "portal_name_code_units": dict(
+                        self.state.client_field_transfer_portal_name_code_units
+                    ),
+                    "redacted_portal_name_count": (
+                        self.state.client_field_transfer_redacted_portal_names
+                    ),
+                    "matched_transitions": (
+                        self.state.matched_client_field_transfers
+                    ),
+                    "cleared_on_field_change": (
+                        self.state.client_field_transfers_cleared_on_field_change
+                    ),
+                    "pending_transfers": (
+                        self.state.pending_client_field_transfers
+                    ),
+                    "last_response_ms": (
+                        None
+                        if self.state.last_client_field_transfer_response_ms
+                        is None
+                        else round(
+                            self.state.last_client_field_transfer_response_ms,
+                            3,
+                        )
+                    ),
+                    "max_response_ms": (
+                        None
+                        if self.state.max_client_field_transfer_response_ms
+                        is None
+                        else round(
+                            self.state.max_client_field_transfer_response_ms,
+                            3,
+                        )
+                    ),
                 },
                 "server_opcode_43": {
                     "packet_count": self.state.server_opcode_43_packets,
@@ -5958,6 +6011,7 @@ class GameplayStateFold:
         self._pending_item_acquisitions: deque[
             PendingItemAcquisition
         ] = deque()
+        self._pending_field_transfers: deque[PendingFieldTransfer] = deque()
         self._pending_npc_state_submissions: dict[
             bytes, deque[PendingNpcStateSubmission]
         ] = {}
@@ -7679,35 +7733,45 @@ class GameplayStateFold:
                 issues=("client opcode-13 payload remains opaque",),
             )
         if opcode == 43:
-            envelope = ClientOpcode43Envelope.parse(payload)
-            self.state.client_opcode_43_packets += 1
-            self.state.client_opcode_43_sequences[envelope.sequence] += 1
-            self.state.client_opcode_43_variants[envelope.variant] += 1
-            self.state.client_opcode_43_text_code_units[
-                envelope.text_code_units
+            request = ClientFieldTransferRequest.parse(payload)
+            epoch_matches = request.field_epoch == self.state.field_epoch
+            self.state.client_field_transfer_requests += 1
+            self.state.client_field_transfer_variants[request.variant] += 1
+            self.state.client_field_transfer_portal_name_code_units[
+                request.portal_name_code_units
             ] += 1
-            self.state.client_opcode_43_opaque_bytes += (
-                envelope.opaque_byte_count
+            self.state.client_field_transfer_redacted_portal_names += (
+                request.portal_name is not None
             )
+            if epoch_matches:
+                self.state.client_field_transfer_epoch_matches += 1
+            else:
+                self.state.client_field_transfer_epoch_mismatches += 1
+            self._pending_field_transfers.append(
+                PendingFieldTransfer(
+                    request_frame_index=frame.index,
+                    request_timestamp_ns=frame.timestamp_ns,
+                    request=request,
+                )
+            )
+            self.state.pending_client_field_transfers += 1
             details = {
-                **envelope.safe_dict(),
-                "field_epoch": self.state.field_epoch,
+                **request.safe_dict(),
+                "active_field_epoch": self.state.field_epoch,
+                "field_epoch_matches": epoch_matches,
+                "pending_transfers": self.state.pending_client_field_transfers,
             }
             self._event(
                 frame,
-                "client_opcode_43_submitted",
+                "field_transfer_requested",
                 details=details,
             )
             return self._observation(
                 frame,
-                kind="client_opcode_43_envelope",
-                coverage=ShapeCoverage.PARTIAL,
-                parsed=envelope,
+                kind="client_field_transfer_request",
+                coverage=ShapeCoverage.FULL,
+                parsed=request,
                 details=details,
-                issues=(
-                    "client opcode-43 identifier, text, opaque bytes, and "
-                    "higher-level purpose remain semantically unresolved",
-                ),
             )
         if opcode == 64:
             request = ClientNpcInteractionRequest.parse(payload)
@@ -9553,6 +9617,31 @@ class GameplayStateFold:
                 len(pending)
                 for pending in self._pending_client_recoveries.values()
             )
+            pending_field_transfer = (
+                self._pending_field_transfers.popleft()
+                if self._pending_field_transfers
+                else None
+            )
+            cleared_field_transfers = len(self._pending_field_transfers)
+            field_transfer_response_ms: float | None = None
+            if pending_field_transfer is not None:
+                field_transfer_response_ms = (
+                    frame.timestamp_ns
+                    - pending_field_transfer.request_timestamp_ns
+                ) / 1e6
+                self.state.matched_client_field_transfers += 1
+                self.state.last_client_field_transfer_response_ms = (
+                    field_transfer_response_ms
+                )
+                self.state.max_client_field_transfer_response_ms = max(
+                    self.state.max_client_field_transfer_response_ms or 0.0,
+                    field_transfer_response_ms,
+                )
+            self.state.client_field_transfers_cleared_on_field_change += (
+                cleared_field_transfers
+            )
+            self._pending_field_transfers.clear()
+            self.state.pending_client_field_transfers = 0
             if self.state.entry_character_id is None:
                 self.warnings.append(
                     "field snapshot arrived without a captured world entry request"
@@ -9621,6 +9710,8 @@ class GameplayStateFold:
                 "cleared_client_recovery_requests": (
                     cleared_client_recovery_requests
                 ),
+                "matched_field_transfer": pending_field_transfer is not None,
+                "cleared_field_transfer_requests": cleared_field_transfers,
                 "cleared_client_attack_effects": (
                     cleared_client_attack_effects
                 ),
@@ -9634,6 +9725,20 @@ class GameplayStateFold:
                     )
                 ),
             }
+            if pending_field_transfer is not None:
+                details.update(
+                    {
+                        "field_transfer_request_frame": (
+                            pending_field_transfer.request_frame_index
+                        ),
+                        "field_transfer_variant": (
+                            pending_field_transfer.request.variant
+                        ),
+                        "field_transfer_response_ms": round(
+                            field_transfer_response_ms or 0.0, 3
+                        ),
+                    }
+                )
             event_identifiers: dict[str, object] = {}
             if initial_snapshot is not None:
                 character = initial_snapshot.character
@@ -12266,6 +12371,16 @@ class GameplayStateFold:
                 f"{self.state.client_inner_portal_field_epoch_mismatches} "
                 "client inner-portal requests did not match the active field "
                 "epoch"
+            )
+        if self.state.client_field_transfer_epoch_mismatches:
+            self.warnings.append(
+                f"{self.state.client_field_transfer_epoch_mismatches} client "
+                "field-transfer requests did not match the active field epoch"
+            )
+        if self.state.pending_client_field_transfers:
+            self.warnings.append(
+                f"{self.state.pending_client_field_transfers} client "
+                "field-transfer requests had no following field snapshot"
             )
         if self.state.pending_npc_interaction_requests:
             self.warnings.append(
@@ -15258,12 +15373,20 @@ def render_gameplay_analysis(
             f"max_rtt_ms:{state.max_opcode_348_round_trip_ms}"
         ),
         (
-            f"client_opcode_43=packets:{state.client_opcode_43_packets} "
-            f"sequences:{dict(sorted(state.client_opcode_43_sequences.items()))} "
-            f"variants:{dict(sorted(state.client_opcode_43_variants.items()))} "
-            "text_code_units:"
-            f"{dict(sorted(state.client_opcode_43_text_code_units.items()))} "
-            f"opaque_bytes:{state.client_opcode_43_opaque_bytes}"
+            "client_field_transfer="
+            f"requests:{state.client_field_transfer_requests} "
+            "variants:"
+            f"{dict(sorted(state.client_field_transfer_variants.items()))} "
+            f"epoch_matches:{state.client_field_transfer_epoch_matches} "
+            f"epoch_mismatches:{state.client_field_transfer_epoch_mismatches} "
+            "portal_name_code_units:"
+            f"{dict(sorted(state.client_field_transfer_portal_name_code_units.items()))} "
+            "redacted_portal_names:"
+            f"{state.client_field_transfer_redacted_portal_names} "
+            f"matched:{state.matched_client_field_transfers} "
+            f"pending:{state.pending_client_field_transfers} "
+            f"last_ms:{state.last_client_field_transfer_response_ms} "
+            f"max_ms:{state.max_client_field_transfer_response_ms}"
         ),
         (
             f"server_opcode_43=packets:{state.server_opcode_43_packets} "

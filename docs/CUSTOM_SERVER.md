@@ -627,21 +627,24 @@ removals/entries without a field transition. Python and native codecs consume
 both records exactly; safe state exposes no portal text. Stream `92` reaches
 `13,419/21,788/0/0` with no warnings.
 
-Together, the currently modeled families leave the long-corpus totals at
-26,661 full, 44,439 partial, zero unknown, and zero invalid. Stream
-`92` now reaches 13,419 full, 21,788 partial, zero unknown, and zero invalid;
-stream `114` reaches 54/22/0/0.
+Together with the later NPC-state and field-transfer increments, the
+long-corpus totals are now `27,188/43,912/0/0`. Stream `92` reaches
+`13,505/21,702/0/0`; stream `114` remains `54/22/0/0`.
 
-Client/server opcode `43` is now folded as a neutral redacted family. The
-client has a sequence byte followed by either an opaque identifier, counted
-UTF-16 value, zero terminator, and six-byte tail, or a compact nine-byte body.
-The server has a message byte plus a fixed 16-byte body. The automatic packet
-manifest now represents the client forms as two length-disambiguated shapes;
-this replaces the earlier stream-`92` switch that failed when the same sequence
-values used the identified-text form in stream `126`. Across both sustained
-captures, all 45 client and three server packets consume and re-emit exactly.
-Safe analysis publishes only sequence/variant, text-length, message-type, and
-opaque-byte distributions.
+Client opcode `43` is now a typed field-transfer request. Its leading byte is
+the active field epoch; all 45 requests match it and correlate one-for-one with
+the next opcode-`157` field snapshot. Forty-two portal requests carry signed
+map sentinel `-1`, a redacted portal name, signed player position, and a zero
+reserved word. The three 12-byte requests carry nine zeros and each follows an
+HP-zero stat update, identifying the death-respawn form. The fold exposes
+variant, epoch agreement, position, pending/matched transitions, and response
+latency while omitting portal text. All 45 requests are full observations;
+combined response latency is `28.125..940.035` ms with median `399.027` ms.
+
+Server opcode `43` remains a separate neutral message byte plus fixed 16-byte
+body. The automatic packet manifest uses two length-disambiguated client
+field-transfer shapes and one server shape; sentinel/reserved zeros are checked
+instead of retained as opaque bytes.
 
 The already active browser-free stream-`114` client then received one exact
 19-byte server envelope through loopback-only `POST /api/v1/server-packets`.
@@ -649,8 +652,10 @@ The independent transcript fold added one partial `server_opcode_43_received`
 event, left phase, field epoch, map, player, inventory, and progression
 unchanged, and advanced matched heartbeat probes from 173 to 176. Runtime
 status retained one active connection with zero connection or injection
-failures. No client opcode-`43` response appeared, so no security or
-request/response behavior is assigned.
+failures. No client opcode-`43` response appeared because the response to a
+client field-transfer request is opcode `157`, not server opcode `43`; the
+injection claim remains bounded to non-stalling acceptance of that separate
+server family.
 
 Client opcode `114` now folds all 44 level-1-to-10 packets as one redacted
 `u8 + counted UTF-16 + zero + u32` envelope. Packet lengths `26/28/32` follow

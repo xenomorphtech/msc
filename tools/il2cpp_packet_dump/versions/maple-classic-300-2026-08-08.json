@@ -1168,23 +1168,27 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":45}]
     },
     {
-      "name":"client_opcode_43_identified_text","direction":"client_to_server","opcode":43,
-      "source":"capture-111 and 1-10FS shared u8/u32/counted-UTF16/trailing-zero/six-byte-tail envelope; opcode-43 handler d43559a5... begins with the same u8 direct read",
+      "name":"client_portal_field_transfer_request","direction":"client_to_server","opcode":43,
+      "source":"capture-111 and 1-10FS portal transfers: active field epoch, signed -1 server-resolved map sentinel, portal name, player position, and zero u16; every request is followed by a field snapshot",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":43},
-        {"op":"read","name":"sequence","kind":"u8"},
-        {"op":"read","name":"opaque_identifier","kind":"u32"},
-        {"op":"utf16","name":"opaque_text","trailing_zero":true},
-        {"op":"bytes","name":"opaque_tail","length":6}
+        {"op":"read","name":"field_epoch","kind":"u8"},
+        {"op":"read","name":"destination_map_id","kind":"i32","equals":-1},
+        {"op":"utf16","name":"portal_name","trailing_zero":true},
+        {"op":"read","name":"position_x","kind":"i16"},
+        {"op":"read","name":"position_y","kind":"i16"},
+        {"op":"read","name":"reserved_value","kind":"u16","equals":0}
       ]
     },
     {
-      "name":"client_opcode_43_compact","direction":"client_to_server","opcode":43,"length":12,
-      "source":"capture-111 compact u8 plus nine-byte body; kept separate because the same u8 values use the identified-text envelope in 1-10FS",
+      "name":"client_death_respawn_field_transfer_request","direction":"client_to_server","opcode":43,"length":12,
+      "source":"capture-111 death-respawn transfers: active field epoch followed by nine zero bytes; all three follow a same-epoch HP-zero update and precede a field snapshot",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":43},
-        {"op":"read","name":"sequence","kind":"u8"},
-        {"op":"bytes","name":"opaque_body","length":9}
+        {"op":"read","name":"field_epoch","kind":"u8"},
+        {"op":"read","name":"zero_1","kind":"u32","equals":0},
+        {"op":"read","name":"zero_2","kind":"u32","equals":0},
+        {"op":"read","name":"zero_3","kind":"u8","equals":0}
       ]
     },
     {

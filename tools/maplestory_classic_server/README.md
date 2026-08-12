@@ -901,10 +901,12 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `13`: the same handler-confirmed discriminator followed by a
   capture-bounded `uint32` body length for types `7`, `12`, and `14`; safe
   state/events expose only type and body-length distributions,
-- client/server opcode `43`: neutral, redacted status envelopes; the client
-  uses either a sequence, opaque identifier, counted UTF-16 field, and six-byte
-  tail or a 12-byte compact form, while the server uses a message byte and
-  fixed 16-byte body; no security or request/response meaning is inferred,
+- client opcode `43`: field-transfer request keyed by active field epoch; the
+  portal form uses map sentinel `-1`, a redacted portal name, signed player
+  position, and zero reserved word, while the 12-byte death-respawn form is
+  nine zeros; both correlate to the next opcode-`157` field snapshot,
+- server opcode `43`: separate neutral message byte plus fixed 16-byte body;
+  it is not the response boundary for client field transfers,
 - client opcode `114`: one neutral redacted envelope with a control byte,
   counted UTF-16 field, required zero terminator, and omitted trailing u32;
   tutorial/UI timing remains a hypothesis rather than a semantic name,
@@ -2392,3 +2394,8 @@ preserve distinct Unity scan codes in this setup.
     opcode-`39` stack addition, validate the encrypted request handler, and
     prove official-client response acceptance with an independently folded
     slot-`25` item while leaving timed and Cash policy branches unserved.
+98. Promote all 45 client opcode-`43` packets to typed field-transfer requests:
+    42 portal forms with epoch, server-resolved map sentinel, redacted portal,
+    position, and reserved zero, plus three HP-zero-linked death respawns.
+    Correlate every request to the next opcode-`157` field snapshot and retain
+    server opcode `43` as a separate neutral family.

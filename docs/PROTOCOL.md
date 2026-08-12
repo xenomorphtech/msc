@@ -278,57 +278,66 @@ exposing any body. Server packets fold as partial
 `server_opcode_13_message_received` events. The payload meanings remain
 partial rather than being labeled as security traffic.
 
-## World opcode `43` neutral envelopes
+## Client opcode `43` field-transfer requests
 
-Client and server opcode `43` use separate capture-bounded envelopes. The
-leading client byte is named only as a sequence: values `1..12` occur once in
-stream `92`, while stream `126` contains `1..29` and `32..35`. Identical values
-do not select a stable layout across the captures, so the decoder branches on
-the complete packet shape rather than inventing discriminator semantics:
+Client opcode `43` requests a field transfer. Its leading byte is the active
+field epoch: all 45 packets match the folded epoch, and every packet is followed
+by the next server opcode-`157` field snapshot with no intervening opcode-`43`.
+The two layouts are portal transfer and death respawn:
 
 ```text
-client identified-text envelope:
+portal transfer:
   uint16 opcode = 43
-  uint8 sequence
-  uint32 opaque_identifier          # redacted
-  uint16 text_code_units
-  utf16le[text_code_units] opaque_text
+  uint8 field_epoch
+  int32 destination_map_id = -1     # destination resolved by server/portal
+  uint16 portal_name_code_units
+  utf16le[portal_name_code_units] portal_name
   uint8 zero_terminator = 0
-  byte[6] opaque_tail
+  int16 position_x
+  int16 position_y
+  uint16 reserved_value = 0
 
-client compact envelope:
+death respawn:
   uint16 opcode = 43
-  uint8 sequence
-  byte[9] opaque_body
+  uint8 field_epoch
+  byte[9] zero_body
 
-server envelope:
+server opcode-43 neutral envelope:
   uint16 opcode = 43
   uint8 message_type
   byte[16] opaque_body
 ```
 
-Stream `92` contributes nine identified-text clients, three compact clients,
-and three server packets; all server message types are zero. Stream `126`
-contributes 33 identified-text clients. Text lengths are `0:3`, `4:5`, `5:9`,
-`6:27`, and `8:1` code units across client packets; zero represents the compact
-form, not captured text. All 48 packets round-trip exactly as partial semantic
-observations. Safe state/events expose only sequence, variant, text length,
-message type, and opaque-byte counts; the identifier, text, and byte bodies are
-never emitted.
+Stream `92` contributes nine portal transfers, three death respawns, and three
+neutral server packets; all server message types are zero. The three respawns
+each follow a same-epoch HP-zero stat update by `2.271..2.918` seconds and use
+an all-zero body. Stream `126` contributes 33 portal transfers. Portal-name
+lengths are `4:5`, `5:9`, `6:27`, and `8:1` code units across both captures;
+all portal requests use map sentinel `-1`, a zero reserved value, and signed
+positions. Safe state/events redact the portal name but expose epoch matching,
+variant, position, pending/matched transitions, and latency.
 
-The automatic shape manifest now uses two competing client candidates rather
-than the earlier stream-`92` switch, which incorrectly treated sequence values
-`4`, `8`, and `12` as compact-only. Exact packet length makes the candidates
-unambiguous, and native validation consumes all 45 client packets without a
-short read, trailing byte, unsupported variant, or ambiguity.
+All 45 client requests round-trip as full observations and match their next
+field snapshot. Response latency is `28.125..940.035` ms (combined median
+`399.027` ms). Promoting this family changes stream `92` to
+`13,505/21,702/0/0` and stream `126` to `27,188/43,912/0/0`; stream `114`
+remains `54/22/0/0`, with no warnings beyond stream `126`'s known six one-HP
+combat-model disagreements.
+
+The automatic manifest uses portal and death-respawn candidates rather than the
+earlier sequence-keyed switch. Exact packet length makes the candidates
+unambiguous, while equality guards enforce map sentinel `-1`, the zero portal
+reserved value, and the death-respawn zero body.
 
 An exact captured 19-byte server envelope was injected into an already active
 browser-free custom-server session. The fold added one partial opcode-`43`
 event, core phase/map/player/inventory/progression state stayed unchanged,
 matched heartbeats advanced from 173 to 176, and the connection remained
-active with zero failures. No client opcode-`43` response appeared, so this
-proves bounded non-stalling acceptance only—not security, status, or
-request/response semantics.
+active with zero failures. No client opcode-`43` response appeared because
+server opcode `43` is not the field-transfer response; the capture-backed
+response boundary is the following opcode-`157` snapshot. The injection still
+proves bounded non-stalling acceptance for the separately neutral server
+family only.
 
 ## Client opcode `114` redacted text envelope
 

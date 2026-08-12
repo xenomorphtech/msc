@@ -59,9 +59,9 @@ from maple_server.packets import (  # noqa: E402
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientAttackAction,
+    ClientFieldTransferRequest,
     ClientInnerPortalRequest,
     ClientOpcode111CashSlotAction,
-    ClientOpcode43Envelope,
     ClientNpcInteractionRequest,
     ClientOpcode66Acknowledgement,
     ClientOpcode75EmptyRecord,
@@ -2683,30 +2683,28 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "value count"):
             ServerOpcode425ValueLedger.parse(bytes(invalid_425_count))
 
-    def test_client_opcode_43_variants_round_trip_and_redact(self) -> None:
-        compact = ClientOpcode43Envelope(
-            sequence=4,
-            opaque_compact_body=bytes(range(9)),
-        )
-        identified = ClientOpcode43Envelope(
-            sequence=35,
-            opaque_identifier=3_456_789,
-            opaque_text="hidden",
-            opaque_tail=b"ABCDEF",
+    def test_client_field_transfer_variants_round_trip_and_redact(self) -> None:
+        death_respawn = ClientFieldTransferRequest(field_epoch=4)
+        portal = ClientFieldTransferRequest(
+            field_epoch=35,
+            destination_map_id=-1,
+            portal_name="west00",
+            position_x=-1_001,
+            position_y=298,
+            reserved_value=0,
         )
 
-        for envelope in (compact, identified):
-            payload = envelope.to_bytes()
-            self.assertEqual(ClientOpcode43Envelope.parse(payload), envelope)
-        self.assertEqual(len(compact.to_bytes()), 12)
-        self.assertEqual(len(identified.to_bytes()), 28)
-        self.assertEqual(compact.variant, "compact")
-        self.assertEqual(identified.variant, "identified_text")
-        self.assertEqual(identified.text_code_units, 6)
-        self.assertEqual(identified.opaque_byte_count, 6)
-        safe = str(identified.safe_dict())
-        self.assertNotIn("3456789", safe)
-        self.assertNotIn("hidden", safe)
+        for request in (death_respawn, portal):
+            payload = request.to_bytes()
+            self.assertEqual(ClientFieldTransferRequest.parse(payload), request)
+        self.assertEqual(len(death_respawn.to_bytes()), 12)
+        self.assertEqual(len(portal.to_bytes()), 28)
+        self.assertEqual(death_respawn.variant, "death_respawn")
+        self.assertEqual(portal.variant, "portal")
+        self.assertEqual(portal.portal_name_code_units, 6)
+        safe = str(portal.safe_dict())
+        self.assertNotIn("west00", safe)
+        self.assertIn("-1001", safe)
 
         server = ServerOpcode43Envelope(
             message_type=0,
@@ -2716,16 +2714,20 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(server.to_bytes()), 19)
         self.assertNotIn(bytes(range(16)).hex(), str(server.safe_dict()))
 
-        with self.assertRaisesRegex(PacketShapeError, "needs 9 opaque"):
-            replace(compact, opaque_compact_body=b"short").to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "needs text"):
-            replace(identified, opaque_text=None).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "6-byte tail"):
-            replace(identified, opaque_tail=b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "cannot contain portal"):
+            replace(death_respawn, portal_name="west00").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "destination map id"):
+            replace(portal, destination_map_id=101_000_000).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires a portal name"):
+            replace(portal, portal_name=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "reserved value"):
+            replace(portal, reserved_value=1).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "fit in u8"):
-            replace(compact, sequence=256).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "needs 2 bytes"):
-            ClientOpcode43Envelope.parse(bytes.fromhex("2b00010000000000"))
+            replace(death_respawn, field_epoch=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "nine zeros"):
+            ClientFieldTransferRequest.parse(
+                bytes.fromhex("2b0004000000000000000001")
+            )
         with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
             replace(server, opaque_body=b"short").to_bytes()
 
@@ -6157,19 +6159,16 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
-    def test_folds_client_opcode_43_neutral_envelopes(self) -> None:
-        envelopes = (
-            ClientOpcode43Envelope(
-                sequence=4,
-                opaque_compact_body=bytes(range(9)),
-            ),
-            ClientOpcode43Envelope(
-                sequence=35,
-                opaque_identifier=3_456_789,
-                opaque_text="sensitive-label",
-                opaque_tail=b"ABCDEF",
-            ),
+    def test_folds_client_field_transfer_requests_into_transitions(self) -> None:
+        portal = ClientFieldTransferRequest(
+            field_epoch=1,
+            destination_map_id=-1,
+            portal_name="sensitive-portal",
+            position_x=1_239,
+            position_y=485,
+            reserved_value=0,
         )
+        death_respawn = ClientFieldTransferRequest(field_epoch=2)
         server = ServerOpcode43Envelope(
             message_type=0,
             opaque_body=bytes(range(16)),
@@ -6177,43 +6176,66 @@ class GameplayStateFoldTest(unittest.TestCase):
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_server_plaintexts=(server.to_bytes(),),
-            extra_client_plaintexts=tuple(
-                envelope.to_bytes() for envelope in envelopes
+            extra_directional_plaintexts=(
+                ("client_to_server", portal.to_bytes()),
+                (
+                    "server_to_client",
+                    fixture_compact_field_transition().to_bytes(),
+                ),
+                ("client_to_server", death_respawn.to_bytes()),
+                (
+                    "server_to_client",
+                    replace(
+                        fixture_compact_field_transition(),
+                        transition_sequence=3,
+                        map_id=101_000_000,
+                        portal_index=14,
+                        current_hp=50,
+                    ).to_bytes(),
+                ),
             ),
         )
 
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.client_opcode_43_packets, 2)
-        self.assertEqual(analysis.state.client_opcode_43_sequences, {4: 1, 35: 1})
+        self.assertEqual(analysis.state.client_field_transfer_requests, 2)
         self.assertEqual(
-            analysis.state.client_opcode_43_variants,
-            {"compact": 1, "identified_text": 1},
+            analysis.state.client_field_transfer_variants,
+            {"portal": 1, "death_respawn": 1},
         )
         self.assertEqual(
-            analysis.state.client_opcode_43_text_code_units,
-            {0: 1, 15: 1},
+            analysis.state.client_field_transfer_portal_name_code_units,
+            {0: 1, 16: 1},
         )
-        self.assertEqual(analysis.state.client_opcode_43_opaque_bytes, 15)
+        self.assertEqual(analysis.state.client_field_transfer_epoch_matches, 2)
+        self.assertEqual(analysis.state.client_field_transfer_epoch_mismatches, 0)
+        self.assertEqual(
+            analysis.state.client_field_transfer_redacted_portal_names, 1
+        )
+        self.assertEqual(analysis.state.matched_client_field_transfers, 2)
+        self.assertEqual(analysis.state.pending_client_field_transfers, 0)
+        self.assertEqual(
+            analysis.state.last_client_field_transfer_response_ms, 0.000001
+        )
         self.assertEqual(analysis.state.server_opcode_43_packets, 1)
         self.assertEqual(analysis.state.server_opcode_43_message_types, {0: 1})
         self.assertEqual(analysis.state.server_opcode_43_opaque_bytes, 16)
         observations = [
             observation
             for observation in analysis.observations
-            if observation.kind == "client_opcode_43_envelope"
+            if observation.kind == "client_field_transfer_request"
         ]
         self.assertEqual(len(observations), 2)
         self.assertTrue(
             all(
-                observation.coverage.value == "partial"
+                observation.coverage.value == "full"
                 for observation in observations
             )
         )
         self.assertEqual(
             sum(
-                event.kind == "client_opcode_43_submitted"
+                event.kind == "field_transfer_requested"
                 for event in analysis.events
             ),
             2,
@@ -6233,16 +6255,46 @@ class GameplayStateFoldTest(unittest.TestCase):
             1,
         )
         safe = str(analysis.safe_dict())
-        self.assertNotIn("3456789", safe)
-        self.assertNotIn("sensitive-label", safe)
+        self.assertNotIn("sensitive-portal", safe)
         self.assertNotIn(bytes(range(16)).hex(), safe)
         self.assertIn(
-            "client_opcode_43=packets:2 sequences:{4: 1, 35: 1}",
+            "client_field_transfer=requests:2",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(
             "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:16",
             render_gameplay_analysis(analysis),
+        )
+
+    def test_warns_for_unmatched_client_field_transfer_epoch(self) -> None:
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_directional_plaintexts=(
+                    (
+                        "client_to_server",
+                        ClientFieldTransferRequest(field_epoch=2).to_bytes(),
+                    ),
+                ),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.client_field_transfer_requests, 1)
+        self.assertEqual(analysis.state.client_field_transfer_epoch_matches, 0)
+        self.assertEqual(
+            analysis.state.client_field_transfer_epoch_mismatches,
+            1,
+        )
+        self.assertEqual(analysis.state.matched_client_field_transfers, 0)
+        self.assertEqual(analysis.state.pending_client_field_transfers, 1)
+        self.assertIn(
+            "1 client field-transfer requests did not match the active field epoch",
+            analysis.warnings,
+        )
+        self.assertIn(
+            "1 client field-transfer requests had no following field snapshot",
+            analysis.warnings,
         )
 
     def test_correlates_npc_interaction_and_opcode_111_cash_slot(self) -> None:

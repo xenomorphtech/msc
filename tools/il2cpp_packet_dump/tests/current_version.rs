@@ -107,19 +107,19 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
 
     let opcode_43_identified = shapes
         .iter()
-        .find(|shape| shape.name == "client_opcode_43_identified_text")
+        .find(|shape| shape.name == "client_portal_field_transfer_request")
         .unwrap();
     assert_eq!(opcode_43_identified.opcode, 43);
     assert_eq!(opcode_43_identified.length, None);
-    assert_eq!(opcode_43_identified.operations.len(), 5);
+    assert_eq!(opcode_43_identified.operations.len(), 7);
 
     let opcode_43_compact = shapes
         .iter()
-        .find(|shape| shape.name == "client_opcode_43_compact")
+        .find(|shape| shape.name == "client_death_respawn_field_transfer_request")
         .unwrap();
     assert_eq!(opcode_43_compact.opcode, 43);
     assert_eq!(opcode_43_compact.length, Some(12));
-    assert_eq!(opcode_43_compact.operations.len(), 3);
+    assert_eq!(opcode_43_compact.operations.len(), 5);
 
     let opcode_114 = shapes
         .iter()

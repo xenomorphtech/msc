@@ -365,14 +365,16 @@
   epoch mismatches are zero, and stream `92` reaches
   `13,419/21,788/0/0` with no warnings. All three reference gameplay streams
   now have zero unknown and zero invalid packets.
-- Client/server opcode `43` now uses two redacted client envelopes and one
-  fixed server envelope instead of a sequence-keyed stream-specific switch.
-  All 45 client and three server packets across streams `92` and `126`
-  round-trip exactly as partial observations; sequence, variant, text length,
-  message type, and opaque-byte counts are safe, while identifiers, text, and
-  bodies remain omitted. An exact server packet live replay left core state
-  unchanged, advanced matched heartbeats `173 -> 176`, retained one active
-  connection with zero failures, and produced no client opcode-`43` response.
+- Client opcode `43` is now a field-transfer request. All 45 packets carry the
+  active field epoch and match the next opcode-`157` snapshot. Forty-two portal
+  requests use map sentinel `-1`, a redacted portal name, signed position, and
+  zero reserved word; three death-respawn requests use nine zeros and follow an
+  HP-zero stat update. All 45 now fold as full observations with
+  `28.125..940.035` ms transition latency. Coverage reaches
+  `13,505/21,702/0/0` for stream `92`, `27,188/43,912/0/0` for stream `126`,
+  and remains `54/22/0/0` for stream `114`. Server opcode `43` stays a separate
+  neutral fixed envelope; its earlier live replay remains a non-stalling
+  acceptance check, not the transfer-response boundary.
 - Client opcode `114` now consumes and round-trips all 44 long-corpus packets
   as a redacted `u8 + counted UTF-16 + zero + u32` envelope. Text lengths
   `8/9/11` explain the exact `26/28/32` packet widths. Safe state/events expose

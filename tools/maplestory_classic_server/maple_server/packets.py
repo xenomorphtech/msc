@@ -6596,106 +6596,138 @@ class ClientSkillUseRequest:
 
 
 @dataclass(frozen=True)
-class ClientOpcode43Envelope:
-    """Capture-bounded neutral envelopes for client opcode 43."""
+class ClientFieldTransferRequest:
+    """Portal or death-respawn field-transfer request (client opcode 43)."""
 
-    sequence: int
-    opaque_identifier: int | None = field(default=None, repr=False)
-    opaque_text: str | None = field(default=None, repr=False)
-    opaque_tail: bytes = field(default=b"", repr=False)
-    opaque_compact_body: bytes = field(default=b"", repr=False)
+    field_epoch: int
+    destination_map_id: int | None = None
+    portal_name: str | None = field(default=None, repr=False)
+    position_x: int | None = None
+    position_y: int | None = None
+    reserved_value: int | None = None
     opcode: int = 43
+
+    SERVER_RESOLVED_MAP_ID = -1
 
     @property
     def variant(self) -> str:
-        return "compact" if self.opaque_identifier is None else "identified_text"
+        return "death_respawn" if self.destination_map_id is None else "portal"
 
     @property
-    def text_code_units(self) -> int:
-        if self.opaque_text is None:
+    def portal_name_code_units(self) -> int:
+        if self.portal_name is None:
             return 0
-        return len(self.opaque_text.encode("utf-16-le")) // 2
-
-    @property
-    def opaque_byte_count(self) -> int:
-        return len(self.opaque_compact_body) + len(self.opaque_tail)
+        return len(self.portal_name.encode("utf-16-le")) // 2
 
     @classmethod
-    def parse(cls, payload: bytes) -> "ClientOpcode43Envelope":
-        reader = PacketReader(payload, packet_name="client_opcode_43")
+    def parse(cls, payload: bytes) -> "ClientFieldTransferRequest":
+        reader = PacketReader(payload, packet_name="client_field_transfer")
         _expect_opcode(reader, 43)
-        sequence = reader.u8("sequence")
+        field_epoch = reader.u8("field_epoch")
         if reader.remaining == 9:
-            opaque_compact_body = reader.bytes(9, "opaque_compact_body")
+            zero_body = reader.bytes(9, "death_respawn_zero_body")
+            if zero_body != b"\x00" * 9:
+                raise PacketShapeError(
+                    "death-respawn field transfer body must contain nine zeros"
+                )
             reader.finish()
-            return cls(
-                sequence=sequence,
-                opaque_compact_body=opaque_compact_body,
-            )
+            return cls(field_epoch=field_epoch)
 
-        opaque_identifier = reader.u32("opaque_identifier")
-        opaque_text = reader.utf16_string("opaque_text", trailing_byte=True)
-        opaque_tail = reader.bytes(6, "opaque_tail")
-        reader.finish()
-        return cls(
-            sequence=sequence,
-            opaque_identifier=opaque_identifier,
-            opaque_text=opaque_text,
-            opaque_tail=opaque_tail,
+        request = cls(
+            field_epoch=field_epoch,
+            destination_map_id=reader.i32("destination_map_id"),
+            portal_name=reader.utf16_string(
+                "portal_name", trailing_byte=True
+            ),
+            position_x=reader.i16("position_x"),
+            position_y=reader.i16("position_y"),
+            reserved_value=reader.u16("reserved_value"),
         )
+        reader.finish()
+        if request.destination_map_id != cls.SERVER_RESOLVED_MAP_ID:
+            raise PacketShapeError(
+                "portal field transfer destination map id must be -1"
+            )
+        if request.reserved_value != 0:
+            raise PacketShapeError(
+                "portal field transfer reserved value must be zero"
+            )
+        return request
 
-    def safe_dict(self) -> dict[str, int | bool | str]:
+    def safe_dict(self) -> dict[str, int | bool | str | None]:
         return {
-            "sequence": self.sequence,
+            "field_epoch": self.field_epoch,
             "variant": self.variant,
-            "identifier_present": self.opaque_identifier is not None,
-            "text_code_units": self.text_code_units,
-            "text_redacted": self.opaque_text is not None,
-            "opaque_bytes": self.opaque_byte_count,
+            "server_resolved_destination": (
+                self.destination_map_id == self.SERVER_RESOLVED_MAP_ID
+            ),
+            "portal_name_code_units": self.portal_name_code_units,
+            "portal_name_redacted": self.portal_name is not None,
+            "position_x": self.position_x,
+            "position_y": self.position_y,
+            "reserved_value": self.reserved_value,
         }
 
     def to_bytes(self) -> bytes:
         if self.opcode != 43:
-            raise PacketShapeError("client opcode-43 envelope opcode must be 43")
-        if not 0 <= self.sequence <= 0xFF:
-            raise PacketShapeError("client opcode-43 sequence must fit in u8")
+            raise PacketShapeError(
+                "client field-transfer request opcode must be 43"
+            )
+        if not 0 <= self.field_epoch <= 0xFF:
+            raise PacketShapeError(
+                "client field-transfer epoch must fit in u8"
+            )
 
-        prefix = struct.pack("<HB", self.opcode, self.sequence)
-        if self.opaque_identifier is None:
-            if self.opaque_text is not None or self.opaque_tail:
-                raise PacketShapeError(
-                    "client opcode-43 compact envelope cannot contain text "
-                    "or a tail"
+        prefix = struct.pack("<HB", self.opcode, self.field_epoch)
+        if self.destination_map_id is None:
+            if any(
+                value is not None
+                for value in (
+                    self.portal_name,
+                    self.position_x,
+                    self.position_y,
+                    self.reserved_value,
                 )
-            if len(self.opaque_compact_body) != 9:
+            ):
                 raise PacketShapeError(
-                    "client opcode-43 compact envelope needs 9 opaque bytes"
+                    "death-respawn field transfer cannot contain portal fields"
                 )
-            return prefix + self.opaque_compact_body
+            return prefix + b"\x00" * 9
 
-        if not 0 <= self.opaque_identifier <= 0xFFFF_FFFF:
+        if self.destination_map_id != self.SERVER_RESOLVED_MAP_ID:
             raise PacketShapeError(
-                "client opcode-43 identifier must fit in u32"
+                "portal field transfer destination map id must be -1"
             )
-        if self.opaque_text is None:
+        if self.portal_name is None:
             raise PacketShapeError(
-                "client opcode-43 identified-text envelope needs text"
+                "portal field transfer requires a portal name"
             )
-        if len(self.opaque_tail) != 6:
+        if self.position_x is None or self.position_y is None:
             raise PacketShapeError(
-                "client opcode-43 identified-text envelope needs a "
-                "6-byte tail"
+                "portal field transfer requires a player position"
             )
-        if self.opaque_compact_body:
+        for name, value in (
+            ("position x", self.position_x),
+            ("position y", self.position_y),
+        ):
+            if not -0x8000 <= value <= 0x7FFF:
+                raise PacketShapeError(
+                    f"portal field transfer {name} must fit in i16"
+                )
+        if self.reserved_value != 0:
             raise PacketShapeError(
-                "client opcode-43 identified-text envelope cannot contain "
-                "a compact body"
+                "portal field transfer reserved value must be zero"
             )
         return (
             prefix
-            + struct.pack("<I", self.opaque_identifier)
-            + encode_utf16_string(self.opaque_text, trailing_byte=True)
-            + self.opaque_tail
+            + struct.pack("<i", self.destination_map_id)
+            + encode_utf16_string(self.portal_name, trailing_byte=True)
+            + struct.pack(
+                "<hhH",
+                self.position_x,
+                self.position_y,
+                self.reserved_value,
+            )
         )
 
 

@@ -263,12 +263,13 @@ Opcodes `60`, `94`, and `379` contribute 14 exact reference frames: ten in
 stream `126` and four across `111.pcapng` streams `92`/`114`.
 Targeted native validation also consumes all 23 opcode-`148` frames: 22 through
 the semantic shape and the one legacy body through its exact opaque pin.
-The client opcode-`43` shape is no longer a stream-`92` switch keyed by its
-leading byte. Two unambiguous candidates now describe the real cross-corpus
-boundary: `u8 + u32 + counted UTF-16 + zero + six bytes`, or the 12-byte
-compact `u8 + nine bytes` envelope. All 45 client packets validate natively,
-including sequences `13..35` from stream `126`; the existing 19-byte server
-shape covers the other three opcode-`43` packets.
+The client opcode-`43` shape is a field-transfer request, not a stream-`92`
+switch keyed by its leading byte. Two unambiguous candidates describe the
+cross-corpus boundary: a portal form with active `u8` field epoch, signed map
+sentinel `-1`, counted UTF-16 portal name, signed position, and zero `u16`; or a
+12-byte death-respawn form with the epoch plus nine zeros. All 45 client
+packets validate natively and correlate to the next opcode-`157` snapshot. The
+existing 19-byte server opcode-`43` shape remains a separate neutral family.
 Client opcode `114` adds one variable-width redacted shape: a neutral `u8`, a
 counted UTF-16 field with required zero terminator, and a trailing `u32`. It
 consumes all 44 stream-`126` packets at lengths `26`, `28`, and `32`; text and
