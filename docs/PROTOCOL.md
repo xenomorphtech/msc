@@ -2536,8 +2536,11 @@ variant 8:
         uint8 reserved_zero = 0
         uint8 control                  # observed 0, 1, 4, or 7
         uint16 terminal_value          # observed 0 or 1; role neutral
-    else:
-        bytes opaque_tail              # observed length 117
+    if exactly 117 bytes remain:
+        uint8 reserved_zero = 0
+        uint16 slot                     # observed 1 or 22
+        uint8 inventory_type = 1       # Equip
+        equipment_item_record          # shared opcode-39 item grammar
 ```
 
 Variant `3` always has its exact three-byte suffix. Variant `4` has 41 short
@@ -2545,9 +2548,12 @@ false forms and ten true forms with a terminated string. All 22 variant-`5`
 packets use control pattern `03 0a 0a 02` and consume exactly. Eleven of the 13
 variant-`8` packets independently agree on the four-byte short suffix above:
 controls `0/1/4/7` and terminal values `0/1`. Those short records now have full
-coverage. The two remaining variant-`8` records have distinct 117-byte,
-item-like bodies; they retain 234 opaque bytes and stay partial because the
-comparison does not establish their internal record grammar.
+coverage. The two remaining variant-`8` records are distinct 117-byte wrappers
+around the existing equipment-item grammar. They expose slots `1`/`22`, item
+templates `1372012`/`1050018`, non-cash permanent expiration, and both validated
+filetime sentinels. Each still contains 75 bytes of equipment metadata with no
+assigned field roles, so the two observations stay partial with 150 opaque
+bytes total.
 
 Stream `92` contributes variants `3/4/5/8 = 152/13/9/6`, stream `114`
 contributes `1/1/0/0`, and level-1-through-10 stream `126` contributes
@@ -2555,7 +2561,8 @@ contributes `1/1/0/0`, and level-1-through-10 stream `126` contributes
 are full and two are partial. The strict stream totals are
 `34,552/655/0/0`, `64/12/0/0`, and `69,948/1,152/0/0`, respectively. Isolated
 native validation consumes all 11 promoted short records without a failure or
-unsupported shape. The active saved transcript contains no variant-`8` record;
+unsupported shape; a separate two-record native corpus consumes both long item
+wrappers exactly. The active saved transcript contains no variant-`8` record;
 its two opcode-`77` observations remain full and the transcript stays valid at
 `763/19/0/0`. The fold emits
 `server_opcode_77_received`, tracks variant/control/value and text-length

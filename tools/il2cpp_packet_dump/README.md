@@ -86,7 +86,7 @@ cargo test --release --test capture_jsonl -- --ignored
 For capture 111 streams 83, 92, and 114 the pinned regression contains 35,316
 packets. All 35,316 are covered and exactly consumed: zero unsupported variants
 and zero short-read, over-read, constant, ambiguity, or hash failures. The
-manifest currently declares 145 semantic/manual shapes and 88 explicitly
+manifest currently declares 146 semantic/manual shapes and 88 explicitly
 observed-opaque exact-width variants. Eleven exact-width opaque pins overlap
 semantic shapes and are retained as raw capture evidence but suppressed from
 the effective shape set. Opcodes `276`, `137`, and `29` add the twelfth through
@@ -103,7 +103,7 @@ opcode-`308`, opcode-`311`, and ability-point opcode-`100` layouts suppress four
 opaque pins without increasing the effective shape count. Live selector-`5`
 action-`51` controls add non-overlapping client chair sit/recovery/stand shapes
 for opcodes `49`, `82`, and `48`. Typed opcode `41` consolidates its three
-capture variants into one handler-exact conditional shape. This leaves 199
+capture variants into one handler-exact conditional shape. This leaves 201
 active shapes and 63 active opaque pins.
 Opcode `135` combines handler `aecdc2fe...` with a detached local-Wine
 primitive-reader trace. Its 1,350-read nested count grammar consumes and
@@ -337,11 +337,13 @@ constructor `0x180CB3F20`; each record reads
 the matching opaque pin and exactly consumes both byte-identical four-record
 packets from streams `92` and `114`. Text and numeric fields remain private;
 higher-level analysis publishes only record and code-unit counts.
-Server opcode `77` variant `8` now distinguishes its repeated short branch
-from its two long binary bodies. All 11 short records across streams `126` and
-`92` exact-consume as counted UTF-16 followed by `zero u8 + neutral control u8
-+ neutral u16`; isolated validation passes `11/11`. The existing 158-byte
-binary shape and the other long record remain opaque evidence, so their
-117-byte bodies are not assigned item or message semantics.
+Server opcode `77` variant `8` distinguishes its repeated short branch from two
+long item wrappers. All 11 short records across streams `126` and `92` consume
+as counted UTF-16 followed by `zero u8 + neutral control u8 + neutral u16`;
+isolated validation passes `11/11`. The 150- and 158-byte shapes then consume
+`zero u8 + slot u16 + Equip u8` plus the shared equipment-item prefix, 67
+metadata bytes, first sentinel/`-1`, eight metadata bytes, and second sentinel/
+zero. Isolated validation passes `2/2`; the 75 metadata bytes per record keep
+their neutral opaque role.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

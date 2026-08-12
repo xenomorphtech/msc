@@ -1171,11 +1171,25 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":49},{"op":"read","name":"notice_type","kind":"u8","equals":3},{"op":"read","name":"status","kind":"u8","equals":1},{"op":"read","name":"status_value","kind":"u32"},{"op":"bytes","name":"reserved_constant","length":36,"equals_hex":"000000000000000000000000000000000000000000000000000000000000000000000000"}]
     },
     {
-      "name":"typed_notice_binary_variant","direction":"server_to_client","opcode":77,"length":158,
-      "source":"capture-111 type-8 binary notice branch; exact comparison isolates an 18-character UTF-16 label followed by 117 binary bytes",
+      "name":"typed_notice_equipment_item_150","direction":"server_to_client","opcode":77,"length":150,
+      "source":"the stream-126 long type-8 branch reuses the opcode-39 equipment-item record grammar after a reserved zero, slot, and inventory type; both filetime sentinels and tails validate while 75 metadata bytes retain no assigned role",
       "operations":[
-        {"op":"read","name":"opcode","kind":"u16","equals":77},{"op":"read","name":"notice_type","kind":"u8","equals":8},
-        {"op":"utf16","name":"label","trailing_zero":false},{"op":"bytes","name":"binary_notice","length":117}
+        {"op":"read","name":"opcode","kind":"u16","equals":77},{"op":"read","name":"notice_type","kind":"u8","equals":8},{"op":"utf16","name":"label","trailing_zero":false},
+        {"op":"read","name":"reserved_zero","kind":"u8","equals":0},{"op":"read","name":"slot","kind":"u16"},{"op":"read","name":"inventory_type","kind":"u8","equals":1},
+        {"op":"read","name":"record_type","kind":"u8","equals":1},{"op":"read","name":"item_id","kind":"u32"},{"op":"read","name":"cash_flag","kind":"u8","equals":0},{"op":"read","name":"expires_at_ticks","kind":"i64","equals":150842304000000000},
+        {"op":"bytes","name":"equipment_metadata","length":67},{"op":"read","name":"first_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_sentinel_tail","kind":"i32","equals":-1},
+        {"op":"bytes","name":"interstitial_metadata","length":8},{"op":"read","name":"second_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_sentinel_tail","kind":"u32","equals":0}
+      ]
+    },
+    {
+      "name":"typed_notice_equipment_item_158","direction":"server_to_client","opcode":77,"length":158,
+      "source":"the stream-92 long type-8 branch independently reuses the same opcode-39 equipment-item record grammar after an 18-code-unit label; both filetime sentinels and tails validate while 75 metadata bytes retain no assigned role",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":77},{"op":"read","name":"notice_type","kind":"u8","equals":8},{"op":"utf16","name":"label","trailing_zero":false},
+        {"op":"read","name":"reserved_zero","kind":"u8","equals":0},{"op":"read","name":"slot","kind":"u16"},{"op":"read","name":"inventory_type","kind":"u8","equals":1},
+        {"op":"read","name":"record_type","kind":"u8","equals":1},{"op":"read","name":"item_id","kind":"u32"},{"op":"read","name":"cash_flag","kind":"u8","equals":0},{"op":"read","name":"expires_at_ticks","kind":"i64","equals":150842304000000000},
+        {"op":"bytes","name":"equipment_metadata","length":67},{"op":"read","name":"first_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"first_sentinel_tail","kind":"i32","equals":-1},
+        {"op":"bytes","name":"interstitial_metadata","length":8},{"op":"read","name":"second_sentinel_ticks","kind":"i64","equals":94354848000000000},{"op":"read","name":"second_sentinel_tail","kind":"u32","equals":0}
       ]
     },
     {

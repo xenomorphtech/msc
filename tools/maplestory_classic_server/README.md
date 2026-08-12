@@ -900,9 +900,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `77`: redacted variants `3`/`4`/`5` fully bind one to three
   counted UTF-16 fields plus their fixed neutral controls/value; the repeated
   short variant-`8` branch binds `zero u8 + control u8 + neutral u16`, while
-  its two distinct 117-byte item-like bodies remain opaque. Safe state, events,
-  JSON, text output, and HTTP status expose lengths/distributions but never
-  captured text,
+  its two distinct 117-byte bodies reuse the typed equipment-item grammar and
+  retain 75 opaque metadata bytes each. Safe state, events, JSON, text output,
+  and HTTP status expose typed item fields and lengths/distributions but never
+  captured text or metadata bytes,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
   to local pickup requests by the exact aliased drop id, with full structural
   coverage for all three reason-selected branches,
@@ -2537,4 +2538,7 @@ preserve distinct Unity scan codes in this setup.
 116. Type the repeated four-byte server opcode-`77` variant-`8` suffix as a
     reserved-zero byte, neutral control byte, and neutral `u16`; promote all 11
     short cross-capture records with isolated native validation, while leaving
-    the two distinct 117-byte item-like bodies opaque and partial.
+    the two distinct 117-byte item-like bodies opaque and partial. Then reuse
+    the existing equipment-item grammar for both long wrappers, validate their
+    zero/slot/inventory prefix and both time sentinels, and reduce their opaque
+    metadata from 117 to 75 bytes each without changing partial coverage.

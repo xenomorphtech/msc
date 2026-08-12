@@ -1839,11 +1839,6 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 variant_8_control=7,
                 variant_8_value=1,
             ),
-            ServerOpcode77Envelope(
-                variant=8,
-                primary_text="private binary text",
-                opaque_tail=b"x" * 117,
-            ),
         )
 
         for envelope in envelopes:
@@ -1865,16 +1860,49 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(parsed_variant_8.variant_8_value, 1)
         self.assertEqual(parsed_variant_8.safe_dict()["opaque_tail_length"], 0)
 
-        long_variant_8 = envelopes[-1]
+        captured_long_variant_8_tail = bytes.fromhex(
+            "00010001016cef14"
+            "0000008005bb46e6"
+            "1702000700000000"
+            "0700000000000000"
+            "2100470000000000"
+            "0000000000000000"
+            "0000000000000000"
+            "0000000000000000"
+            "0000000000000000"
+            "0000000000de0600"
+            "001a0000230040e0"
+            "fd3b374f01ffffff"
+            "ff00000000000000"
+            "000040e0fd3b374f"
+            "0100000000"
+        )
+        captured_long_variant_8 = (
+            bytes.fromhex("4d000801004100") + captured_long_variant_8_tail
+        )
+        long_variant_8 = ServerOpcode77Envelope.parse(captured_long_variant_8)
+        self.assertEqual(long_variant_8.to_bytes(), captured_long_variant_8)
         self.assertFalse(long_variant_8.fully_bounded)
-        self.assertEqual(len(long_variant_8.opaque_tail), 117)
+        self.assertEqual(long_variant_8.variant_8_slot, 1)
+        self.assertEqual(long_variant_8.variant_8_inventory_type, 1)
+        self.assertIsNotNone(long_variant_8.variant_8_item)
+        if long_variant_8.variant_8_item is None:
+            self.fail("captured long variant-8 item was not parsed")
+        self.assertEqual(long_variant_8.variant_8_item.item_id, 1_372_012)
+        self.assertEqual(len(long_variant_8.variant_8_item.raw_record), 113)
+        self.assertEqual(long_variant_8.safe_dict()["opaque_tail_length"], 0)
+        self.assertEqual(
+            long_variant_8.safe_dict()["opaque_item_metadata_length"], 75
+        )
 
         invalid_reserved = bytearray(captured_variant_8)
         invalid_reserved[-4] = 1
         with self.assertRaisesRegex(PacketShapeError, "reserved_zero"):
             ServerOpcode77Envelope.parse(bytes(invalid_reserved))
         with self.assertRaisesRegex(PacketShapeError, "both control and value"):
-            replace(envelopes[-2], variant_8_value=None).to_bytes()
+            replace(envelopes[-1], variant_8_value=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "slot does not match"):
+            replace(long_variant_8, variant_8_slot=2).to_bytes()
 
         captured_variant_5 = bytes.fromhex(
             "4d000521005300490044005f0057004f0052004c0044004e004f005400490043"
@@ -6014,12 +6042,28 @@ class GameplayStateFoldTest(unittest.TestCase):
                 variant_8_control=7,
                 variant_8_value=0,
             ),
-            ServerOpcode77Envelope(
-                variant=8,
-                primary_text="sensitive binary text",
-                opaque_tail=b"x" * 117,
-            ),
         )
+        long_variant_8_tail = bytes.fromhex(
+            "00010001016cef14"
+            "0000008005bb46e6"
+            "1702000700000000"
+            "0700000000000000"
+            "2100470000000000"
+            "0000000000000000"
+            "0000000000000000"
+            "0000000000000000"
+            "0000000000000000"
+            "0000000000de0600"
+            "001a0000230040e0"
+            "fd3b374f01ffffff"
+            "ff00000000000000"
+            "000040e0fd3b374f"
+            "0100000000"
+        )
+        long_variant_8 = ServerOpcode77Envelope.parse(
+            bytes.fromhex("4d000801004100") + long_variant_8_tail
+        )
+        envelopes += (long_variant_8,)
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_server_plaintexts=tuple(
@@ -6045,7 +6089,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.server_opcode_77_text_code_units,
             expected_code_units,
         )
-        self.assertEqual(analysis.state.server_opcode_77_opaque_bytes, 117)
+        self.assertEqual(analysis.state.server_opcode_77_opaque_bytes, 75)
         observations = [
             observation
             for observation in analysis.observations

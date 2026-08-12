@@ -8889,9 +8889,7 @@ class GameplayStateFold:
             self.state.server_opcode_77_text_code_units += sum(
                 text_code_unit_counts
             )
-            self.state.server_opcode_77_opaque_bytes += len(
-                envelope.opaque_tail
-            )
+            self.state.server_opcode_77_opaque_bytes += envelope.opaque_bytes
             self.state.server_opcode_77_control_patterns[
                 f"{envelope.variant}:{control_pattern}"
             ] += 1
@@ -8920,7 +8918,7 @@ class GameplayStateFold:
                 issues=(
                     (
                         f"variant {envelope.variant} retains "
-                        f"{len(envelope.opaque_tail)} opaque bytes"
+                        f"{envelope.opaque_bytes} opaque bytes"
                     ),
                 )
                 if partial

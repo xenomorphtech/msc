@@ -675,8 +675,9 @@
   sustained-corpus samples. Variants `3`, `4`, and `5` fully bound their
   counted UTF-16 fields, optional terminator, fixed controls, and neutral
   terminal value. Eleven short variant-`8` records also bind a reserved-zero
-  byte, neutral control byte, and neutral `u16`; the two distinct long records
-  preserve 117 opaque bytes each. Streams `92`, `114`, and `126` contribute
+  byte, neutral control byte, and neutral `u16`. The two distinct long records
+  reuse the typed equipment-item grammar and retain only 75 opaque metadata
+  bytes each. Streams `92`, `114`, and `126` contribute
   180, 2, and 333 exact round-trips respectively, with 513 observations full
   and two partial. State/events expose only variant, text-length,
   control/value, and opaque-byte distributions; captured text is omitted from
@@ -856,10 +857,15 @@
   reserved-zero byte, one neutral control byte, and one neutral `u16`. All 11
   short records across streams `126` and `92` round-trip and pass isolated
   native validation, promoting six/five observations and advancing coverage to
-  `69,948/1,152/0/0` and `34,552/655/0/0`. The two distinct 117-byte item-like
-  bodies remain partial with 234 opaque bytes total. The active saved transcript
-  contains no variant-`8` record and remains valid at `763/19/0/0`; safe events
-  and HTTP-derived analysis expose only text lengths and neutral suffix values.
+  `69,948/1,152/0/0` and `34,552/655/0/0`. Both distinct 117-byte long bodies
+  reuse the opcode-`39` equipment-item record grammar after their zero/slot/
+  inventory wrapper: slots `1`/`22`, templates `1372012`/`1050018`, permanent
+  expiration, and both sentinels validate. Their 75-byte metadata regions remain
+  opaque, reducing family opacity from 234 to 150 bytes without promoting the
+  two partial observations. Isolated native validation passes `2/2`. The active
+  saved transcript contains no variant-`8` record and remains valid at
+  `763/19/0/0`; safe events and HTTP-derived analysis expose typed item fields,
+  text lengths, and neutral suffix values but never text or metadata bytes.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

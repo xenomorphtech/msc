@@ -4518,8 +4518,8 @@ class ServerOpcode77Envelope:
     The three text fields are retained for exact round trips but deliberately
     omitted from ``safe_dict`` because capture samples contain player-visible
     and user-derived strings.  The repeated short variant-8 branch exposes its
-    zero marker, control byte, and terminal u16; longer variant-8 bodies and
-    unknown variants remain opaque.
+    zero marker, control byte, and terminal u16.  The two captured long forms
+    reuse the typed inventory-item record; unknown widths remain opaque.
     """
 
     variant: int
@@ -4530,6 +4530,9 @@ class ServerOpcode77Envelope:
     terminal_u32: int | None = None
     variant_8_control: int | None = None
     variant_8_value: int | None = None
+    variant_8_slot: int | None = None
+    variant_8_inventory_type: int | None = None
+    variant_8_item: InitialInventoryItem | None = None
     opaque_tail: bytes = field(default=b"", repr=False)
     opcode: int = 77
 
@@ -4544,6 +4547,22 @@ class ServerOpcode77Envelope:
             and self.variant_8_value is not None
             and not self.opaque_tail
         )
+
+    @property
+    def opaque_bytes(self) -> int:
+        opaque_bytes = len(self.opaque_tail)
+        item = self.variant_8_item
+        if item is None or item.record_type != 1:
+            return opaque_bytes
+        sentinel = INITIAL_ITEM_SENTINEL_TICKS.to_bytes(
+            8, "little", signed=True
+        )
+        prefix_length = 14 + (8 if item.cash_item else 0)
+        first = item.raw_record.find(sentinel, prefix_length)
+        second = item.raw_record.find(sentinel, first + 8)
+        if first < 0 or second < 0:
+            return opaque_bytes + len(item.raw_record)
+        return opaque_bytes + (first - prefix_length) + (second - first - 12)
 
     @property
     def text_code_unit_counts(self) -> tuple[int, ...]:
@@ -4569,6 +4588,9 @@ class ServerOpcode77Envelope:
         terminal_u32 = None
         variant_8_control = None
         variant_8_value = None
+        variant_8_slot = None
+        variant_8_inventory_type = None
+        variant_8_item = None
         opaque_tail = b""
         if variant == 3:
             primary_text = reader.utf16_string(
@@ -4621,6 +4643,23 @@ class ServerOpcode77Envelope:
                     )
                 variant_8_control = reader.u8("variant_8_control")
                 variant_8_value = reader.u16("variant_8_value")
+            elif reader.remaining == 117:
+                reserved_zero = reader.u8("reserved_zero")
+                if reserved_zero != 0:
+                    raise PacketShapeError(
+                        "server_opcode_77_envelope long variant 8 reserved_zero "
+                        f"is {reserved_zero}, expected 0"
+                    )
+                variant_8_slot = reader.u16("variant_8_slot")
+                variant_8_inventory_type = reader.u8(
+                    "variant_8_inventory_type"
+                )
+                variant_8_item = InventoryModification._parse_item(
+                    reader,
+                    inventory_type=variant_8_inventory_type,
+                    slot=variant_8_slot,
+                    field_prefix="variant_8",
+                )
             else:
                 opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
         else:
@@ -4635,10 +4674,26 @@ class ServerOpcode77Envelope:
             terminal_u32=terminal_u32,
             variant_8_control=variant_8_control,
             variant_8_value=variant_8_value,
+            variant_8_slot=variant_8_slot,
+            variant_8_inventory_type=variant_8_inventory_type,
+            variant_8_item=variant_8_item,
             opaque_tail=opaque_tail,
         )
 
     def safe_dict(self) -> dict[str, object]:
+        variant_8_item = None
+        if self.variant_8_item is not None:
+            variant_8_item = {
+                "inventory": InventoryModification.INVENTORY_NAMES.get(
+                    self.variant_8_inventory_type, "unknown"
+                ),
+                "slot": self.variant_8_slot,
+                "record_type": self.variant_8_item.record_type,
+                "item_id": self.variant_8_item.item_id,
+                "cash_item": self.variant_8_item.cash_item,
+                "expires_at_ticks": self.variant_8_item.expires_at_ticks,
+                "record_bytes": len(self.variant_8_item.raw_record),
+            }
         return {
             "variant": self.variant,
             "text_field_count": len(self.text_code_unit_counts),
@@ -4647,7 +4702,11 @@ class ServerOpcode77Envelope:
             "terminal_u32": self.terminal_u32,
             "variant_8_control": self.variant_8_control,
             "variant_8_value": self.variant_8_value,
+            "variant_8_item": variant_8_item,
             "opaque_tail_length": len(self.opaque_tail),
+            "opaque_item_metadata_length": (
+                self.opaque_bytes - len(self.opaque_tail)
+            ),
             "text_redacted": bool(self.text_code_unit_counts),
         }
 
@@ -4664,6 +4723,9 @@ class ServerOpcode77Envelope:
         if self.variant != 8 and (
             self.variant_8_control is not None
             or self.variant_8_value is not None
+            or self.variant_8_slot is not None
+            or self.variant_8_inventory_type is not None
+            or self.variant_8_item is not None
         ):
             raise PacketShapeError(
                 "server opcode-77 variant-8 suffix fields require variant 8"
@@ -4775,6 +4837,18 @@ class ServerOpcode77Envelope:
                     "or terminal_u32"
                 )
             short_values = (self.variant_8_control, self.variant_8_value)
+            item_values = (
+                self.variant_8_slot,
+                self.variant_8_inventory_type,
+                self.variant_8_item,
+            )
+            if any(value is not None for value in short_values) and any(
+                value is not None for value in item_values
+            ):
+                raise PacketShapeError(
+                    "server opcode-77 variant 8 cannot combine short and item "
+                    "suffix fields"
+                )
             if any(value is not None for value in short_values):
                 if any(value is None for value in short_values):
                     raise PacketShapeError(
@@ -4798,6 +4872,54 @@ class ServerOpcode77Envelope:
                         "server opcode-77 variant-8 control and value must fit "
                         "uint8 and uint16"
                     ) from error
+            elif any(value is not None for value in item_values):
+                if any(value is None for value in item_values):
+                    raise PacketShapeError(
+                        "server opcode-77 long variant 8 needs slot, inventory "
+                        "type, and item"
+                    )
+                if self.opaque_tail:
+                    raise PacketShapeError(
+                        "server opcode-77 long variant 8 has no opaque tail"
+                    )
+                slot = self.variant_8_slot
+                inventory_type = self.variant_8_inventory_type
+                item = self.variant_8_item
+                if slot is None or inventory_type is None or item is None:
+                    raise AssertionError(
+                        "validated opcode-77 variant-8 item is incomplete"
+                    )
+                if item.slot != slot:
+                    raise PacketShapeError(
+                        "server opcode-77 variant-8 item slot does not match"
+                    )
+                allowed_record_types = (
+                    {1}
+                    if inventory_type == 1
+                    else ({2, 3} if inventory_type == 5 else {2})
+                )
+                if (
+                    inventory_type not in InventoryModification.INVENTORY_NAMES
+                    or item.record_type not in allowed_record_types
+                ):
+                    raise PacketShapeError(
+                        "server opcode-77 variant-8 item record does not match "
+                        "its inventory type"
+                    )
+                try:
+                    suffix = (
+                        struct.pack("<BHB", 0, slot, inventory_type)
+                        + item.to_bytes()[1:]
+                    )
+                except struct.error as error:
+                    raise PacketShapeError(
+                        "server opcode-77 variant-8 item slot must fit uint16"
+                    ) from error
+                if len(suffix) != 117:
+                    raise PacketShapeError(
+                        "server opcode-77 variant-8 captured item suffix must "
+                        "be 117 bytes"
+                    )
             else:
                 suffix = self.opaque_tail
             return header + encode_utf16_string(
@@ -4812,6 +4934,9 @@ class ServerOpcode77Envelope:
             or self.terminal_u32 is not None
             or self.variant_8_control is not None
             or self.variant_8_value is not None
+            or self.variant_8_slot is not None
+            or self.variant_8_inventory_type is not None
+            or self.variant_8_item is not None
         ):
             raise PacketShapeError(
                 "unknown server opcode-77 variants retain only an opaque body"
