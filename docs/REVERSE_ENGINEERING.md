@@ -478,8 +478,13 @@ All 17 stream-`92` instances are exactly `u16 opcode, u32 tick, i16 Use slot,
 u32 item template` and round-trip. Their typed state correlations establish
 same-slot quantity `-1`, red-potion HP `+50`, and blue-potion MP `+80` with
 maximum capping. The live reactive test reproduced the predicted red-potion
-`2 -> 1` and HP `50 -> 100` effects. Keep the tick role and last-item
-remove-versus-zero behavior unnamed until independent evidence resolves them.
+`2 -> 1` and HP `50 -> 100` effects. The last-item remove-versus-zero behavior
+remains unnamed because the capture does not exercise it.
+Independent v79 handler source resolves the shared leading u32 by passing it
+to `updateTick` for both item movement and Use-item requests; the same item-
+move handler names the final signed short quantity. That source-level role
+confirmation promotes the already fully correlated opcode-`79` and opcode-
+`80` reference requests without expanding their responder policies.
 
 Client opcode `185` also no longer needs a primitive-reader trace for its
 captured boundary. Its 23-byte base and 35-byte extended forms, the three short

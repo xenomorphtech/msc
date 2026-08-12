@@ -4933,7 +4933,7 @@ class InventoryMoveRequest:
     inventory_type: int
     source_slot: int
     destination_slot: int
-    trailing_count: int
+    quantity: int
     opcode: int = 79
 
     @classmethod
@@ -4949,7 +4949,7 @@ class InventoryMoveRequest:
             )
         source_slot = reader.i16("source_slot")
         destination_slot = reader.i16("destination_slot")
-        trailing_count = reader.i16("trailing_count")
+        quantity = reader.i16("quantity")
         reader.finish()
         if source_slot == destination_slot:
             raise PacketShapeError(
@@ -4960,7 +4960,7 @@ class InventoryMoveRequest:
             inventory_type=inventory_type,
             source_slot=source_slot,
             destination_slot=destination_slot,
-            trailing_count=trailing_count,
+            quantity=quantity,
         )
 
     @property
@@ -4973,7 +4973,7 @@ class InventoryMoveRequest:
             "inventory": self.inventory_name,
             "source_slot": self.source_slot,
             "destination_slot": self.destination_slot,
-            "trailing_count": self.trailing_count,
+            "quantity": self.quantity,
         }
 
     def to_bytes(self) -> bytes:
@@ -4986,7 +4986,7 @@ class InventoryMoveRequest:
         for name, value in (
             ("source", self.source_slot),
             ("destination", self.destination_slot),
-            ("trailing count", self.trailing_count),
+            ("quantity", self.quantity),
         ):
             if not -0x8000 <= value <= 0x7FFF:
                 raise PacketShapeError(
@@ -5003,7 +5003,7 @@ class InventoryMoveRequest:
             self.inventory_type,
             self.source_slot,
             self.destination_slot,
-            self.trailing_count,
+            self.quantity,
         )
 
 

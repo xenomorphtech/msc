@@ -2466,7 +2466,7 @@ uint32 client_tick
 uint8  inventory_type                 # 1 equip in both observations
 int16  source_slot                    # observed 2 and 3
 int16  destination_slot               # observed -11 in both
-int16  trailing_count                 # observed -1; role remains neutral
+int16  quantity                       # observed -1 for both equip moves
 ```
 
 The first request is followed 13 combined gameplay frames/1,040.241 ms later
@@ -2474,9 +2474,10 @@ by a single server opcode-`39` move for the same inventory and slots. The
 second is followed in the next frame/402.275 ms by the same exact transaction
 shape. This repeated
 field equality is the semantic evidence for the inventory-move name; the
-layout alone is not used to infer it. The client tick and trailing signed count
-remain neutral, and no unobserved opcode-`79` length is accepted by the native
-manifest.
+layout alone is not used to infer it. An independent v79
+[inventory handler](https://github.com/mrzhqiang/ms079/blob/963e06e4cbc13a591d6d7a293b23dc05e69d60ab/src/main/java/handling/channel/handler/InventoryHandler.java#L75-L104)
+names the leading value as the client tick and the final signed short as
+quantity. No unobserved opcode-`79` length is accepted by the native manifest.
 
 The state fold queues requests FIFO, correlates only an opcode-`39` operation
 `2` with matching inventory/source/destination, and updates inventory from the
@@ -2485,14 +2486,13 @@ authoritative server packet rather than the request. It emits
 reports request counts by inventory, matches, server moves without a request,
 pending requests, and last/maximum response milliseconds; plaintext bytes are
 never copied into those fields. Both native-manifest records and Python codecs
-consume/re-emit exactly. The two observations move stream `126` from 39 to 37
-unknown packets, yielding `26,661/44,402/37/0`.
+consume/re-emit exactly. The two requests now have full semantic coverage.
 
 The opt-in `--reactive-inventory-move-responses` policy turns this correlated
 pair into a bounded hold-open handler. It projects initial equipment group `1`
 onto negative equipped slots, group `3` onto positive Equip-inventory slots,
 and overlays later authoritative opcode-`39` changes. It admits only opcode
-`79` inventory type `1`, captured trailing count `-1`, and a source slot that
+`79` inventory type `1`, captured quantity `-1`, and a source slot that
 exists in that mutable model. The reply is one exact opcode-`39` operation-`2`
 record with captured `update_flag=1`, request source/destination slots, and
 captured `move_flag=2`; occupied destinations are swapped in policy state.
@@ -2502,7 +2502,7 @@ identifier-free item/slot state under `protocol.inventory_move_responses`.
 
 A fresh local-Wine control supplied an independent destination variant. A UI
 move from occupied Equip slot `3` to occupied slot `1` emitted one exact
-opcode-`79` request with trailing count `-1`; the handler returned one opcode
+opcode-`79` request with quantity `-1`; the handler returned one opcode
 `39` and swapped item templates `1302000`/`1002053`. The live transcript folds
 warning-free at `342/323/0/0`, matches the request and response with none
 pending, remains `active` on map `101000000`, and had `222/222` matched
@@ -2590,7 +2590,7 @@ The capture-validated request is exactly 12 bytes:
 
 ```text
 uint16 opcode = 80
-uint32 client_tick                    # role beyond ordering remains neutral
+uint32 client_tick
 int16  use_slot
 uint32 item_template_id
 ```
@@ -2606,8 +2606,10 @@ Each request is also followed by the captured potion stat effect in opcode
 MP by 80 with max-MP capping (one observed delta is 79 because MP reaches its
 modeled maximum `342`). All 17 quantity correlations and all 17 stat-effect
 correlations match, with no unknown slots, template mismatches, or pending
-requests at capture end. Effects for other item templates and the semantic role
-of `client_tick` remain intentionally unknown.
+requests at capture end. The same independent v79
+[Use-item handler](https://github.com/mrzhqiang/ms079/blob/963e06e4cbc13a591d6d7a293b23dc05e69d60ab/src/main/java/handling/channel/handler/InventoryHandler.java#L298-L314)
+passes the leading u32 to the character's tick updater.
+Effects for item templates outside the two captured potions remain unknown.
 
 The reactive policy derives mutable inventory and HP/MP state from a validated
 world transcript. It accepts only the two evidenced potion templates, checks
@@ -4110,9 +4112,9 @@ requests also target a final mode-`0` spawn whose two owner words equal the
 initial player id. The four mode-`2` field-load mesos records are exact 30-byte
 shapes. Variable opcode `303` NPC-state tails remain partial; client opcode
 `158` mode `0` is now a full counted keymap change. Strict validation succeeds
-across all 71,100 frames with 27,214
-full, 43,886 partial, zero unknown, and zero invalid packet
-observations. Stream `92` independently reaches 13,505 full, 21,702 partial,
+across all 71,100 frames with 27,220
+full, 43,880 partial, zero unknown, and zero invalid packet
+observations. Stream `92` independently reaches 13,522 full, 21,685 partial,
 zero unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its one remaining warning is a cross-packet state correlation:

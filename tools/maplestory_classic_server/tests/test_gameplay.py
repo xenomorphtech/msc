@@ -880,7 +880,7 @@ def fixture_gameplay_transcript(
                 inventory_type=1,
                 source_slot=2,
                 destination_slot=-11,
-                trailing_count=-1,
+                quantity=-1,
             ).to_bytes(),
         )
         append(
@@ -1892,14 +1892,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 inventory_type=1,
                 source_slot=2,
                 destination_slot=-11,
-                trailing_count=-1,
+                quantity=-1,
             ),
             InventoryMoveRequest(
                 client_tick=3_131_327,
                 inventory_type=1,
                 source_slot=3,
                 destination_slot=-11,
-                trailing_count=-1,
+                quantity=-1,
             ),
         )
 
@@ -1909,7 +1909,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 self.assertEqual(len(encoded), 13)
                 self.assertEqual(InventoryMoveRequest.parse(encoded), request)
                 self.assertEqual(request.safe_dict()["inventory"], "equip")
-                self.assertEqual(request.safe_dict()["trailing_count"], -1)
+                self.assertEqual(request.safe_dict()["quantity"], -1)
 
         with self.assertRaisesRegex(PacketShapeError, "between one and five"):
             InventoryMoveRequest(
@@ -1917,7 +1917,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 inventory_type=0,
                 source_slot=1,
                 destination_slot=2,
-                trailing_count=1,
+                quantity=1,
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "must differ"):
             InventoryMoveRequest(
@@ -1925,7 +1925,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 inventory_type=1,
                 source_slot=2,
                 destination_slot=2,
-                trailing_count=-1,
+                quantity=-1,
             ).to_bytes()
 
     def test_item_pickup_packet_family_round_trip(self) -> None:
@@ -8599,7 +8599,13 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertTrue(request_event.details["source_known"])
         self.assertFalse(request_event.details["destination_known"])
-        self.assertEqual(request_event.details["trailing_count"], -1)
+        self.assertEqual(request_event.details["quantity"], -1)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "inventory_move_request"
+        )
+        self.assertEqual(request_observation.coverage, ShapeCoverage.FULL)
         confirmation = next(
             event
             for event in analysis.events
@@ -8648,7 +8654,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             inventory_type=1,
             source_slot=2,
             destination_slot=-11,
-            trailing_count=-1,
+            quantity=-1,
         )
 
         plan = policy.respond(request)
@@ -8670,14 +8676,14 @@ class GameplayStateFoldTest(unittest.TestCase):
             policy.safe_dict()["prediction"]["inventory_effect"],
             "move_or_swap",
         )
-        with self.assertRaisesRegex(ValueError, "trailing count -1"):
+        with self.assertRaisesRegex(ValueError, "quantity -1"):
             policy.respond(
                 InventoryMoveRequest(
                     client_tick=1_640_185,
                     inventory_type=1,
                     source_slot=-11,
                     destination_slot=2,
-                    trailing_count=0,
+                    quantity=0,
                 )
             )
 
@@ -9063,6 +9069,12 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(request_event.details["predicted_quantity"], 2)
         self.assertEqual(request_event.details["predicted_effect_value"], 120)
+        request_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "item_use_request"
+        )
+        self.assertEqual(request_observation.coverage, ShapeCoverage.FULL)
         stat_event = next(
             event for event in analysis.events if event.kind == "player_stats_updated"
         )

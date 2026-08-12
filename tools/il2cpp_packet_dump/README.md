@@ -141,10 +141,11 @@ zero-u32/zero-u8 suffix. Its text, purpose, and UI role remain redacted/neutral,
 and the manifest does not equate it with the captured opcode-`241` exit request.
 Client opcode `79` adds a 13-byte semantic shape from two stream-`126`
 transactions: `u32 client tick + u8 inventory type + i16 source + i16
-destination + i16 trailing count`. Each request is followed by a server
+destination + i16 quantity`. Each request is followed by a server
 opcode-`39` move with the exact same inventory/source/destination tuple. Native
-validation consumes both records; the trailing signed-count role remains
-neutral rather than being inferred from its captured value `-1`.
+validation consumes both records; independent v79 handler code confirms the
+tick and quantity roles rather than inferring them from the captured value
+`-1`.
 Client opcode `158` now uses one variable-length counted shape across all three
 reference streams. Modes `1` and `2` have zero changes and encode the field-
 load sequence. Mode `0` repeats `u32 key code + u8 binding type + i32 action`;

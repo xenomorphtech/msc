@@ -2666,7 +2666,7 @@ class InventoryMoveResponsePolicy:
             },
             "admission": {
                 "inventory": "equip",
-                "trailing_count": -1,
+                "quantity": -1,
                 "source_slot": "modeled",
             },
             "prediction": {
@@ -2717,9 +2717,9 @@ class InventoryMoveResponsePolicy:
             raise ValueError(
                 "inventory-move responder admits only captured Equip requests"
             )
-        if request.trailing_count != -1:
+        if request.quantity != -1:
             raise ValueError(
-                "inventory-move responder requires captured trailing count -1"
+                "inventory-move responder requires captured quantity -1"
             )
         item = self.equip_items.get(request.source_slot)
         if item is None:
@@ -6896,12 +6896,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="inventory_move_request",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=request,
                 details=details,
-                issues=(
-                    "client tick and trailing signed-count roles remain neutral",
-                ),
             )
         if opcode == 49:
             request = ChairSitRequest.parse(payload)
@@ -7048,13 +7045,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="item_use_request",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=request,
                 details=details,
-                issues=(
-                    "client tick semantics and item effects beyond the two "
-                    "captured potion templates remain neutral",
-                ),
             )
         if opcode in {185, 222}:
             request = ItemPickupRequest.parse(payload)
@@ -8531,8 +8524,8 @@ class GameplayStateFold:
                             pending_inventory_move.request_frame_index
                         )
                         details["inventory_move_response_ms"] = response_ms
-                        details["inventory_move_trailing_count"] = (
-                            pending_inventory_move.request.trailing_count
+                        details["inventory_move_quantity"] = (
+                            pending_inventory_move.request.quantity
                         )
                         self._event(
                             frame,

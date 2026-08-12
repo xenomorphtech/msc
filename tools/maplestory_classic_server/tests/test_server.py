@@ -2415,7 +2415,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 inventory_type=1,
                 source_slot=2,
                 destination_slot=-11,
-                trailing_count=-1,
+                quantity=-1,
             ).to_bytes()
             writer.write(
                 encode_frame_header(len(request), client_iv, 300)

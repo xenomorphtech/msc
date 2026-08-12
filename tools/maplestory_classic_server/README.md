@@ -469,7 +469,7 @@ identifier-free HP/MP state under `protocol.client_recovery_responses`.
 
 `--reactive-inventory-move-responses` answers modeled opcode-`79` Equip moves
 during hold-open. The policy reconstructs signed Equip slots from the initial
-snapshot, admits only inventory type `1`, captured trailing count `-1`, and a
+snapshot, admits only inventory type `1`, captured quantity `-1`, and a
 known source slot, then emits one opcode-`39` move using captured
 `update_flag=1` and `move_flag=2`. It supports empty destinations and occupied
 slot swaps, requires `--keep-world-open` with a positive hold duration, and
@@ -844,11 +844,11 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 27,214 full,
-43,886 partial, zero unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 27,220 full,
+43,880 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,505 full, 21,702 partial,
+metadata. Stream `92` independently passes with 13,522 full, 21,685 partial,
 zero unknown, and zero invalid observations; short stream `114` reaches 54 full,
 22 partial, zero unknown, and zero invalid.
 
@@ -869,13 +869,14 @@ The gameplay fold currently models these capture-backed boundaries:
   equip-slot move, and remove operations plus lossless equipment, stack, and
   cash item records; cash-tab adds accept both captured stack and cash records,
 - client opcode `79`: exact 13-byte inventory-move requests with typed client
-  tick, inventory type, signed source/destination slots, and a neutral trailing
-  signed count; both long-corpus requests FIFO-match the authoritative
+  tick, inventory type, signed source/destination slots, and signed quantity;
+  both long-corpus requests FIFO-match the authoritative
   same-slot server opcode-`39` move, and safe analysis exposes only structural
   fields plus request/match/pending/latency counters,
 - client opcode `80`: a 12-byte Use-item request containing client tick, signed
   slot, and item template; the fold correlates it with the following opcode-`39`
-  quantity change and captured opcode-`41` potion effect,
+  quantity change and captured opcode-`41` potion effect; independent v79
+  handler code confirms the tick role shared with inventory moves,
 - client opcodes `185`/`222`: 23-/35-byte full and 19-byte compact item-pickup
   requests containing the folded field epoch, client tick, position, aliased
   drop id, neutral validation token, and an opcode-`185` optional proof; all
@@ -1298,6 +1299,11 @@ opcode `80`, and the reactive server emitted opcodes `39,41`. The UI and the
 independently folded transcript both showed quantity `2 -> 1` and HP
 `50/222 -> 100/222`, with one inventory match, one effect match, no pending or
 mismatched request, and all 20 heartbeat pairs matched.
+Independent v79 handler code calls the leading u32 `updateTick` for both the
+item-move and Use-item grammars, and names the item-move trailer quantity.
+Together with the capture correlations, this promotes all 23 reference
+requests to full semantic coverage; other item-template effects and last-item
+removal policy remain deliberately unmodeled.
 
 Client opcode `185` now connects field drops to inventory and mesos state.
 Stream `92` contains 54 requests: 48 exact 23-byte base records and six records
@@ -2408,3 +2414,7 @@ preserve distinct Unity scan codes in this setup.
     authoritative opcode-`385` skill/item/action state. Retain modes `1` and
     `2` as the field-load sequence and promote all 39 reference packets to full
     coverage.
+101. Confirm opcode-`79` client tick and quantity plus opcode-`80` client tick
+    from independent v79 handler code, retain the existing exact authoritative
+    response correlations, and promote all 23 reference inventory-action
+    requests to full semantic coverage.

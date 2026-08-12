@@ -53,8 +53,8 @@
   epochs. Variable NPC-state tails remain losslessly bounded as partial, while
   opcode-`158` mode-`0` keymap changes are fully typed. Strict decoding now
   succeeds across all 71,100 frames:
-  27,214 full, 43,886 partial, zero unknown, and zero invalid
-  packet observations. Stream `92` now reports 13,505 full, 21,702 partial,
+  27,220 full, 43,880 partial, zero unknown, and zero invalid
+  packet observations. Stream `92` now reports 13,522 full, 21,685 partial,
   zero unknown, and zero invalid; stream `114` reports 54/22/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
   one-HP combat prediction differences.
@@ -277,20 +277,20 @@
   counts under `client_neutral_records`. Strict reference/live analysis stays
   valid, and isolated native validation consumes all 33 applicable records.
 - Client opcode `79` is now a typed 13-byte inventory-move request containing
-  a client tick, inventory type, signed source/destination slots, and a trailing
-  signed count whose higher-level role remains neutral. Both stream-`126`
+  a client tick, inventory type, signed source/destination slots, and signed
+  quantity. Both stream-`126`
   requests are equip moves to slot `-11`; the server answers with an exact
   same-inventory/same-slot opcode-`39` move after 13 frames/1,040.241 ms and
   one frame/402.275 ms, respectively. The fold correlates both FIFO with zero
   pending requests,
   emits `inventory_move_requested`/`inventory_move_confirmed`, and exposes safe
   request/match/pending/latency counters through analysis JSON. Native shape
-  validation consumes both packets exactly. This checkpoint brings long-corpus
-  coverage to
-  `26,661/44,402/37/0`; streams `92` and `114` are unchanged.
+  validation consumes both packets exactly. Independent v79 handler code
+  confirms the tick and quantity roles, so both requests now have full
+  semantic coverage.
 - `--reactive-inventory-move-responses` now serves that correlated family
   during hold-open. It reconstructs signed Equip state from initial equipment
-  groups, admits only inventory type `1`, trailing count `-1`, and a modeled
+  groups, admits only inventory type `1`, quantity `-1`, and a modeled
   source slot, then emits one opcode-`39` move with capture constants
   `update_flag=1` and `move_flag=2`. Occupied destinations swap in policy
   state; configured opcode-`79` replies are mutually exclusive. A fresh live
@@ -831,6 +831,10 @@
   frozen fold is valid and warning-free with two requests, one matched
   inventory/effect pair, one policy rejection, zero pending uses, and 90/90
   heartbeats.
+  Independent v79 handler code confirms that the leading u32 updates the
+  character tick, so all 21 reference item-use requests now have full semantic
+  coverage; effects outside the two captured potion templates remain outside
+  the responder policy.
 - Client opcode `185`, server opcode `49`, and server opcode `312` now form a
   typed item-pickup chain. All 54 stream-`92` requests round-trip (48 base and
   six extended), match their folded field epoch, inventory/mesos/special

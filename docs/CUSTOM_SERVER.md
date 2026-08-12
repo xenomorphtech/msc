@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 203 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 27,214 observations are full, 43,886 partial, none are
+`--fail-on-invalid`: 27,220 observations are full, 43,880 partial, none are
 unknown or invalid. One state-correlation warning remains,
 not a shape failure: the aggregate warning for six delayed combat predictions
 that differ by one HP.
@@ -521,7 +521,7 @@ remained active throughout.
 
 Client opcode `79` now closes the strongest remaining transaction-shaped
 unknown. Its two 13-byte stream-`126` packets parse as client tick, inventory
-type, signed source slot, signed destination slot, and a trailing signed count.
+type, signed source slot, signed destination slot, and signed quantity.
 Both are equip requests ending at slot `-11`; server opcode `39` applies the
 same `2 -> -11` and `3 -> -11` moves after 13 frames/1,040.241 ms and one
 frame/402.275 ms. The fold
@@ -530,7 +530,8 @@ and emits `inventory_move_requested` plus `inventory_move_confirmed`. Safe JSON
 adds `inventory_move_requests`, per-inventory counts, matches, unmatched server
 updates, pending requests, and last/maximum response milliseconds without
 including packet bytes. The Rust manifest independently exact-consumes both
-records, and stream `126` advances to `26,661/44,402/37/0`.
+records. Independent v79 handler code confirms the tick and quantity roles;
+the two requests now have full semantic coverage.
 Inventory-move and item-acquisition request/match/pending/latency counters plus
 redacted opcode-`276` selector/shape/group/pair aggregates are part of finalized
 `analyze-gameplay --json` output.
@@ -1481,7 +1482,7 @@ with no failed connection.
 transaction into an opt-in hold-open behavior. The policy projects initial
 equipment group `1` to negative equipped slots and group `3` to positive Equip
 inventory slots, then applies later opcode-`39` changes. It admits only Equip
-requests with captured trailing count `-1` and a modeled source. One response
+requests with captured quantity `-1` and a modeled source. One response
 packet preserves the request slots and uses the repeated capture constants
 `update_flag=1`, operation `2`, and `move_flag=2`; an occupied destination is
 tracked as a swap. The option requires `--keep-world-open` and cannot share
