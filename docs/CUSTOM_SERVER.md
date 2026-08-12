@@ -79,12 +79,14 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 203 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 26,661 observations are full, 44,439 partial, none are
+`--fail-on-invalid`: 27,214 observations are full, 43,886 partial, none are
 unknown or invalid. One state-correlation warning remains,
 not a shape failure: the aggregate warning for six delayed combat predictions
 that differ by one HP.
-The opcode-`158` stage-`0` variant keeps its
-neutral word `1` and nine-byte tail as partial semantic coverage.
+Opcode `158` mode `0` is now fully typed as a counted keymap change. Its 11
+packets update Left Ctrl, Left Shift, Home, or keypad zero with empty, skill,
+item, or action bindings and fold into the same keyboard state established by
+server opcode `385`.
 
 Player movement appears as decoded opcode-`182` submissions and opcode-`202`
 broadcasts. The short stream prints one local path ending at `(633,-2677)` and
@@ -1233,7 +1235,8 @@ frame restored variant `18`, two hits, damage `[29,25]`. The frozen transcript
 folds validly with no issues/warnings, three `keyboard_bindings_loaded` events,
 two injection events, final Left Ctrl skill `2001005`, active map `101000000`,
 HP `50`, and 91/91 matched heartbeats. This is a causal key-binding result;
-selectors `2/4/6` remain unnamed.
+selectors `4/6` remain unnamed. Later opcode-`158` mode-`0` changes identify
+selector `2` as an item binding.
 
 A second browser-free A/B/A exercised physical evdev key code `71`. Under the
 captured `71 -> 2001002` binding, the client emitted the exact 13-byte skill-use

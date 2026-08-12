@@ -50,10 +50,11 @@
   greeting, then decrypts 71,100 frames. The fold now recognizes its
   marker-`26` level-1 character/inventory snapshot, 36 total field epochs, 436
   drop spawns, and all 203 pickup requests with known drops and matching
-  epochs. Variable NPC-state and stage-`0` field-load tails are losslessly
-  bounded as partial. Strict decoding now succeeds across all 71,100 frames:
-  26,661 full, 44,439 partial, zero unknown, and zero invalid
-  packet observations. Stream `92` now reports 13,419 full, 21,788 partial,
+  epochs. Variable NPC-state tails remain losslessly bounded as partial, while
+  opcode-`158` mode-`0` keymap changes are fully typed. Strict decoding now
+  succeeds across all 71,100 frames:
+  27,214 full, 43,886 partial, zero unknown, and zero invalid
+  packet observations. Stream `92` now reports 13,505 full, 21,702 partial,
   zero unknown, and zero invalid; stream `114` reports 54/22/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
   one-HP combat prediction differences.
@@ -508,8 +509,16 @@
   admitted nearby drop produced opcode `185`. Folded action/skill counts moved
   `6/2 -> 5/3 -> 6/2`, and pickup keys moved `(44,78) -> (78) -> (44,78)`.
   Later physical-input controls identify action `53`/Left Alt as jump and
-  action `54`/Space as NPC interaction. Action `52` and selectors `2/4/6`
-  remain neutral.
+  action `54`/Space as NPC interaction. Action `52` and selectors `4/6`
+  remain neutral; opcode-`158` mode-`0` changes identify selector `2` as an
+  item binding.
+- Client opcode `158` mode `0` is now the counted keymap-change request. Its
+  11 stream-`126` packets all carry one `u32 key, u8 type, i32 action` change;
+  types `0/1/2/5` are empty, skill, item, and action bindings. The updates use
+  evdev Left Ctrl/Left Shift/Home/keypad-zero and fold into the same keyboard
+  state established by server opcode `385`. Modes `1` and `2` retain their
+  existing count-zero field-load roles. Stream `126` advances by 11 full
+  observations with no new warning.
 - Physical X at key `45` now identifies selector-`5` action `51` as chair sit.
   The client rendered Setup-slot-`1` item `3010370` and sent opcode `49` with
   that exact u32 item id, followed 20,006 ms later by empty recovery opcode
@@ -1316,7 +1325,7 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
    additional item/request shapes only from independently admitted evidence,
    and continue serving `[39,49,312]` only after an authentic opcode-`185` or
    compact opcode-`222` request.
-2. Keep opcode-`385` selectors `2/4/6` and selector-`5` action `52` neutral
+2. Keep opcode-`385` selectors `4/6` and selector-`5` action `52` neutral
    until an independently identifiable input/action permits another control.
    Selector `0` is the bounded empty binding, selector `1` the skill binding,
    selector `5` the action binding; actions `50`, `51`, `53`, and `54` are

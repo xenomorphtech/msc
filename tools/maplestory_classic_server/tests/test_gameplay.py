@@ -96,7 +96,8 @@ from maple_server.packets import (  # noqa: E402
     FixedServerU32Record,
     FixedServerU64Record,
     FixedServerU8Record,
-    FieldLoadStage,
+    ClientKeymapBindingChange,
+    ClientOpcode158Request,
     FieldSnapshotEnvelope,
     HeartbeatProbe,
     HeartbeatResponse,
@@ -823,8 +824,8 @@ def fixture_gameplay_transcript(
         "client_to_server",
         WorldBootstrapAcknowledgement(opaque_value=0).to_bytes(),
     )
-    append("client_to_server", FieldLoadStage(stage=1).to_bytes())
-    append("client_to_server", FieldLoadStage(stage=2).to_bytes())
+    append("client_to_server", ClientOpcode158Request(mode=1).to_bytes())
+    append("client_to_server", ClientOpcode158Request(mode=2).to_bytes())
     for health_percentage in (75, 50, 0):
         append(
             "server_to_client",
@@ -3678,10 +3679,15 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(records[3].empty_keyboard_binding_count, 0)
 
     def test_npc_state_submission_and_update_round_trip(self) -> None:
-        stage = FieldLoadStage(
-            stage=0,
-            trailing=1,
-            opaque_tail=b"nine-byte",
+        keymap_change = ClientOpcode158Request(
+            mode=0,
+            changes=(
+                ClientKeymapBindingChange(
+                    key_code=42,
+                    binding_type=1,
+                    action_id=1000,
+                ),
+            ),
         )
         compact = bytes.fromhex("d900b55b00000201")
         absolute = bytes.fromhex(
@@ -3693,7 +3699,23 @@ class GameplayPacketShapeTest(unittest.TestCase):
             "0000005900048813003d0041003d004100"
         )
 
-        self.assertEqual(FieldLoadStage.parse(stage.to_bytes()), stage)
+        self.assertEqual(
+            ClientOpcode158Request.parse(keymap_change.to_bytes()),
+            keymap_change,
+        )
+        item_change = ClientOpcode158Request(
+            mode=0,
+            changes=(
+                ClientKeymapBindingChange(
+                    key_code=82,
+                    binding_type=2,
+                    action_id=2_000_013,
+                ),
+            ),
+        )
+        self.assertEqual(
+            ClientOpcode158Request.parse(item_change.to_bytes()), item_change
+        )
         for payload in (compact, absolute, mixed):
             submission = ClientNpcStateSubmission.parse(payload)
             self.assertEqual(submission.to_bytes(), payload)
@@ -3711,7 +3733,100 @@ class GameplayPacketShapeTest(unittest.TestCase):
             "9e0000000000010000002a00000001e8030000"
         )
         self.assertEqual(
-            FieldLoadStage.parse(captured_stage).to_bytes(), captured_stage
+            ClientOpcode158Request.parse(captured_stage).to_bytes(),
+            captured_stage,
+        )
+        for payload in (
+            bytes.fromhex("9e000100000000000000"),
+            bytes.fromhex("9e000200000000000000"),
+        ):
+            self.assertEqual(
+                ClientOpcode158Request.parse(payload).to_bytes(), payload
+            )
+        with self.assertRaisesRegex(PacketShapeError, "mode 0 requires"):
+            ClientOpcode158Request(mode=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "expected observed"):
+            ClientOpcode158Request(
+                mode=0,
+                changes=(ClientKeymapBindingChange(42, 4, 0),),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "removal action"):
+            ClientOpcode158Request(
+                mode=0,
+                changes=(ClientKeymapBindingChange(42, 0, 1),),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "change count requires"):
+            ClientOpcode158Request.parse(
+                bytes.fromhex("9e0000000000020000002a00000001e8030000")
+            )
+
+    def test_folds_client_opcode_158_keyboard_binding_changes(self) -> None:
+        requests = (
+            ClientOpcode158Request(
+                mode=0,
+                changes=(
+                    ClientKeymapBindingChange(29, 1, 2_001_005),
+                ),
+            ),
+            ClientOpcode158Request(
+                mode=0,
+                changes=(
+                    ClientKeymapBindingChange(42, 2, 2_000_014),
+                    ClientKeymapBindingChange(82, 5, 52),
+                ),
+            ),
+            ClientOpcode158Request(
+                mode=0,
+                changes=(ClientKeymapBindingChange(42, 0, 0),),
+            ),
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_directional_plaintexts=tuple(
+                    ("client_to_server", request.to_bytes())
+                    for request in requests
+                )
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.keyboard_binding_changes, 4)
+        self.assertEqual(
+            analysis.state.keyboard_binding_changes_by_type,
+            {0: 1, 1: 1, 2: 1, 5: 1},
+        )
+        self.assertEqual(analysis.state.keyboard_binding_removals, 1)
+        self.assertEqual(
+            analysis.state.keyboard_binding_selector_counts,
+            {0: 1, 1: 1, 5: 1},
+        )
+        self.assertEqual(
+            analysis.state.keyboard_skill_bindings, {29: 2_001_005}
+        )
+        self.assertEqual(analysis.state.keyboard_item_bindings, {})
+        self.assertEqual(analysis.state.keyboard_action_bindings, {82: 52})
+        self.assertEqual(analysis.state.left_ctrl_skill_id, 2_001_005)
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "keyboard_binding_change"
+        ]
+        self.assertEqual(len(observations), 3)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in observations
+            )
+        )
+        self.assertEqual(
+            len(
+                [
+                    event
+                    for event in analysis.events
+                    if event.kind == "keyboard_bindings_changed"
+                ]
+            ),
+            3,
         )
 
     def test_world_entry_request_types_character_id_after_entry_value(self) -> None:
@@ -5240,10 +5355,12 @@ class GameplayStateFoldTest(unittest.TestCase):
             keyboard_state["validated_key_codes"],
             {
                 "left_ctrl": 29,
+                "left_shift": 42,
                 "z": 44,
                 "left_alt": 56,
                 "space": 57,
                 "keypad_zero": 82,
+                "home": 71,
             },
         )
         self.assertEqual(
@@ -7706,10 +7823,12 @@ class GameplayStateFoldTest(unittest.TestCase):
             keyboard_state["validated_key_codes"],
             {
                 "left_ctrl": 29,
+                "left_shift": 42,
                 "z": 44,
                 "left_alt": 56,
                 "space": 57,
                 "keypad_zero": 82,
+                "home": 71,
             },
         )
         loaded = next(

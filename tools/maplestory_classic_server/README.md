@@ -200,12 +200,13 @@ and `385` variants. Both begin with a one-byte discriminator. The level-1
 variants end there. Expanded opcode `156` contains a packet UTF-16 string,
 bool, and three int32 values; expanded opcode `385` contains 89 keyboard
 bindings whose tuple index is the key code. Selector `1` binds a skill id, and
-selector `0` is an empty binding. Selector `5` binds an action id; live controls
+selector `0` is an empty binding. Opcode-`158` mode-`0` changes independently
+identify selector `2` as an item binding. Selector `5` binds an action id; live controls
 identify action `50` as pickup, `51` as chair sit, `53` as jump, and `54` as
 NPC interaction. Key codes `29`, `44`, `56`, and `57` are validated evdev Left
 Ctrl, Z, Left Alt, and Space. The emitter round-trips and replaces the complete
-records; selectors `2/4/6`, action `52`, and opcode-`156` field meanings remain
-neutral. Safe output reports empty, skill, action, pickup, jump, and NPC-
+records; selectors `4/6`, action `52`, and opcode-`156` field meanings remain
+neutral. Safe output reports empty, skill, item, action, pickup, jump, and NPC-
 interaction bindings without naming action `52`.
 
 Use `?keyboard-skill=KEY_CODE:SKILL_ID` on an expanded opcode-`385` PCAP
@@ -843,11 +844,11 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 26,661 full,
-44,439 partial, zero unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 27,214 full,
+43,886 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,419 full, 21,788 partial,
+metadata. Stream `92` independently passes with 13,505 full, 21,702 partial,
 zero unknown, and zero invalid observations; short stream `114` reaches 54 full,
 22 partial, zero unknown, and zero invalid.
 
@@ -861,8 +862,9 @@ The gameplay fold currently models these capture-backed boundaries:
   transition variant is fully bounded; the level-1 corpus also validates a
   marker-`26` initial character/inventory prefix with an opaque 172-byte
   progression region,
-- client opcode `158`: the complete `1 -> 2` field-load stage sequence plus a
-  stage-`0` variant with neutral word `1` and a bounded nine-byte opaque tail,
+- client opcode `158`: a shared counted envelope whose modes `1 -> 2` form the
+  field-load stage sequence and whose mode `0` applies exact keyboard binding
+  changes (`u32 key`, `u8 type`, `i32 action`) to the active keymap state,
 - server opcode `39`: inventory change sets with empty, add, stack-quantity,
   equip-slot move, and remove operations plus lossless equipment, stack, and
   cash item records; cash-tab adds accept both captured stack and cash records,
@@ -2401,3 +2403,8 @@ preserve distinct Unity scan codes in this setup.
     removal lifecycle and client opcode `225` as the reactor-hit request. Match
     all 15 requests to 12 authoritative state updates and three removals, prove
     exact stance continuity, and promote the requests to full coverage.
+100. Reclassify client opcode `158` mode `0` as counted keymap changes, type
+    the key/binding/value records, and apply all 11 reference changes to the
+    authoritative opcode-`385` skill/item/action state. Retain modes `1` and
+    `2` as the field-load sequence and promote all 39 reference packets to full
+    coverage.

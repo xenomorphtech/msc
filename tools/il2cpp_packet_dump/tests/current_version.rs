@@ -264,6 +264,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         assert_eq!(shape.operations.len(), operation_count);
     }
 
+    let opcode_158 = shapes
+        .iter()
+        .find(|shape| shape.name == "client_opcode_158_request")
+        .unwrap();
+    assert_eq!(opcode_158.opcode, 158);
+    assert_eq!(opcode_158.length, None);
+    assert_eq!(opcode_158.operations.len(), 4);
+
     for (name, opcode, length) in [
         ("server_opcode_228_u32_opaque_tail", 228, 10),
         ("server_opcode_230_u32_short_tail", 230, 7),

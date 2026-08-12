@@ -378,6 +378,13 @@ updates echo the request stance, every response arrives within
 supports typed reactor roles while keeping runtime object ids aliased and the
 character-position value build-specific.
 
+The same cross-version grammar check corrects client opcode `158` mode `0`.
+Its former nine-byte opaque tail is exactly one `u32 key, u8 binding type,
+i32 action` record after a count of one. Eleven stream-`126` packets exercise
+empty, skill, item, and action bindings across evdev Left Ctrl, Left Shift,
+Home, and keypad zero. Modes `1` and `2` remain the count-zero field-load
+sequence; one counted manifest shape consumes both branches exactly.
+
 Client opcode `114` is bounded directly from all 44 long-corpus packets rather
 than from a server handler. Offsets `3..4` are a little-endian UTF-16 code-unit
 count, followed by exactly that many code units, a required zero byte, and one

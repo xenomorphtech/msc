@@ -1650,6 +1650,33 @@ gameplay. The two full observations move stream `92` to
 
 ## Client field bootstrap and world exit
 
+Client opcode `158` is a shared mode/count envelope, not one uniform field-load
+stage packet:
+
+```text
+uint16 opcode = 158
+uint32 mode
+uint32 change_count
+
+repeat change_count:
+    uint32 key_code
+    uint8  binding_type
+    int32  action_id
+```
+
+Modes `1` and `2` carry count zero and remain the repeated field-load
+`1 -> 2` sequence in streams `92` and `114`. Mode `0` carries keymap changes.
+All 11 stream-`126` mode-`0` packets have count one and match the independent
+v83 keymap-change grammar. The key codes are Linux evdev values: `29` Left
+Ctrl, `42` Left Shift, `71` Home, and `82` keypad zero. Binding types are
+`0` empty/removal, `1` skill, `2` item, and `5` action. Observed binding values
+include learned skills `2001005`, item templates `2000013`/`2000014`, and
+action `52`, while the first packet assigns type `1` value `1000` at key `42`.
+The fold applies changes to the opcode-`385` keyboard snapshot state, emits
+`keyboard_bindings_changed`, and exposes key/type/action values. The exact
+counted grammar supports arbitrary multi-change packets even though the
+reference corpus contains only count one.
+
 Client opcode `75` is an exact opcode-only marker:
 
 ```text
@@ -4081,12 +4108,11 @@ All 203 pickup requests resolve to a known active drop and match their field
 epoch after the marker-`26` initial snapshot is folded. The 197 opcode-`185`
 requests also target a final mode-`0` spawn whose two owner words equal the
 initial player id. The four mode-`2` field-load mesos records are exact 30-byte
-shapes. Variable opcode
-`303` NPC-state tails and the client opcode-`158` stage-`0` variant (neutral
-word `1` plus a nine-byte tail) are preserved and reported as partial semantic
-coverage. Strict validation succeeds across all 71,100 frames with 26,661
-full, 44,439 partial, zero unknown, and zero invalid packet
-observations. Stream `92` independently reaches 13,419 full, 21,788 partial,
+shapes. Variable opcode `303` NPC-state tails remain partial; client opcode
+`158` mode `0` is now a full counted keymap change. Strict validation succeeds
+across all 71,100 frames with 27,214
+full, 43,886 partial, zero unknown, and zero invalid packet
+observations. Stream `92` independently reaches 13,505 full, 21,702 partial,
 zero unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its one remaining warning is a cross-packet state correlation:

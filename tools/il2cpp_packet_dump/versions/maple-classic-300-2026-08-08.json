@@ -666,12 +666,17 @@
       ]
     },
     {
-      "name":"field_load_stage","direction":"client_to_server","opcode":158,"length":10,
-      "source":"packets.py:FieldLoadStage; capture 111 stream 92",
+      "name":"client_opcode_158_request","direction":"client_to_server","opcode":158,
+      "source":"packets.py:ClientOpcode158Request; capture 111 streams 92/114 and 1-10FS stream 126; mode 0 matches independent v83 keymap-change grammar",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":158},
-        {"op":"read","name":"stage","kind":"u32"},
-        {"op":"read","name":"trailing","kind":"u32","equals":0}
+        {"op":"read","name":"mode","kind":"u32"},
+        {"op":"read","name":"change_count","kind":"u32"},
+        {"op":"repeat","count_from":"change_count","operations":[
+          {"op":"read","name":"key_code","kind":"u32"},
+          {"op":"read","name":"binding_type","kind":"u8"},
+          {"op":"read","name":"action_id","kind":"i32"}
+        ]}
       ]
     },
     {

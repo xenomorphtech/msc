@@ -11398,15 +11398,18 @@ class VariableServerRecord:
     KEYBOARD_BINDING_COUNT = 89
     EMPTY_BINDING_SELECTOR = 0
     SKILL_BINDING_SELECTOR = 1
+    ITEM_BINDING_SELECTOR = 2
     ACTION_BINDING_SELECTOR = 5
     PICKUP_ACTION_ID = 50
     JUMP_ACTION_ID = 53
     NPC_INTERACTION_ACTION_ID = 54
     LEFT_CTRL_KEY_CODE = 29
+    LEFT_SHIFT_KEY_CODE = 42
     Z_KEY_CODE = 44
     LEFT_ALT_KEY_CODE = 56
     SPACE_KEY_CODE = 57
     KEYPAD_ZERO_KEY_CODE = 82
+    HOME_KEY_CODE = 71
 
     @property
     def keyboard_skill_bindings(self) -> dict[int, int]:
@@ -11426,6 +11429,16 @@ class VariableServerRecord:
             key_code: entry.value
             for key_code, entry in enumerate(self.entries)
             if entry.selector == self.ACTION_BINDING_SELECTOR
+        }
+
+    @property
+    def keyboard_item_bindings(self) -> dict[int, int]:
+        if self.opcode != 385 or self.variant:
+            return {}
+        return {
+            key_code: entry.value
+            for key_code, entry in enumerate(self.entries)
+            if entry.selector == self.ITEM_BINDING_SELECTOR
         }
 
     @property
@@ -11622,63 +11635,114 @@ class WorldBootstrapAcknowledgement:
 
 
 @dataclass(frozen=True)
-class FieldLoadStage:
-    stage: int
-    trailing: int = 0
-    opaque_tail: bytes = b""
+class ClientKeymapBindingChange:
+    key_code: int
+    binding_type: int
+    action_id: int
+
+    def validate(self) -> None:
+        if self.binding_type not in {0, 1, 2, 5}:
+            raise PacketShapeError(
+                "client keymap-binding type is "
+                f"{self.binding_type}, expected observed 0, 1, 2, or 5"
+            )
+        if self.binding_type == 0 and self.action_id != 0:
+            raise PacketShapeError(
+                "client keymap-binding removal action id must be zero"
+            )
+
+    def to_bytes(self) -> bytes:
+        self.validate()
+        try:
+            return struct.pack(
+                "<IBi",
+                self.key_code,
+                self.binding_type,
+                self.action_id,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client keymap-binding change is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class ClientOpcode158Request:
+    mode: int
+    changes: tuple[ClientKeymapBindingChange, ...] = ()
     opcode: int = 158
 
     @classmethod
-    def parse(cls, payload: bytes) -> "FieldLoadStage":
-        reader = PacketReader(payload, packet_name="field_load_stage")
+    def parse(cls, payload: bytes) -> "ClientOpcode158Request":
+        reader = PacketReader(payload, packet_name="client_opcode_158_request")
         _expect_opcode(reader, 158)
-        stage = reader.u32("stage")
-        trailing = reader.u32("trailing")
-        opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
+        mode = reader.u32("mode")
+        change_count = reader.u32("change_count")
+        if mode not in {0, 1, 2}:
+            raise PacketShapeError(
+                f"client opcode-158 mode is {mode}, expected observed 0, 1, or 2"
+            )
+        expected_change_bytes = change_count * 9
+        if reader.remaining != expected_change_bytes:
+            raise PacketShapeError(
+                "client opcode-158 change count requires "
+                f"{expected_change_bytes} bytes, found {reader.remaining}"
+            )
+        changes = tuple(
+            ClientKeymapBindingChange(
+                key_code=reader.u32(f"changes[{index}].key_code"),
+                binding_type=reader.u8(f"changes[{index}].binding_type"),
+                action_id=reader.i32(f"changes[{index}].action_id"),
+            )
+            for index in range(change_count)
+        )
         reader.finish()
-        if stage not in {0, 1, 2}:
+        for change in changes:
+            change.validate()
+        if mode in {1, 2} and changes:
             raise PacketShapeError(
-                f"field_load_stage.stage is {stage}, expected observed stage 0, 1, or 2"
+                "client opcode-158 modes 1 and 2 carry no changes"
             )
-        if stage == 0 and trailing != 1:
+        if mode == 0 and not changes:
             raise PacketShapeError(
-                f"field_load_stage stage-0 trailing is {trailing}, expected 1"
+                "client opcode-158 mode 0 requires keymap changes"
             )
-        if stage in {1, 2} and trailing != 0:
-            raise PacketShapeError(
-                f"field_load_stage stage-{stage} trailing is {trailing}, expected 0"
-            )
-        if stage == 0 and len(opaque_tail) != 9:
-            raise PacketShapeError(
-                "field_load_stage stage 0 requires the observed 9-byte tail"
-            )
-        if stage in {1, 2} and opaque_tail:
-            raise PacketShapeError(
-                "field_load_stage stages 1 and 2 cannot carry an opaque tail"
-            )
-        return cls(stage=stage, trailing=trailing, opaque_tail=opaque_tail)
+        return cls(mode=mode, changes=changes)
+
+    @property
+    def is_field_load_stage(self) -> bool:
+        return self.mode in {1, 2}
+
+    @property
+    def is_keymap_change(self) -> bool:
+        return self.mode == 0
 
     def to_bytes(self) -> bytes:
-        if self.stage not in {0, 1, 2}:
-            raise PacketShapeError("field load stage must be 0, 1, or 2")
-        if self.stage == 0 and self.trailing != 1:
-            raise PacketShapeError("field load stage-0 trailing value must be one")
-        if self.stage in {1, 2} and self.trailing != 0:
+        if self.opcode != 158:
             raise PacketShapeError(
-                "field load stage-1/stage-2 trailing value must be zero"
+                "client opcode-158 request opcode must be 158"
             )
-        if self.stage == 0 and len(self.opaque_tail) != 9:
+        if self.mode not in {0, 1, 2}:
+            raise PacketShapeError("client opcode-158 mode must be 0, 1, or 2")
+        if self.mode in {1, 2} and self.changes:
             raise PacketShapeError(
-                "field load stage 0 requires the observed 9-byte tail"
+                "client opcode-158 modes 1 and 2 carry no changes"
             )
-        if self.stage in {1, 2} and self.opaque_tail:
+        if self.mode == 0 and not self.changes:
             raise PacketShapeError(
-                "field load stages 1 and 2 cannot carry an opaque tail"
+                "client opcode-158 mode 0 requires keymap changes"
             )
-        return (
-            struct.pack("<HII", self.opcode, self.stage, self.trailing)
-            + self.opaque_tail
-        )
+        for change in self.changes:
+            change.validate()
+        try:
+            header = struct.pack(
+                "<HII", self.opcode, self.mode, len(self.changes)
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"client opcode-158 header is out of range: {error}"
+            ) from error
+        return header + b"".join(change.to_bytes() for change in self.changes)
 
 
 @dataclass(frozen=True)

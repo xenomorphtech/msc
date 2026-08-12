@@ -145,6 +145,12 @@ destination + i16 trailing count`. Each request is followed by a server
 opcode-`39` move with the exact same inventory/source/destination tuple. Native
 validation consumes both records; the trailing signed-count role remains
 neutral rather than being inferred from its captured value `-1`.
+Client opcode `158` now uses one variable-length counted shape across all three
+reference streams. Modes `1` and `2` have zero changes and encode the field-
+load sequence. Mode `0` repeats `u32 key code + u8 binding type + i32 action`;
+all 11 stream-`126` packets carry one change and match the independent v83
+keymap-change grammar. Native validation consumes both 10-byte and 19-byte
+variants through the same manifest shape.
 Client opcode `225` adds one exact 16-byte reactor-hit shape for 15 stream-`126`
 records: signed/redacted reactor object id, signed character-position value,
 u16 stance, and a zero u32. Every request targets an active reactor introduced
