@@ -11739,28 +11739,44 @@ class ServerOpcode148Envelope:
 
 
 @dataclass(frozen=True)
-class ServerOpcode201Record:
-    """Opcode-201 typed prefix with a capture-fixed opaque suffix."""
+class PetActivation:
+    """Activate one character pet with its redacted identity and position."""
 
-    primary_value: int = field(repr=False)
-    secondary_value: int = field(repr=False)
-    flag_a: int
-    flag_b: int
-    opaque_tail: bytes = field(repr=False)
+    character_id: int = field(repr=False)
+    pet_slot: int
+    activation_flag: int
+    activation_type: int
+    pet_item_id: int
+    name: str = field(repr=False)
+    pet_serial_id: int = field(repr=False)
+    x: int
+    y: int
+    stance: int
+    foothold_id: int
     opcode: int = 201
 
-    OPAQUE_TAIL_LENGTH = 22
-
     @classmethod
-    def parse(cls, payload: bytes) -> "ServerOpcode201Record":
-        reader = PacketReader(payload, packet_name="server_opcode_201_record")
+    def parse(cls, payload: bytes) -> "PetActivation":
+        reader = PacketReader(payload, packet_name="pet_activation")
         _expect_opcode(reader, 201)
+        character_id = reader.u32("character_id")
+        pet_slot = reader.u32("pet_slot")
+        activation_flag = reader.u8("activation_flag")
+        activation_type = reader.u8("activation_type")
+        pet_item_id = reader.u32("pet_item_id")
+        name = reader.utf16_string("name", trailing_byte=True)
         record = cls(
-            primary_value=reader.u32("primary_value"),
-            secondary_value=reader.u32("secondary_value"),
-            flag_a=reader.u8("flag_a"),
-            flag_b=reader.u8("flag_b"),
-            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+            character_id=character_id,
+            pet_slot=pet_slot,
+            activation_flag=activation_flag,
+            activation_type=activation_type,
+            pet_item_id=pet_item_id,
+            name=name,
+            pet_serial_id=reader.u64("pet_serial_id"),
+            x=reader.i16("x"),
+            y=reader.i16("y"),
+            stance=reader.u8("stance"),
+            foothold_id=reader.u16("foothold_id"),
         )
         reader.finish()
         record._validate()
@@ -11768,37 +11784,59 @@ class ServerOpcode201Record:
 
     def _validate(self) -> None:
         if self.opcode != 201:
-            raise PacketShapeError("server opcode-201 record opcode must be 201")
-        if len(self.opaque_tail) != self.OPAQUE_TAIL_LENGTH:
+            raise PacketShapeError("pet activation opcode must be 201")
+        if self.activation_flag != 1:
             raise PacketShapeError(
-                "server opcode-201 opaque tail must be exactly "
-                f"{self.OPAQUE_TAIL_LENGTH} bytes"
+                "pet activation flag must be one for the modeled body"
+            )
+        if self.name:
+            raise PacketShapeError(
+                "pet activation name must be empty in the captured grammar"
             )
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
-            "primary_value_redacted": True,
-            "secondary_value_redacted": True,
-            "flag_a": self.flag_a,
-            "flag_b": self.flag_b,
-            "typed_value_count": 4,
-            "opaque_tail_length": len(self.opaque_tail),
+            "character_id_redacted": True,
+            "pet_slot": self.pet_slot,
+            "activation_flag": self.activation_flag,
+            "activation_type": self.activation_type,
+            "pet_item_id": self.pet_item_id,
+            "name_code_units": len(self.name.encode("utf-16-le")) // 2,
+            "pet_serial_id_redacted": True,
+            "x": self.x,
+            "y": self.y,
+            "stance": self.stance,
+            "foothold_id": self.foothold_id,
+            "typed_value_count": 10,
+            "opaque_tail_length": 0,
         }
 
     def to_bytes(self) -> bytes:
         self._validate()
         try:
-            return struct.pack(
-                "<HIIBB",
+            prefix = struct.pack(
+                "<HIIBBI",
                 self.opcode,
-                self.primary_value,
-                self.secondary_value,
-                self.flag_a,
-                self.flag_b,
-            ) + bytes(self.opaque_tail)
+                self.character_id,
+                self.pet_slot,
+                self.activation_flag,
+                self.activation_type,
+                self.pet_item_id,
+            )
+            suffix = struct.pack(
+                "<QhhBH",
+                self.pet_serial_id,
+                self.x,
+                self.y,
+                self.stance,
+                self.foothold_id,
+            )
+            return prefix + encode_utf16_string(
+                self.name, trailing_byte=True
+            ) + suffix
         except struct.error as error:
             raise PacketShapeError(
-                f"server opcode-201 prefix is out of range: {error}"
+                f"pet activation value is out of range: {error}"
             ) from error
 
 

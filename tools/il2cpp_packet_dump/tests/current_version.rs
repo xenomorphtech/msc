@@ -125,6 +125,30 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
             )
     ));
 
+    let pet_activation = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_201_pet_activation")
+        .unwrap();
+    assert_eq!(pet_activation.opcode, 201);
+    assert!(pet_activation.length.is_none());
+    assert_eq!(pet_activation.operations.len(), 13);
+    assert!(matches!(
+        &pet_activation.operations[6],
+        ShapeOp::Read {
+            kind: ReadKind::U16,
+            equals: Some(0),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &pet_activation.operations[7],
+        ShapeOp::Read {
+            kind: ReadKind::U8,
+            equals: Some(0),
+            ..
+        }
+    ));
+
     let chair_sit = shapes
         .iter()
         .find(|shape| shape.name == "chair_sit_request")

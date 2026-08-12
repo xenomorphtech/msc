@@ -172,7 +172,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode142TextLedgerEntry,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
-    ServerOpcode201Record,
+    PetActivation,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
     ServerOpcode239ValueRecord,
@@ -3327,14 +3327,18 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 primary_value=2_380_000,
                 secondary_value=2,
             ),
-            ServerOpcode201Record(
-                primary_value=302_104,
-                secondary_value=0,
-                flag_a=1,
-                flag_b=1,
-                opaque_tail=bytes.fromhex(
-                    "6e4b4c000000009028150000000000480220f5004d02"
-                ),
+            PetActivation(
+                character_id=302_104,
+                pet_slot=0,
+                activation_flag=1,
+                activation_type=1,
+                pet_item_id=5_000_046,
+                name="",
+                pet_serial_id=1_386_640,
+                x=584,
+                y=-2784,
+                stance=0,
+                foothold_id=589,
             ),
             ServerOpcode205Record(
                 primary_value=302_104,
@@ -3378,8 +3382,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
         nonzero_opcode_69[-1] = 1
         with self.assertRaisesRegex(PacketShapeError, "must all be zero"):
             ServerOpcode69Record.parse(bytes(nonzero_opcode_69))
-        with self.assertRaisesRegex(PacketShapeError, "exactly 22"):
-            replace(records[3], opaque_tail=b"\x00" * 21).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "flag must be one"):
+            replace(records[3], activation_flag=0).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "name must be empty"):
+            replace(records[3], name="寵物").to_bytes()
+        nonzero_pet_name_terminator = bytearray(records[3].to_bytes())
+        nonzero_pet_name_terminator[18] = 1
+        with self.assertRaisesRegex(PacketShapeError, "expected 0"):
+            PetActivation.parse(bytes(nonzero_pet_name_terminator))
         noncanonical_94 = bytes.fromhex("5e0002e050240002000000")
         parsed_noncanonical_94 = ServerOpcode94Record.parse(noncanonical_94)
         self.assertTrue(parsed_noncanonical_94.flag)
@@ -7880,12 +7890,18 @@ class GameplayStateFoldTest(unittest.TestCase):
                 third_value=5_050_003,
                 opaque_tail=b"\xa5" * 72,
             ),
-            ServerOpcode201Record(
-                primary_value=302_104,
-                secondary_value=0,
-                flag_a=1,
-                flag_b=1,
-                opaque_tail=b"\x00" * ServerOpcode201Record.OPAQUE_TAIL_LENGTH,
+            PetActivation(
+                character_id=302_104,
+                pet_slot=0,
+                activation_flag=1,
+                activation_type=1,
+                pet_item_id=5_000_046,
+                name="",
+                pet_serial_id=1_386_640,
+                x=584,
+                y=-2784,
+                stance=0,
+                foothold_id=589,
             ),
             ServerOpcode205Record(
                 primary_value=302_104,
@@ -7933,7 +7949,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 21)
+        self.assertEqual(analysis.state.neutral_server_records, 20)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
             {
@@ -7942,7 +7958,6 @@ class GameplayStateFoldTest(unittest.TestCase):
                 94: 1,
                 137: 1,
                 148: 5,
-                201: 1,
                 205: 1,
                 228: 1,
                 230: 2,
@@ -7954,12 +7969,18 @@ class GameplayStateFoldTest(unittest.TestCase):
                 379: 2,
             },
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 44)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_783)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 40)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_761)
+        self.assertEqual(analysis.state.pet_activations, 1)
+        self.assertEqual(analysis.state.pet_activations_for_local_player, 0)
+        self.assertEqual(
+            analysis.state.pet_activations_for_unknown_players, 1
+        )
+        self.assertEqual(analysis.state.pet_activation_items, {5_000_046: 1})
         observations = [
             observation
             for observation in analysis.observations
-            if observation.kind == "neutral_server_record"
+            if observation.kind in {"neutral_server_record", "pet_activation"}
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
@@ -7968,7 +7989,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "full",
                 "full",
                 "partial",
-                "partial",
+                "full",
                 "full",
                 "full",
                 "full",
@@ -7995,11 +8016,23 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            21,
+            20,
         )
+        pet_event = next(
+            event for event in analysis.events if event.kind == "pet_activated"
+        )
+        self.assertFalse(pet_event.details["local_owner"])
+        self.assertFalse(pet_event.details["known_owner"])
+        self.assertEqual(pet_event.details["owner"], "player:1")
+        self.assertNotIn("302104", str(pet_event.safe_dict()))
+        self.assertNotIn("1386640", str(pet_event.safe_dict()))
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:21 opcodes:",
+            "neutral_server_records=packets:20 opcodes:",
+            render_gameplay_analysis(analysis),
+        )
+        self.assertIn(
+            "pet_activations=packets:1 local:0 remote:0 unknown:1",
             render_gameplay_analysis(analysis),
         )
 

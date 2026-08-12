@@ -1368,9 +1368,9 @@ probes. The status API reported `frames_patched:21` and the exact 21-opcode
 plan. The expanded emitter also has exhaustive byte-for-byte PCAP round-trip
 coverage.
 
-## Neutral server records (`69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, `379`)
+## Neutral server records (`69`, `93`, `94`, `137`, `148`, `205`, `276`, `379`)
 
-These nine opcodes recur with capture-bounded layouts in the gameplay
+These eight opcodes recur with capture-bounded layouts in the gameplay
 streams. Their semantic roles remain neutral, and fields that may carry a
 character/session value are redacted from safe output:
 
@@ -1406,14 +1406,6 @@ opcode 148:
     variant 10: no body
     variant 12 or 13: int32 primary_value; int32 secondary_value
 
-opcode 201:
-    uint16 opcode
-    uint32 primary_value             # redacted
-    uint32 secondary_value           # redacted
-    uint8 flag_a
-    uint8 flag_b
-    byte[22] opaque_tail
-
 opcode 205:
     uint16 opcode
     uint32 primary_value             # redacted
@@ -1438,8 +1430,8 @@ opcode 379, variant 36:
     int64 time_4
 ```
 
-Streams `92/114/126` contribute `52/6/123` records respectively. By opcode,
-the combined counts are `69:50`, `93:7`, `94:3`, `137:3`, `148:23`, `201:46`,
+Streams `92/114/126` contribute `37/5/93` records respectively. By opcode,
+the combined counts are `69:50`, `93:7`, `94:3`, `137:3`, `148:23`,
 `205:42`, `276:2`, and `379:5`. Every
 opcode-`69` count is `7` and all seven 38-byte records are zero in these
 captures. The generated handler independently proves the initial `u8` read;
@@ -1457,7 +1449,7 @@ variant-`9`, nine empty variant-`10`, nine variant-`12`, three variant-`13`, and
 one nonempty variant-`9` packet. The current delegated IL2CPP record mask is
 `0x9`; the legacy nonempty body does not consume under that current parser and
 therefore retains 1,632 record bytes as one explicit partial observation.
-Together the family provides 131 full and 50 partial observations with 2,860
+Together the family provides 131 full and four partial observations with 1,848
 opaque bytes rather than inventing suffix or record semantics. All 50 opcode-
 `69` packets (36/13/1 in streams `126`/`92`/`114`) independently validate and
 round-trip exactly.
@@ -1466,7 +1458,39 @@ The gamestate fold emits `neutral_server_record_received`, tracks packets by
 opcode, typed-value counts, reserved-zero byte counts, and opaque-byte totals,
 and exposes only redacted safe details. The HTTP-derived analysis publishes
 opcode `69`'s count, record width, and zero-byte total, but no record contents.
-All 181 packets reparse and round-trip byte-for-byte.
+All 135 packets reparse and round-trip byte-for-byte.
+
+## Pet activation (`server 201`)
+
+The 46 formerly neutral opcode-`201` records are exact pet-activation
+envelopes. The generated current-client handler proves dispatch through the
+shared delegated parser; independent TMS pet packet writers name the ordered
+body, and every Protocol-300 packet consumes this grammar exactly:
+
+```text
+uint16 opcode = 201
+uint32 character_id                  # redacted; owner alias in safe output
+uint32 pet_slot
+uint8  activation_flag = 1
+uint8  activation_type
+uint32 pet_item_id
+uint16 name_code_units = 0
+uint8  name_trailing_zero = 0
+uint64 pet_serial_id                 # redacted
+int16  x
+int16  y
+uint8  stance
+uint16 foothold_id
+```
+
+Streams `126`/`92`/`114` contain 30/15/1 packets. All 42 local-owner records
+match the world-entry character id; the other four match active remote players,
+leaving zero unknown owners. The fold emits `pet_activated`, reports item,
+slot, activation type, position, stance, foothold, and owner alias, and keeps
+the character id, pet serial, and empty name out of ordinary JSON, events, and
+HTTP-derived analysis. Native validation and Python round trips consume all 46
+packets exactly. Coverage advances to `69,719/1,381/0/0`,
+`34,494/713/0/0`, and `64/12/0/0` for streams `126`/`92`/`114`.
 
 A typed live replay of captured opcode-`94` values (`flag=true`, primary
 `2380000`, secondary `2`) added exactly one neutral event while phase, field

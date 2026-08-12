@@ -793,6 +793,15 @@
   further full observation. Safe state and HTTP-derived analysis publish only
   count, record width, and reserved-zero byte total; the record role remains
   neutral.
+- Server opcode `201` is now the exact pet-activation envelope: redacted owner,
+  slot, activation flag/type, pet item, empty counted name, redacted serial,
+  signed position, stance, and foothold. All 30/15/1 packets in streams
+  `126`/`92`/`114` round-trip and independently validate; 42 owners match the
+  local world-entry character and four match active remote players. Coverage
+  advances to `69,719/1,381/0/0`, `34,494/713/0/0`, and `64/12/0/0`. The
+  active saved transcript adds one full accepted pet activation and remains
+  warning-free with 1,440/1,440 heartbeats. Safe JSON and HTTP-derived analysis
+  expose aliases and structural fields, never owner ids, serial ids, or names.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

@@ -265,10 +265,10 @@ text-code-unit, control/value, and opaque-byte distributions. Neither packet
 records, events, text reports, JSON, nor HTTP status return captured text.
 
 The neutral server-record fold now separates opcodes `69`, `93`, `94`, `137`,
-`148`, `201`, `205`, `276`, and `379`. Streams `92/114/126` contribute
-`52/6/123` records, for 181/181 exact packet round trips. Combined opcode
-counts are `69:50`, `93:7`, `94:3`, `137:3`, `148:23`, `201:46`, `205:42`,
-`276:2`, and `379:5`. The generated IL2CPP dump supplies exact direct reads for
+`148`, `205`, `276`, and `379`. Streams `92/114/126` contribute `37/5/93`
+records, for 135/135 exact packet round trips. Combined opcode counts are
+`69:50`, `93:7`, `94:3`, `137:3`, `148:23`, `205:42`, `276:2`, and `379:5`.
+The generated IL2CPP dump supplies exact direct reads for
 opcodes `94`, `137`, `276`, and `379` plus the delegated opcode-`148` variant
 switch. That switch bounds
 empty variant `10`,
@@ -278,11 +278,19 @@ the current build's record mask `0x9`. Opcode `69` is now the exact capture-
 bounded `u8 count=7` followed by seven 38-byte all-zero records. The pinned
 handler independently proves the count read, and native validation exactly
 consumes all 50 packets across the three streams. The family therefore
-provides 131 full and 50 partial observations, 516 typed numeric values, and
-2,860 opaque bytes. Safe events and HTTP-derived analysis expose only the
+provides 131 full and four partial observations, 332 typed numeric values, and
+1,848 opaque bytes. Safe events and HTTP-derived analysis expose only the
 record count, fixed width, and reserved-zero byte total.
 Potentially identifying values are retained for exact re-emission but omitted
 from safe state, events, and reports.
+
+Opcode `201` is now separate typed `pet_activated` state rather than a neutral
+record. Its owner, slot, activation controls, pet item, empty counted name,
+redacted serial, position, stance, and foothold exactly consume all 46 packets.
+The 42 local-owner packets match the world-entry character and four others
+match active remote players. Safe events and `GET /api/v1/status`-derived
+analysis expose owner aliases and structural/gameplay fields, never raw owner
+ids, serial ids, or names.
 
 The current tree was also exercised through a fresh browser-free launch on the
 nested Wayland space, using direct seat input without moving the desktop

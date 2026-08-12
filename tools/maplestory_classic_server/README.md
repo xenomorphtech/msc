@@ -2506,3 +2506,7 @@ preserve distinct Unity scan codes in this setup.
     grammar of seven 38-byte all-zero records, independently validate all 50
     reference packets, and expose only structural counts through safe events
     and HTTP-derived analysis.
+109. Identify server opcode-`201` as pet activation, type its owner/slot/item/
+    empty-name/serial/position/stance/foothold body, independently validate all
+    46 reference packets, and expose only owner aliases and non-identifying
+    structural/gameplay fields through events and HTTP-derived analysis.

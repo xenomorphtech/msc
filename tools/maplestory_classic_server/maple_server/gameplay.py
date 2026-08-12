@@ -112,7 +112,7 @@ from .packets import (
     ServerOpcode142TextLedger,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
-    ServerOpcode201Record,
+    PetActivation,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
     ServerOpcode244DialogueInstruction,
@@ -1032,6 +1032,16 @@ class GameplayGameState:
     )
     neutral_server_typed_values: int = 0
     neutral_server_opaque_bytes: int = 0
+    pet_activations: int = 0
+    pet_activations_for_local_player: int = 0
+    pet_activations_for_active_remote_players: int = 0
+    pet_activations_for_unknown_players: int = 0
+    pet_activation_items: Counter[int] = field(default_factory=Counter)
+    pet_activation_slots: Counter[int] = field(default_factory=Counter)
+    pet_activation_types: Counter[int] = field(default_factory=Counter)
+    pet_activation_name_code_units: Counter[int] = field(
+        default_factory=Counter
+    )
     tutorial_ui_instructions: int = 0
     tutorial_ui_text_code_units: Counter[int] = field(default_factory=Counter)
     tutorial_ui_value_1: Counter[int] = field(default_factory=Counter)
@@ -1408,7 +1418,7 @@ NeutralServerRecord = (
     | ServerOpcode94Record
     | ServerOpcode137OpaqueTailEnvelope
     | ServerOpcode148Envelope
-    | ServerOpcode201Record
+    | PetActivation
     | ServerOpcode205Record
     | ServerOpcode276BooleanFlag
     | ServerOpcode379Record
@@ -5440,6 +5450,26 @@ class GameplayAnalysis:
                         self.state.neutral_server_typed_values
                     ),
                     "opaque_bytes": self.state.neutral_server_opaque_bytes,
+                },
+                "pet_activations": {
+                    "packet_count": self.state.pet_activations,
+                    "local_player": (
+                        self.state.pet_activations_for_local_player
+                    ),
+                    "active_remote_players": (
+                        self.state.pet_activations_for_active_remote_players
+                    ),
+                    "unknown_players": (
+                        self.state.pet_activations_for_unknown_players
+                    ),
+                    "item_ids": dict(self.state.pet_activation_items),
+                    "slots": dict(self.state.pet_activation_slots),
+                    "activation_types": dict(
+                        self.state.pet_activation_types
+                    ),
+                    "name_code_units": dict(
+                        self.state.pet_activation_name_code_units
+                    ),
                 },
                 "tutorial_ui_instructions": {
                     "packet_count": self.state.tutorial_ui_instructions,
@@ -10957,7 +10987,7 @@ class GameplayStateFold:
             elif opcode == 148:
                 neutral_record = ServerOpcode148Envelope.parse(payload)
             elif opcode == 201:
-                neutral_record = ServerOpcode201Record.parse(payload)
+                neutral_record = PetActivation.parse(payload)
             elif opcode == 205:
                 neutral_record = ServerOpcode205Record.parse(payload)
             elif opcode == 276:
@@ -10969,6 +10999,64 @@ class GameplayStateFold:
                 **neutral_record.safe_dict(),
                 "field_epoch": self.state.field_epoch,
             }
+            if isinstance(neutral_record, PetActivation):
+                owner_alias = self._alias(
+                    self._player_aliases,
+                    neutral_record.character_id,
+                    "player",
+                )
+                local_owner = (
+                    self.state.entry_character_id is not None
+                    and neutral_record.character_id
+                    == self.state.entry_character_id
+                )
+                active_remote_owner = (
+                    not local_owner
+                    and neutral_record.character_id
+                    in self.state.observed_players
+                )
+                known_owner = local_owner or active_remote_owner
+                self.state.pet_activations += 1
+                self.state.pet_activation_items[
+                    neutral_record.pet_item_id
+                ] += 1
+                self.state.pet_activation_slots[neutral_record.pet_slot] += 1
+                self.state.pet_activation_types[
+                    neutral_record.activation_type
+                ] += 1
+                self.state.pet_activation_name_code_units[
+                    len(neutral_record.name.encode("utf-16-le")) // 2
+                ] += 1
+                if local_owner:
+                    self.state.pet_activations_for_local_player += 1
+                elif active_remote_owner:
+                    self.state.pet_activations_for_active_remote_players += 1
+                else:
+                    self.state.pet_activations_for_unknown_players += 1
+                details.update(
+                    {
+                        "owner": owner_alias,
+                        "local_owner": local_owner,
+                        "active_remote_owner": active_remote_owner,
+                        "known_owner": known_owner,
+                    }
+                )
+                self._event(
+                    frame,
+                    "pet_activated",
+                    details=details,
+                    identifiers={
+                        "character_id": neutral_record.character_id,
+                        "pet_serial_id": neutral_record.pet_serial_id,
+                    },
+                )
+                return self._observation(
+                    frame,
+                    kind="pet_activation",
+                    coverage=ShapeCoverage.FULL,
+                    parsed=neutral_record,
+                    details=details,
+                )
             typed_value_count = int(details["typed_value_count"])
             opaque_tail_length = int(details["opaque_tail_length"])
             self.state.neutral_server_records += 1
@@ -10982,7 +11070,6 @@ class GameplayStateFold:
             )
             partial = opcode in {
                 137,
-                201,
                 *ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS,
             } or (
                 isinstance(neutral_record, ServerOpcode148Envelope)
@@ -14743,6 +14830,18 @@ def render_gameplay_analysis(
     neutral_server_record_opcodes = json.dumps(
         dict(sorted(state.neutral_server_records_by_opcode.items()))
     )
+    pet_activation_items = json.dumps(
+        dict(sorted(state.pet_activation_items.items()))
+    )
+    pet_activation_slots = json.dumps(
+        dict(sorted(state.pet_activation_slots.items()))
+    )
+    pet_activation_types = json.dumps(
+        dict(sorted(state.pet_activation_types.items()))
+    )
+    pet_activation_name_code_units = json.dumps(
+        dict(sorted(state.pet_activation_name_code_units.items()))
+    )
     tutorial_ui_text_code_units = json.dumps(
         dict(sorted(state.tutorial_ui_text_code_units.items()))
     )
@@ -15331,6 +15430,16 @@ def render_gameplay_analysis(
             f"opcodes:{neutral_server_record_opcodes} "
             f"typed_values:{state.neutral_server_typed_values} "
             f"opaque_bytes:{state.neutral_server_opaque_bytes}"
+        ),
+        (
+            "pet_activations="
+            f"packets:{state.pet_activations} "
+            f"local:{state.pet_activations_for_local_player} "
+            f"remote:{state.pet_activations_for_active_remote_players} "
+            f"unknown:{state.pet_activations_for_unknown_players} "
+            f"items:{pet_activation_items} slots:{pet_activation_slots} "
+            f"types:{pet_activation_types} "
+            f"names:{pet_activation_name_code_units}"
         ),
         (
             "tutorial_ui_instructions="
