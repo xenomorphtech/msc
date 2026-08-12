@@ -2499,3 +2499,10 @@ preserve distinct Unity scan codes in this setup.
 106. Replace all client opcode-`50`/`52` opaque state regions with typed scalar,
     coordinate, damage-array, and reserved-zero fields; independently validate
     all 810 reference actions and promote both branches to full coverage.
+107. Type client opcode-`23` as one neutral, redacted `uint64` heartbeat value,
+    FIFO-match all 380 sustained-capture responses, and preserve 343/343
+    warning-free heartbeat pairs in the active saved transcript.
+108. Replace server opcode-`69`'s opaque table with the observed count-seven
+    grammar of seven 38-byte all-zero records, independently validate all 50
+    reference packets, and expose only structural counts through safe events
+    and HTTP-derived analysis.

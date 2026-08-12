@@ -3317,8 +3317,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
     ) -> None:
         records = (
             ServerOpcode69Record(
-                header_value=7,
-                opaque_tail=b"\x00" * ServerOpcode69Record.OPAQUE_TAIL_LENGTH,
+                record_count=7,
             ),
             ServerOpcode93Record(
                 values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
@@ -3373,8 +3372,12 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 self.assertEqual(type(record).parse(encoded), record)
                 self.assertNotIn("302104", str(record.safe_dict()))
 
-        with self.assertRaisesRegex(PacketShapeError, "exactly 263"):
-            replace(records[0], opaque_tail=b"\x00" * 262).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "count must be exactly 7"):
+            replace(records[0], record_count=6).to_bytes()
+        nonzero_opcode_69 = bytearray(records[0].to_bytes())
+        nonzero_opcode_69[-1] = 1
+        with self.assertRaisesRegex(PacketShapeError, "must all be zero"):
+            ServerOpcode69Record.parse(bytes(nonzero_opcode_69))
         with self.assertRaisesRegex(PacketShapeError, "exactly 22"):
             replace(records[3], opaque_tail=b"\x00" * 21).to_bytes()
         noncanonical_94 = bytes.fromhex("5e0002e050240002000000")
@@ -7861,8 +7864,7 @@ class GameplayStateFoldTest(unittest.TestCase):
     ) -> None:
         records = (
             ServerOpcode69Record(
-                header_value=7,
-                opaque_tail=b"\x00" * ServerOpcode69Record.OPAQUE_TAIL_LENGTH,
+                record_count=7,
             ),
             ServerOpcode93Record(
                 values=(9_000_017, 2_041_017, 1_022_101, 9_000_021)
@@ -7953,7 +7955,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             },
         )
         self.assertEqual(analysis.state.neutral_server_typed_values, 44)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 2_046)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_783)
         observations = [
             observation
             for observation in analysis.observations
@@ -7962,7 +7964,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(
             [observation.coverage.value for observation in observations],
             [
-                "partial",
+                "full",
                 "full",
                 "full",
                 "partial",

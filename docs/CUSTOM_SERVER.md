@@ -274,8 +274,13 @@ switch. That switch bounds
 empty variant `10`,
 count-zero variant `9`, and two-i32 variants `12`/`13`; the one legacy nonempty
 variant-`9` body remains explicit opaque data because it does not consume under
-the current build's record mask `0x9`. The family therefore provides 81 full
-and 100 partial observations, 516 typed values, and 16,010 opaque bytes.
+the current build's record mask `0x9`. Opcode `69` is now the exact capture-
+bounded `u8 count=7` followed by seven 38-byte all-zero records. The pinned
+handler independently proves the count read, and native validation exactly
+consumes all 50 packets across the three streams. The family therefore
+provides 131 full and 50 partial observations, 516 typed numeric values, and
+2,860 opaque bytes. Safe events and HTTP-derived analysis expose only the
+record count, fixed width, and reserved-zero byte total.
 Potentially identifying values are retained for exact re-emission but omitted
 from safe state, events, and reports.
 

@@ -1771,8 +1771,14 @@
     },
     {
       "name":"server_opcode_69","direction":"server_to_client","opcode":69,"length":269,
-      "source":"14 byte-identical-width capture frames; opcode-69 handler a52a9e19... delegates its fixed 267-byte record",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":69},{"op":"read","name":"record_count","kind":"u8"},{"op":"bytes","name":"records","length":266}]
+      "source":"opcode-69 handler a52a9e19... directly reads a u8 count; all 50 gameplay packets across 1-10FS stream 126 and 111 streams 92/114 contain count 7 followed by seven 38-byte all-zero records",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":69},
+        {"op":"read","name":"record_count","kind":"u8","equals":7},
+        {"op":"repeat","count_from":"record_count","operations":[
+          {"op":"bytes","name":"reserved_zero","length":38,"equals_hex":"0000000000000000000000000000000000000000000000000000000000000000000000000000"}
+        ]}
+      ]
     },
     {
       "name":"server_opcode_379_short","direction":"server_to_client","opcode":379,"length":3,

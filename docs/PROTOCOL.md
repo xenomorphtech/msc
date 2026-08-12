@@ -1377,8 +1377,9 @@ character/session value are redacted from safe output:
 ```text
 opcode 69:
     uint16 opcode
-    uint32 header_value
-    byte[263] opaque_table
+    uint8 record_count = 7
+    repeat record_count:
+        byte[38] reserved_zero = 0
 
 opcode 93:
     uint16 opcode
@@ -1440,8 +1441,10 @@ opcode 379, variant 36:
 Streams `92/114/126` contribute `52/6/123` records respectively. By opcode,
 the combined counts are `69:50`, `93:7`, `94:3`, `137:3`, `148:23`, `201:46`,
 `205:42`, `276:2`, and `379:5`. Every
-opcode-`69` header is `7` and all 263 retained bytes are zero in these
-captures. Every opcode-`93` packet counts four u32 values. Opcode `205` is
+opcode-`69` count is `7` and all seven 38-byte records are zero in these
+captures. The generated handler independently proves the initial `u8` read;
+the repeated-record boundary is deliberately limited to the only observed
+count and width. Every opcode-`93` packet counts four u32 values. Opcode `205` is
 fully bounded, as is the counted opcode-`93` vector. The generated handler dump
 independently supplies the exact direct-read sequences for opcodes `94`, `137`,
 `276`, and `379`. Opcode `137` directly reads `i16/i32/i32`; the two stream-`92`
@@ -1454,12 +1457,16 @@ variant-`9`, nine empty variant-`10`, nine variant-`12`, three variant-`13`, and
 one nonempty variant-`9` packet. The current delegated IL2CPP record mask is
 `0x9`; the legacy nonempty body does not consume under that current parser and
 therefore retains 1,632 record bytes as one explicit partial observation.
-Together the family provides 81 full and 100 partial observations with 16,010
-opaque bytes rather than inventing suffix or record semantics.
+Together the family provides 131 full and 50 partial observations with 2,860
+opaque bytes rather than inventing suffix or record semantics. All 50 opcode-
+`69` packets (36/13/1 in streams `126`/`92`/`114`) independently validate and
+round-trip exactly.
 
 The gamestate fold emits `neutral_server_record_received`, tracks packets by
-opcode, typed-value counts, and opaque-byte totals, and exposes only redacted
-safe details. All 181 packets reparse and round-trip byte-for-byte.
+opcode, typed-value counts, reserved-zero byte counts, and opaque-byte totals,
+and exposes only redacted safe details. The HTTP-derived analysis publishes
+opcode `69`'s count, record width, and zero-byte total, but no record contents.
+All 181 packets reparse and round-trip byte-for-byte.
 
 A typed live replay of captured opcode-`94` values (`flag=true`, primary
 `2380000`, secondary `2`) added exactly one neutral event while phase, field

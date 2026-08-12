@@ -11448,52 +11448,57 @@ class ServerOpcode169TextInstruction:
 
 @dataclass(frozen=True)
 class ServerOpcode69Record:
-    """Opcode-69 numeric prefix followed by its capture-fixed opaque table."""
+    """Opcode-69 count followed by capture-fixed reserved-zero records."""
 
-    header_value: int
-    opaque_tail: bytes = field(repr=False)
+    record_count: int
     opcode: int = 69
 
-    OPAQUE_TAIL_LENGTH = 263
+    CAPTURED_RECORD_COUNT = 7
+    RECORD_LENGTH = 38
 
     @classmethod
     def parse(cls, payload: bytes) -> "ServerOpcode69Record":
         reader = PacketReader(payload, packet_name="server_opcode_69_record")
         _expect_opcode(reader, 69)
-        record = cls(
-            header_value=reader.u32("header_value"),
-            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
-        )
+        record_count = reader.u8("record_count")
+        for record_index in range(record_count):
+            reserved_zero = reader.bytes(
+                cls.RECORD_LENGTH,
+                f"records[{record_index}].reserved_zero",
+            )
+            if any(reserved_zero):
+                raise PacketShapeError(
+                    "server opcode-69 record bytes must all be zero"
+                )
         reader.finish()
+        record = cls(record_count=record_count)
         record._validate()
         return record
 
     def _validate(self) -> None:
         if self.opcode != 69:
             raise PacketShapeError("server opcode-69 record opcode must be 69")
-        if len(self.opaque_tail) != self.OPAQUE_TAIL_LENGTH:
+        if self.record_count != self.CAPTURED_RECORD_COUNT:
             raise PacketShapeError(
-                "server opcode-69 opaque tail must be exactly "
-                f"{self.OPAQUE_TAIL_LENGTH} bytes"
+                "server opcode-69 record count must be exactly "
+                f"{self.CAPTURED_RECORD_COUNT}"
             )
 
     def safe_dict(self) -> dict[str, int]:
         return {
-            "header_value": self.header_value,
+            "record_count": self.record_count,
+            "record_length": self.RECORD_LENGTH,
+            "reserved_zero_bytes": self.record_count * self.RECORD_LENGTH,
             "typed_value_count": 1,
-            "opaque_tail_length": len(self.opaque_tail),
+            "opaque_tail_length": 0,
         }
 
     def to_bytes(self) -> bytes:
         self._validate()
-        try:
-            return struct.pack("<HI", self.opcode, self.header_value) + bytes(
-                self.opaque_tail
-            )
-        except struct.error as error:
-            raise PacketShapeError(
-                f"server opcode-69 header value is out of range: {error}"
-            ) from error
+        return (
+            struct.pack("<HB", self.opcode, self.record_count)
+            + b"\x00" * (self.record_count * self.RECORD_LENGTH)
+        )
 
 
 @dataclass(frozen=True)

@@ -93,6 +93,38 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         ] if name == "response_value"
     ));
 
+    let server_opcode_69 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_69")
+        .unwrap();
+    assert!(matches!(
+        server_opcode_69.operations.as_slice(),
+        [
+            ShapeOp::Read {
+                kind: ReadKind::U16,
+                equals: Some(69),
+                ..
+            },
+            ShapeOp::Read {
+                kind: ReadKind::U8,
+                equals: Some(7),
+                ..
+            },
+            ShapeOp::Repeat {
+                count_from,
+                operations,
+            }
+        ] if count_from == "record_count"
+            && matches!(
+                operations.as_slice(),
+                [ShapeOp::Bytes {
+                    length: 38,
+                    equals_hex: Some(value),
+                    ..
+                }] if value == &"00".repeat(38)
+            )
+    ));
+
     let chair_sit = shapes
         .iter()
         .find(|shape| shape.name == "chair_sit_request")

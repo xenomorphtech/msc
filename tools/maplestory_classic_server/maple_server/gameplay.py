@@ -10981,7 +10981,6 @@ class GameplayStateFold:
                 details=details,
             )
             partial = opcode in {
-                69,
                 137,
                 201,
                 *ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS,

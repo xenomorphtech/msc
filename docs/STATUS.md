@@ -785,6 +785,14 @@
   matches 343/343 at full coverage without warnings; current read-only HTTP
   telemetry reports a 3,369/3,369 listener aggregate with none pending and
   never exposes the response values.
+- Server opcode `69` now types its complete capture-bounded record grammar:
+  `u8 count=7` followed by seven 38-byte all-zero records. All 36/13/1 packets
+  in streams `126`/`92`/`114` round-trip and independently validate, promoting
+  them to full coverage and moving the streams to `69,689/1,411/0/0`,
+  `34,479/728/0/0`, and `63/13/0/0`. The active saved transcript contains one
+  further full observation. Safe state and HTTP-derived analysis publish only
+  count, record width, and reserved-zero byte total; the record role remains
+  neutral.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits
