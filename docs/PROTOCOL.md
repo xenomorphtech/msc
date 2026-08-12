@@ -3673,17 +3673,23 @@ directions:
 type 0: int16 position_x/y, int16 velocity_x/y,
         uint16 foothold_id, uint8 stance, uint16 duration_ms  # 13 bytes
 type 1: int16 velocity_x/y, uint8 stance, uint16 duration_ms # 7 bytes
-type 3: byte[5] bounded semantic unknown
+type 3: int16 position_x/y, int16 neutral_value,
+        uint8 stance, int16 duration_ms                       # 9 bytes
+type 4: same 9-byte fields as type 3
 type 5: same 13-byte fields as type 0
 ```
 
 Stream `92` contains 531 client submissions with 3,606 commands
-(`0:3526, 1:53, 3:20, 5:7`) and 113 server broadcasts with 675 commands
-(`0:646, 1:18, 3:4, 5:7`). All 644 packets and 4,281 commands round-trip
-byte-for-byte. All client control values are zero in that stream; the two
-stream-`114` broadcasts demonstrate values zero and one, so the field remains
-neutrally named. The fold uses the client trailer endpoint for general local
-position and the last absolute command for each observed remote player,
+(`0:3506, 1:53, 3:20, 4:20, 5:7`) and 113 server broadcasts with 675 commands
+(`0:642, 1:18, 3:4, 4:4, 5:7`). All 644 packets and 4,281 commands round-trip
+byte-for-byte. Stream `126` independently exact-consumes 2,435 packets and
+11,147 commands (`0:10736, 1:236, 3:61, 4:61, 5:53`). The type-`3`/`4`
+layout is pinned to the current client's shared IL2CPP movement parser; its
+third signed value is zero in both captures, so its role remains neutral. All
+client control values are zero in stream `92`; the two stream-`114` broadcasts
+demonstrate values zero and one, so that field also remains neutrally named.
+The fold uses the client trailer endpoint for general local position and the
+last positioned command for each observed remote player,
 emitting typed events for both directions. Proximity-sensitive live pickup
 placement is deliberately narrower: it prefers the latest same-field client
 command-final coordinate and falls back to the trailer only when no such
@@ -4178,10 +4184,10 @@ requests also target a final mode-`0` spawn whose two owner words equal the
 initial player id. The four mode-`2` field-load mesos records are exact 30-byte
 shapes. Variable opcode `303` NPC-state tails remain partial; client opcode
 `158` mode `0` is now a full counted keymap change. Strict validation succeeds
-across all 71,100 frames with 27,220
-full, 43,880 partial, zero unknown, and zero invalid packet
-observations. Stream `92` independently reaches 13,522 full, 21,685 partial,
-zero unknown, and zero invalid; stream `114` reaches 54/22/0/0. The long fold
+across all 71,100 frames with 52,510
+full, 18,590 partial, zero unknown, and zero invalid packet
+observations. Stream `92` independently reaches 26,266 full, 8,941 partial,
+zero unknown, and zero invalid; stream `114` reaches 57/19/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot
 modifications; its one remaining warning is a cross-packet state correlation:
 an aggregate warning for six delayed combat predictions that differ by one

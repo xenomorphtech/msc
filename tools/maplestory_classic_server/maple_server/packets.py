@@ -7990,7 +7990,7 @@ class PlayerMovementCommand:
     command_type: int
     opaque_payload: bytes
 
-    _PAYLOAD_LENGTHS = {0: 13, 1: 7, 3: 5, 5: 13}
+    _PAYLOAD_LENGTHS = {0: 13, 1: 7, 3: 9, 4: 9, 5: 13}
 
     @classmethod
     def absolute(
@@ -8040,8 +8040,31 @@ class PlayerMovementCommand:
         )
 
     @classmethod
-    def compact(cls, opaque_payload: bytes) -> "PlayerMovementCommand":
-        return cls(command_type=3, opaque_payload=opaque_payload)
+    def positioned(
+        cls,
+        *,
+        command_type: int = 3,
+        position_x: int,
+        position_y: int,
+        neutral_value: int,
+        stance: int,
+        duration_ms: int,
+    ) -> "PlayerMovementCommand":
+        if command_type not in {3, 4}:
+            raise PacketShapeError(
+                "positioned player movement command type must be three or four"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=struct.pack(
+                "<hhhBh",
+                position_x,
+                position_y,
+                neutral_value,
+                stance,
+                duration_ms,
+            ),
+        )
 
     @property
     def byte_length(self) -> int:
@@ -8049,7 +8072,7 @@ class PlayerMovementCommand:
 
     @property
     def position(self) -> tuple[int, int] | None:
-        if self.command_type not in {0, 5}:
+        if self.command_type not in {0, 3, 4, 5}:
             return None
         return struct.unpack_from("<hh", self.opaque_payload)
 
@@ -8091,11 +8114,26 @@ class PlayerMovementCommand:
                 "stance": stance,
                 "duration_ms": duration_ms,
             }
-        return {
-            "type": self.command_type,
-            "kind": "compact_opaque",
-            "opaque_payload_bytes": len(self.opaque_payload),
-        }
+        if self.command_type in {3, 4}:
+            position_x, position_y, neutral_value, stance, duration_ms = (
+                struct.unpack("<hhhBh", self.opaque_payload)
+            )
+            return {
+                "type": self.command_type,
+                "kind": (
+                    "positioned"
+                    if self.command_type == 3
+                    else "alternate_positioned"
+                ),
+                "position_x": position_x,
+                "position_y": position_y,
+                "neutral_value": neutral_value,
+                "stance": stance,
+                "duration_ms": duration_ms,
+            }
+        raise PacketShapeError(
+            f"unsupported player movement command type {self.command_type}"
+        )
 
     @classmethod
     def parse(
@@ -8132,7 +8170,7 @@ class PlayerMovementCommand:
         if len(self.opaque_payload) != expected_length:
             raise PacketShapeError(
                 f"player movement command type {self.command_type} needs "
-                f"{expected_length} opaque bytes, got "
+                f"{expected_length} payload bytes, got "
                 f"{len(self.opaque_payload)}"
             )
         return bytes((self.command_type,)) + self.opaque_payload

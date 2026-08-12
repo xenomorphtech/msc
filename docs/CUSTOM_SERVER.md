@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 203 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 27,220 observations are full, 43,880 partial, none are
+`--fail-on-invalid`: 52,510 observations are full, 18,590 partial, none are
 unknown or invalid. One state-correlation warning remains,
 not a shape failure: the aggregate warning for six delayed combat predictions
 that differ by one HP.
@@ -92,7 +92,11 @@ Player movement appears as decoded opcode-`182` submissions and opcode-`202`
 broadcasts. The short stream prints one local path ending at `(633,-2677)` and
 two remote-player broadcasts under session-local aliases. The long stream
 validates and round-trips 531 submissions, 113 broadcasts, and all 4,281
-commands, with fixed tags `0/1/3/5` and payload sizes `13/7/5/13` bytes.
+commands, with fixed tags `0/1/3/4/5` and payload sizes `13/7/9/9/13` bytes.
+Tags `3` and `4` share an exact positioned-command layout: signed position,
+one capture-neutral signed value, stance, and signed duration. Stream `126`
+independently exact-consumes all 2,435 player-movement packets and 11,147
+commands with the same layouts, promoting both directions to full coverage.
 
 Remote-player presence now begins with server opcode `189`, whose IL2CPP-backed
 prefix carries object id, level, and a counted UTF-16 name before a retained

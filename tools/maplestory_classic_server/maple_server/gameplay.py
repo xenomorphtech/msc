@@ -6262,7 +6262,7 @@ class GameplayStateFold:
             "commands": [
                 command.safe_dict() for command in movement.commands
             ],
-            "opaque_command_payload_bytes": sum(
+            "command_payload_bytes": sum(
                 len(command.opaque_payload) for command in movement.commands
             ),
         }
@@ -7275,13 +7275,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="player_movement_submission",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=movement,
                 details=details,
-                issues=(
-                    "player movement control value and type-3 command "
-                    "meaning remain opaque",
-                ),
             )
         if opcode == 207:
             movement = MobMovementSubmission.parse(payload)
@@ -11564,13 +11560,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="player_movement_broadcast",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=broadcast,
                 details=details,
-                issues=(
-                    "player movement control value and type-3 command "
-                    "meaning remain opaque",
-                ),
             )
         if opcode == 279:
             entered = MobEnterField.parse(payload)

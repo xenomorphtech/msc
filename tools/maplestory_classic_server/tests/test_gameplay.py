@@ -379,7 +379,21 @@ def fixture_player_movement_path() -> PlayerMovementPath:
                 stance=3,
                 duration_ms=12,
             ),
-            PlayerMovementCommand.compact(b"\x01\x02\x03\x04\x05"),
+            PlayerMovementCommand.positioned(
+                position_x=115,
+                position_y=-190,
+                neutral_value=0,
+                stance=3,
+                duration_ms=15,
+            ),
+            PlayerMovementCommand.positioned(
+                command_type=4,
+                position_x=118,
+                position_y=-185,
+                neutral_value=0,
+                stance=4,
+                duration_ms=20,
+            ),
             PlayerMovementCommand.absolute(
                 command_type=5,
                 position_x=120,
@@ -4096,25 +4110,52 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         self.assertEqual(
             [command.byte_length for command in path.commands],
-            [14, 8, 6, 14, 14],
+            [14, 8, 10, 10, 14, 14],
         )
         self.assertEqual(path.final_position, (130, -170))
+        self.assertEqual(path.commands[2].position, (115, -190))
+        self.assertEqual(path.commands[3].position, (118, -185))
         self.assertEqual(
             path.commands[2].safe_dict(),
             {
                 "type": 3,
-                "kind": "compact_opaque",
-                "opaque_payload_bytes": 5,
+                "kind": "positioned",
+                "position_x": 115,
+                "position_y": -190,
+                "neutral_value": 0,
+                "stance": 3,
+                "duration_ms": 15,
+            },
+        )
+        self.assertEqual(
+            path.commands[3].safe_dict(),
+            {
+                "type": 4,
+                "kind": "alternate_positioned",
+                "position_x": 118,
+                "position_y": -185,
+                "neutral_value": 0,
+                "stance": 4,
+                "duration_ms": 20,
             },
         )
         with self.assertRaisesRegex(PacketShapeError, "expected one of"):
             PlayerMovementPath(
                 reference_x=0,
                 reference_y=0,
-                commands=(PlayerMovementCommand(4, b""),),
+                commands=(PlayerMovementCommand(2, b""),),
             ).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "needs 5 opaque bytes"):
-            PlayerMovementCommand.compact(b"four").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 9 payload bytes"):
+            PlayerMovementCommand(3, b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be three or four"):
+            PlayerMovementCommand.positioned(
+                command_type=5,
+                position_x=0,
+                position_y=0,
+                neutral_value=0,
+                stance=0,
+                duration_ms=0,
+            )
         with self.assertRaisesRegex(PacketShapeError, "must contain a command"):
             PlayerMovementPath(
                 reference_x=0,
@@ -8470,10 +8511,10 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.player_x, 132)
         self.assertEqual(analysis.state.player_y, -168)
         self.assertEqual(analysis.state.player_movement_submissions, 1)
-        self.assertEqual(analysis.state.player_movement_commands, 5)
+        self.assertEqual(analysis.state.player_movement_commands, 6)
         self.assertEqual(
             analysis.state.player_movement_commands_by_type,
-            {0: 2, 1: 1, 3: 1, 5: 1},
+            {0: 2, 1: 1, 3: 1, 4: 1, 5: 1},
         )
         self.assertEqual(analysis.state.remote_player_movement_broadcasts, 1)
         self.assertEqual(
@@ -8484,10 +8525,10 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.remote_player_movement_broadcasts_for_unknown_players,
             1,
         )
-        self.assertEqual(analysis.state.remote_player_movement_commands, 5)
+        self.assertEqual(analysis.state.remote_player_movement_commands, 6)
         self.assertEqual(
             analysis.state.remote_player_movement_commands_by_type,
-            {0: 2, 1: 1, 3: 1, 5: 1},
+            {0: 2, 1: 1, 3: 1, 4: 1, 5: 1},
         )
         self.assertEqual(analysis.state.life_movement_submissions, 1)
         self.assertEqual(analysis.state.life_movement_submission_commands, 5)
@@ -8521,6 +8562,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertIn("remote_player_movement_broadcast", event_kinds)
         self.assertIn("life_movement_submitted", event_kinds)
         self.assertIn("life_movement_broadcast_received", event_kinds)
+        player_movement_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind
+            in {"player_movement_submission", "player_movement_broadcast"}
+        ]
+        self.assertEqual(len(player_movement_observations), 2)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in player_movement_observations
+            )
+        )
         life_submission_event = next(
             event
             for event in analysis.events

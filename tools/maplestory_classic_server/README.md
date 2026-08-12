@@ -847,13 +847,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 27,220 full,
-43,880 partial, zero unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 52,510 full,
+18,590 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 13,522 full, 21,685 partial,
-zero unknown, and zero invalid observations; short stream `114` reaches 54 full,
-22 partial, zero unknown, and zero invalid.
+metadata. Stream `92` independently passes with 26,266 full, 8,941 partial,
+zero unknown, and zero invalid observations; short stream `114` reaches 57 full,
+19 partial, zero unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -942,7 +942,8 @@ The gameplay fold currently models these capture-backed boundaries:
   trailing/unknown values,
 - client opcode `182`: local-player movement with a neutral 32-bit control
   value, signed reference position, typed command stream, and zero-marked
-  start/end-position trailer,
+  start/end-position trailer; command tags `3` and `4` share the parser-proven
+  nine-byte signed-position/neutral-value/stance/duration layout,
 - server opcode `202`: remote-player movement with an aliased object id, the
   same control value and command stream, and no client-only trailer,
 - server opcode `189`: remote-player entry with an aliased object id, level,
@@ -1206,12 +1207,14 @@ liveness.
 Player movement is now a separate typed family rather than being confused with
 the mob controller protocol. In stream `92`, client opcode `182` contains 531
 local submissions and 3,606 commands; server opcode `202` contains 113 remote
-broadcasts and 675 commands. Only tags `0/1/3/5` occur. Their payload lengths
-are exactly `13/7/5/13` bytes, excluding the tag. Tags `0` and `5` expose
+broadcasts and 675 commands. Only tags `0/1/3/4/5` occur. Their payload lengths
+are exactly `13/7/9/9/13` bytes, excluding the tag. Tags `0` and `5` expose
 signed position/velocity pairs, foothold, stance, and duration; tag `1`
-exposes relative velocity, stance, and duration; tag `3` remains a bounded
-five-byte semantic unknown. Every packet round-trips. The fold updates the
-local path endpoint, maintains session-local aliases and final absolute
+exposes relative velocity, stance, and duration; tags `3` and `4` expose their
+parser-proven signed position, neutral value, stance, and duration fields.
+Every packet round-trips. Stream `126` independently exact-consumes all 2,435
+player-movement packets and 11,147 commands. The fold updates the
+local path endpoint, maintains session-local aliases and final positioned
 positions for observed remote players, and emits `player_movement_submitted`
 and `remote_player_movement_broadcast` events. Short stream `114` folds its one
 local submission to `(633,-2677)` and its two broadcasts to two redacted

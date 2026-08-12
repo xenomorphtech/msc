@@ -681,7 +681,7 @@
     },
     {
       "name":"player_movement_submission","direction":"client_to_server","opcode":182,
-      "source":"PlayerMovementSubmission/Path/Command; command tags 0,1,3,5 select 13,7,5,13-byte layouts",
+      "source":"PlayerMovementSubmission/Path/Command; pinned IL2CPP movement parser caa238b8... jump table at 0x18560933c; both reference captures",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":182},
         {"op":"read","name":"control_value","kind":"u32"},
@@ -693,7 +693,8 @@
           {"op":"switch","field":"command_type","cases":[
             {"equals":0,"operations":[{"op":"bytes","name":"absolute_command","length":13}]},
             {"equals":1,"operations":[{"op":"bytes","name":"relative_command","length":7}]},
-            {"equals":3,"operations":[{"op":"bytes","name":"compact_command","length":5}]},
+            {"equals":3,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":4,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
             {"equals":5,"operations":[{"op":"bytes","name":"alternate_absolute_command","length":13}]}
           ]}
         ]},
@@ -973,7 +974,7 @@
     },
     {
       "name":"player_movement_broadcast","direction":"server_to_client","opcode":202,
-      "source":"IL2CPP opcode-202 handler dc9d52c2... delegates movement parsing; PlayerMovementBroadcast/Path/Command; capture 111",
+      "source":"IL2CPP opcode-202 handler dc9d52c2... delegates to the pinned caa238b8... movement parser; both reference captures",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":202},
         {"op":"read","name":"object_id","kind":"u32"},
@@ -985,7 +986,8 @@
           {"op":"switch","field":"command_type","cases":[
             {"equals":0,"operations":[{"op":"bytes","name":"absolute_command","length":13}]},
             {"equals":1,"operations":[{"op":"bytes","name":"relative_command","length":7}]},
-            {"equals":3,"operations":[{"op":"bytes","name":"compact_command","length":5}]},
+            {"equals":3,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
+            {"equals":4,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"neutral_value","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"i16"}]},
             {"equals":5,"operations":[{"op":"bytes","name":"alternate_absolute_command","length":13}]}
           ]}
         ]}

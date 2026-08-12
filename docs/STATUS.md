@@ -53,9 +53,9 @@
   epochs. Variable NPC-state tails remain losslessly bounded as partial, while
   opcode-`158` mode-`0` keymap changes are fully typed. Strict decoding now
   succeeds across all 71,100 frames:
-  27,220 full, 43,880 partial, zero unknown, and zero invalid
-  packet observations. Stream `92` now reports 13,522 full, 21,685 partial,
-  zero unknown, and zero invalid; stream `114` reports 54/22/0/0. One
+  52,510 full, 18,590 partial, zero unknown, and zero invalid
+  packet observations. Stream `92` now reports 26,266 full, 8,941 partial,
+  zero unknown, and zero invalid; stream `114` reports 57/19/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
   one-HP combat prediction differences.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
@@ -800,9 +800,11 @@
   exposes the identifier-free plan and patch count.
 - Player movement is now distinct from mob movement: client opcode `182` and
   server opcode `202` parse and re-encode all 644 stream-`92` packets and all
-  4,281 commands. Fixed command tags `0/1/3/5` have payload lengths
-  `13/7/5/13`; typed absolute/relative fields are emitted while type `3`
-  remains a bounded five-byte semantic unknown. The game-state fold records
+  4,281 commands. Fixed command tags `0/1/3/4/5` have payload lengths
+  `13/7/9/9/13`; tags `3` and `4` expose their parser-proven position,
+  capture-neutral signed value, stance, and duration fields. Stream `126`
+  independently exact-consumes 2,435 packets and 11,147 commands with the
+  same layouts. The game-state fold records
   local path endpoint `(633,-2677)` in both reference streams, maintains
   identifier-safe remote-player positions, and emits local submission and
   remote broadcast events. Both streams remain valid with no warnings.
