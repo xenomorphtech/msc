@@ -1699,7 +1699,7 @@
     },
     {
       "name":"client_npc_state_submission_movement","direction":"client_to_server","opcode":217,
-      "source":"packets.py:ClientNpcStateSubmission; all 592 movement packets in 1-10FS stream 126 parse exactly and 591 match opcode-303 echoes after removal of the final nine-byte client trailer",
+      "source":"type-0/type-2 fields share the pinned caa238b8... movement-parser layouts; all 592 stream-126 packets parse exactly and 591 match opcode-303 echoes after removal of the final nine-byte client trailer",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":217},
         {"op":"read","name":"object_id","kind":"u32"},
@@ -1711,8 +1711,8 @@
         {"op":"repeat","count_from":"command_count","operations":[
           {"op":"read","name":"command_type","kind":"u8"},
           {"op":"switch","field":"command_type","cases":[
-            {"equals":0,"operations":[{"op":"bytes","name":"absolute_0","length":13}]},
-            {"equals":2,"operations":[{"op":"bytes","name":"relative_2","length":7}]}
+            {"equals":0,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]},
+            {"equals":2,"operations":[{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]}
           ]}
         ]},
         {"op":"read","name":"trailer_marker","kind":"u8","equals":0},
@@ -1734,7 +1734,7 @@
     },
     {
       "name":"npc_state_update_movement","direction":"server_to_client","opcode":303,
-      "source":"packets.py:NpcStateUpdate; all 683 movement packets in 1-10FS stream 126 parse exactly, including 591 exact client opcode-217 echoes",
+      "source":"type-0/type-2 fields share the pinned caa238b8... movement-parser layouts; all 683 stream-126 packets parse exactly, including 591 exact client opcode-217 echoes",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":303},
         {"op":"read","name":"object_id","kind":"u32"},
@@ -1746,8 +1746,8 @@
         {"op":"repeat","count_from":"command_count","operations":[
           {"op":"read","name":"command_type","kind":"u8"},
           {"op":"switch","field":"command_type","cases":[
-            {"equals":0,"operations":[{"op":"bytes","name":"absolute_0","length":13}]},
-            {"equals":2,"operations":[{"op":"bytes","name":"relative_2","length":7}]}
+            {"equals":0,"operations":[{"op":"read","name":"position_x","kind":"i16"},{"op":"read","name":"position_y","kind":"i16"},{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"foothold_id","kind":"u16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]},
+            {"equals":2,"operations":[{"op":"read","name":"velocity_x","kind":"i16"},{"op":"read","name":"velocity_y","kind":"i16"},{"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"duration_ms","kind":"u16"}]}
           ]}
         ]}
       ]

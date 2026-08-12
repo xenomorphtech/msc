@@ -8246,18 +8246,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="npc_state_submission",
-                coverage=(
-                    ShapeCoverage.PARTIAL
-                    if submission.movement is not None
-                    else ShapeCoverage.FULL
-                ),
+                coverage=ShapeCoverage.FULL,
                 parsed=submission,
                 details=details,
-                issues=(
-                    ("NPC movement command roles remain neutral",)
-                    if submission.movement is not None
-                    else ()
-                ),
             )
         if opcode == 225:
             request = ClientReactorHitRequest.parse(payload)
@@ -11336,18 +11327,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="npc_state_update",
-                coverage=(
-                    ShapeCoverage.PARTIAL
-                    if update.movement is not None
-                    else ShapeCoverage.FULL
-                ),
+                coverage=ShapeCoverage.FULL,
                 parsed=update,
                 details=details,
-                issues=(
-                    ("NPC movement command roles remain neutral",)
-                    if update.movement is not None
-                    else ()
-                ),
             )
         if opcode == 189:
             entered = RemotePlayerEnterField.parse(payload)

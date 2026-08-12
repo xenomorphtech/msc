@@ -847,8 +847,8 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 52,510 full,
-18,590 partial, zero unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 53,785 full,
+17,315 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
 metadata. Stream `92` independently passes with 26,266 full, 8,941 partial,
@@ -1082,8 +1082,9 @@ The gameplay fold currently models these capture-backed boundaries:
   captured control `1`, by the exact 16-byte opcode-`300` spawn body; the
   handler-backed compact control-`0` branch is modeled as removal but remains
   absent from reference captures and not yet live-proven,
-- server opcode `303`: an 8-byte typed NPC state prefix plus a losslessly
-  preserved optional opaque tail,
+- server opcode `303`: an 8-byte typed NPC state prefix plus an optional typed
+  absolute/relative movement path; client opcode `217` carries the same body
+  and adds a nine-byte marker/start/end trailer only on movement submissions,
 - server opcode `279`: mob-entry envelope with object id, template id,
   temporary-status block, position/stance/footholds, spawn effect, and tail,
 - server opcode `280`: complete object-id plus one-byte mob-leave record,

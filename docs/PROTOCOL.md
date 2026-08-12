@@ -3794,8 +3794,9 @@ movement:
   uint8 command_count                # 1..255
   repeat command_count:
     uint8 command_type               # observed 0 or 2
-    byte[13] absolute_payload         # type 0
-    byte[7] relative_payload          # type 2
+    type 0: int16 position_x/y, int16 velocity_x/y,
+            uint16 foothold_id, uint8 stance, uint16 duration_ms
+    type 2: int16 velocity_x/y, uint8 stance, uint16 duration_ms
   uint8 trailer_marker = 0
   int16 path_start_x
   int16 path_start_y
@@ -3825,18 +3826,19 @@ trailer. The remaining seven requests have no same-epoch captured response and
 are cleared by later field changes; 349 server updates are independent of a
 client submission. The fold records exact matches, latency, active-NPC
 admission, command distributions, and final absolute positions. Higher-level
-action/parameter intent remains neutral.
+action/parameter intent remains neutral. The command field layouts match the
+current client's pinned movement parser and make both variants full structural
+coverage without assigning those higher-level action semantics.
 
 The opt-in `--reactive-npc-state-responses` policy admits only object ids active
 in the replay's final field, validates the two captured variants and command
 types, and emits the exact typed opcode-`303` transformation. NPC spawn and
 lifecycle packets keep the runtime admission set current.
 
-This semantic promotion changes stream `126` coverage from
-`26,810/44,290/0/0` to `27,155/43,945/0/0` (full/partial/unknown/invalid): the
-345 compact client submissions are now fully typed, while movement-bearing
-forms stay partial until every command's higher-level role is known. Streams
-`92` and `114` remain `13,493/21,714/0/0` and `54/22/0/0`.
+Promoting the 592 movement-bearing requests and 683 movement-bearing updates
+adds 1,275 full observations. Current stream `126` coverage is
+`53,785/17,315/0/0` (full/partial/unknown/invalid). Streams `92` and `114`
+remain `26,266/8,941/0/0` and `57/19/0/0`.
 
 ## Client opcode `122` selector envelopes
 
@@ -4182,10 +4184,10 @@ All 203 pickup requests resolve to a known active drop and match their field
 epoch after the marker-`26` initial snapshot is folded. The 197 opcode-`185`
 requests also target a final mode-`0` spawn whose two owner words equal the
 initial player id. The four mode-`2` field-load mesos records are exact 30-byte
-shapes. Variable opcode `303` NPC-state tails remain partial; client opcode
-`158` mode `0` is now a full counted keymap change. Strict validation succeeds
-across all 71,100 frames with 52,510
-full, 18,590 partial, zero unknown, and zero invalid packet
+shapes. Opcode `303` NPC-state movement paths and client opcode `158` mode `0`
+keymap changes are now fully typed. Strict validation succeeds
+across all 71,100 frames with 53,785
+full, 17,315 partial, zero unknown, and zero invalid packet
 observations. Stream `92` independently reaches 26,266 full, 8,941 partial,
 zero unknown, and zero invalid; stream `114` reaches 57/19/0/0. The long fold
 reaches level `10` and reports no unknown inventory-slot

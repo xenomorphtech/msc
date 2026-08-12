@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 203 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 52,510 observations are full, 18,590 partial, none are
+`--fail-on-invalid`: 53,785 observations are full, 17,315 partial, none are
 unknown or invalid. One state-correlation warning remains,
 not a shape failure: the aggregate warning for six delayed combat predictions
 that differ by one HP.
@@ -680,12 +680,15 @@ client-to-server family is not synthesized or injected in the opposite
 direction.
 
 Client opcode `217` is modeled separately from server opcode `217`. Its 345
-compact packets are exactly eight bytes. The other 592 packets contain a
-ten-byte opaque prefix, count/format bytes, fixed records (14 bytes for format
-`0`, 11 for format `2`), and an eight-byte opaque trailer. All 937 stream-`126`
-instances round-trip and fold into safe count/format distributions. No active
-mob-id or sub-second server opcode-`219` correlation was found, so the server
-does not synthesize or replay this still-neutral client family.
+compact NPC-state packets are exactly eight bytes. The other 592 carry a typed
+NPC movement path with 1,596 absolute type-`0` and 57 relative type-`2`
+commands, followed by the zero marker and signed start/end positions. All 937
+requests and all 1,279 server opcode-`303` updates round-trip exactly; 591
+movement requests match an opcode-`303` echo byte-for-byte after removal of
+the client-only nine-byte trailer. Their type-`0`/`2` byte layouts match the
+position, velocity, foothold, stance, and duration fields established by the
+pinned movement parser. Action and
+parameter intent stay neutral, while both packet directions are full coverage.
 
 The analyzer separately matches exact empty server opcode `426` notifications
 to exact empty client opcode `309` acknowledgements. All 299 stream-`126`, 61

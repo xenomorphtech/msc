@@ -50,10 +50,10 @@
   greeting, then decrypts 71,100 frames. The fold now recognizes its
   marker-`26` level-1 character/inventory snapshot, 36 total field epochs, 436
   drop spawns, and all 203 pickup requests with known drops and matching
-  epochs. Variable NPC-state tails remain losslessly bounded as partial, while
-  opcode-`158` mode-`0` keymap changes are fully typed. Strict decoding now
+  epochs. NPC-state movement paths and opcode-`158` mode-`0` keymap changes are
+  fully typed. Strict decoding now
   succeeds across all 71,100 frames:
-  52,510 full, 18,590 partial, zero unknown, and zero invalid
+  53,785 full, 17,315 partial, zero unknown, and zero invalid
   packet observations. Stream `92` now reports 26,266 full, 8,941 partial,
   zero unknown, and zero invalid; stream `114` reports 57/19/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
@@ -667,8 +667,11 @@
   final positions. The opt-in hold-open responder applies the same bounded
   transformation only for active field NPCs; its encrypted integration test
   verifies the emitted opcode `303` and independently folds the observed pair.
-  Coverage is now `27,155/43,945/0/0` for stream `126`; streams `92` and `114`
-  remain `13,493/21,714/0/0` and `54/22/0/0`.
+  The absolute/relative command layouts match the pinned movement parser,
+  promoting all 937 requests and 1,279 updates to full coverage while
+  action/parameter intent remains neutral. Coverage is now
+  `53,785/17,315/0/0` for stream `126`; streams `92` and `114` remain
+  `26,266/8,941/0/0` and `57/19/0/0`.
 - Empty server opcode `426` and empty client opcode `309` are now a fully typed,
   temporally correlated notification/acknowledgement pair. Stream `126` has
   299 matches, stream `92` has 61, and stream `114` has one; all 361 server

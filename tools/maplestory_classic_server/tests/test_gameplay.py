@@ -10173,8 +10173,20 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertIn(
-            "opcode=217 kind=npc_state_submission coverage=partial",
+            "opcode=217 kind=npc_state_submission coverage=full",
             report,
+        )
+        npc_state_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind in {"npc_state_submission", "npc_state_update"}
+        ]
+        self.assertTrue(npc_state_observations)
+        self.assertTrue(
+            all(
+                observation.coverage.value == "full"
+                for observation in npc_state_observations
+            )
         )
         self.assertEqual(analysis.state.opcode_426_notifications, 1)
         self.assertEqual(analysis.state.opcode_309_acknowledgements, 1)
