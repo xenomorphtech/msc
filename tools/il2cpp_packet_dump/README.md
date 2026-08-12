@@ -337,5 +337,11 @@ constructor `0x180CB3F20`; each record reads
 the matching opaque pin and exactly consumes both byte-identical four-record
 packets from streams `92` and `114`. Text and numeric fields remain private;
 higher-level analysis publishes only record and code-unit counts.
+Server opcode `77` variant `8` now distinguishes its repeated short branch
+from its two long binary bodies. All 11 short records across streams `126` and
+`92` exact-consume as counted UTF-16 followed by `zero u8 + neutral control u8
++ neutral u16`; isolated validation passes `11/11`. The existing 158-byte
+binary shape and the other long record remain opaque evidence, so their
+117-byte bodies are not assigned item or message semantics.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

@@ -1836,7 +1836,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ServerOpcode77Envelope(
                 variant=8,
                 primary_text="private child text",
-                opaque_tail=b"\x00\x07\x00\x00",
+                variant_8_control=7,
+                variant_8_value=1,
+            ),
+            ServerOpcode77Envelope(
+                variant=8,
+                primary_text="private binary text",
+                opaque_tail=b"x" * 117,
             ),
         )
 
@@ -1848,6 +1854,27 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 )
                 safe = str(envelope.safe_dict())
                 self.assertNotIn("private", safe)
+
+        captured_variant_8 = bytes.fromhex(
+            "4d00081e00" + "4100" * 30 + "00070100"
+        )
+        parsed_variant_8 = ServerOpcode77Envelope.parse(captured_variant_8)
+        self.assertEqual(parsed_variant_8.to_bytes(), captured_variant_8)
+        self.assertTrue(parsed_variant_8.fully_bounded)
+        self.assertEqual(parsed_variant_8.variant_8_control, 7)
+        self.assertEqual(parsed_variant_8.variant_8_value, 1)
+        self.assertEqual(parsed_variant_8.safe_dict()["opaque_tail_length"], 0)
+
+        long_variant_8 = envelopes[-1]
+        self.assertFalse(long_variant_8.fully_bounded)
+        self.assertEqual(len(long_variant_8.opaque_tail), 117)
+
+        invalid_reserved = bytearray(captured_variant_8)
+        invalid_reserved[-4] = 1
+        with self.assertRaisesRegex(PacketShapeError, "reserved_zero"):
+            ServerOpcode77Envelope.parse(bytes(invalid_reserved))
+        with self.assertRaisesRegex(PacketShapeError, "both control and value"):
+            replace(envelopes[-2], variant_8_value=None).to_bytes()
 
         captured_variant_5 = bytes.fromhex(
             "4d000521005300490044005f0057004f0052004c0044004e004f005400490043"
@@ -5984,7 +6011,13 @@ class GameplayStateFoldTest(unittest.TestCase):
             ServerOpcode77Envelope(
                 variant=8,
                 primary_text="sensitive child text",
-                opaque_tail=b"\x00\x07\x00\x00",
+                variant_8_control=7,
+                variant_8_value=0,
+            ),
+            ServerOpcode77Envelope(
+                variant=8,
+                primary_text="sensitive binary text",
+                opaque_tail=b"x" * 117,
             ),
         )
         transcript = fixture_gameplay_transcript(
@@ -5999,12 +6032,12 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(analysis.valid, analysis.issues)
         self.assertEqual(analysis.state.current_hp, 70)
         self.assertEqual(analysis.state.current_mp, 136)
-        self.assertEqual(analysis.state.server_opcode_77_packets, 4)
+        self.assertEqual(analysis.state.server_opcode_77_packets, 5)
         self.assertEqual(
             analysis.state.server_opcode_77_by_variant,
-            {3: 1, 4: 1, 5: 1, 8: 1},
+            {3: 1, 4: 1, 5: 1, 8: 2},
         )
-        self.assertEqual(analysis.state.server_opcode_77_text_fields, 5)
+        self.assertEqual(analysis.state.server_opcode_77_text_fields, 6)
         expected_code_units = sum(
             sum(envelope.text_code_unit_counts) for envelope in envelopes
         )
@@ -6012,7 +6045,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.server_opcode_77_text_code_units,
             expected_code_units,
         )
-        self.assertEqual(analysis.state.server_opcode_77_opaque_bytes, 4)
+        self.assertEqual(analysis.state.server_opcode_77_opaque_bytes, 117)
         observations = [
             observation
             for observation in analysis.observations
@@ -6020,18 +6053,18 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            ["full", "full", "full", "partial"],
+            ["full", "full", "full", "full", "partial"],
         )
         events = [
             event
             for event in analysis.events
             if event.kind == "server_opcode_77_received"
         ]
-        self.assertEqual(len(events), 4)
+        self.assertEqual(len(events), 5)
         safe = str(analysis.safe_dict())
         self.assertNotIn("sensitive", safe)
         self.assertIn(
-            "server_opcode_77=packets:4 variants:",
+            "server_opcode_77=packets:5 variants:",
             render_gameplay_analysis(analysis),
         )
 

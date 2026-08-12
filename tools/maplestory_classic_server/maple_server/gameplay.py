@@ -8908,10 +8908,7 @@ class GameplayStateFold:
                 "server_opcode_77_received",
                 details=details,
             )
-            partial = (
-                envelope.variant
-                not in ServerOpcode77Envelope.FULLY_BOUNDED_VARIANTS
-            )
+            partial = not envelope.fully_bounded
             return self._observation(
                 frame,
                 kind="server_opcode_77_envelope",

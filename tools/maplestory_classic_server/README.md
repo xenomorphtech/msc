@@ -897,9 +897,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `49`: the three pickup-result variants for item quantity, mesos
   amount, and a still-neutral special value; each branch has full structural
   coverage,
-- server opcode `77`: redacted variants `3`/`4`/`5` fully bound one to three
-  counted UTF-16 fields plus their fixed neutral controls/value, while variant
-  `8` preserves only its 4- or 117-byte tail as opaque; safe state, events,
+- server opcode `77`: redacted variants `3`/`4`/`5` fully bind one to three
+  counted UTF-16 fields plus their fixed neutral controls/value; the repeated
+  short variant-`8` branch binds `zero u8 + control u8 + neutral u16`, while
+  its two distinct 117-byte item-like bodies remain opaque. Safe state, events,
   JSON, text output, and HTTP status expose lengths/distributions but never
   captured text,
 - server opcode `312`: the 7/11/15-byte field-drop removal variants, correlated
@@ -2533,3 +2534,7 @@ preserve distinct Unity scan codes in this setup.
     a reserved-zero word plus one neutral byte, validate both captured values,
     and leave the neighboring stat/job-script role unnamed. All 503 non-pickup
     opcode-`49` packets now have full coverage and zero opaque bytes.
+116. Type the repeated four-byte server opcode-`77` variant-`8` suffix as a
+    reserved-zero byte, neutral control byte, and neutral `u16`; promote all 11
+    short cross-capture records with isolated native validation, while leaving
+    the two distinct 117-byte item-like bodies opaque and partial.

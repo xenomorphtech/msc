@@ -2532,19 +2532,32 @@ variant 5:
 
 variant 8:
     utf16 primary_text
-    bytes opaque_tail                  # observed lengths 4 or 117
+    if exactly 4 bytes remain:
+        uint8 reserved_zero = 0
+        uint8 control                  # observed 0, 1, 4, or 7
+        uint16 terminal_value          # observed 0 or 1; role neutral
+    else:
+        bytes opaque_tail              # observed length 117
 ```
 
 Variant `3` always has its exact three-byte suffix. Variant `4` has 41 short
 false forms and ten true forms with a terminated string. All 22 variant-`5`
-packets use control pattern `03 0a 0a 02` and consume exactly. Variant `8`
-retains 278 opaque bytes across 13 packets and therefore remains partial;
-variants `3`, `4`, and `5` have full structural coverage.
+packets use control pattern `03 0a 0a 02` and consume exactly. Eleven of the 13
+variant-`8` packets independently agree on the four-byte short suffix above:
+controls `0/1/4/7` and terminal values `0/1`. Those short records now have full
+coverage. The two remaining variant-`8` records have distinct 117-byte,
+item-like bodies; they retain 234 opaque bytes and stay partial because the
+comparison does not establish their internal record grammar.
 
 Stream `92` contributes variants `3/4/5/8 = 152/13/9/6`, stream `114`
 contributes `1/1/0/0`, and level-1-through-10 stream `126` contributes
-`276/37/13/7`. Every packet reparses and round-trips exactly: 502 observations
-move from unknown to full and 13 move to partial. The fold emits
+`276/37/13/7`. Every packet reparses and round-trips exactly: 513 observations
+are full and two are partial. The strict stream totals are
+`34,552/655/0/0`, `64/12/0/0`, and `69,948/1,152/0/0`, respectively. Isolated
+native validation consumes all 11 promoted short records without a failure or
+unsupported shape. The active saved transcript contains no variant-`8` record;
+its two opcode-`77` observations remain full and the transcript stays valid at
+`763/19/0/0`. The fold emits
 `server_opcode_77_received`, tracks variant/control/value and text-length
 distributions plus opaque-byte totals, and never copies any of the three text
 fields into safe JSON, text reports, events, or HTTP status. The family keeps a

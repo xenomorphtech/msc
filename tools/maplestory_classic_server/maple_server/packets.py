@@ -4517,8 +4517,9 @@ class ServerOpcode77Envelope:
 
     The three text fields are retained for exact round trips but deliberately
     omitted from ``safe_dict`` because capture samples contain player-visible
-    and user-derived strings.  Variant 8 and unknown variants retain their
-    post-text/body bytes as opaque.
+    and user-derived strings.  The repeated short variant-8 branch exposes its
+    zero marker, control byte, and terminal u16; longer variant-8 bodies and
+    unknown variants remain opaque.
     """
 
     variant: int
@@ -4527,11 +4528,22 @@ class ServerOpcode77Envelope:
     tertiary_text: str | None = field(default=None, repr=False)
     control_bytes: tuple[int, ...] = ()
     terminal_u32: int | None = None
+    variant_8_control: int | None = None
+    variant_8_value: int | None = None
     opaque_tail: bytes = field(default=b"", repr=False)
     opcode: int = 77
 
     FULLY_BOUNDED_VARIANTS = frozenset({3, 4, 5})
     VARIANT_5_CONTROLS = (3, 10, 10, 2)
+
+    @property
+    def fully_bounded(self) -> bool:
+        return self.variant in self.FULLY_BOUNDED_VARIANTS or (
+            self.variant == 8
+            and self.variant_8_control is not None
+            and self.variant_8_value is not None
+            and not self.opaque_tail
+        )
 
     @property
     def text_code_unit_counts(self) -> tuple[int, ...]:
@@ -4555,6 +4567,8 @@ class ServerOpcode77Envelope:
         tertiary_text = None
         control_bytes: tuple[int, ...] = ()
         terminal_u32 = None
+        variant_8_control = None
+        variant_8_value = None
         opaque_tail = b""
         if variant == 3:
             primary_text = reader.utf16_string(
@@ -4598,7 +4612,17 @@ class ServerOpcode77Envelope:
             primary_text = reader.utf16_string(
                 "primary_text", trailing_byte=False
             )
-            opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
+            if reader.remaining == 4:
+                reserved_zero = reader.u8("reserved_zero")
+                if reserved_zero != 0:
+                    raise PacketShapeError(
+                        "server_opcode_77_envelope variant 8 reserved_zero "
+                        f"is {reserved_zero}, expected 0"
+                    )
+                variant_8_control = reader.u8("variant_8_control")
+                variant_8_value = reader.u16("variant_8_value")
+            else:
+                opaque_tail = reader.bytes(reader.remaining, "opaque_tail")
         else:
             opaque_tail = reader.bytes(reader.remaining, "opaque_body")
         reader.finish()
@@ -4609,6 +4633,8 @@ class ServerOpcode77Envelope:
             tertiary_text=tertiary_text,
             control_bytes=control_bytes,
             terminal_u32=terminal_u32,
+            variant_8_control=variant_8_control,
+            variant_8_value=variant_8_value,
             opaque_tail=opaque_tail,
         )
 
@@ -4619,6 +4645,8 @@ class ServerOpcode77Envelope:
             "text_code_unit_counts": list(self.text_code_unit_counts),
             "control_bytes": list(self.control_bytes),
             "terminal_u32": self.terminal_u32,
+            "variant_8_control": self.variant_8_control,
+            "variant_8_value": self.variant_8_value,
             "opaque_tail_length": len(self.opaque_tail),
             "text_redacted": bool(self.text_code_unit_counts),
         }
@@ -4633,6 +4661,13 @@ class ServerOpcode77Envelope:
                 "their unsigned integer widths"
             ) from error
         texts = (self.primary_text, self.secondary_text, self.tertiary_text)
+        if self.variant != 8 and (
+            self.variant_8_control is not None
+            or self.variant_8_value is not None
+        ):
+            raise PacketShapeError(
+                "server opcode-77 variant-8 suffix fields require variant 8"
+            )
         if self.variant == 3:
             if self.primary_text is None or any(
                 text is not None for text in texts[1:]
@@ -4736,18 +4771,48 @@ class ServerOpcode77Envelope:
                 )
             if self.control_bytes or self.terminal_u32 is not None:
                 raise PacketShapeError(
-                    "server opcode-77 variant 8 retains only an opaque tail"
+                    "server opcode-77 variant 8 does not use generic controls "
+                    "or terminal_u32"
                 )
-            return (
-                header
-                + encode_utf16_string(self.primary_text, trailing_byte=False)
-                + self.opaque_tail
-            )
+            short_values = (self.variant_8_control, self.variant_8_value)
+            if any(value is not None for value in short_values):
+                if any(value is None for value in short_values):
+                    raise PacketShapeError(
+                        "server opcode-77 short variant 8 needs both control "
+                        "and value"
+                    )
+                if self.opaque_tail:
+                    raise PacketShapeError(
+                        "server opcode-77 short variant 8 has no opaque tail"
+                    )
+                control = self.variant_8_control
+                value = self.variant_8_value
+                if control is None or value is None:
+                    raise AssertionError(
+                        "validated opcode-77 variant-8 suffix is incomplete"
+                    )
+                try:
+                    suffix = struct.pack("<BBH", 0, control, value)
+                except struct.error as error:
+                    raise PacketShapeError(
+                        "server opcode-77 variant-8 control and value must fit "
+                        "uint8 and uint16"
+                    ) from error
+            else:
+                suffix = self.opaque_tail
+            return header + encode_utf16_string(
+                self.primary_text, trailing_byte=False
+            ) + suffix
         if any(text is not None for text in texts):
             raise PacketShapeError(
                 "unknown server opcode-77 variants cannot contain typed text"
             )
-        if self.control_bytes or self.terminal_u32 is not None:
+        if (
+            self.control_bytes
+            or self.terminal_u32 is not None
+            or self.variant_8_control is not None
+            or self.variant_8_value is not None
+        ):
             raise PacketShapeError(
                 "unknown server opcode-77 variants retain only an opaque body"
             )

@@ -674,10 +674,11 @@
 - Server opcode `77` now has a redacted structural envelope across all 515
   sustained-corpus samples. Variants `3`, `4`, and `5` fully bound their
   counted UTF-16 fields, optional terminator, fixed controls, and neutral
-  terminal value; variant `8` preserves 278 final bytes across 13 packets as
-  opaque. Streams `92`, `114`, and `126` contribute 180, 2, and 333 exact
-  round-trips respectively, promoting 502 observations to full and 13 to
-  partial coverage. State/events expose only variant, text-length,
+  terminal value. Eleven short variant-`8` records also bind a reserved-zero
+  byte, neutral control byte, and neutral `u16`; the two distinct long records
+  preserve 117 opaque bytes each. Streams `92`, `114`, and `126` contribute
+  180, 2, and 333 exact round-trips respectively, with 513 observations full
+  and two partial. State/events expose only variant, text-length,
   control/value, and opaque-byte distributions; captured text is omitted from
   safe reports and HTTP status.
 - Client opcode `217`, separate from the same-numbered server life-movement
@@ -851,6 +852,14 @@
   both records to full and moving stream `126` to `69,942/1,158/0/0`; streams
   `92` and `114` remain `34,547/660/0/0` and `64/12/0/0`. The entire 503-packet
   non-pickup opcode-`49` family now has full coverage and zero opaque bytes.
+- Server opcode `77` variant `8` now types its repeated short suffix as one
+  reserved-zero byte, one neutral control byte, and one neutral `u16`. All 11
+  short records across streams `126` and `92` round-trip and pass isolated
+  native validation, promoting six/five observations and advancing coverage to
+  `69,948/1,152/0/0` and `34,552/655/0/0`. The two distinct 117-byte item-like
+  bodies remain partial with 234 opaque bytes total. The active saved transcript
+  contains no variant-`8` record and remains valid at `763/19/0/0`; safe events
+  and HTTP-derived analysis expose only text lengths and neutral suffix values.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

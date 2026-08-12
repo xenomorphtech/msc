@@ -1180,7 +1180,7 @@
     },
     {
       "name":"typed_notice","direction":"server_to_client","opcode":77,
-      "source":"opcode-77 width clusters compared by u8 discriminator; UTF-16 counts and type-5 parameter list exactly explain 181 non-binary capture frames",
+      "source":"opcode-77 width clusters compared by u8 discriminator; UTF-16 counts and type-5 parameters explain the text variants, while all 11 short type-8 frames across both reference captures share a zero byte, control u8, and terminal u16",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":77},{"op":"read","name":"notice_type","kind":"u8"},
         {"op":"switch","field":"notice_type","cases":[
@@ -1196,7 +1196,7 @@
               ]}
             ]}
           ]},
-          {"equals":8,"operations":[{"op":"utf16","name":"message","trailing_zero":false},{"op":"bytes","name":"message_tail","length":4}]}
+          {"equals":8,"operations":[{"op":"utf16","name":"message","trailing_zero":false},{"op":"read","name":"reserved_zero","kind":"u8","equals":0},{"op":"read","name":"control","kind":"u8"},{"op":"read","name":"terminal_value","kind":"u16"}]}
         ]}
       ]
     },
