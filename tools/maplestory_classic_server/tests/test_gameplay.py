@@ -3426,7 +3426,11 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ServerU32OpaqueTailEnvelope(
                 opcode=opcode,
                 primary_value=2_345_678 + index,
-                opaque_tail=bytes((index + 1,)) * tail_length,
+                opaque_tail=(
+                    b"\x00" * tail_length
+                    if opcode in {234, 235}
+                    else bytes((index + 1,)) * tail_length
+                ),
             )
             for index, (opcode, tail_length) in enumerate(
                 (
@@ -3454,13 +3458,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 self.assertNotIn(envelope.opaque_tail.hex(), safe)
                 self.assertEqual(
                     envelope.safe_dict()["opaque_tail_length"],
-                    len(envelope.opaque_tail),
+                    0 if envelope.fully_bounded else len(envelope.opaque_tail),
                 )
 
         with self.assertRaisesRegex(PacketShapeError, "expected one of"):
             replace(envelopes[0], opaque_tail=b"short").to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "opcode must be one of"):
             replace(envelopes[0], opcode=229).to_bytes()
+        with self.assertRaisesRegex(
+            PacketShapeError, "reserved tail must be all zero"
+        ):
+            replace(envelopes[-1], opaque_tail=b"\x00" * 5 + b"\x01").to_bytes()
 
     def test_server_opcode_137_pair_ledger_round_trip(self) -> None:
         ledger = ServerOpcode137PairLedger(
@@ -7960,8 +7968,8 @@ class GameplayStateFoldTest(unittest.TestCase):
             ServerU32OpaqueTailEnvelope(103, b"\x03" * 7, 230),
             ServerU32OpaqueTailEnvelope(104, b"\x04" * 20, 231),
             ServerU32OpaqueTailEnvelope(105, b"\x05" * 16, 232),
-            ServerU32OpaqueTailEnvelope(106, b"\x06" * 3, 234),
-            ServerU32OpaqueTailEnvelope(107, b"\x07" * 6, 235),
+            ServerU32OpaqueTailEnvelope(106, b"\x00" * 3, 234),
+            ServerU32OpaqueTailEnvelope(107, b"\x00" * 6, 235),
         )
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
@@ -7992,7 +8000,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             },
         )
         self.assertEqual(analysis.state.neutral_server_typed_values, 57)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_689)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_680)
         self.assertEqual(analysis.state.pet_activations, 1)
         self.assertEqual(analysis.state.pet_activations_for_local_player, 0)
         self.assertEqual(
@@ -8026,8 +8034,8 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "partial",
                 "partial",
                 "partial",
-                "partial",
-                "partial",
+                "full",
+                "full",
             ],
         )
         self.assertEqual(

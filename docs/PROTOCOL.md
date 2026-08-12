@@ -2033,13 +2033,13 @@ muted and a ready world connection.
 These six opcodes are registered on the same generated handler class. Each
 handler makes exactly one direct `PacketReader` call, a `u32`, then invokes its
 local state method without another reader call. The captures contain additional
-bytes after that value, so the honest boundary is a typed leading value plus an
-ignored, capture-bounded tail:
+bytes after that value, so the shared boundary starts as a typed leading value
+plus a capture-bounded suffix:
 
 ```text
 uint16 opcode
 uint32 primary_value
-bytes  opaque_tail
+bytes  suffix
 ```
 
 Only these observed opcode/tail-length combinations are accepted:
@@ -2051,23 +2051,32 @@ Only these observed opcode/tail-length combinations are accepted:
 | `230` | `7` | `13` | `1` in stream `126` |
 | `231` | `20` | `26` | `1` in stream `126` |
 | `232` | `16` | `22` | `1` in stream `92` |
-| `234` | `3` | `9` | `1` in stream `92`, `2` in stream `126` |
-| `235` | `6` | `12` | `1` in stream `92`, `2` in stream `126` |
+| `234` | `3` reserved zero | `9` | `1` in stream `92`, `2` in stream `126` |
+| `235` | `6` reserved zero | `12` | `1` in stream `92`, `2` in stream `126` |
 
 The shared Python envelope consumes and re-emits all 12 packets exactly.
 Safe state and `neutral_server_record_received` events publish only opcode,
-typed-value count, and opaque-tail length; the `u32` and tail bytes are
-redacted. Observations remain partial because the client handler does not give
-the tail bytes a readable role. Seven semantic manifest declarations replace
+typed-value count, reserved-zero length, and opaque-tail length; the `u32` and
+non-reserved tail bytes are redacted. Across both captures, all three opcode-
+`234` suffixes are three zero bytes and all three opcode-`235` suffixes are six
+zero bytes. Capture-bounded zero validation promotes these six observations to
+full coverage; the other six family observations remain partial because their
+suffix bytes have no readable role. Seven semantic manifest declarations replace
 the five matching `111` opaque pins and add the two widths found only in
 `1-10FS`; targeted native validation passes `12/12` with no unsupported or
 consumption failures.
 
-The family moves seven long-stream and five stream-`92` observations from
-unknown to partial. Strict totals become `26,659/44,380/61/0` for stream `126`,
-`13,410/21,760/37/0` for stream `92`, and `49/20/7/0` for stream `114`. Live
-replay is deferred: the leading value may identify session-local state, and
-replaying an untyped ignored tail across sessions would not be a bounded test.
+The current strict totals after this refinement are `69,938/1,162/0/0` for
+stream `126`, `34,542/665/0/0` for stream `92`, and `64/12/0/0` for stream
+`114`. The family retains 49 opaque bytes and separately accounts for 27
+reserved-zero bytes. The active saved transcript contains neither opcode and
+remains warning-free at `2,980/54/0/0`.
+
+At its original introduction, the family moved seven long-stream and five
+stream-`92` observations from unknown to partial; the current totals are the
+refined values above. Live replay remains deferred: the leading value may
+identify session-local state, and replaying a captured value across sessions
+would not be a bounded semantic test.
 
 ## Variable server records (`156`, `385`)
 

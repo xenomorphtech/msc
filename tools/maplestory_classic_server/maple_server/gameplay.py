@@ -11069,9 +11069,10 @@ class GameplayStateFold:
                 "neutral_server_record_received",
                 details=details,
             )
-            partial = opcode in {
-                *ServerU32OpaqueTailEnvelope.CAPTURED_TAIL_LENGTHS,
-            } or (
+            partial = (
+                isinstance(neutral_record, ServerU32OpaqueTailEnvelope)
+                and not neutral_record.fully_bounded
+            ) or (
                 isinstance(neutral_record, ServerOpcode148Envelope)
                 and not neutral_record.fully_bounded
             )

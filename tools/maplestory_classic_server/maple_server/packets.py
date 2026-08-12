@@ -11304,6 +11304,16 @@ class ServerU32OpaqueTailEnvelope:
         234: frozenset({3}),
         235: frozenset({6}),
     }
+    RESERVED_ZERO_TAIL_LENGTHS = {234: 3, 235: 6}
+
+    @property
+    def fully_bounded(self) -> bool:
+        reserved_length = self.RESERVED_ZERO_TAIL_LENGTHS.get(self.opcode)
+        return (
+            reserved_length is not None
+            and len(self.opaque_tail) == reserved_length
+            and not any(self.opaque_tail)
+        )
 
     @classmethod
     def parse(cls, payload: bytes) -> "ServerU32OpaqueTailEnvelope":
@@ -11338,13 +11348,23 @@ class ServerU32OpaqueTailEnvelope:
                 f"{len(self.opaque_tail)} bytes, expected one of "
                 f"{sorted(expected_lengths)}"
             )
+        if self.opcode in self.RESERVED_ZERO_TAIL_LENGTHS and any(
+            self.opaque_tail
+        ):
+            raise PacketShapeError(
+                f"server opcode-{self.opcode} reserved tail must be all zero"
+            )
 
     def safe_dict(self) -> dict[str, int | bool]:
+        reserved_zero_length = len(self.opaque_tail) if self.fully_bounded else 0
         return {
             "primary_value_redacted": True,
             "typed_value_count": 1,
-            "opaque_tail_length": len(self.opaque_tail),
-            "opaque_tail_redacted": bool(self.opaque_tail),
+            "reserved_zero_length": reserved_zero_length,
+            "opaque_tail_length": len(self.opaque_tail) - reserved_zero_length,
+            "opaque_tail_redacted": (
+                bool(self.opaque_tail) and not self.fully_bounded
+            ),
         }
 
     def to_bytes(self) -> bytes:

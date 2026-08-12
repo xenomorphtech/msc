@@ -1519,14 +1519,14 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":232},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":16}]
     },
     {
-      "name":"server_opcode_234_u32_opaque_tail","direction":"server_to_client","opcode":234,"length":9,
-      "source":"generated handler fc681013... reads one u32; all three gameplay packets retain three unconsumed capture-bounded bytes",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":234},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":3}]
+      "name":"server_opcode_234_u32_reserved_zero","direction":"server_to_client","opcode":234,"length":9,
+      "source":"generated handler fc681013... reads one u32; all three gameplay packets end in three reserved-zero bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":234},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"reserved_zero","length":3,"equals_hex":"000000"}]
     },
     {
-      "name":"server_opcode_235_u32_opaque_tail","direction":"server_to_client","opcode":235,"length":12,
-      "source":"generated handler ead463fb... reads one u32; all three gameplay packets retain six unconsumed capture-bounded bytes",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":235},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":6}]
+      "name":"server_opcode_235_u32_reserved_zero","direction":"server_to_client","opcode":235,"length":12,
+      "source":"generated handler ead463fb... reads one u32; all three gameplay packets end in six reserved-zero bytes",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":235},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"reserved_zero","length":6,"equals_hex":"000000000000"}]
     },
     {
       "name":"server_opcode_27_integer_ledger_large","direction":"server_to_client","opcode":27,"length":1056,

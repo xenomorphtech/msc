@@ -2517,3 +2517,6 @@ preserve distinct Unity scan codes in this setup.
 111. Replace opcode-`137`'s 72-byte opaque tail with the pinned handler's
     counted ten-pair loop, independently validate all three reference packets,
     and expose only structural counts while keeping pair values redacted.
+112. Promote all six generated-u32 opcode-`234`/`235` records by validating
+    their exact three-/six-byte reserved-zero suffixes, retaining the sibling
+    `228/230/231/232` suffixes as explicit opaque partial data.

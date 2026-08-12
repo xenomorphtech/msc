@@ -537,13 +537,29 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         ("server_opcode_230_u32_long_tail", 230, 13),
         ("server_opcode_231_u32_opaque_tail", 231, 26),
         ("server_opcode_232_u32_opaque_tail", 232, 22),
-        ("server_opcode_234_u32_opaque_tail", 234, 9),
-        ("server_opcode_235_u32_opaque_tail", 235, 12),
     ] {
         let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
         assert_eq!(shape.opcode, opcode);
         assert_eq!(shape.length, Some(length));
         assert_eq!(shape.operations.len(), 3);
+    }
+
+    for (name, opcode, length, reserved_length) in [
+        ("server_opcode_234_u32_reserved_zero", 234, 9, 3),
+        ("server_opcode_235_u32_reserved_zero", 235, 12, 6),
+    ] {
+        let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
+        assert_eq!(shape.opcode, opcode);
+        assert_eq!(shape.length, Some(length));
+        assert!(matches!(
+            shape.operations.last().unwrap(),
+            ShapeOp::Bytes {
+                length,
+                equals_hex: Some(value),
+                ..
+            } if *length == reserved_length
+                && value == &"00".repeat(reserved_length)
+        ));
     }
 
     let opcode_272 = shapes

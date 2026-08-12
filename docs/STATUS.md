@@ -820,6 +820,15 @@
   transcript contains no opcode-`137` packet and remains warning-free at
   `2,980/54/0/0`. Safe JSON and HTTP-derived analysis expose record and unique
   counts while keeping both numeric values redacted.
+- Generated-u32 server opcodes `234` and `235` now validate their complete
+  capture-bounded suffixes as three and six reserved-zero bytes. All three
+  packets per opcode round-trip and pass native validation, promoting six
+  observations to full coverage and moving streams `126`/`92` to
+  `69,938/1,162/0/0` and `34,542/665/0/0`; stream `114` remains
+  `64/12/0/0`. The sibling `228/230/231/232` records remain partial with 49
+  opaque bytes total. The active saved transcript contains neither promoted
+  opcode and stays warning-free at `2,980/54/0/0`. Safe JSON and HTTP-derived
+  analysis redact the u32 and expose only structural suffix lengths.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

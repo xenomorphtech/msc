@@ -293,6 +293,12 @@ provides 131 full and four partial observations, 332 typed numeric values, and
 record count, fixed width, and reserved-zero byte total.
 Potentially identifying values are retained for exact re-emission but omitted
 from safe state, events, and reports.
+The shared generated-u32 envelope now fully bounds opcodes `234` and `235`:
+their six combined reference packets end in three and six reserved-zero bytes,
+respectively. Safe events and HTTP-derived analysis continue to redact the u32,
+report the reserved-zero length, and count zero opaque bytes. The other six
+opcodes `228/230/231/232` observations in this envelope remain partial with 49
+opaque bytes because their suffixes are not assigned a role.
 
 Opcode `201` is now separate typed `pet_activated` state rather than a neutral
 record. Its owner, slot, activation controls, pet item, empty counted name,
