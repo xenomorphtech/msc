@@ -7248,8 +7248,8 @@ class GameplayStateFold:
                 parsed=submission,
                 details=details,
                 issues=(
-                    "life movement command payload and control/tail roles "
-                    "remain opaque",
+                    "life movement control/tail and command-specific unknown "
+                    "roles remain neutral",
                 ),
             )
         if opcode == 182:
@@ -11484,6 +11484,10 @@ class GameplayStateFold:
                 self._player_aliases, broadcast.object_id, "player"
             )
             known_player = broadcast.object_id in self.state.observed_players
+            final_position = path.final_position
+            if known_player and final_position is not None:
+                player = self.state.observed_players[broadcast.object_id]
+                player.x, player.y = final_position
             self.state.life_movement_broadcasts += 1
             self.state.life_movement_broadcast_commands += len(path.commands)
             self.state.life_movement_broadcast_commands_by_type.update(
@@ -11497,6 +11501,7 @@ class GameplayStateFold:
                 "entity": alias,
                 "known_player": known_player,
                 **path.safe_dict(),
+                "final_position": final_position,
                 "field_epoch": self.state.field_epoch,
             }
             self._event(
@@ -11511,7 +11516,10 @@ class GameplayStateFold:
                 coverage=ShapeCoverage.PARTIAL,
                 parsed=broadcast,
                 details=details,
-                issues=("life movement command payload roles remain opaque",),
+                issues=(
+                    "life movement command-specific unknown roles remain "
+                    "neutral",
+                ),
             )
         if opcode == 202:
             broadcast = PlayerMovementBroadcast.parse(payload)

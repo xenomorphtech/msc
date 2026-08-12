@@ -408,11 +408,41 @@ def fixture_life_movement_path() -> LifeMovementPath:
         reference_x=100,
         reference_y=-200,
         commands=(
-            LifeMovementCommand(command_type=0, opaque_payload=b"\x00" * 13),
-            LifeMovementCommand(command_type=2, opaque_payload=b"\x00" * 7),
-            LifeMovementCommand(command_type=10, opaque_payload=b"\x00"),
-            LifeMovementCommand(command_type=14, opaque_payload=b"\x00" * 9),
-            LifeMovementCommand(command_type=15, opaque_payload=b"\x00" * 15),
+            LifeMovementCommand.absolute(
+                position_x=110,
+                position_y=-190,
+                last_x=3,
+                last_y=-4,
+                foothold_id=5,
+                stance=6,
+                duration_ms=7,
+            ),
+            LifeMovementCommand.relative(
+                command_type=2,
+                delta_x=8,
+                delta_y=-9,
+                stance=10,
+                duration_ms=11,
+            ),
+            LifeMovementCommand.equipment_change(12),
+            LifeMovementCommand.teleport(
+                command_type=14,
+                position_x=120,
+                position_y=-180,
+                unknown_value=13,
+                stance=14,
+                trailing_value=15,
+            ),
+            LifeMovementCommand.jump_down(
+                position_x=130,
+                position_y=-170,
+                vector_x=16,
+                vector_y=-17,
+                unknown_value_1=18,
+                unknown_value_2=19,
+                stance=20,
+                trailing_value=21,
+            ),
         ),
     )
 
@@ -3991,6 +4021,80 @@ class GameplayPacketShapeTest(unittest.TestCase):
             [0, 2, 10, 14, 15],
         )
         self.assertEqual(
+            [command.byte_length for command in life_path.commands],
+            [14, 8, 2, 10, 16],
+        )
+        self.assertEqual(life_path.final_position, (130, -170))
+        self.assertEqual(
+            life_path.commands[0].safe_dict(),
+            {
+                "type": 0,
+                "kind": "absolute",
+                "position_x": 110,
+                "position_y": -190,
+                "last_x": 3,
+                "last_y": -4,
+                "foothold_id": 5,
+                "stance": 6,
+                "duration_ms": 7,
+            },
+        )
+        self.assertEqual(
+            life_path.commands[1].safe_dict(),
+            {
+                "type": 2,
+                "kind": "relative",
+                "delta_x": 8,
+                "delta_y": -9,
+                "stance": 10,
+                "duration_ms": 11,
+            },
+        )
+        self.assertEqual(
+            life_path.commands[2].safe_dict(),
+            {"type": 10, "kind": "equipment_change", "value": 12},
+        )
+        self.assertEqual(life_path.commands[3].safe_dict()["kind"], "teleport")
+        self.assertEqual(
+            life_path.commands[4].safe_dict(),
+            {
+                "type": 15,
+                "kind": "jump_down",
+                "position_x": 130,
+                "position_y": -170,
+                "vector_x": 16,
+                "vector_y": -17,
+                "unknown_value_1": 18,
+                "unknown_value_2": 19,
+                "stance": 20,
+                "trailing_value": 21,
+            },
+        )
+        self.assertEqual(
+            LifeMovementCommand.chair(
+                position_x=22,
+                position_y=-23,
+                unknown_value=24,
+                stance=25,
+                trailing_value=26,
+            ).safe_dict(),
+            {
+                "type": 11,
+                "kind": "chair",
+                "position_x": 22,
+                "position_y": -23,
+                "unknown_value": 24,
+                "stance": 25,
+                "trailing_value": 26,
+            },
+        )
+        self.assertEqual(
+            LifeMovementCommand(
+                command_type=21, opaque_payload=b"\x01\x02\x03"
+            ).safe_dict(),
+            {"type": 21, "kind": "opaque", "opaque_payload_bytes": 3},
+        )
+        self.assertEqual(
             [command.byte_length for command in path.commands],
             [14, 8, 6, 14, 14],
         )
@@ -4019,6 +4123,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "needs 13 opaque bytes"):
             LifeMovementCommand(command_type=0, opaque_payload=b"").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "type must be 0, 5, or 17"):
+            LifeMovementCommand.absolute(
+                command_type=1,
+                position_x=0,
+                position_y=0,
+                last_x=0,
+                last_y=0,
+                foothold_id=0,
+                stance=0,
+                duration_ms=0,
+            )
         with self.assertRaisesRegex(PacketShapeError, "tail type 17 needs 8"):
             LifeMovementSubmission(
                 local_object_index=0,

@@ -7481,6 +7481,12 @@ class LifeMovementCommand:
     command_type: int
     opaque_payload: bytes
 
+    _ABSOLUTE_TYPES = {0, 5, 17}
+    _RELATIVE_TYPES = {1, 2, 6, 12, 13, 16}
+    _TELEPORT_TYPES = {3, 4, 7, 8, 9, 14}
+    _EQUIPMENT_CHANGE_TYPE = 10
+    _CHAIR_TYPE = 11
+    _JUMP_DOWN_TYPE = 15
     _PAYLOAD_LENGTHS = {
         0: 13,
         1: 7,
@@ -7508,6 +7514,156 @@ class LifeMovementCommand:
     }
 
     @classmethod
+    def absolute(
+        cls,
+        *,
+        command_type: int = 0,
+        position_x: int,
+        position_y: int,
+        last_x: int,
+        last_y: int,
+        foothold_id: int,
+        stance: int,
+        duration_ms: int,
+    ) -> "LifeMovementCommand":
+        if command_type not in cls._ABSOLUTE_TYPES:
+            raise PacketShapeError(
+                "absolute life movement command type must be 0, 5, or 17"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=struct.pack(
+                "<hhhhHBh",
+                position_x,
+                position_y,
+                last_x,
+                last_y,
+                foothold_id,
+                stance,
+                duration_ms,
+            ),
+        )
+
+    @classmethod
+    def relative(
+        cls,
+        *,
+        command_type: int = 1,
+        delta_x: int,
+        delta_y: int,
+        stance: int,
+        duration_ms: int,
+    ) -> "LifeMovementCommand":
+        if command_type not in cls._RELATIVE_TYPES:
+            raise PacketShapeError(
+                "relative life movement command type is not supported"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=struct.pack(
+                "<hhBh", delta_x, delta_y, stance, duration_ms
+            ),
+        )
+
+    @classmethod
+    def teleport(
+        cls,
+        *,
+        command_type: int = 3,
+        position_x: int,
+        position_y: int,
+        unknown_value: int,
+        stance: int,
+        trailing_value: int,
+    ) -> "LifeMovementCommand":
+        if command_type not in cls._TELEPORT_TYPES:
+            raise PacketShapeError(
+                "teleport life movement command type is not supported"
+            )
+        return cls(
+            command_type=command_type,
+            opaque_payload=struct.pack(
+                "<hhhBh",
+                position_x,
+                position_y,
+                unknown_value,
+                stance,
+                trailing_value,
+            ),
+        )
+
+    @classmethod
+    def equipment_change(cls, value: int) -> "LifeMovementCommand":
+        return cls(
+            command_type=cls._EQUIPMENT_CHANGE_TYPE,
+            opaque_payload=struct.pack("<B", value),
+        )
+
+    @classmethod
+    def chair(
+        cls,
+        *,
+        position_x: int,
+        position_y: int,
+        unknown_value: int,
+        stance: int,
+        trailing_value: int,
+    ) -> "LifeMovementCommand":
+        return cls(
+            command_type=cls._CHAIR_TYPE,
+            opaque_payload=struct.pack(
+                "<hhhBh",
+                position_x,
+                position_y,
+                unknown_value,
+                stance,
+                trailing_value,
+            ),
+        )
+
+    @classmethod
+    def jump_down(
+        cls,
+        *,
+        position_x: int,
+        position_y: int,
+        vector_x: int,
+        vector_y: int,
+        unknown_value_1: int,
+        unknown_value_2: int,
+        stance: int,
+        trailing_value: int,
+    ) -> "LifeMovementCommand":
+        return cls(
+            command_type=cls._JUMP_DOWN_TYPE,
+            opaque_payload=struct.pack(
+                "<hhhhhHBh",
+                position_x,
+                position_y,
+                vector_x,
+                vector_y,
+                unknown_value_1,
+                unknown_value_2,
+                stance,
+                trailing_value,
+            ),
+        )
+
+    @property
+    def byte_length(self) -> int:
+        return 1 + len(self.opaque_payload)
+
+    @property
+    def position(self) -> tuple[int, int] | None:
+        if self.command_type not in (
+            self._ABSOLUTE_TYPES
+            | self._TELEPORT_TYPES
+            | {self._CHAIR_TYPE, self._JUMP_DOWN_TYPE}
+        ):
+            return None
+        return struct.unpack_from("<hh", self.opaque_payload)
+
+    @classmethod
     def parse(
         cls,
         reader: PacketReader,
@@ -7532,8 +7688,98 @@ class LifeMovementCommand:
         )
 
     def safe_dict(self) -> dict[str, object]:
+        if self.command_type in self._ABSOLUTE_TYPES:
+            (
+                position_x,
+                position_y,
+                last_x,
+                last_y,
+                foothold_id,
+                stance,
+                duration_ms,
+            ) = struct.unpack("<hhhhHBh", self.opaque_payload)
+            return {
+                "type": self.command_type,
+                "kind": "absolute",
+                "position_x": position_x,
+                "position_y": position_y,
+                "last_x": last_x,
+                "last_y": last_y,
+                "foothold_id": foothold_id,
+                "stance": stance,
+                "duration_ms": duration_ms,
+            }
+        if self.command_type in self._RELATIVE_TYPES:
+            delta_x, delta_y, stance, duration_ms = struct.unpack(
+                "<hhBh", self.opaque_payload
+            )
+            return {
+                "type": self.command_type,
+                "kind": "relative",
+                "delta_x": delta_x,
+                "delta_y": delta_y,
+                "stance": stance,
+                "duration_ms": duration_ms,
+            }
+        if self.command_type in self._TELEPORT_TYPES:
+            position_x, position_y, unknown_value, stance, trailing_value = (
+                struct.unpack("<hhhBh", self.opaque_payload)
+            )
+            return {
+                "type": self.command_type,
+                "kind": "teleport",
+                "position_x": position_x,
+                "position_y": position_y,
+                "unknown_value": unknown_value,
+                "stance": stance,
+                "trailing_value": trailing_value,
+            }
+        if self.command_type == self._EQUIPMENT_CHANGE_TYPE:
+            (value,) = struct.unpack("<B", self.opaque_payload)
+            return {
+                "type": self.command_type,
+                "kind": "equipment_change",
+                "value": value,
+            }
+        if self.command_type == self._CHAIR_TYPE:
+            position_x, position_y, unknown_value, stance, trailing_value = (
+                struct.unpack("<hhhBh", self.opaque_payload)
+            )
+            return {
+                "type": self.command_type,
+                "kind": "chair",
+                "position_x": position_x,
+                "position_y": position_y,
+                "unknown_value": unknown_value,
+                "stance": stance,
+                "trailing_value": trailing_value,
+            }
+        if self.command_type == self._JUMP_DOWN_TYPE:
+            (
+                position_x,
+                position_y,
+                vector_x,
+                vector_y,
+                unknown_value_1,
+                unknown_value_2,
+                stance,
+                trailing_value,
+            ) = struct.unpack("<hhhhhHBh", self.opaque_payload)
+            return {
+                "type": self.command_type,
+                "kind": "jump_down",
+                "position_x": position_x,
+                "position_y": position_y,
+                "vector_x": vector_x,
+                "vector_y": vector_y,
+                "unknown_value_1": unknown_value_1,
+                "unknown_value_2": unknown_value_2,
+                "stance": stance,
+                "trailing_value": trailing_value,
+            }
         return {
             "type": self.command_type,
+            "kind": "opaque",
             "opaque_payload_bytes": len(self.opaque_payload),
         }
 
@@ -7593,6 +7839,17 @@ class LifeMovementPath:
             ],
             "commands": [command.safe_dict() for command in self.commands],
         }
+
+    @property
+    def final_position(self) -> tuple[int, int] | None:
+        return next(
+            (
+                command.position
+                for command in reversed(self.commands)
+                if command.position is not None
+            ),
+            None,
+        )
 
     def to_bytes(self) -> bytes:
         if not self.commands:

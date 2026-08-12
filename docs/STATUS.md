@@ -634,11 +634,14 @@
 - Client opcode `47` and server opcode `217` are now structurally exact
   life-movement relay/broadcast packets. Stream `126` validates 2,585 client
   submissions with 8,189 commands and 347 server broadcasts with 1,399
-  commands; 344 broadcasts name an already active player and three precede
-  player discovery. Stream `92` independently validates all four observed
-  client-tail variants and additional command tags. The fold emits redacted
-  events and command/tail distributions; opaque command bodies and field roles
-  keep the family at partial semantic coverage.
+  commands; all 347 broadcasts name an already active player. Stream `92`
+  independently validates all four observed
+  client-tail variants and additional command tags. Independent v83 movement
+  parsers now name the absolute, relative, equipment-change, chair,
+  teleport-like, and jump-down layouts. The fold emits their safe fields and
+  advances known remote-player aliases to the last positioned command; neutral
+  control/tail values, conflicting teleport labels, and unobserved tags keep the
+  family at partial semantic coverage.
 - Client opcode `13` is now decoded on world connections using the same neutral
   family as login. Stream `126` has 970 exact 11-byte type-`1` envelopes;
   stream `92` has 446 type-`1`, 104 length-prefixed type-`6`, and five
@@ -1329,14 +1332,17 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
 
 ## Immediate next steps
 
-1. Preserve the pickup-specific command-final coordinate selector and its
+1. Preserve the newly typed life-movement command-final coordinate selector
+   and its pickup folded-trailer fallback as a regression boundary. Extend
+   command tags `18..22` only from independently observed packets.
+2. Preserve the pickup-specific command-final coordinate selector and its
    folded-trailer fallback as a regression boundary. Extend pickup handling to
    additional item/request shapes only from independently admitted evidence,
    and continue serving `[39,49,312]` only after an authentic opcode-`185` or
    compact opcode-`222` request.
-2. Capture a ranked or multi-character login to exercise the typed
+3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
-3. Keep packet injection an explicit loopback-only opt-in while expanding
+4. Keep packet injection an explicit loopback-only opt-in while expanding
    stateful handlers only from independently validated evidence.
 
 ## Useful proof artifacts

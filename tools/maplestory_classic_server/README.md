@@ -935,7 +935,11 @@ The gameplay fold currently models these capture-backed boundaries:
   and no effect or replay behavior is inferred,
 - client opcode `47`: structurally exact life-movement relay with local object
   index, redacted client token, neutral control value, fixed-width command
-  stream, capture-bounded tail variant, marker, and start/end coordinates,
+  stream, capture-bounded tail variant, marker, and start/end coordinates;
+  command types `0/5/17`, `1/2/6/12/13/16`, `10`, `11`, and `15` expose
+  independently sourced absolute, relative, equipment-change, chair, and
+  jump-down fields, while teleport-like and unobserved bodies retain neutral
+  trailing/unknown values,
 - client opcode `182`: local-player movement with a neutral 32-bit control
   value, signed reference position, typed command stream, and zero-marked
   start/end-position trailer,
@@ -954,7 +958,8 @@ The gameplay fold currently models these capture-backed boundaries:
   neutral source-level/duration values, and relay/refresh/reset/lifecycle
   correlation; unobserved masks and values remain unknown,
 - server opcode `217`: structurally exact life-movement broadcast with an
-  aliased object id and the same fixed-width command stream as opcode `47`,
+  aliased object id and the same fixed-width command stream as opcode `47`;
+  its last positioned command updates an already known remote-player alias,
 - server opcode `239`: capture-bounded selector envelopes for counted
   u32/i32 records, empty selectors `9`/`13`, and a redacted terminated counted
   UTF-16 selector-`21` branch with one trailing u32; roles remain neutral and
@@ -1211,20 +1216,26 @@ and `remote_player_movement_broadcast` events. Short stream `114` folds its one
 local submission to `(633,-2677)` and its two broadcasts to two redacted
 remote-player aliases.
 
-The separate life-movement relay family is now bounded without assigning
-meaning to its command bodies. Client opcode `47` carries a local object index,
+The separate life-movement relay family is now bounded and its supported
+command bodies are typed. Client opcode `47` carries a local object index,
 a redacted 32-bit client token, a neutral 32-bit control value, a signed
 reference position, a counted command stream, one of four typed tail layouts,
 a marker, and signed start/end coordinates. Server opcode `217` carries an
 object id plus the same reference/count/command stream. Stream `92` validates
 963 submissions containing 3,869 commands and 305 broadcasts containing 1,441
 commands. Stream `126` validates another 2,585 submissions with 8,189 commands
-and 347 broadcasts with 1,399 commands; 344 of those broadcasts name a player
-already active when received, while three precede player discovery. All 2,932
-long-corpus packets consume exactly and round-trip. Command tags `0..22` and
-client tail tags `17/18/21/24` have capture-derived fixed widths; their field
-roles, the client control value, and the tail marker remain neutral, so reports
-classify the family as partial semantic coverage and omit the token value.
+and 347 broadcasts with 1,399 commands; all 347 broadcasts now name a player
+already active when received. All 2,932
+long-corpus packets consume exactly and round-trip. The independent v83
+`MovementParser` identifies absolute command types `0/5/17`, relative types
+`1/2/6/12/13/16`, equipment change `10`, chair `11`, and jump-down `15`, with
+position, last-position/vector, foothold, stance, and duration fields where
+that parser names them. Guida's v83 parser independently bounds the nine-byte
+teleport-like command family `3/4/7/8/9/14`, but conflicting higher-level
+field labels keep its middle/trailing values neutral. Command tags `18..22`,
+the client control/tail values, and the tail marker also remain neutral, so
+reports classify the family as partial semantic coverage and omit the token
+value.
 
 Opcode `13` also continues in both directions on the world connection. The
 fixed client type-`1`

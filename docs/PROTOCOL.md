@@ -3675,7 +3675,7 @@ int16  reference_y
 uint8  command_count
 repeat command_count:
   uint8 command_type
-  byte[command_payload_length(command_type)] opaque_payload
+  byte[command_payload_length(command_type)] command_payload
 uint8  tail_type
 byte[tail_payload_length(tail_type)] opaque_tail_state
 uint8  tail_marker                  # neutral role
@@ -3693,7 +3693,7 @@ uint32 object_id
 int16  reference_x
 int16  reference_y
 uint8  command_count
-repeat command_count: command_type + fixed opaque payload
+repeat command_count: command_type + fixed command payload
 ```
 
 Capture-derived command payload sizes, excluding the one-byte tag, are exact:
@@ -3703,17 +3703,38 @@ type:    0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22
 bytes:  13  7  7  9  9 13  7  9  9  9  1  9  7  7  9 15  7 13  7  7  3  3  7
 ```
 
+The exact v83 [`MovementParser`](https://github.com/ryantpayton/MapleStory-Client/blob/cbb0fe27cf9683a12eca0a569121d8033cdc2a4d/Net/Handlers/Helpers/MovementParser.cpp)
+and its [`Movement` record](https://github.com/ryantpayton/MapleStory-Client/blob/cbb0fe27cf9683a12eca0a569121d8033cdc2a4d/Gameplay/Movement.h)
+independently name the supported layouts:
+
+```text
+types 0/5/17: position x/y, last x/y, foothold, stance, duration
+types 1/2/6/12/13/16: relative delta x/y, stance, duration
+type 10: equipment-change value
+type 11: chair position x/y, neutral u16, stance, trailing i16
+type 15: jump-down position x/y, two vectors, two neutral u16s,
+         stance, trailing i16
+types 3/4/7/8/9/14: teleport-like position x/y plus neutral middle/trailing values
+```
+
+Guida's v83
+[`AbstractMovementPacketHandler`](https://github.com/v3921358/Guida83/blob/b6b3c69f099169c2a60c9ef156220a87dd4b09b1/src/main/java/guida/net/channel/handler/AbstractMovementPacketHandler.java)
+confirms every captured payload width and identifies the nine-byte family as
+teleport-like. It disagrees with the other parser about some middle/trailing
+labels, so the codec intentionally does not promote those disputed words.
+
 Client tail types `17`, `18`, `21`, and `24` carry `8`, `8`, `10`, and `11`
 opaque bytes respectively. Stream `92` validates 963 client packets with 3,869
 commands and 305 server packets with 1,441 commands; it observes every tail
 type and command tags `0/1/2/3/4/10/11/14/15`. Stream `126` validates another
 2,585 client packets with 8,189 commands and 347 server packets with 1,399
-commands. In the long corpus, 344 server object ids name players already active
-when the packet arrives and three arrive before player discovery. The fold
-therefore records that correlation without using the opaque command bodies to
-change coordinates. It emits redacted submission/broadcast events and tracks
-command, tail-type, and tail-marker distributions. The shape is exact, but the
-command fields and control/tail roles remain semantically partial.
+commands. In the long corpus, all 347 server object ids name players already
+active when the packet arrives. The fold
+records that correlation and advances an already known remote-player alias to
+the last positioned command. It emits redacted submission/broadcast events and
+tracks decoded command, tail-type, and tail-marker distributions. The shape is
+exact, but disputed command words, unobserved tags `18..22`, and control/tail
+roles remain semantically partial.
 
 ## NPC state submission and echo (`client 217`, `server 303`)
 

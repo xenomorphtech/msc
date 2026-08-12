@@ -513,7 +513,10 @@ proof, opcode-`49` flags, and opcode-`312` reason/actor roles neutral.
 3. Trace the remaining finite field-bootstrap opcodes `27`, `28`, `142`, and
    `425`, preferring a generated direct-read ledger where available. Trace the
    bounded five-byte player-movement type-`3` command only if a controlled
-   effect requires its semantics. The opcode-`41` stat-delta, opcode-`39`
+   effect requires its semantics. For life movement, the independently sourced
+   v83 parsers now cover captured command tags through `17`; keep unobserved
+   tags `18..22` neutral until a reference packet exercises them. The
+   opcode-`41` stat-delta, opcode-`39`
    inventory-effect, opcode-`80` consumable-use, opcode-`185` pickup-request,
    and opcode-`311` drop-spawn grammars are complete at their evidenced
    boundaries.

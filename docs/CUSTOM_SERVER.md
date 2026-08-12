@@ -227,8 +227,13 @@ unrelated one-HP combat aggregate warning.
 The analyzer also bounds client opcode `47` and server opcode `217` as a
 separate life-movement relay family. Stream `126` contributes 2,585 client
 submissions and 347 server broadcasts, all consuming exactly; stream `92`
-exercises all fixed client-tail variants. Command bytes and neutral control/
-tail roles remain opaque, so these packets are partial rather than full.
+exercises all fixed client-tail variants. Independent v83 client/server
+movement parsers now type the supported absolute, relative, equipment-change,
+chair, teleport-like, and jump-down command layouts. Safe events expose
+position, last/vector, foothold, stance, and duration fields where independently
+named, and a known remote-player alias advances to the last positioned command.
+Conflicting teleport labels plus neutral control/tail fields keep these packets
+partial rather than full.
 
 Client opcode `13` is shared with the login protocol but persists in gameplay.
 The analyzer now accepts the exact 11-byte type-`1` shape and the existing
@@ -2669,7 +2674,8 @@ Replace the remaining opaque replay portions with stateful handling:
    request.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
-   retain neutral roles for the opcode-`394`/`279` correlation.
+   retain neutral roles for the opcode-`394`/`279` correlation and unobserved
+   life-movement command tags `18..22`.
 3. Reuse the proven typed final-field mob injection to validate the existing
    movement-acknowledgement policy through the real client.
 4. Capture a ranked or multi-character account to validate the conditional
