@@ -504,6 +504,18 @@ and field-load item/mesos variants; no additional primitive trace is required
 for its captured boundary. Keep the opcode `185` validation token, optional
 proof, opcode-`49` flags, and opcode-`312` reason/actor roles neutral.
 
+Client opcode `207` now applies the same source-and-capture boundary to its
+high-volume control prefix. The original v83 writer emits six one-byte action
+arguments followed by a reserved 13-byte region. Two independent server
+handlers support option/activity and skill-id/level placement, while differing
+on whether the final two bytes form one option or separate values. The codec
+therefore exposes option flags, signed activity code, skill id/level, and two
+neutral auxiliary bytes, but leaves the 13-byte tail opaque. Stream `92`
+validates that split across 12,100 paths and stream `126` across another
+22,855; captured option flags are `0`, `1`, and `17`, while signed activities
+are mainly `-1` with `12`, `13`, and `24` also observed. Acknowledgement flag
+prediction now names the typed option field instead of indexing an opaque byte.
+
 ## Next debugger work
 
 1. Locate the inner character-record parser reached from the 170-byte server

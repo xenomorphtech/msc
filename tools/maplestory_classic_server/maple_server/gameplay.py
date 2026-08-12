@@ -3825,7 +3825,7 @@ class MobMovementAcknowledgementPolicy:
                 f"mob template {template_id} has no deterministic captured "
                 "acknowledgement value"
             )
-        status_flag = int(bool(submission.movement_path.opaque_control[0]))
+        status_flag = int(bool(submission.movement_path.option_flags))
         return MobMovementAcknowledgement(
             object_id=submission.object_id,
             sequence=submission.sequence,
@@ -7292,9 +7292,7 @@ class GameplayStateFold:
             key = (movement.object_id, movement.sequence)
             entity = self.state.mobs.get(movement.object_id)
             template_id = self.state.mob_templates.get(movement.object_id)
-            expected_status_flag = int(
-                bool(movement_path.opaque_control[0])
-            )
+            expected_status_flag = int(bool(movement_path.option_flags))
             self._pending_movements.setdefault(key, deque()).append(
                 PendingMobMovement(
                     expected_status_flag=expected_status_flag,
@@ -7326,7 +7324,7 @@ class GameplayStateFold:
                 "sequence": movement.sequence,
                 "predicted_acknowledgement_flag": expected_status_flag,
                 "movement_body_bytes": len(movement.opaque_movement),
-                "opaque_control_bytes": len(movement_path.opaque_control),
+                **movement_path.safe_control_dict(),
                 "reference_x": movement_path.reference_x,
                 "reference_y": movement_path.reference_y,
                 "command_count": len(movement_path.commands),
@@ -7359,7 +7357,8 @@ class GameplayStateFold:
                 parsed=movement,
                 details=details,
                 issues=(
-                    "movement control metadata after byte zero remains opaque",
+                    "movement action auxiliary meanings remain neutral and "
+                    "the 13-byte control tail remains opaque",
                 ),
             )
         if opcode == 293:

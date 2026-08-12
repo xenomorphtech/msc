@@ -2643,8 +2643,9 @@ async def replay_connection(
                         "sequence": movement.sequence,
                         "target_known": template_id is not None,
                         "template_id": template_id,
-                        "control_byte_0_nonzero": bool(
-                            movement_path.opaque_control[0]
+                        **movement_path.safe_control_dict(),
+                        "option_flags_nonzero": bool(
+                            movement_path.option_flags
                         ),
                         "command_count": len(movement_path.commands),
                         "reference_position": [

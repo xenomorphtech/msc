@@ -1064,6 +1064,14 @@ acknowledgements matched, with no pending/unmatched movement, no analysis
 issues or warnings, and 7/7 matched heartbeats. Unknown-object tests prove
 the rejection event remains nonfatal and produces no guessed response.
 
+The client-opcode-`207` request model now resolves its first six control bytes
+as option flags, signed activity code, skill id/level, and two neutral action
+auxiliaries. The following 13 bytes remain opaque because independent v83
+handlers disagree on their adjacent option grouping. This source-backed split
+round-trips all 12,100 stream-`92` and 22,855 stream-`126` submissions;
+fold/runtime reports expose the typed prefix and tail length, and generated
+opcode-`283` flags derive from the named option field.
+
 One state-driven opcode-`282` primitive is now proven too. From 5,284 stream-
 `92` broadcasts, the planner accepts only the dominant control prefix and exact
 one-command stationary placement shape. A live stream-`114` run introduced a

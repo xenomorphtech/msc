@@ -3287,7 +3287,13 @@ movement path:
 uint16 opcode = 207
 uint32 mob_object_id
 uint16 sequence
-byte[19] control_prefix
+uint8  option_flags
+int8   activity_code
+uint8  skill_id
+uint8  skill_level
+uint8  action_auxiliary_1
+uint8  action_auxiliary_2
+byte[13] opaque_control_tail
 int16  reference_x
 int16  reference_y
 uint8  command_count                 # nonzero
@@ -3304,7 +3310,20 @@ and velocity pairs, uint16 foothold, stance, and duration; types `1` and `2`
 have signed relative velocity, stance, and duration. All 12,100 stream-`92`
 submissions, 40,090 commands, and nine-byte trailers parse and re-encode
 exactly; stream `126` validates the same boundaries across another 22,855
-submissions. The 19 control bytes remain deliberately opaque.
+submissions. The six-byte action prefix is also typed. The signed activity is
+predominantly `-1`, with captured `12`, `13`, and `24` values; option flags are
+captured as `0`, `1`, and `17`. The two auxiliary bytes retain neutral names,
+and the following 13 bytes remain opaque.
+
+This split follows the original v83 client writer, which emits six one-byte
+arguments and then reserves 13 bytes before the reference point. Independent
+v83 server handlers agree on option/activity and skill-id/level placement, but
+disagree on whether the final pair is one uint16 option or two independent
+bytes, so the model does not assign those two bytes behavioral meaning.
+[Original client writer](https://github.com/ryantpayton/MapleStory-Client/blob/cbb0fe27cf9683a12eca0a569121d8033cdc2a4d/Net/Packets/GameplayPackets.h),
+[Guida83 handler](https://github.com/v3921358/Guida83/blob/b6b3c69f099169c2a60c9ef156220a87dd4b09b1/src/main/java/guida/net/channel/handler/MoveLifeHandler.java),
+and [gms083 handler](https://github.com/akhuting/gms083/blob/2ac781b5012ffdbf7c9c3200c756e660149ff00/src/main/java/net/server/channel/handlers/MoveLifeHandler.java)
+provide the independent source anchors.
 
 Server opcode `282` broadcasts movement for one field-local mob without the
 client sequence or nine-byte trailer:
@@ -3339,7 +3358,7 @@ uint8  status_auxiliary_2
 ```
 
 All 11,949 stream-`92` acknowledgements correlate with a prior submission.
-The flag is exactly whether control-prefix byte zero is nonzero, both auxiliary
+The flag is exactly whether `option_flags` is nonzero, both auxiliary
 bytes are always zero, and the status value is deterministic for every
 field-local template: `100100 -> 0`, `130100 -> 30`, `210100 -> 35`,
 `1110100 -> 25`, `1130100 -> 30`, `2110200 -> 35`, `3210800 -> 100`, and
@@ -3361,8 +3380,9 @@ movement. Heartbeats and the world connection remained active.
 
 The current replay also records each reactive submission and outcome as a
 safe runtime event. Request details retain template, sequence, command count,
-the control-byte predicate, and reference/start/end coordinates, but omit the
-runtime object id. A fresh browser-free run produced 13 alternating
+the typed action prefix, opaque-tail length, and reference/start/end
+coordinates, but omit the runtime object id. A fresh browser-free run produced
+13 alternating
 `mob_movement_submission_observed` and
 `mob_movement_acknowledgement_completed` events. All 58 generated opcode-`283`
 packets independently matched their opcode-`207` submissions; the valid,

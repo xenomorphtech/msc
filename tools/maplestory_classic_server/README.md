@@ -1367,9 +1367,11 @@ body ends exactly at its nine-byte zero-marker/start/end trailer. Type `0`
 decodes into signed position and velocity pairs, an unsigned foothold id,
 stance byte, and duration; types `1` and `2` decode into signed relative
 velocity, stance, and duration. All 40,090 typed commands and all 12,100 paths
-round-trip byte-for-byte. The 19-byte control prefix remains intentionally
-opaque. Reports emit reference/start/end coordinates and the decoded command
-records instead of one undifferentiated movement blob.
+round-trip byte-for-byte. The first six control bytes now expose option flags,
+signed activity code, skill id/level, and two neutral auxiliary bytes. The
+remaining 13-byte tail stays opaque. Reports emit these fields,
+reference/start/end coordinates, and decoded command records instead of one
+undifferentiated movement blob.
 
 All 11,949 acknowledgement bodies also fit one exact primitive boundary: flag
 `0` or `1`, a 16-bit little-endian value in `{0,25,30,35,100}`, and two zero
@@ -1386,7 +1388,7 @@ contain 18,874 commands: 18,610 type `0`, 222 type `1`, and 42 type `2`. Every
 leave and broadcast resolves to an active modeled mob.
 
 After respecting field-epoch resets, the acknowledgement flag matches whether
-submission control-prefix byte `0` is nonzero in all 11,949 correlated pairs.
+submission `option_flags` is nonzero in all 11,949 correlated pairs.
 Both auxiliary fields are zero in all 11,949 pairs. The 16-bit value is
 deterministic by the field-local mob template for every pair: `100100 -> 0`,
 `130100 -> 30`, `210100 -> 35`, `1110100 -> 25`, `1130100 -> 30`,
@@ -1419,7 +1421,7 @@ guessing.
 
 `--reactive-mob-movement-acknowledgements` wires the policy into hold-open
 replay. Each live opcode `207` is parsed, the submitted object and sequence are
-copied into a typed opcode `283`, the flag is derived from control byte zero,
+copied into a typed opcode `283`, the flag is derived from `option_flags`,
 the deterministic template value is selected, and the two auxiliary fields are
 zeroed. The option requires `--keep-world-open`, refuses a simultaneous
 capture-sourced opcode-`207` rule, and leaves rejected unknown submissions

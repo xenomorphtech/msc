@@ -8428,6 +8428,54 @@ class MobMovementPath:
     path_end_x: int
     path_end_y: int
 
+    def _validated_control(self) -> bytes:
+        if len(self.opaque_control) != 19:
+            raise PacketShapeError(
+                "mob movement path control prefix must contain exactly 19 bytes"
+            )
+        return self.opaque_control
+
+    @property
+    def option_flags(self) -> int:
+        return self._validated_control()[0]
+
+    @property
+    def activity_code(self) -> int:
+        return int.from_bytes(
+            self._validated_control()[1:2], "little", signed=True
+        )
+
+    @property
+    def skill_id(self) -> int:
+        return self._validated_control()[2]
+
+    @property
+    def skill_level(self) -> int:
+        return self._validated_control()[3]
+
+    @property
+    def action_auxiliary_1(self) -> int:
+        return self._validated_control()[4]
+
+    @property
+    def action_auxiliary_2(self) -> int:
+        return self._validated_control()[5]
+
+    @property
+    def opaque_control_tail(self) -> bytes:
+        return self._validated_control()[6:]
+
+    def safe_control_dict(self) -> dict[str, object]:
+        return {
+            "option_flags": self.option_flags,
+            "activity_code": self.activity_code,
+            "skill_id": self.skill_id,
+            "skill_level": self.skill_level,
+            "action_auxiliary_1": self.action_auxiliary_1,
+            "action_auxiliary_2": self.action_auxiliary_2,
+            "opaque_control_tail_bytes": len(self.opaque_control_tail),
+        }
+
     @classmethod
     def parse(cls, payload: bytes) -> "MobMovementPath":
         reader = PacketReader(payload, packet_name="mob_movement_path")
@@ -8464,10 +8512,7 @@ class MobMovementPath:
         )
 
     def to_bytes(self) -> bytes:
-        if len(self.opaque_control) != 19:
-            raise PacketShapeError(
-                "mob movement path control prefix must contain exactly 19 bytes"
-            )
+        control = self._validated_control()
         if not self.commands:
             raise PacketShapeError("mob movement path must contain a command")
         if len(self.commands) > 255:
@@ -8477,7 +8522,7 @@ class MobMovementPath:
         if self.trailer_marker != 0:
             raise PacketShapeError("mob movement path trailer marker must be zero")
         return (
-            self.opaque_control
+            control
             + struct.pack(
                 "<hhB", self.reference_x, self.reference_y, len(self.commands)
             )

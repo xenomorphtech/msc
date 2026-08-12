@@ -1911,8 +1911,9 @@ stopped cleanly.
 
 Reactive acknowledgements now record bounded causal runtime events as well.
 `mob_movement_submission_observed` contains the known-template flag, template,
-sequence, command count, control-byte predicate, and reference/start/end
-coordinates without the runtime object id. A successful drain adds
+sequence, command count, typed option/activity/skill fields, neutral action
+auxiliaries, opaque-tail length, and reference/start/end coordinates without
+the runtime object id. A successful drain adds
 `mob_movement_acknowledgement_completed`; a policy refusal instead adds
 `mob_movement_submission_rejected` and its safe reason. Fresh browser-free
 transcript
