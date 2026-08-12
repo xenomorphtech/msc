@@ -6781,18 +6781,21 @@ class GameplayStateFold:
         if opcode == 301:
             acknowledgement = WorldBootstrapAcknowledgement.parse(payload)
             self.state.bootstrap_acknowledgements += 1
+            details = {
+                "field_epoch": self.state.field_epoch,
+                "reserved_zero": acknowledgement.reserved_zero == 0,
+            }
             self._event(
                 frame,
                 "world_bootstrap_acknowledged",
-                details={"opaque_value_present": True},
+                details=details,
             )
             return self._observation(
                 frame,
                 kind="world_bootstrap_acknowledgement",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=acknowledgement,
-                details={"opaque_value_present": True},
-                issues=("bootstrap acknowledgement value remains opaque",),
+                details=details,
             )
         if opcode == 158:
             request = ClientOpcode158Request.parse(payload)

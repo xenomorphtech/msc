@@ -1296,8 +1296,8 @@
     },
     {
       "name":"client_opcode_301","direction":"client_to_server","opcode":301,"length":6,
-      "source":"WorldBootstrapAcknowledgement; two capture frames",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":301},{"op":"read","name":"value","kind":"u32"}]
+      "source":"WorldBootstrapAcknowledgement; three independent reference sessions across two captures plus one active custom-server login share the exact first-client bootstrap packet",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":301},{"op":"read","name":"reserved_zero","kind":"u32","equals":0}]
     },
     {
       "name":"server_opcode_301","direction":"server_to_client","opcode":301,"length":6,

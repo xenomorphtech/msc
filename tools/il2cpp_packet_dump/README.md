@@ -362,5 +362,9 @@ validation exact-consumes all 114 entries across streams `92`, `114`, and `126`
 with no width-specific fallback. Python further types a second terminated
 string, four-value header, and one capture-bounded appearance island while
 retaining the two unresolved regions as opaque.
+Client opcode `301` is the identical six-byte first client gameplay packet in
+all three reference sessions and one active custom-server login. Its manual
+shape constrains the body to `reserved_zero u32 = 0`; Python round-trips the
+same grammar at full coverage without assigning a narrower subsystem role.
 The complete 71,100-frame stream intentionally remains a broader modeling
 corpus rather than an all-opcode manifest regression.

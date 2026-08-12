@@ -968,7 +968,7 @@ def fixture_gameplay_transcript(
     )
     append(
         "client_to_server",
-        WorldBootstrapAcknowledgement(opaque_value=0).to_bytes(),
+        WorldBootstrapAcknowledgement().to_bytes(),
     )
     append("client_to_server", ClientOpcode158Request(mode=1).to_bytes())
     append("client_to_server", ClientOpcode158Request(mode=2).to_bytes())
@@ -1738,6 +1738,22 @@ def fixture_gameplay_transcript(
 
 
 class GameplayPacketShapeTest(unittest.TestCase):
+    def test_world_bootstrap_acknowledgement_round_trip(self) -> None:
+        observed = bytes.fromhex("2d0100000000")
+        acknowledgement = WorldBootstrapAcknowledgement()
+
+        self.assertEqual(acknowledgement.to_bytes(), observed)
+        self.assertEqual(
+            WorldBootstrapAcknowledgement.parse(observed),
+            acknowledgement,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "reserved value"):
+            WorldBootstrapAcknowledgement.parse(
+                bytes.fromhex("2d0101000000")
+            )
+        with self.assertRaisesRegex(PacketShapeError, "reserved value"):
+            replace(acknowledgement, reserved_zero=1).to_bytes()
+
     def test_skill_record_change_lifecycle_round_trip(self) -> None:
         request_bytes = bytes.fromhex("6700affa0200e8030000")
         update_bytes = bytes.fromhex(
@@ -5043,6 +5059,30 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
 
 class GameplayStateFoldTest(unittest.TestCase):
+    def test_folds_world_bootstrap_acknowledgement_at_full_coverage(
+        self,
+    ) -> None:
+        analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
+
+        acknowledgement = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "world_bootstrap_acknowledgement"
+        )
+        self.assertEqual(acknowledgement.coverage, ShapeCoverage.FULL)
+        self.assertEqual(acknowledgement.issues, ())
+        self.assertEqual(
+            acknowledgement.details,
+            {"field_epoch": 1, "reserved_zero": True},
+        )
+        event = next(
+            event
+            for event in analysis.events
+            if event.kind == "world_bootstrap_acknowledged"
+        )
+        self.assertEqual(event.details, acknowledgement.details)
+        self.assertEqual(analysis.state.bootstrap_acknowledgements, 1)
+
     def test_player_mob_proximity_predicate_is_edge_triggered(self) -> None:
         with self.assertRaisesRegex(ValueError, "radius must be in 1..4096"):
             PlayerMobProximityPredicate(radius=0)

@@ -1137,7 +1137,10 @@ The gameplay fold currently models these capture-backed boundaries:
   opcode-`218` branch types the same first six metadata bytes plus the full
   form's mastery/auxiliary fields and validates its short zero-target form;
   both codecs store typed metadata and target records without an opaque body,
-- client opcode `301`: the world-bootstrap acknowledgement envelope,
+- client opcode `301`: the exact world-bootstrap acknowledgement envelope;
+  its four-byte body is required to be zero, matching its invariant position
+  as the first client gameplay packet in three reference sessions and one
+  active custom-server login,
 - server opcode `10`: the exact empty-body heartbeat probe, followed by client
   opcode `23`: one neutral, redacted `uint64` response value; all 380 gameplay
   samples FIFO-match probes and validate at full coverage,
@@ -2568,3 +2571,7 @@ preserve distinct Unity scan codes in this setup.
     all 18 initial-snapshot items, four opcode-`39` additions, and two long
     opcode-`77` wrappers; promote all six residual packet observations to full
     coverage with zero equipment metadata bytes left opaque.
+119. Constrain client opcode `301` to its observed `u16 opcode + zero u32`
+    grammar across all three reference sessions and the active saved login.
+    Promote all four acknowledgement observations to full coverage while
+    retaining the broader bootstrap role and exposing only structural state.

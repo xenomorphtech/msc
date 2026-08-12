@@ -13275,19 +13275,32 @@ class VariableServerRecord:
 
 @dataclass(frozen=True)
 class WorldBootstrapAcknowledgement:
-    opaque_value: int
+    reserved_zero: int = 0
     opcode: int = 301
 
     @classmethod
     def parse(cls, payload: bytes) -> "WorldBootstrapAcknowledgement":
         reader = PacketReader(payload, packet_name="world_bootstrap_acknowledgement")
         _expect_opcode(reader, 301)
-        opaque_value = reader.u32("opaque_value")
+        reserved_zero = reader.u32("reserved_zero")
         reader.finish()
-        return cls(opaque_value=opaque_value)
+        acknowledgement = cls(reserved_zero=reserved_zero)
+        acknowledgement._validate()
+        return acknowledgement
+
+    def _validate(self) -> None:
+        if self.opcode != 301:
+            raise PacketShapeError(
+                "world-bootstrap acknowledgement opcode must be 301"
+            )
+        if self.reserved_zero != 0:
+            raise PacketShapeError(
+                "world-bootstrap acknowledgement reserved value must be zero"
+            )
 
     def to_bytes(self) -> bytes:
-        return struct.pack("<HI", self.opcode, self.opaque_value)
+        self._validate()
+        return struct.pack("<HI", self.opcode, self.reserved_zero)
 
 
 @dataclass(frozen=True)

@@ -499,6 +499,14 @@
   `64/12/0/0`. The active saved transcript's Cash add is also full, moving it
   to `764/18/0/0`. Its 78 opcode-`300` NPC spawns also validate
   after preserving the facing byte values `0/1/2/4/5`.
+- Client opcode `301` is now the exact six-byte bootstrap acknowledgement:
+  opcode plus a required zero `u32`. It is the identical first client gameplay
+  packet in all three independent reference sessions and the active saved
+  login, following the preceding server bootstrap record by `0.533..10.121`
+  ms. All four round-trip at full coverage; reference totals advance to
+  `70,074/1,026/0/0`, `34,570/637/0/0`, and `66/10/0/0`, while the active
+  saved transcript advances to `2,982/52/0/0`. The fold exposes only the field
+  epoch and validated-zero invariant.
 - The 35 stream-`126` opcode-`157` records with width 59 are now the second
   fully typed `CompactFieldTransition` branch. Marker `26` uses the same
   transition/map/portal/HP/FILETIME grammar as the existing 95-byte marker-`23`

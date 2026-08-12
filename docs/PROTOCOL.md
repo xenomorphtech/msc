@@ -1778,6 +1778,21 @@ It occurs once during the initial `field_loading` phase in `111.pcapng` stream
 independently emits the same marker at field epoch `1`. No stronger semantic
 role is assigned.
 
+Client opcode `301` is the first client gameplay packet in each of streams
+`92`, `114`, and `126`, and independently in the active custom-server login:
+
+```text
+uint16 opcode = 301
+uint32 reserved_zero = 0
+```
+
+All four packets are the identical six bytes `2d0100000000`. They follow the
+immediately preceding server bootstrap record by `7.109`, `8.105`, `0.533`,
+and `10.121` ms respectively. The exact constant is now enforced, every byte
+round-trips, and the fold reports the acknowledgement at full coverage without
+publishing an opaque value. The bootstrap role comes from its invariant
+position; no narrower subsystem purpose is assigned.
+
 Both terminating `111.pcapng` world sessions share this client/server sequence:
 
 ```text
