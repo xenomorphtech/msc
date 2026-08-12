@@ -1944,7 +1944,11 @@ The custom server also owns one conservative server-to-client movement
 primitive. `--emit-mob-movement-broadcast X:Y:FOOTHOLD[:STANCE]` selects the
 only active modeled mob after explicit post-transcript frames, validates an
 exact stationary shape in the movement evidence, predicts the state delta, and
-appends one typed opcode `282`. The validated visual run used:
+appends one typed opcode `282`. Its former seven-byte prefix is now represented
+by the pinned handler's exact `bool + bool + u8 + u32` boundary; generated
+packets use the dominant captured `false,false,0xff,0` combination while
+evidence matching still compares its exact encoded bytes. The validated visual
+run used:
 
 ```sh
 sudo ip netns exec mapleproxy sudo -u sdancer env \

@@ -1080,6 +1080,17 @@ round-trips all 12,100 stream-`92` and 22,855 stream-`126` submissions at full
 coverage; fold/runtime reports expose every structural field, and generated
 opcode-`283` flags derive from the named option field.
 
+Server opcode `282` is now fully structural rather than partial. The pinned
+receive path proves its former seven-byte control prefix as two booleans, one
+u8 selector, and one u32 value; the command cases expose their signed
+position/velocity, foothold, stance, and duration scalars. Both reference
+captures validate all 13,366 broadcasts independently: 5,284 in stream `92`
+and 8,082 in stream `126`, with zero unsupported or consumption failures.
+Fold events expose the four neutral control fields and no longer report opaque
+control metadata. This moves stream `92` to 32,818 full and 2,389 partial
+packets, and stream `126` to 64,799 full and 6,301 partial packets, with no
+unknown or invalid packets in either stream.
+
 One state-driven opcode-`282` primitive is now proven too. From 5,284 stream-
 `92` broadcasts, the planner accepts only the dominant control prefix and exact
 one-command stationary placement shape. A live stream-`114` run introduced a

@@ -3700,7 +3700,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             ) -> MobMovementBroadcast:
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -3931,7 +3934,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             def broadcast(reference_x: int, target_x: int, stance: int):
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -4220,7 +4226,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             def broadcast(reference_x: int, target_x: int, stance: int):
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -4706,7 +4715,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             def broadcast(reference_x: int, target_x: int, stance: int):
                 return MobMovementBroadcast(
                     object_id=object_id,
-                    opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                    control_flag_1=False,
+                    control_flag_2=False,
+                    control_selector=0xFF,
+                    control_value=0,
                     reference_x=reference_x,
                     reference_y=-200,
                     commands=(
@@ -4997,7 +5009,10 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             ).to_bytes()
             broadcast = MobMovementBroadcast(
                 object_id=object_id,
-                opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                control_flag_1=False,
+                control_flag_2=False,
+                control_selector=0xFF,
+                control_value=0,
                 reference_x=200,
                 reference_y=-200,
                 commands=(

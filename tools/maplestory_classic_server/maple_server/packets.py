@@ -8672,10 +8672,19 @@ class MobControllerChange:
 @dataclass(frozen=True)
 class MobMovementBroadcast:
     object_id: int
-    opaque_control: bytes
+    control_flag_1: bool
+    control_flag_2: bool
+    control_selector: int
+    control_value: int
     reference_x: int
     reference_y: int
     commands: tuple[MobMovementCommand, ...]
+    raw_control_flag_1: int | None = field(
+        default=None, repr=False, compare=False
+    )
+    raw_control_flag_2: int | None = field(
+        default=None, repr=False, compare=False
+    )
     opcode: int = 282
 
     @classmethod
@@ -8683,7 +8692,10 @@ class MobMovementBroadcast:
         reader = PacketReader(payload, packet_name="mob_movement_broadcast")
         _expect_opcode(reader, 282)
         object_id = reader.u32("object_id")
-        opaque_control = reader.bytes(7, "opaque_control")
+        raw_control_flag_1 = reader.u8("control_flag_1")
+        raw_control_flag_2 = reader.u8("control_flag_2")
+        control_selector = reader.u8("control_selector")
+        control_value = reader.u32("control_value")
         reference_x = reader.i16("reference_x")
         reference_y = reader.i16("reference_y")
         command_count = reader.u8("command_count")
@@ -8696,17 +8708,43 @@ class MobMovementBroadcast:
         reader.finish()
         return cls(
             object_id=object_id,
-            opaque_control=opaque_control,
+            control_flag_1=bool(raw_control_flag_1),
+            control_flag_2=bool(raw_control_flag_2),
+            control_selector=control_selector,
+            control_value=control_value,
             reference_x=reference_x,
             reference_y=reference_y,
             commands=commands,
+            raw_control_flag_1=raw_control_flag_1,
+            raw_control_flag_2=raw_control_flag_2,
         )
 
-    def to_bytes(self) -> bytes:
-        if len(self.opaque_control) != 7:
-            raise PacketShapeError(
-                "mob movement broadcast control prefix must contain seven bytes"
+    @property
+    def control_prefix(self) -> bytes:
+        encoded_flag_1 = _il2cpp_boolean_byte(
+            self.control_flag_1,
+            self.raw_control_flag_1,
+            field_name="mob movement broadcast control_flag_1",
+        )
+        encoded_flag_2 = _il2cpp_boolean_byte(
+            self.control_flag_2,
+            self.raw_control_flag_2,
+            field_name="mob movement broadcast control_flag_2",
+        )
+        try:
+            return struct.pack(
+                "<BBBI",
+                encoded_flag_1,
+                encoded_flag_2,
+                self.control_selector,
+                self.control_value,
             )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"mob movement broadcast control value is out of range: {error}"
+            ) from error
+
+    def to_bytes(self) -> bytes:
         if not self.commands:
             raise PacketShapeError(
                 "mob movement broadcast must contain a command"
@@ -8717,7 +8755,7 @@ class MobMovementBroadcast:
             )
         return (
             struct.pack("<HI", self.opcode, self.object_id)
-            + self.opaque_control
+            + self.control_prefix
             + struct.pack(
                 "<hhB", self.reference_x, self.reference_y, len(self.commands)
             )

@@ -858,7 +858,10 @@ def fixture_gameplay_transcript(
         "server_to_client",
         MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=fixture_movement_path().commands,
@@ -4405,7 +4408,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         broadcast = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=fixture_movement_path().commands,
@@ -4428,6 +4434,23 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(released.to_bytes()), 7)
         self.assertEqual(len(controlled.to_bytes()), 49)
         self.assertEqual(len(broadcast.to_bytes()), 32)
+        alternate_control = replace(
+            broadcast,
+            control_flag_2=True,
+            control_selector=0x0D,
+            control_value=0x1234_5678,
+        )
+        self.assertEqual(
+            alternate_control.control_prefix.hex(), "00010d78563412"
+        )
+        self.assertEqual(
+            MobMovementBroadcast.parse(alternate_control.to_bytes()),
+            alternate_control,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            replace(broadcast, control_selector=256).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be a boolean"):
+            replace(broadcast, control_flag_1=1).to_bytes()
         with self.assertRaises(PacketShapeError):
             MobControllerChange(
                 control_level=0,
@@ -10116,6 +10139,29 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(movement_event.details["control_value_2"], 0)
         self.assertEqual(movement_event.details["control_value_3"], 0)
         self.assertEqual(event_kinds[-1], "session_ended")
+        broadcast_observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "mob_movement_broadcast"
+        )
+        self.assertEqual(broadcast_observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(
+            {
+                field: broadcast_observation.details[field]
+                for field in (
+                    "control_flag_1",
+                    "control_flag_2",
+                    "control_selector",
+                    "control_value",
+                )
+            },
+            {
+                "control_flag_1": False,
+                "control_flag_2": False,
+                "control_selector": 0xFF,
+                "control_value": 0,
+            },
+        )
         self.assertEqual(
             [event.index for event in analysis.events],
             list(range(len(analysis.events))),
@@ -10618,7 +10664,10 @@ class GameplayStateFoldTest(unittest.TestCase):
     def test_plans_stationary_mob_broadcast_from_runtime_spawn(self) -> None:
         stationary_evidence = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=(
@@ -10665,7 +10714,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             (broadcast.reference_x, broadcast.reference_y),
             (200, -200),
         )
-        self.assertEqual(broadcast.opaque_control.hex(), "0000ff00000000")
+        self.assertEqual(broadcast.control_prefix.hex(), "0000ff00000000")
         self.assertEqual(broadcast.commands[0].position, (200, -200))
         self.assertEqual(broadcast.commands[0].velocity, (0, 0))
         self.assertEqual(broadcast.commands[0].foothold_id, 8)
@@ -10706,7 +10755,10 @@ class GameplayStateFoldTest(unittest.TestCase):
     def test_translates_captured_multi_command_mob_path(self) -> None:
         source_path = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=(
@@ -11160,7 +11212,10 @@ class GameplayStateFoldTest(unittest.TestCase):
             midpoint_x = 100 + displacement_x // 2
             return MobMovementBroadcast(
                 object_id=MOB_OBJECT_ID,
-                opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+                control_flag_1=False,
+                control_flag_2=False,
+                control_selector=0xFF,
+                control_value=0,
                 reference_x=100,
                 reference_y=-200,
                 commands=(
@@ -11215,7 +11270,10 @@ class GameplayStateFoldTest(unittest.TestCase):
 
         alternate_path = MobMovementBroadcast(
             object_id=MOB_OBJECT_ID,
-            opaque_control=b"\x00\x00\xff\x00\x00\x00\x00",
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=100,
             reference_y=-200,
             commands=(

@@ -954,20 +954,41 @@
     },
     {
       "name":"mob_movement_broadcast","direction":"server_to_client","opcode":282,
-      "source":"IL2CPP opcode-282 handler fce96542... plus MobMovementBroadcast/Command; tags 0,1,2 select 13,7,7 bytes",
+      "source":"IL2CPP opcode-282 handler fce96542... delegates to c593a76f... direct bool/bool/u8/u32 reads plus MobMovementBroadcast/Command; both reference captures; tags 0,1,2 select typed 13,7,7-byte records",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":282},
         {"op":"read","name":"object_id","kind":"u32"},
-        {"op":"bytes","name":"opaque_control","length":7},
+        {"op":"read","name":"control_flag_1","kind":"bool"},
+        {"op":"read","name":"control_flag_2","kind":"bool"},
+        {"op":"read","name":"control_selector","kind":"u8"},
+        {"op":"read","name":"control_value","kind":"u32"},
         {"op":"read","name":"reference_x","kind":"i16"},
         {"op":"read","name":"reference_y","kind":"i16"},
         {"op":"read","name":"command_count","kind":"u8"},
         {"op":"repeat","count_from":"command_count","operations":[
           {"op":"read","name":"command_type","kind":"u8"},
           {"op":"switch","field":"command_type","cases":[
-            {"equals":0,"operations":[{"op":"bytes","name":"absolute_command","length":13}]},
-            {"equals":1,"operations":[{"op":"bytes","name":"relative_command_1","length":7}]},
-            {"equals":2,"operations":[{"op":"bytes","name":"relative_command_2","length":7}]}
+            {"equals":0,"operations":[
+              {"op":"read","name":"position_x","kind":"i16"},
+              {"op":"read","name":"position_y","kind":"i16"},
+              {"op":"read","name":"velocity_x","kind":"i16"},
+              {"op":"read","name":"velocity_y","kind":"i16"},
+              {"op":"read","name":"foothold_id","kind":"u16"},
+              {"op":"read","name":"stance","kind":"u8"},
+              {"op":"read","name":"duration_ms","kind":"u16"}
+            ]},
+            {"equals":1,"operations":[
+              {"op":"read","name":"velocity_x","kind":"i16"},
+              {"op":"read","name":"velocity_y","kind":"i16"},
+              {"op":"read","name":"stance","kind":"u8"},
+              {"op":"read","name":"duration_ms","kind":"u16"}
+            ]},
+            {"equals":2,"operations":[
+              {"op":"read","name":"velocity_x","kind":"i16"},
+              {"op":"read","name":"velocity_y","kind":"i16"},
+              {"op":"read","name":"stance","kind":"u8"},
+              {"op":"read","name":"duration_ms","kind":"u16"}
+            ]}
           ]}
         ]}
       ]

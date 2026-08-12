@@ -3340,19 +3340,33 @@ client sequence or nine-byte trailer:
 ```text
 uint16 opcode = 282
 uint32 mob_object_id
-byte[7] control_prefix
+bool   control_flag_1
+bool   control_flag_2
+uint8  control_selector
+uint32 control_value
 int16  reference_x
 int16  reference_y
 uint8  command_count                 # nonzero
 repeat command_count: mob_movement_command
 ```
 
-Stream `92` contains 5,284 broadcasts and 18,874 commands; every referenced
-object is active and every packet re-encodes exactly. Control prefix
-`0000ff00000000` occurs 5,230 times. Of those, 1,509 packets use the exact
-one-command stationary placement shape: the reference equals the absolute
-command position, velocity is zero, and duration is 1,080 ms. Stances `2`,
-`4`, and `5` are all captured; stance `4` has 1,055 exact examples.
+The pinned opcode-`282` receive handler delegates the body to method
+`c593a76f...`, whose first reads after the object id are exactly
+`bool, bool, u8, u32`. The six observed seven-byte combinations therefore no
+longer need an opaque prefix. Across streams `92` and `126`, all 13,366
+broadcasts have `control_flag_1 = false`, selectors are `0x0c`, `0x0d`, or
+`0xff`, and `control_value` is zero; `control_flag_2` exercises both values.
+Those neutral names describe only the proven wire types, not behavioral roles.
+The three command tags are also scalar-typed rather than width-only blobs, so
+all 5,284 stream-`92` and 8,082 stream-`126` broadcasts now have full structural
+coverage and pass independent manifest validation with exact byte consumption.
+
+Stream `92` contains 18,874 commands and every referenced object is active.
+The control combination `false,false,0xff,0` occurs 5,230 times. Of those,
+1,509 packets use the exact one-command stationary placement shape: the
+reference equals the absolute command position, velocity is zero, and duration
+is 1,080 ms. Stances `2`, `4`, and `5` are all captured; stance `4` has 1,055
+exact examples.
 
 The complete acknowledgement is 13 plaintext bytes:
 

@@ -1091,8 +1091,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `280`: complete object-id plus one-byte mob-leave record,
 - server opcode `281`: controller level/object id with spawn data for nonzero
   controller assignments and no body for level zero,
-- server opcode `282`: server mob-movement broadcast with a seven-byte control
-  prefix, signed reference position, and the same typed movement commands,
+- server opcode `282`: server mob-movement broadcast with two boolean control
+  flags, one-byte selector, u32 control value, signed reference position, and
+  fully scalar-typed absolute/relative movement commands,
 - client opcode `207`: correlated mob movement submissions with a bounded
   typed 19-byte option/activity/skill/neutral-control prefix, signed reference
   position, command count, typed commands, and zero-marked start/end-position
@@ -1396,6 +1397,17 @@ controller changes, and 5,284
 server movement broadcasts validate and round-trip exactly. The broadcasts
 contain 18,874 commands: 18,610 type `0`, 222 type `1`, and 42 type `2`. Every
 leave and broadcast resolves to an active modeled mob.
+
+The opcode-`282` control prefix is also fully split at the pinned receive
+handler's direct `bool + bool + u8 + u32` boundary. Across streams `92` and
+`126`, all 13,366 broadcasts use six observed control combinations: the first
+flag and u32 are always false/zero, the second flag varies, and the selector is
+`0x0c`, `0x0d`, or `0xff`. The behavioral roles retain neutral names. All
+command cases are scalar-typed in both the Python codec and the independent
+manifest, making every opcode-`282` packet full coverage with exact
+consumption. Overall coverage becomes 32,818 full / 2,389 partial for stream
+`92` and 64,799 full / 6,301 partial for stream `126`, with zero unknown or
+invalid packets.
 
 After respecting field-epoch resets, the acknowledgement flag matches whether
 submission `option_flags` is nonzero in all 11,949 correlated pairs.

@@ -3037,7 +3037,11 @@ class MobMovementBroadcastPlan:
             },
             "packet": {
                 "opcode": self.broadcast.opcode,
-                "control_prefix": self.broadcast.opaque_control.hex(),
+                "control_prefix": self.broadcast.control_prefix.hex(),
+                "control_flag_1": self.broadcast.control_flag_1,
+                "control_flag_2": self.broadcast.control_flag_2,
+                "control_selector": self.broadcast.control_selector,
+                "control_value": self.broadcast.control_value,
                 "reference_x": self.broadcast.reference_x,
                 "reference_y": self.broadcast.reference_y,
                 "command_count": len(self.broadcast.commands),
@@ -11785,7 +11789,10 @@ class GameplayStateFold:
             details = {
                 "entity": alias,
                 "known_entity": entity is not None,
-                "opaque_control_bytes": len(broadcast.opaque_control),
+                "control_flag_1": broadcast.control_flag_1,
+                "control_flag_2": broadcast.control_flag_2,
+                "control_selector": broadcast.control_selector,
+                "control_value": broadcast.control_value,
                 "reference_x": broadcast.reference_x,
                 "reference_y": broadcast.reference_y,
                 "command_count": len(broadcast.commands),
@@ -11817,10 +11824,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="mob_movement_broadcast",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=broadcast,
                 details=details,
-                issues=("server mob-movement control metadata remains opaque",),
             )
         if opcode == 283:
             acknowledgement = MobMovementAcknowledgement.parse(payload)
@@ -13425,7 +13431,7 @@ def build_mob_movement_planning_context(
     )
     stationary_shape_counts: Counter[int] = Counter()
     for broadcast in evidence_broadcasts:
-        if broadcast.opaque_control != MOB_MOVEMENT_CONTROL_PREFIX:
+        if broadcast.control_prefix != MOB_MOVEMENT_CONTROL_PREFIX:
             continue
         if len(broadcast.commands) != 1:
             continue
@@ -13612,7 +13618,10 @@ def plan_mob_movement_broadcast(
     if not path_requested:
         broadcast = MobMovementBroadcast(
             object_id=object_id,
-            opaque_control=control_prefix,
+            control_flag_1=False,
+            control_flag_2=False,
+            control_selector=0xFF,
+            control_value=0,
             reference_x=target_x,
             reference_y=target_y,
             commands=(
@@ -13639,7 +13648,7 @@ def plan_mob_movement_broadcast(
         for candidate in path_evidence_candidates:
             if (
                 candidate.template_id != template_id
-                or candidate.broadcast.opaque_control != control_prefix
+                or candidate.broadcast.control_prefix != control_prefix
                 or len(candidate.broadcast.commands) < 2
                 or any(
                     command.command_type != 0
@@ -13698,7 +13707,7 @@ def plan_mob_movement_broadcast(
                 "mob movement path evidence template does not match the "
                 f"active mob: {source_template_id} != {template_id}"
             )
-        if source_broadcast.opaque_control != control_prefix:
+        if source_broadcast.control_prefix != control_prefix:
             raise ValueError(
                 "mob movement path evidence does not use the dominant "
                 "captured control prefix"
@@ -13774,7 +13783,7 @@ def plan_mob_movement_broadcast(
         for evidence_path in path_evidence_candidates:
             if (
                 evidence_path.template_id != template_id
-                or evidence_path.broadcast.opaque_control != control_prefix
+                or evidence_path.broadcast.control_prefix != control_prefix
             ):
                 continue
             if evidence_path.relative_motion_shape == source_shape:
@@ -13788,7 +13797,10 @@ def plan_mob_movement_broadcast(
             mode = "translated_captured_path"
         broadcast = MobMovementBroadcast(
             object_id=object_id,
-            opaque_control=source_broadcast.opaque_control,
+            control_flag_1=source_broadcast.control_flag_1,
+            control_flag_2=source_broadcast.control_flag_2,
+            control_selector=source_broadcast.control_selector,
+            control_value=source_broadcast.control_value,
             reference_x=reference_x,
             reference_y=reference_y,
             commands=tuple(translated_commands),
@@ -13883,7 +13895,7 @@ def plan_composed_mob_movement_broadcasts(
     for path in context.captured_paths:
         if (
             path.template_id != template_id
-            or path.broadcast.opaque_control != control_prefix
+            or path.broadcast.control_prefix != control_prefix
             or len(path.broadcast.commands) < 2
             or path.relative_motion_shape is None
             or path.displacement is None
