@@ -254,12 +254,14 @@ separate neutral envelope and cannot enter pickup correlation. Across streams
 keyed-u64, u64, and text branches provide 243 full observations. All 258
 variant-`3` numeric records are additionally bounded by their marker and three
 exact reserved-constant layouts, independently validate, and are now full;
-only two variant-`4` records remain partial with six opaque bytes total.
+the two variant-`4` records are exact zero-word plus neutral-byte forms with
+values `1` and `6`. All 503 non-pickup records are therefore full with zero
+opaque bytes.
 Decoded text is kept only for re-emission: events, reports, safe JSON, and
 HTTP-derived analysis expose its code-unit count but never its contents. For
-variant `3`, those surfaces expose the reserved-constant length and zero opaque
-bytes, plus the deliberately neutral numeric value; they do not expose the
-constant bytes or assign them higher-level semantics.
+variants `3` and `4`, those surfaces expose the structural constants and
+deliberately neutral numeric values; they do not expose constant bytes or
+assign higher-level semantics.
 Server opcode `137` is an independently traced counted pair ledger: one signed
 16-bit count followed by that many signed 32-bit pairs. All three reference
 packets use count `10` and consume exactly; the two stream-`92` instances are

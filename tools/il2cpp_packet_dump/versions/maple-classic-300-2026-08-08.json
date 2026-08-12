@@ -1151,6 +1151,11 @@
       ]
     },
     {
+      "name":"server_opcode_49_neutral_byte","direction":"server_to_client","opcode":49,"length":6,
+      "source":"both 1-10FS stream-126 variant-4 records use a zero u16 followed by one neutral u8 value (1 or 6) inside the same stat/job-script update burst",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":49},{"op":"read","name":"notice_type","kind":"u8","equals":4},{"op":"read","name":"reserved_value","kind":"u16","equals":0},{"op":"read","name":"neutral_value","kind":"u8"}]
+    },
+    {
       "name":"server_opcode_49_status_36","direction":"server_to_client","opcode":49,"length":36,
       "source":"generated opcode-49 handler db07bb07... reads the u8 discriminator; all 189 captured variant-3 width-36 packets contain marker 1, one u32 value, and 28 reserved-zero bytes",
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":49},{"op":"read","name":"notice_type","kind":"u8","equals":3},{"op":"read","name":"status","kind":"u8","equals":1},{"op":"read","name":"status_value","kind":"u32"},{"op":"bytes","name":"reserved_constant","length":28,"equals_hex":"00000000000000000000000000000000000000000000000000000000"}]

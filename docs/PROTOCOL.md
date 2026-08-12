@@ -2459,7 +2459,8 @@ variant 3:
     bytes reserved_constant         # observed lengths 28, 29, or 36
 
 variant 4:
-    bytes opaque_body               # three bytes in both samples
+    uint16 reserved_zero
+    uint8 neutral_value             # observed 1 and 6
 
 variant 6:
     uint64 numeric_value
@@ -2483,17 +2484,19 @@ non-pickup packets parse to their exact ends and round-trip byte-for-byte. The
 counts `189/25/44`: all use marker `1`; widths `36` and `44` end in 28 and 36
 zero bytes, while width `37` ends in constant byte `1` plus 28 zero bytes.
 These capture-bounded constants promote all variant-`3` observations from
-partial to full coverage. The family now provides 501 full observations and
-only the two variant-`4` records remain partial, retaining six opaque bytes.
-Reference coverage advances to `69,933/1,167/0/0` and
-`34,538/669/0/0` in streams `126` and `92`; stream `114` remains
-`64/12/0/0`. The fold emits
+partial to full coverage. The two variant-`4` records are exact six-byte forms:
+both carry a zero word and one neutral byte (`1` or `6`) in the same stat/job-
+script update burst. No higher-level meaning is assigned to that byte. The
+family now provides 503 full observations and zero opaque bytes. Current
+reference coverage is `69,942/1,158/0/0` and `34,547/660/0/0` in streams
+`126` and `92`; stream `114` remains `64/12/0/0`. The fold emits
 `server_opcode_49_received` and tracks variant, neutral shape, text-code-unit,
 reserved-constant-length, and opaque-byte distributions. Text is retained only
 in the typed object for exact re-emission and is omitted from safe JSON,
 events, text reports, and HTTP-derived analysis. The 258 exact-width records
 also pass the independent native manifest validator while the record value
-retains a deliberately neutral name.
+retains a deliberately neutral name. The two variant-`4` records separately
+pass their exact native shape.
 
 ## Redacted server opcode-`77` envelope
 

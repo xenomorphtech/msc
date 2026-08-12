@@ -5462,6 +5462,12 @@ class ServerOpcode49Envelope:
                 and self.opaque_tail in self.VARIANT_3_RESERVED_TAILS
             )
             or (
+                self.variant == 4
+                and self.reserved_value == 0
+                and self.numeric_value is not None
+                and not self.opaque_tail
+            )
+            or (
                 self.variant == 1
                 and self.value_kind in {self.TEXT_VALUE, self.U64_VALUE}
                 and not self.opaque_tail
@@ -5478,7 +5484,7 @@ class ServerOpcode49Envelope:
             return "keyed_opaque"
         return {
             3: "numeric_record_reserved_constants",
-            4: "opaque_record",
+            4: "neutral_byte_record",
             6: "u64",
             10: "text",
             12: "keyed_text",
@@ -5515,9 +5521,13 @@ class ServerOpcode49Envelope:
                 reader.remaining, "opaque_tail"
             )
         elif variant == 4:
-            values["opaque_tail"] = reader.bytes(
-                reader.remaining, "opaque_body"
-            )
+            reserved_value = reader.u16("reserved_value")
+            if reserved_value != 0:
+                raise PacketShapeError(
+                    "server opcode-49 variant 4 reserved value must be zero"
+                )
+            values["reserved_value"] = reserved_value
+            values["numeric_value"] = reader.u8("neutral_value")
         elif variant == 6:
             values["numeric_value"] = reader.u64("numeric_value")
         elif variant == 10:
@@ -5659,8 +5669,19 @@ class ServerOpcode49Envelope:
                     "<BI", self.record_marker, self.record_value
                 ) + bytes(self.opaque_tail)
             if self.variant == 4:
-                reject_fields()
-                return header + bytes(self.opaque_tail)
+                reject_fields("numeric_value", "reserved_value")
+                if self.reserved_value != 0 or self.numeric_value is None:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 4 requires reserved zero "
+                        "and one neutral byte"
+                    )
+                if self.opaque_tail:
+                    raise PacketShapeError(
+                        "server opcode-49 variant 4 has no opaque tail"
+                    )
+                return header + struct.pack(
+                    "<HB", self.reserved_value, self.numeric_value
+                )
             if self.variant == 6:
                 reject_fields("numeric_value")
                 if self.numeric_value is None:

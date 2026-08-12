@@ -9469,9 +9469,7 @@ class GameplayStateFold:
                     envelope.text_code_unit_count
                 )
             opaque_tail_length = (
-                0
-                if envelope.variant == 3 and envelope.fully_bounded
-                else len(envelope.opaque_tail)
+                0 if envelope.fully_bounded else len(envelope.opaque_tail)
             )
             self.state.server_opcode_49_opaque_bytes += opaque_tail_length
             details = {

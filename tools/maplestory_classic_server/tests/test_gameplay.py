@@ -1887,7 +1887,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 record_value=8,
                 opaque_tail=b"\x00" * 28,
             ),
-            ServerOpcode49Envelope(variant=4, opaque_tail=b"\x00\x00\x01"),
+            ServerOpcode49Envelope(
+                variant=4, reserved_value=0, numeric_value=1
+            ),
             ServerOpcode49Envelope(variant=6, numeric_value=200),
             ServerOpcode49Envelope(
                 variant=10,
@@ -1913,6 +1915,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
             bytes.fromhex("3100010704000001000000"),
             bytes.fromhex("3100010704000002f00946a90528dd01"),
             bytes.fromhex("310004000001"),
+            bytes.fromhex("310004000006"),
             bytes.fromhex("310006c800000000000000"),
             bytes.fromhex(
                 "31000cd872000005006d006f006e003d00300000"
@@ -1938,12 +1941,19 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 ServerOpcode49Envelope.parse(envelope.to_bytes()), envelope
             )
             self.assertTrue(envelope.fully_bounded)
+        self.assertTrue(envelopes[3].fully_bounded)
         with self.assertRaisesRegex(PacketShapeError, "marker must be one"):
             replace(envelopes[2], record_marker=0).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "28, 29, or 36"):
             replace(envelopes[2], opaque_tail=b"\x00" * 27).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "capture-bounded constant"):
             replace(envelopes[2], opaque_tail=b"\x00" * 27 + b"\x01").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "reserved value must be zero"):
+            ServerOpcode49Envelope.parse(bytes.fromhex("310004010001"))
+        with self.assertRaisesRegex(PacketShapeError, "reserved zero"):
+            replace(envelopes[3], reserved_value=1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "unsigned widths"):
+            replace(envelopes[3], numeric_value=256).to_bytes()
 
         with self.assertRaisesRegex(PacketShapeError, "pickup gain notice"):
             ServerOpcode49Envelope.parse(
@@ -6087,7 +6097,9 @@ class GameplayStateFoldTest(unittest.TestCase):
                 record_value=8,
                 opaque_tail=b"\x00" * 28,
             ),
-            ServerOpcode49Envelope(variant=4, opaque_tail=b"\x00\x00\x01"),
+            ServerOpcode49Envelope(
+                variant=4, reserved_value=0, numeric_value=1
+            ),
             ServerOpcode49Envelope(variant=6, numeric_value=200),
             ServerOpcode49Envelope(
                 variant=10,
@@ -6123,7 +6135,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 envelope.text_code_unit_count or 0 for envelope in envelopes
             ),
         )
-        self.assertEqual(analysis.state.server_opcode_49_opaque_bytes, 3)
+        self.assertEqual(analysis.state.server_opcode_49_opaque_bytes, 0)
         observations = [
             observation
             for observation in analysis.observations
@@ -6131,7 +6143,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            ["full", "full", "full", "partial", "full", "full", "full"],
+            ["full", "full", "full", "full", "full", "full", "full"],
         )
         self.assertEqual(
             len(

@@ -2529,3 +2529,7 @@ preserve distinct Unity scan codes in this setup.
     message type and fixed 16-byte signature, promote them to full structural
     coverage after Python/native validation, and keep their post-HP-zero
     gameplay role explicitly unresolved.
+115. Complete server opcode-`49` by typing both six-byte variant-`4` records as
+    a reserved-zero word plus one neutral byte, validate both captured values,
+    and leave the neighboring stat/job-script role unnamed. All 503 non-pickup
+    opcode-`49` packets now have full coverage and zero opaque bytes.

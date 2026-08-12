@@ -844,6 +844,13 @@
   native validation pass; the three observations move from partial to full,
   advancing stream `92` to `34,547/660/0/0`. Safe events and HTTP-derived
   analysis expose only the structural byte count and report zero opaque bytes.
+- The last two partial server opcode-`49` records, both variant `4`, are now
+  exact `reserved u16 zero + neutral u8` forms with values `1` and `6`. Their
+  neighboring stat/job-script burst does not justify a semantic label. Python
+  round-trip/rejection tests and isolated native validation pass, promoting
+  both records to full and moving stream `126` to `69,942/1,158/0/0`; streams
+  `92` and `114` remain `34,547/660/0/0` and `64/12/0/0`. The entire 503-packet
+  non-pickup opcode-`49` family now has full coverage and zero opaque bytes.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits
