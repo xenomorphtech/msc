@@ -7281,37 +7281,46 @@ class ClientFieldTransferRequest:
 class ServerOpcode43Envelope:
     """Capture-bounded neutral fixed server response for opcode 43."""
 
-    message_type: int
-    opaque_body: bytes = field(repr=False)
+    CAPTURED_BODY = bytes.fromhex("00000000000000000002000000000002")
+
+    message_type: int = 0
     opcode: int = 43
 
     @classmethod
     def parse(cls, payload: bytes) -> "ServerOpcode43Envelope":
         reader = PacketReader(payload, packet_name="server_opcode_43")
         _expect_opcode(reader, 43)
-        envelope = cls(
-            message_type=reader.u8("message_type"),
-            opaque_body=reader.bytes(16, "opaque_body"),
-        )
+        message_type = reader.u8("message_type")
+        if message_type != 0:
+            raise PacketShapeError(
+                "server opcode-43 capture-bounded message type must be zero"
+            )
+        captured_body = reader.bytes(16, "captured_body")
+        if captured_body != cls.CAPTURED_BODY:
+            raise PacketShapeError(
+                "server opcode-43 body does not match the captured fixed signature"
+            )
         reader.finish()
-        return envelope
+        return cls(message_type=message_type)
 
     def safe_dict(self) -> dict[str, int]:
         return {
             "message_type": self.message_type,
-            "opaque_bytes": len(self.opaque_body),
+            "capture_bounded_body_bytes": 16,
+            "opaque_bytes": 0,
         }
 
     def to_bytes(self) -> bytes:
         if self.opcode != 43:
             raise PacketShapeError("server opcode-43 envelope opcode must be 43")
-        if not 0 <= self.message_type <= 0xFF:
-            raise PacketShapeError("server opcode-43 message type must fit in u8")
-        if len(self.opaque_body) != 16:
+        if self.message_type != 0:
             raise PacketShapeError(
-                "server opcode-43 envelope needs a 16-byte opaque body"
+                "server opcode-43 capture-bounded message type must be zero"
             )
-        return struct.pack("<HB", self.opcode, self.message_type) + self.opaque_body
+        return (
+            struct.pack("<HB", self.opcode, self.message_type)
+            + self.CAPTURED_BODY
+        )
 
 
 @dataclass(frozen=True)

@@ -2818,13 +2818,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertNotIn("west00", safe)
         self.assertIn("-1001", safe)
 
-        server = ServerOpcode43Envelope(
-            message_type=0,
-            opaque_body=bytes(range(16)),
-        )
+        server = ServerOpcode43Envelope()
         self.assertEqual(ServerOpcode43Envelope.parse(server.to_bytes()), server)
         self.assertEqual(len(server.to_bytes()), 19)
-        self.assertNotIn(bytes(range(16)).hex(), str(server.safe_dict()))
+        self.assertEqual(
+            server.safe_dict(),
+            {
+                "message_type": 0,
+                "capture_bounded_body_bytes": 16,
+                "opaque_bytes": 0,
+            },
+        )
 
         with self.assertRaisesRegex(PacketShapeError, "cannot contain portal"):
             replace(death_respawn, portal_name="west00").to_bytes()
@@ -2840,8 +2844,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ClientFieldTransferRequest.parse(
                 bytes.fromhex("2b0004000000000000000001")
             )
-        with self.assertRaisesRegex(PacketShapeError, "16-byte opaque"):
-            replace(server, opaque_body=b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "message type must be zero"):
+            replace(server, message_type=1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "message type must be zero"):
+            ServerOpcode43Envelope.parse(bytes.fromhex("2b0001") + bytes(16))
+        with self.assertRaisesRegex(PacketShapeError, "fixed signature"):
+            ServerOpcode43Envelope.parse(
+                server.to_bytes()[:-1] + b"\x03"
+            )
 
     def test_npc_interaction_and_client_opcode_111_round_trip(self) -> None:
         interaction_payloads = (
@@ -6610,10 +6620,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             reserved_value=0,
         )
         death_respawn = ClientFieldTransferRequest(field_epoch=2)
-        server = ServerOpcode43Envelope(
-            message_type=0,
-            opaque_body=bytes(range(16)),
-        )
+        server = ServerOpcode43Envelope()
         transcript = fixture_gameplay_transcript(
             initial_snapshot=True,
             extra_server_plaintexts=(server.to_bytes(),),
@@ -6661,7 +6668,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(analysis.state.server_opcode_43_packets, 1)
         self.assertEqual(analysis.state.server_opcode_43_message_types, {0: 1})
-        self.assertEqual(analysis.state.server_opcode_43_opaque_bytes, 16)
+        self.assertEqual(analysis.state.server_opcode_43_opaque_bytes, 0)
         observations = [
             observation
             for observation in analysis.observations
@@ -6687,7 +6694,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             if observation.kind == "server_opcode_43_envelope"
         ]
         self.assertEqual(len(server_observations), 1)
-        self.assertEqual(server_observations[0].coverage.value, "partial")
+        self.assertEqual(server_observations[0].coverage.value, "full")
         self.assertEqual(
             sum(
                 event.kind == "server_opcode_43_received"
@@ -6697,13 +6704,13 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         safe = str(analysis.safe_dict())
         self.assertNotIn("sensitive-portal", safe)
-        self.assertNotIn(bytes(range(16)).hex(), safe)
+        self.assertIn("'capture_bounded_body_bytes': 16", safe)
         self.assertIn(
             "client_field_transfer=requests:2",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(
-            "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:16",
+            "server_opcode_43=packets:1 message_types:{0: 1} opaque_bytes:0",
             render_gameplay_analysis(analysis),
         )
 

@@ -918,8 +918,10 @@ The gameplay fold currently models these capture-backed boundaries:
   portal form uses map sentinel `-1`, a redacted portal name, signed player
   position, and zero reserved word, while the 12-byte death-respawn form is
   nine zeros; both correlate to the next opcode-`157` field snapshot,
-- server opcode `43`: separate neutral message byte plus fixed 16-byte body;
-  it is not the response boundary for client field transfers,
+- server opcode `43`: separate capture-bounded neutral message type zero plus
+  one fixed 16-byte signature shared by all three reference records; each
+  follows an HP-zero/experience update, but it is not the response boundary for
+  client field transfers and its higher-level role remains unresolved,
 - client opcode `114`: one neutral redacted envelope with a control byte,
   counted UTF-16 field, required zero terminator, and omitted trailing u32;
   all records have full structural coverage while tutorial/UI timing remains a
@@ -2523,3 +2525,7 @@ preserve distinct Unity scan codes in this setup.
 113. Complete the generated-u32 suffix audit by bounding zero-suffix opcodes
     `228`/`231` and both short opcode-`230` constant-`09` records, leaving only
     long opcode `230` and opcode `232` partial with 23 opaque bytes.
+114. Bound all three server opcode-`43` records to their byte-identical neutral
+    message type and fixed 16-byte signature, promote them to full structural
+    coverage after Python/native validation, and keep their post-HP-zero
+    gameplay role explicitly unresolved.

@@ -837,6 +837,13 @@
   `34,544/663/0/0`. The active saved transcript contains none of the family and
   remains warning-free at `2,980/54/0/0`; safe JSON and HTTP-derived analysis
   publish suffix lengths, never the redacted u32 or constant byte.
+- Server opcode `43` is now capture-bounded to the one exact 19-byte signature
+  shared by all three stream-`92` records: message type zero plus a fixed
+  16-byte body. Each record immediately follows an HP-zero/experience update,
+  but the higher-level role stays neutral. Python round-trip/rejection tests and
+  native validation pass; the three observations move from partial to full,
+  advancing stream `92` to `34,547/660/0/0`. Safe events and HTTP-derived
+  analysis expose only the structural byte count and report zero opaque bytes.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

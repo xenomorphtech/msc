@@ -305,15 +305,18 @@ death respawn:
 
 server opcode-43 neutral envelope:
   uint16 opcode = 43
-  uint8 message_type
-  byte[16] opaque_body
+  uint8 message_type = 0
+  byte[16] captured_body = 00000000000000000002000000000002
 ```
 
 Stream `92` contributes nine portal transfers, three death respawns, and three
-neutral server packets; all server message types are zero. The three respawns
-each follow a same-epoch HP-zero stat update by `2.271..2.918` seconds and use
-an all-zero body. Stream `126` contributes 33 portal transfers. Portal-name
-lengths are `4:5`, `5:9`, `6:27`, and `8:1` code units across both captures;
+neutral server packets. The server packets are byte-identical: message type
+zero followed by the fixed 16-byte signature above. Each immediately follows
+an HP-zero/experience stat update, but its higher-level purpose remains
+unresolved. The three respawns each follow a same-epoch HP-zero stat update by
+`2.271..2.918` seconds and use an all-zero body. Stream `126` contributes 33
+portal transfers. Portal-name lengths are `4:5`, `5:9`, `6:27`, and `8:1`
+code units across both captures;
 all portal requests use map sentinel `-1`, a zero reserved value, and signed
 positions. Safe state/events redact the portal name but expose epoch matching,
 variant, position, pending/matched transitions, and latency.
@@ -328,17 +331,21 @@ combat-model disagreements.
 The automatic manifest uses portal and death-respawn candidates rather than the
 earlier sequence-keyed switch. Exact packet length makes the candidates
 unambiguous, while equality guards enforce map sentinel `-1`, the zero portal
-reserved value, and the death-respawn zero body.
+reserved value, the death-respawn zero body, and the capture-bounded server
+signature. The three server observations now fold at full structural coverage,
+moving current stream-`92` coverage from `34,544/663/0/0` to
+`34,547/660/0/0`; native validation consumes all 35,207 decrypted packets.
 
 An exact captured 19-byte server envelope was injected into an already active
-browser-free custom-server session. The fold added one partial opcode-`43`
+browser-free custom-server session. The fold added one opcode-`43`
 event, core phase/map/player/inventory/progression state stayed unchanged,
 matched heartbeats advanced from 173 to 176, and the connection remained
 active with zero failures. No client opcode-`43` response appeared because
 server opcode `43` is not the field-transfer response; the capture-backed
 response boundary is the following opcode-`157` snapshot. The injection still
 proves bounded non-stalling acceptance for the separately neutral server
-family only.
+family only. Reanalysis now classifies that exact signature as structurally
+full; it does not retroactively assign a gameplay meaning.
 
 ## Client opcode `114` redacted text envelope
 

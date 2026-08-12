@@ -301,6 +301,13 @@ report structural suffix lengths, and count zero opaque bytes for those ten
 records. Only the seven-byte suffix of the long opcode-`230` record and the
 16-byte opcode-`232` suffix remain partial, with 23 opaque bytes total.
 
+Server opcode `43` is likewise structurally complete for the captured
+family: all three reference packets use message type zero and the same fixed
+16-byte signature, while safe events and HTTP-derived analysis expose only the
+signature length and zero opaque bytes. Its earlier active-client replay remains
+a non-stalling acceptance check; the higher-level post-HP-zero role is not
+claimed.
+
 Opcode `201` is now separate typed `pet_activated` state rather than a neutral
 record. Its owner, slot, activation controls, pet item, empty counted name,
 redacted serial, position, stance, and foothold exactly consume all 46 packets.

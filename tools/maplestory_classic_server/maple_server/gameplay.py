@@ -8336,9 +8336,6 @@ class GameplayStateFold:
             self.state.server_opcode_43_message_types[
                 envelope.message_type
             ] += 1
-            self.state.server_opcode_43_opaque_bytes += len(
-                envelope.opaque_body
-            )
             details = {
                 **envelope.safe_dict(),
                 "field_epoch": self.state.field_epoch,
@@ -8351,13 +8348,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="server_opcode_43_envelope",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=envelope,
                 details=details,
-                issues=(
-                    "server opcode-43 body and higher-level purpose remain "
-                    "semantically unresolved",
-                ),
             )
         if opcode == 39:
             change_set = InventoryChangeSet.parse(payload)
