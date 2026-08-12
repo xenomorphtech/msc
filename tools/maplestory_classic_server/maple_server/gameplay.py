@@ -6402,19 +6402,20 @@ class GameplayStateFold:
         return self._observation(
             frame,
             kind="client_attack_action",
-            coverage=ShapeCoverage.PARTIAL,
+            coverage=(
+                ShapeCoverage.PARTIAL
+                if isinstance(action, ClientAttackAction)
+                else ShapeCoverage.FULL
+            ),
             parsed=action,
             details=details,
             issues=(
-                (
-                    "attack target and damage-array roles are "
-                    "capture-correlated; control, value, and opaque target "
-                    "prefix/tail roles remain uninterpreted"
-                    if isinstance(action, ClientAttackAction)
-                    else "attack target role is capture-correlated; control, "
-                    "value, and opaque body roles remain uninterpreted"
-                ),
-            ),
+                "attack target and damage-array roles are "
+                "capture-correlated; control, value, and opaque target "
+                "prefix/tail roles remain uninterpreted",
+            )
+            if isinstance(action, ClientAttackAction)
+            else (),
         )
 
     def _event(

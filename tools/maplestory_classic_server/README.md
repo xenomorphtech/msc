@@ -936,7 +936,8 @@ The gameplay fold currently models these capture-backed boundaries:
   extended variants, plus typed per-hit damage words between bounded opaque
   target prefix/tail regions; each nonzero word becomes one pending hit effect,
 - client opcode `54`: exact 24-byte attack action whose third trailing u32 is
-  an aliased mob target; the other numeric roles remain neutral,
+  an aliased mob target; all 151 records have full structural coverage while
+  the other numeric roles remain neutral,
 - client opcode `217`: neutral compact and counted record-set envelopes with
   capture-bounded format-`0`/`2` record widths; opaque bytes remain redacted,
   and no effect or replay behavior is inferred,

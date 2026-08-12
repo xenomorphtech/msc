@@ -4078,6 +4078,10 @@ opcode-`54` actions are followed by same-mob health or leave traffic often
 enough to establish the attack-action family; stream `92` independently
 confirms the targeted opcode-`52` shape. All 961 actions consume exactly and
 round-trip byte-for-byte.
+The fixed scalar opcode-`54` branch now reports full structural coverage for all
+151 records and passes independent manifest validation. Opcode `50`/`52`
+actions remain partial because their target prefix/tail bytes are still opaque;
+the shared fold does not promote them.
 
 The fold emits `client_attack_submitted`, aliases the mob target, distinguishes
 currently active from previously known targets, and records per-mob damage/hit

@@ -10416,6 +10416,15 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "54:flags=255:0": 1,
             },
         )
+        attack_observations = {
+            observation.opcode: observation
+            for observation in analysis.observations
+            if observation.kind == "client_attack_action"
+        }
+        self.assertEqual(attack_observations[50].coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(attack_observations[52].coverage, ShapeCoverage.PARTIAL)
+        self.assertEqual(attack_observations[54].coverage, ShapeCoverage.FULL)
+        self.assertEqual(attack_observations[54].issues, ())
         self.assertEqual(analysis.state.client_attack_targeted_actions, 3)
         self.assertEqual(analysis.state.client_attack_untargeted_actions, 2)
         self.assertEqual(
@@ -10584,7 +10593,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             report,
         )
         self.assertIn(
-            "opcode=54 kind=client_attack_action coverage=partial",
+            "opcode=54 kind=client_attack_action coverage=full",
             report,
         )
         self.assertIn(

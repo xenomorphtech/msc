@@ -723,8 +723,11 @@ safe output aliases it and omits client tokens. Targeted `50`/`52` suffixes
 also expose 646 damage words across both captures after a fixed opaque prefix.
 The state fold treats every nonzero word as one hit, matches all 607 opcode-
 `293` responses, clears 32 terminal hits at lifecycle boundaries, and skips
-seven zero-damage words while leaving no pending effects. Server opcodes
-`218`/`219`
+seven zero-damage words while leaving no pending effects. The fixed-scalar
+opcode-`54` branch now reports full structural coverage for
+all 151 records and passes independent exact validation. Opcode `50`/`52`
+remain partial because their bounded target prefix/tail bytes are still opaque.
+Server opcodes `218`/`219`
 likewise fold as 140 and 43 attack relays, with aliased actors and packed
 target/hit counts. Their bodies expose 194 target records and 254 damage words,
 with aliased mobs and a neutral high-bit marker; active mobs also accumulate

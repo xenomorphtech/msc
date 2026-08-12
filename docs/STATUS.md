@@ -715,7 +715,10 @@
   responses, clears 21 and 11 terminal hits at lifecycle boundaries, skips the
   seven zero-damage stream-`92` entries, and finishes with zero pending effects.
   Reports alias targets and redact client tokens while keeping control/value
-  and target prefix/tail roles neutral.
+  and target prefix/tail roles neutral. The 151 fixed-scalar opcode-`54`
+  records now have full structural coverage and pass independent exact
+  validation; opcodes `50`/`52` stay partial because their target prefix/tail
+  bytes remain opaque.
 - The official client's WZJS-v5 mob records provide `info/maxHP` for all 11
   templates attacked in the references. Opcode `293` is modeled as floor
   integer percentage, yielding an authoritative current-HP interval and a
