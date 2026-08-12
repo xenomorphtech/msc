@@ -1160,19 +1160,29 @@ match their value effect, opcode-`49` result, and opcode-`312` removal. All 100
 removal packets round-trip. Two mob movement submissions remain pending at
 capture end.
 
-Twelve of the 13 opcode-`157` packets use an exact 95-byte compact transition
-shape (two-byte opcode plus 93-byte body). `CompactFieldTransition` decodes the
-marker/reserved fields, transition sequence, map id, portal index, current HP,
-two one-character UTF-16 strings with trailing zero bytes, one 16-character
-UTF-16 string, fixed integers, a `1900-01-01` FILETIME sentinel, a server-local
-FILETIME value, and a final unnamed `u32`. All 12 round-trip byte-for-byte and
-their sequences exactly match field epochs `2..13`. The map sequence is drawn
+Twelve of the 13 stream-`92` opcode-`157` packets use an exact 95-byte compact
+transition shape (two-byte opcode plus 93-byte body).
+`CompactFieldTransition` decodes the marker/reserved fields, transition
+sequence, map id, portal index, current HP, three counted UTF-16 fields, fixed
+integers, a `1900-01-01` FILETIME sentinel, a server-local FILETIME value, and
+a final unnamed `u32`. The marker-`23` branch has text counts `1/1/16` and
+constant `2`. All 12 round-trip byte-for-byte and their sequences exactly
+match field epochs `2..13`. The map sequence is drawn
 from `100050000`, `100040100`, `100040000`, `100040110`, and `101000000`; the
 final folded state is map `101000000`, portal `6`, HP `50`. After accounting for
 UTC+8, each server-local clock value precedes packet capture by 1.097-1.183
 seconds. Reports expose string lengths, not their potentially identifying text,
-and retain neutral names for the three text roles and final integer. The first
-large opcode-`157` packet now decodes through its 112-byte plaintext prefix:
+and retain neutral names for the three text roles and final integer.
+
+Stream `126` adds 35 exact 59-byte compact transitions. They use marker `26`,
+three empty counted UTF-16 fields, and constant `0`, while retaining the same
+field/state/time grammar. Their sequences span field epochs `2..36`; the final
+neutral `u32` takes values `0/1/2/7`. All 35 round-trip and fold at full
+coverage, moving the strict stream totals to `70,068/1,032/0/0`; stream `92`
+remains `34,568/639/0/0`. The active saved transcript contains neither compact
+form and remains `764/18/0/0`.
+
+The first large opcode-`157` packet now decodes through its 112-byte plaintext prefix:
 marker/branch flags, three connection-local integers, signed `-1` sentinel,
 character-data flags, character id, UTF-16 name, appearance, level/job, four
 base stats, HP/MP pairs, AP/SP, EXP, fame, map id, portal, and two still-neutral

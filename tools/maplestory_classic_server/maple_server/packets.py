@@ -3265,9 +3265,10 @@ class CompactFieldTransition:
 
     @classmethod
     def parse(cls, payload: bytes) -> "CompactFieldTransition":
-        if len(payload) != 95:
+        if len(payload) not in (59, 95):
             raise PacketShapeError(
-                f"compact field transition has {len(payload)} bytes, expected 95"
+                f"compact field transition has {len(payload)} bytes, "
+                "expected 59 or 95"
             )
         reader = PacketReader(payload, packet_name="compact_field_transition")
         _expect_opcode(reader, 157)
@@ -3302,9 +3303,18 @@ class CompactFieldTransition:
         return transition
 
     def _validate(self) -> None:
-        if self.marker != 23:
+        expected_text_lengths = {
+            23: (1, 1, 16),
+            26: (0, 0, 0),
+        }
+        expected_constants = {
+            23: 2,
+            26: 0,
+        }
+        if self.marker not in expected_text_lengths:
             raise PacketShapeError(
-                f"compact field transition marker is {self.marker}, expected 23"
+                f"compact field transition marker is {self.marker}, "
+                "expected 23 or 26"
             )
         if self.reserved_flag != 0 or self.reserved_flag_2 != 0:
             raise PacketShapeError(
@@ -3314,21 +3324,26 @@ class CompactFieldTransition:
             raise PacketShapeError(
                 "compact field transition reserved integers must be zero"
             )
-        if self.constant_u32 != 2:
+        if self.constant_u32 != expected_constants[self.marker]:
             raise PacketShapeError(
-                "compact field transition constant integer must be two"
+                "compact field transition marker "
+                f"{self.marker} constant integer is {self.constant_u32}, "
+                f"expected {expected_constants[self.marker]}"
             )
         if self.sentinel_filetime_ticks != 94_354_848_000_000_000:
             raise PacketShapeError(
                 "compact field transition sentinel must encode 1900-01-01"
             )
-        if len(self.opaque_text_1) != 1 or len(self.opaque_text_2) != 1:
+        text_lengths = (
+            len(self.opaque_text_1),
+            len(self.opaque_text_2),
+            len(self.opaque_text_3),
+        )
+        if text_lengths != expected_text_lengths[self.marker]:
             raise PacketShapeError(
-                "compact field transition short strings must contain one character"
-            )
-        if len(self.opaque_text_3) != 16:
-            raise PacketShapeError(
-                "compact field transition long string must contain 16 characters"
+                "compact field transition marker "
+                f"{self.marker} text lengths are {text_lengths}, expected "
+                f"{expected_text_lengths[self.marker]}"
             )
 
     def to_bytes(self) -> bytes:
@@ -3369,9 +3384,11 @@ class CompactFieldTransition:
             raise PacketShapeError(
                 f"compact field transition field is out of range: {error}"
             ) from error
-        if len(encoded) != 95:
+        expected_length = 95 if self.marker == 23 else 59
+        if len(encoded) != expected_length:
             raise PacketShapeError(
-                f"compact field transition encoded to {len(encoded)} bytes"
+                f"compact field transition encoded to {len(encoded)} bytes, "
+                f"expected {expected_length}"
             )
         return encoded
 

@@ -838,9 +838,16 @@ to `active` with those values, the same inventory/progression state, and 7/7
 matched generated heartbeats. Therefore the exact re-emission is accepted by
 the live encrypted client path as well as by the offline round-trip checks.
 
-The later 95-byte opcode-`157` variant is `CompactFieldTransition`; it remains
-fully decoded and updates transition sequence, map, portal, HP, and server
-clock without replacing the initial player-stat model.
+The later 59- and 95-byte opcode-`157` variants are
+`CompactFieldTransition`. Both share transition sequence, map, portal, HP,
+reserved fields, the `1900-01-01` FILETIME sentinel, server clock, and a final
+neutral `u32`. The 95-byte marker-`23` branch carries UTF-16 character counts
+`1/1/16` and constant `2`; the 59-byte marker-`26` branch carries three empty
+counted strings and constant `0`. All 12 marker-`23` records in stream `92` and
+all 35 marker-`26` records in stream `126` round-trip exactly and update the
+same field-transition state without replacing the initial player-stat model.
+The marker-`26` sequences span `2..36`; its observed final neutral values are
+`0/1/2/7`.
 
 ## Remote-player field lifecycle (`189`, `190`)
 

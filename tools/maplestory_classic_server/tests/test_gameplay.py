@@ -4071,15 +4071,30 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
     def test_compact_field_transition_round_trip(self) -> None:
         transition = fixture_compact_field_transition()
+        empty_text_transition = replace(
+            transition,
+            marker=26,
+            opaque_text_1="",
+            opaque_text_2="",
+            opaque_text_3="",
+            constant_u32=0,
+        )
 
         self.assertEqual(len(transition.to_bytes()), 95)
         self.assertEqual(
             CompactFieldTransition.parse(transition.to_bytes()), transition
         )
+        self.assertEqual(len(empty_text_transition.to_bytes()), 59)
+        self.assertEqual(
+            CompactFieldTransition.parse(empty_text_transition.to_bytes()),
+            empty_text_transition,
+        )
         with self.assertRaisesRegex(PacketShapeError, "marker"):
             replace(transition, marker=24).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "16 characters"):
+        with self.assertRaisesRegex(PacketShapeError, "text lengths"):
             replace(transition, opaque_text_3="short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "text lengths"):
+            replace(empty_text_transition, opaque_text_1="1").to_bytes()
 
     def test_npc_spawn_round_trip(self) -> None:
         spawn = fixture_npc()
@@ -10509,6 +10524,36 @@ class GameplayStateFoldTest(unittest.TestCase):
             observation.details["opaque_text_character_counts"], [1, 1, 16]
         )
         self.assertNotIn("sanitized-field!", analysis.to_json())
+
+    def test_folds_empty_text_compact_transition_into_map_state(self) -> None:
+        transition = replace(
+            fixture_compact_field_transition(),
+            marker=26,
+            opaque_text_1="",
+            opaque_text_2="",
+            opaque_text_3="",
+            constant_u32=0,
+        )
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                extra_server_plaintexts=(transition.to_bytes(),),
+            )
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.compact_field_transitions, 1)
+        self.assertEqual(analysis.state.transition_sequence, 2)
+        self.assertEqual(analysis.state.map_id, 100_050_000)
+        observation = next(
+            item
+            for item in analysis.observations
+            if item.kind == "compact_field_transition"
+        )
+        self.assertEqual(observation.coverage.value, "full")
+        self.assertEqual(observation.details["marker"], 26)
+        self.assertEqual(
+            observation.details["opaque_text_character_counts"], [0, 0, 0]
+        )
 
     def test_safe_output_uses_correlatable_aliases_and_redacts_raw_ids(self) -> None:
         analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())

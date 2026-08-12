@@ -9727,7 +9727,7 @@ class GameplayStateFold:
             snapshot = FieldSnapshotEnvelope.parse(payload)
             transition = (
                 CompactFieldTransition.parse(payload)
-                if len(snapshot.opaque_snapshot) == 93
+                if len(snapshot.opaque_snapshot) in (57, 93)
                 else None
             )
             initial_snapshot = (
@@ -10106,6 +10106,7 @@ class GameplayStateFold:
                     )
                 details.update(
                     {
+                        "marker": transition.marker,
                         "transition_sequence": transition.transition_sequence,
                         "map_id": transition.map_id,
                         "portal_index": transition.portal_index,

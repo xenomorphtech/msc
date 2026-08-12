@@ -226,6 +226,29 @@
       ]
     },
     {
+      "name":"compact_field_transition_empty_text","direction":"server_to_client","opcode":157,"length":59,
+      "source":"packets.py:CompactFieldTransition; capture 1-10FS stream 126",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":157},
+        {"op":"read","name":"marker","kind":"u32","equals":26},
+        {"op":"read","name":"reserved_flag","kind":"u8","equals":0},
+        {"op":"read","name":"transition_sequence","kind":"u32"},
+        {"op":"read","name":"map_id","kind":"u32"},
+        {"op":"read","name":"portal_index","kind":"u8"},
+        {"op":"read","name":"current_hp","kind":"u32"},
+        {"op":"read","name":"reserved_u16","kind":"u16","equals":0},
+        {"op":"utf16","name":"opaque_text_1","trailing_zero":true},
+        {"op":"utf16","name":"opaque_text_2","trailing_zero":true},
+        {"op":"utf16","name":"opaque_text_3","trailing_zero":false},
+        {"op":"read","name":"reserved_u32","kind":"u32","equals":0},
+        {"op":"read","name":"constant_u32","kind":"u32","equals":0},
+        {"op":"read","name":"reserved_flag_2","kind":"u8","equals":0},
+        {"op":"read","name":"sentinel_filetime_ticks","kind":"i64","equals":94354848000000000},
+        {"op":"read","name":"server_local_filetime_ticks","kind":"i64"},
+        {"op":"read","name":"unknown_tail_u32","kind":"u32"}
+      ]
+    },
+    {
       "name":"client_opcode_6_record_set","direction":"client_to_server","opcode":6,
       "source":"packets.py:ClientOpcode6RecordSet; capture 111 streams 83 and 116 plus live login transcript 1786463759633587464",
       "operations":[

@@ -491,6 +491,15 @@
   `64/12/0/0`. The active saved transcript's Cash add is also full, moving it
   to `764/18/0/0`. Its 78 opcode-`300` NPC spawns also validate
   after preserving the facing byte values `0/1/2/4/5`.
+- The 35 stream-`126` opcode-`157` records with width 59 are now the second
+  fully typed `CompactFieldTransition` branch. Marker `26` uses the same
+  transition/map/portal/HP/FILETIME grammar as the existing 95-byte marker-`23`
+  branch, but carries three empty counted strings and constant `0` instead of
+  text counts `1/1/16` and constant `2`. Sequences cover field epochs `2..36`,
+  all records round-trip, and native validation exact-consumes `35/35`. Strict
+  stream-`126` coverage improves to `70,068/1,032/0/0`; stream `92` stays
+  `34,568/639/0/0`, and the active saved transcript stays `764/18/0/0` with no
+  compact-transition occurrence.
 - The common fixed-width server family now has complete typed codecs for
   opcodes `11`, `24`, `45`, `56`, `58`, `59`, `60`, `71`, `72`, `74`, `76`,
   `89`, `96`, `105`, `112`, `121`, `131`, `178`, `301`, `386`, `388`, `389`,
