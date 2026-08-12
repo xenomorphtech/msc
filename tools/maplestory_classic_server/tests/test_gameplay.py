@@ -9635,6 +9635,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(request_events), 3)
         self.assertEqual(len(result_events), 3)
         self.assertEqual(len(removal_events), 3)
+        result_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "pickup_gain_notice"
+        ]
+        self.assertEqual(len(result_observations), 3)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                for observation in result_observations
+            )
+        )
         self.assertEqual(
             sum(event.kind == "field_drop_spawned" for event in analysis.events),
             3,

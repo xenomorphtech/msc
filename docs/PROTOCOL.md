@@ -2928,6 +2928,12 @@ inferred prior balance of `4100`; the other 28 are independently checked as
 direct deltas. The special result has no inventory or stat effect. All 54
 result chains match. Request-to-result latency is 27.801-111.964 ms, averaging
 68.239 ms.
+The pinned opcode-`49` handler independently confirms this result discriminator
+and all three kind-selected branches. Consequently, neutral meanings for the
+result flag, mesos subtype/tail, and special value no longer make the
+byte-complete packet partial: all 257 pickup-result records across both
+reference gameplay streams report full structural coverage and pass exact
+independent manifest validation.
 
 Field-drop removal opcode `312` has three exact widths:
 

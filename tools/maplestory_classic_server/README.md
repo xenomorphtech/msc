@@ -892,7 +892,8 @@ The gameplay fold currently models these capture-backed boundaries:
   active lifecycle; all four branches have full structural coverage even where
   field roles remain neutral,
 - server opcode `49`: the three pickup-result variants for item quantity, mesos
-  amount, and a still-neutral special value,
+  amount, and a still-neutral special value; each branch has full structural
+  coverage,
 - server opcode `77`: redacted variants `3`/`4`/`5` fully bound one to three
   counted UTF-16 fields plus their fixed neutral controls/value, while variant
   `8` preserves only its 4- or 117-byte tail as opaque; safe state, events,

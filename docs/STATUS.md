@@ -863,7 +863,9 @@
   the 54 local chains have zero effect/removal mismatches and zero pending
   requests. Reactive pickup tests additionally prove ordered
   request/completion events and nonfatal rejection after the modeled drop has
-  already been removed.
+  already been removed. Handler-confirmed branching and independent exact
+  validation promote all 257 reference-corpus pickup-result notices to full
+  structural coverage while retaining neutral labels for unresolved roles.
 - Server opcode `311` is typed across animated item/mesos, field-load item,
   and field-load mesos variants. Stream `92` has 125 packets/66 drop
   lifecycles; the level-1-to-10 corpus adds four exact 30-byte mode-`2` mesos

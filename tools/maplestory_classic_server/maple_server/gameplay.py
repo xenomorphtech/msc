@@ -9451,13 +9451,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="pickup_gain_notice",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=notice,
                 details=details,
-                issues=(
-                    "pickup result flag, mesos subtype/tail, and special-value "
-                    "semantics remain neutral",
-                ),
             )
         if opcode == 49:
             envelope = ServerOpcode49Envelope.parse(payload)

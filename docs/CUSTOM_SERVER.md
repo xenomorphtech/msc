@@ -2575,6 +2575,10 @@ project's own `README.md` for all options.
   exact stack decrements plus potion stat effects. A reactive live request
   produced the predicted red-potion `2 -> 1` and HP `50 -> 100` effects, with
   zero mismatches and continued heartbeats.
+- All 257 typed opcode-`49` pickup-result notices in the two reference gameplay
+  streams have full structural coverage and pass the independent manifest
+  validator across item, mesos, and special branches. Still-unresolved result
+  flag, mesos subtype/tail, and special-value roles retain neutral labels.
 - All 125 stream-`92` opcode-`311` packets round-trip and fold into 66 drop
   lifecycles. All 54 pickup requests, gain values, effects, and local removals
   correlate with an active spawn; stream `114` ends with one modeled active
