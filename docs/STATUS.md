@@ -811,6 +811,15 @@
   The active saved transcript remains warning-free at `2,980/54/0/0`; safe
   JSON and HTTP-derived analysis report structural lengths and the neutrally
   named numeric value, not the raw constant bytes.
+- Server opcode `137` now follows the pinned handler's complete counted grammar:
+  one signed 16-bit count and repeated signed 32-bit pairs. All three reference
+  packets use count `10`; the two stream-`92` packets match byte-for-byte, while
+  stream `126` permutes the same ten distinct pairs. Exact round trips and
+  native validation promote all three to full coverage, moving streams `126`
+  and `92` to `69,934/1,166/0/0` and `34,540/667/0/0`. The active saved
+  transcript contains no opcode-`137` packet and remains warning-free at
+  `2,980/54/0/0`. Safe JSON and HTTP-derived analysis expose record and unique
+  counts while keeping both numeric values redacted.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

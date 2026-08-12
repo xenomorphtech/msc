@@ -1394,10 +1394,10 @@ opcode 94:
 
 opcode 137:
     uint16 opcode
-    int16 first_value               # redacted
-    int32 second_value              # redacted
-    int32 third_value               # redacted
-    byte[72] opaque_tail
+    int16 record_count              # observed 10
+    repeat record_count:
+        int32 first_value           # redacted
+        int32 second_value          # redacted
 
 opcode 148:
     uint16 opcode
@@ -1439,9 +1439,14 @@ the repeated-record boundary is deliberately limited to the only observed
 count and width. Every opcode-`93` packet counts four u32 values. Opcode `205` is
 fully bounded, as is the counted opcode-`93` vector. The generated handler dump
 independently supplies the exact direct-read sequences for opcodes `94`, `137`,
-`276`, and `379`. Opcode `137` directly reads `i16/i32/i32`; the two stream-`92`
-packets and one stream-`126` packet are all 84 bytes, leaving the same 72-byte
-capture-bounded tail after that prefix. Both opcode-`276` packets are the
+`276`, and `379`. Opcode `137` reads an `i16` count and loops over two `i32`
+reads. All three packets use count `10`, consume as ten exact pairs, and have
+ten distinct pairs within each packet; the two stream-`92` packets are exact
+duplicates, while stream `126` contains the same ten pairs in a different
+order. The numeric values stay redacted and neutral. This promotes one/two
+observations in streams `126`/`92` to full coverage, advancing them to
+`69,934/1,166/0/0` and `34,540/667/0/0`; stream `114` remains
+`64/12/0/0`. Both opcode-`276` packets are the
 three-byte `0x05` true form, both opcode-`379` short packets use variant `35`,
 and its three
 four-datetime packets use variant `36`. Opcode `148` contributes one empty

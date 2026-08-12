@@ -156,7 +156,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode69Record,
     ServerOpcode93Record,
     ServerOpcode94Record,
-    ServerOpcode137OpaqueTailEnvelope,
+    ServerOpcode137PairLedger,
     ServerOpcode169TextInstruction,
     ServerOpcode27IntegerLedger,
     ServerOpcode27IntegerLedgerEntry,
@@ -3462,26 +3462,27 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "opcode must be one of"):
             replace(envelopes[0], opcode=229).to_bytes()
 
-    def test_server_opcode_137_primitive_prefix_round_trip(self) -> None:
-        envelope = ServerOpcode137OpaqueTailEnvelope(
-            first_value=10,
-            second_value=120_000_001,
-            third_value=5_050_003,
-            opaque_tail=b"\xa5" * 72,
+    def test_server_opcode_137_pair_ledger_round_trip(self) -> None:
+        ledger = ServerOpcode137PairLedger(
+            records=tuple(
+                (120_000_001 + index, 5_050_003 + index)
+                for index in range(10)
+            ),
         )
 
-        encoded = envelope.to_bytes()
+        encoded = ledger.to_bytes()
 
         self.assertEqual(len(encoded), 84)
-        self.assertEqual(
-            ServerOpcode137OpaqueTailEnvelope.parse(encoded), envelope
-        )
-        self.assertNotIn("120000001", str(envelope.safe_dict()))
-        self.assertNotIn(envelope.opaque_tail.hex(), str(envelope.safe_dict()))
-        self.assertEqual(envelope.safe_dict()["typed_value_count"], 3)
-        self.assertEqual(envelope.safe_dict()["opaque_tail_length"], 72)
-        with self.assertRaisesRegex(PacketShapeError, "exactly 72"):
-            replace(envelope, opaque_tail=b"short").to_bytes()
+        self.assertEqual(ServerOpcode137PairLedger.parse(encoded), ledger)
+        self.assertNotIn("120000001", str(ledger.safe_dict()))
+        self.assertEqual(ledger.safe_dict()["record_count"], 10)
+        self.assertEqual(ledger.safe_dict()["unique_record_count"], 10)
+        self.assertEqual(ledger.safe_dict()["typed_value_count"], 20)
+        self.assertEqual(ledger.safe_dict()["opaque_tail_length"], 0)
+        with self.assertRaisesRegex(PacketShapeError, "record count does not fit"):
+            ServerOpcode137PairLedger.parse(struct.pack("<Hh", 137, 1))
+        with self.assertRaisesRegex(PacketShapeError, "record value is out of range"):
+            replace(ledger, records=((0x8000_0000, 0),)).to_bytes()
 
     def test_server_opcode_169_text_instruction_round_trip(self) -> None:
         instruction = ServerOpcode169TextInstruction(
@@ -7905,11 +7906,11 @@ class GameplayStateFoldTest(unittest.TestCase):
                 primary_value=2_380_000,
                 secondary_value=2,
             ),
-            ServerOpcode137OpaqueTailEnvelope(
-                first_value=10,
-                second_value=120_000_001,
-                third_value=5_050_003,
-                opaque_tail=b"\xa5" * 72,
+            ServerOpcode137PairLedger(
+                records=tuple(
+                    (120_000_001 + index, 5_050_003 + index)
+                    for index in range(10)
+                ),
             ),
             PetActivation(
                 character_id=302_104,
@@ -7990,8 +7991,8 @@ class GameplayStateFoldTest(unittest.TestCase):
                 379: 2,
             },
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 40)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_761)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 57)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_689)
         self.assertEqual(analysis.state.pet_activations, 1)
         self.assertEqual(analysis.state.pet_activations_for_local_player, 0)
         self.assertEqual(
@@ -8009,7 +8010,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "full",
                 "full",
                 "full",
-                "partial",
+                "full",
                 "full",
                 "full",
                 "full",

@@ -260,6 +260,12 @@ HTTP-derived analysis expose its code-unit count but never its contents. For
 variant `3`, those surfaces expose the reserved-constant length and zero opaque
 bytes, plus the deliberately neutral numeric value; they do not expose the
 constant bytes or assign them higher-level semantics.
+Server opcode `137` is an independently traced counted pair ledger: one signed
+16-bit count followed by that many signed 32-bit pairs. All three reference
+packets use count `10` and consume exactly; the two stream-`92` instances are
+identical and stream `126` carries the same ten distinct pairs in a different
+order. Events, reports, safe JSON, and HTTP-derived analysis expose counts and
+uniqueness only, never the redacted numeric values.
 Server opcode `77` is a separate redacted envelope family. Across streams
 `92`, `114`, and `126`, variants `3/4/5/8` contribute 515 exact round trips.
 Variants `3`, `4`, and `5` fully bound their counted UTF-16 fields and neutral

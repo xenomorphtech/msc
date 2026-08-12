@@ -248,11 +248,42 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
 
     let opcode_137 = shapes
         .iter()
-        .find(|shape| shape.name == "server_opcode_137_primitive_prefix")
+        .find(|shape| shape.name == "server_opcode_137_pair_ledger")
         .unwrap();
     assert_eq!(opcode_137.opcode, 137);
     assert_eq!(opcode_137.length, Some(84));
-    assert_eq!(opcode_137.operations.len(), 5);
+    assert!(matches!(
+        opcode_137.operations.as_slice(),
+        [
+            ShapeOp::Read {
+                kind: ReadKind::U16,
+                equals: Some(137),
+                ..
+            },
+            ShapeOp::Read {
+                kind: ReadKind::I16,
+                equals: Some(10),
+                ..
+            },
+            ShapeOp::Repeat {
+                count_from,
+                operations,
+            }
+        ] if count_from == "record_count"
+            && matches!(
+                operations.as_slice(),
+                [
+                    ShapeOp::Read {
+                        kind: ReadKind::I32,
+                        ..
+                    },
+                    ShapeOp::Read {
+                        kind: ReadKind::I32,
+                        ..
+                    }
+                ]
+            )
+    ));
 
     let opcode_169 = shapes
         .iter()

@@ -11362,63 +11362,61 @@ class ServerU32OpaqueTailEnvelope:
 
 
 @dataclass(frozen=True)
-class ServerOpcode137OpaqueTailEnvelope:
-    """Generated i16/i32/i32 prefix plus a capture-bounded ignored tail."""
+class ServerOpcode137PairLedger:
+    """Generated counted vector of neutral, redacted i32 pairs."""
 
-    first_value: int = field(repr=False)
-    second_value: int = field(repr=False)
-    third_value: int = field(repr=False)
-    opaque_tail: bytes = field(repr=False)
+    records: tuple[tuple[int, int], ...] = field(repr=False)
     opcode: int = 137
 
-    OPAQUE_TAIL_LENGTH = 72
-
     @classmethod
-    def parse(cls, payload: bytes) -> "ServerOpcode137OpaqueTailEnvelope":
-        reader = PacketReader(payload, packet_name="server_opcode_137_envelope")
+    def parse(cls, payload: bytes) -> "ServerOpcode137PairLedger":
+        reader = PacketReader(payload, packet_name="server_opcode_137_pair_ledger")
         _expect_opcode(reader, 137)
-        envelope = cls(
-            first_value=reader.i16("first_value"),
-            second_value=reader.i32("second_value"),
-            third_value=reader.i32("third_value"),
-            opaque_tail=reader.bytes(reader.remaining, "opaque_tail"),
+        record_count = reader.i16("record_count")
+        if record_count < 0 or record_count > reader.remaining // 8:
+            raise PacketShapeError(
+                "server opcode-137 record count does not fit the packet: "
+                f"{record_count} with {reader.remaining} bytes remaining"
+            )
+        ledger = cls(
+            records=tuple(
+                (
+                    reader.i32(f"records[{index}].first_value"),
+                    reader.i32(f"records[{index}].second_value"),
+                )
+                for index in range(record_count)
+            )
         )
         reader.finish()
-        envelope._validate()
-        return envelope
+        return ledger
 
     def _validate(self) -> None:
         if self.opcode != 137:
+            raise PacketShapeError("server opcode-137 ledger opcode must be 137")
+        if len(self.records) > 0x7FFF:
             raise PacketShapeError(
-                "server opcode-137 envelope opcode must be 137"
-            )
-        if len(self.opaque_tail) != self.OPAQUE_TAIL_LENGTH:
-            raise PacketShapeError(
-                "server opcode-137 opaque tail must be exactly "
-                f"{self.OPAQUE_TAIL_LENGTH} bytes"
+                "server opcode-137 ledger cannot contain more than 32767 records"
             )
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
+            "record_count": len(self.records),
+            "unique_record_count": len(set(self.records)),
             "typed_values_redacted": True,
-            "typed_value_count": 3,
-            "opaque_tail_length": len(self.opaque_tail),
-            "opaque_tail_redacted": bool(self.opaque_tail),
+            "typed_value_count": len(self.records) * 2,
+            "opaque_tail_length": 0,
+            "opaque_tail_redacted": False,
         }
 
     def to_bytes(self) -> bytes:
         self._validate()
         try:
-            return struct.pack(
-                "<Hhii",
-                self.opcode,
-                self.first_value,
-                self.second_value,
-                self.third_value,
-            ) + bytes(self.opaque_tail)
+            return struct.pack("<Hh", self.opcode, len(self.records)) + b"".join(
+                struct.pack("<ii", *record) for record in self.records
+            )
         except struct.error as error:
             raise PacketShapeError(
-                f"server opcode-137 prefix value is out of range: {error}"
+                f"server opcode-137 record value is out of range: {error}"
             ) from error
 
 

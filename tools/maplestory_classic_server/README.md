@@ -2514,3 +2514,6 @@ preserve distinct Unity scan codes in this setup.
     marker and exact width-specific reserved constants, promote them to full
     coverage after native validation, and leave only the two six-byte variant-
     `4` records partial without assigning semantics to their values.
+111. Replace opcode-`137`'s 72-byte opaque tail with the pinned handler's
+    counted ten-pair loop, independently validate all three reference packets,
+    and expose only structural counts while keeping pair values redacted.

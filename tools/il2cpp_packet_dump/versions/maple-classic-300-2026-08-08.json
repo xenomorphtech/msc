@@ -1484,9 +1484,9 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":94},{"op":"read","name":"flag","kind":"bool"},{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]
     },
     {
-      "name":"server_opcode_137_primitive_prefix","direction":"server_to_client","opcode":137,"length":84,
-      "source":"generated opcode-137 handler e7a5869c... directly reads i16/i32/i32; all three gameplay packets retain the same 72-byte capture-bounded tail",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":137},{"op":"read","name":"first_value","kind":"i16"},{"op":"read","name":"second_value","kind":"i32"},{"op":"read","name":"third_value","kind":"i32"},{"op":"bytes","name":"opaque_tail","length":72}]
+      "name":"server_opcode_137_pair_ledger","direction":"server_to_client","opcode":137,"length":84,
+      "source":"generated opcode-137 handler e7a5869c... reads one i16 count then loops over two i32 reads; all three gameplay packets contain count 10 and ten exact pairs",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":137},{"op":"read","name":"record_count","kind":"i16","equals":10},{"op":"repeat","count_from":"record_count","operations":[{"op":"read","name":"first_value","kind":"i32"},{"op":"read","name":"second_value","kind":"i32"}]}]
     },
     {
       "name":"server_opcode_169_text_instruction","direction":"server_to_client","opcode":169,"length":54,
