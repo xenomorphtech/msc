@@ -1271,6 +1271,10 @@ class GameplayGameState:
         default_factory=dict, repr=False
     )
     keyboard_item_bindings: dict[int, int] = field(default_factory=dict)
+    keyboard_menu_bindings: dict[int, int] = field(default_factory=dict)
+    keyboard_face_expression_bindings: dict[int, int] = field(
+        default_factory=dict
+    )
     keyboard_known_skill_bindings: int = 0
     keyboard_action_bindings: dict[int, int] = field(
         default_factory=dict
@@ -1486,11 +1490,20 @@ class VariableServerReplayFrame:
             "skill_binding_count": len(
                 self.record.keyboard_skill_bindings
             ),
+            "item_binding_count": len(self.record.keyboard_item_bindings),
+            "menu_binding_count": len(self.record.keyboard_menu_bindings),
             "action_binding_count": len(
                 self.record.keyboard_action_bindings
             ),
+            "face_expression_binding_count": len(
+                self.record.keyboard_face_expression_bindings
+            ),
             "pickup_binding_count": len(self.record.pickup_key_codes),
             "pickup_key_codes": self.record.pickup_key_codes,
+            "sit_binding_count": len(self.record.sit_key_codes),
+            "sit_key_codes": self.record.sit_key_codes,
+            "attack_binding_count": len(self.record.attack_key_codes),
+            "attack_key_codes": self.record.attack_key_codes,
             "left_ctrl_skill_id": self.record.left_ctrl_skill_id,
             "compact": (
                 bool(self.record.variant)
@@ -5842,14 +5855,30 @@ class GameplayAnalysis:
                             0,
                         )
                     ),
+                    "selector_ids": {
+                        "empty": VariableServerRecord.EMPTY_BINDING_SELECTOR,
+                        "skill": VariableServerRecord.SKILL_BINDING_SELECTOR,
+                        "item": VariableServerRecord.ITEM_BINDING_SELECTOR,
+                        "menu": VariableServerRecord.MENU_BINDING_SELECTOR,
+                        "action": VariableServerRecord.ACTION_BINDING_SELECTOR,
+                        "face_expression": (
+                            VariableServerRecord.FACE_EXPRESSION_BINDING_SELECTOR
+                        ),
+                    },
                     "skill_bindings": dict(
                         self.state.keyboard_skill_bindings
                     ),
                     "item_bindings": dict(
                         self.state.keyboard_item_bindings
                     ),
+                    "menu_bindings": dict(
+                        self.state.keyboard_menu_bindings
+                    ),
                     "action_bindings": dict(
                         self.state.keyboard_action_bindings
+                    ),
+                    "face_expression_bindings": dict(
+                        self.state.keyboard_face_expression_bindings
                     ),
                     "change_count": self.state.keyboard_binding_changes,
                     "changes_by_type": dict(
@@ -5860,6 +5889,22 @@ class GameplayAnalysis:
                         VariableServerRecord.PICKUP_ACTION_ID
                     ),
                     "pickup_key_codes": self.state.pickup_key_codes,
+                    "sit_action_id": VariableServerRecord.SIT_ACTION_ID,
+                    "sit_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id == VariableServerRecord.SIT_ACTION_ID
+                    ),
+                    "attack_action_id": VariableServerRecord.ATTACK_ACTION_ID,
+                    "attack_key_codes": tuple(
+                        key_code
+                        for key_code, action_id in (
+                            self.state.keyboard_action_bindings.items()
+                        )
+                        if action_id == VariableServerRecord.ATTACK_ACTION_ID
+                    ),
                     "jump_action_id": VariableServerRecord.JUMP_ACTION_ID,
                     "jump_key_codes": tuple(
                         key_code
@@ -6730,18 +6775,24 @@ class GameplayStateFold:
                     self.state.keyboard_binding_selector_counts[
                         change.binding_type
                     ] += 1
+                    self.state.keyboard_skill_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_item_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_menu_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_action_bindings.pop(
+                        change.key_code, None
+                    )
+                    self.state.keyboard_face_expression_bindings.pop(
+                        change.key_code, None
+                    )
                     if change.binding_type == (
                         VariableServerRecord.EMPTY_BINDING_SELECTOR
                     ):
-                        self.state.keyboard_skill_bindings.pop(
-                            change.key_code, None
-                        )
-                        self.state.keyboard_item_bindings.pop(
-                            change.key_code, None
-                        )
-                        self.state.keyboard_action_bindings.pop(
-                            change.key_code, None
-                        )
                         self.state.keyboard_binding_removals += 1
                     elif change.binding_type == (
                         VariableServerRecord.SKILL_BINDING_SELECTOR
@@ -6749,36 +6800,18 @@ class GameplayStateFold:
                         self.state.keyboard_skill_bindings[
                             change.key_code
                         ] = change.action_id
-                        self.state.keyboard_action_bindings.pop(
-                            change.key_code, None
-                        )
-                        self.state.keyboard_item_bindings.pop(
-                            change.key_code, None
-                        )
                     elif change.binding_type == (
                         VariableServerRecord.ITEM_BINDING_SELECTOR
                     ):
                         self.state.keyboard_item_bindings[
                             change.key_code
                         ] = change.action_id
-                        self.state.keyboard_skill_bindings.pop(
-                            change.key_code, None
-                        )
-                        self.state.keyboard_action_bindings.pop(
-                            change.key_code, None
-                        )
                     elif change.binding_type == (
                         VariableServerRecord.ACTION_BINDING_SELECTOR
                     ):
                         self.state.keyboard_action_bindings[
                             change.key_code
                         ] = change.action_id
-                        self.state.keyboard_skill_bindings.pop(
-                            change.key_code, None
-                        )
-                        self.state.keyboard_item_bindings.pop(
-                            change.key_code, None
-                        )
                 self.state.pickup_key_codes = tuple(
                     key_code
                     for key_code, action_id in sorted(
@@ -10198,6 +10231,12 @@ class GameplayStateFold:
                 self.state.keyboard_item_bindings = (
                     variable_record.keyboard_item_bindings
                 )
+                self.state.keyboard_menu_bindings = (
+                    variable_record.keyboard_menu_bindings
+                )
+                self.state.keyboard_face_expression_bindings = (
+                    variable_record.keyboard_face_expression_bindings
+                )
                 self.state.keyboard_known_skill_bindings = sum(
                     skill_id in self.state.skill_levels
                     for skill_id in self.state.keyboard_skill_bindings.values()
@@ -10238,13 +10277,23 @@ class GameplayStateFold:
                 "item_binding_count": len(
                     variable_record.keyboard_item_bindings
                 ),
+                "menu_binding_count": len(
+                    variable_record.keyboard_menu_bindings
+                ),
                 "action_binding_count": len(
                     variable_record.keyboard_action_bindings
+                ),
+                "face_expression_binding_count": len(
+                    variable_record.keyboard_face_expression_bindings
                 ),
                 "pickup_binding_count": len(
                     variable_record.pickup_key_codes
                 ),
                 "pickup_key_codes": variable_record.pickup_key_codes,
+                "sit_binding_count": len(variable_record.sit_key_codes),
+                "sit_key_codes": variable_record.sit_key_codes,
+                "attack_binding_count": len(variable_record.attack_key_codes),
+                "attack_key_codes": variable_record.attack_key_codes,
                 "known_skill_binding_count": (
                     self.state.keyboard_known_skill_bindings
                     if opcode == 385 and not variable_record.variant
@@ -15012,8 +15061,11 @@ def render_gameplay_analysis(
             f"empty_bindings:{empty_keyboard_binding_count} "
             f"skills:{dict(state.keyboard_skill_bindings)} "
             f"items:{dict(state.keyboard_item_bindings)} "
+            f"menus:{dict(state.keyboard_menu_bindings)} "
             f"known_skills:{state.keyboard_known_skill_bindings} "
             f"actions:{dict(state.keyboard_action_bindings)} "
+            "faces:"
+            f"{dict(state.keyboard_face_expression_bindings)} "
             f"changes:{state.keyboard_binding_changes} "
             f"removals:{state.keyboard_binding_removals} "
             f"pickup_keys:{state.pickup_key_codes} "

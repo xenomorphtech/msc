@@ -11399,8 +11399,12 @@ class VariableServerRecord:
     EMPTY_BINDING_SELECTOR = 0
     SKILL_BINDING_SELECTOR = 1
     ITEM_BINDING_SELECTOR = 2
+    MENU_BINDING_SELECTOR = 4
     ACTION_BINDING_SELECTOR = 5
+    FACE_EXPRESSION_BINDING_SELECTOR = 6
     PICKUP_ACTION_ID = 50
+    SIT_ACTION_ID = 51
+    ATTACK_ACTION_ID = 52
     JUMP_ACTION_ID = 53
     NPC_INTERACTION_ACTION_ID = 54
     LEFT_CTRL_KEY_CODE = 29
@@ -11442,11 +11446,47 @@ class VariableServerRecord:
         }
 
     @property
+    def keyboard_menu_bindings(self) -> dict[int, int]:
+        if self.opcode != 385 or self.variant:
+            return {}
+        return {
+            key_code: entry.value
+            for key_code, entry in enumerate(self.entries)
+            if entry.selector == self.MENU_BINDING_SELECTOR
+        }
+
+    @property
+    def keyboard_face_expression_bindings(self) -> dict[int, int]:
+        if self.opcode != 385 or self.variant:
+            return {}
+        return {
+            key_code: entry.value
+            for key_code, entry in enumerate(self.entries)
+            if entry.selector == self.FACE_EXPRESSION_BINDING_SELECTOR
+        }
+
+    @property
     def pickup_key_codes(self) -> tuple[int, ...]:
         return tuple(
             key_code
             for key_code, action_id in self.keyboard_action_bindings.items()
             if action_id == self.PICKUP_ACTION_ID
+        )
+
+    @property
+    def sit_key_codes(self) -> tuple[int, ...]:
+        return tuple(
+            key_code
+            for key_code, action_id in self.keyboard_action_bindings.items()
+            if action_id == self.SIT_ACTION_ID
+        )
+
+    @property
+    def attack_key_codes(self) -> tuple[int, ...]:
+        return tuple(
+            key_code
+            for key_code, action_id in self.keyboard_action_bindings.items()
+            if action_id == self.ATTACK_ACTION_ID
         )
 
     @property

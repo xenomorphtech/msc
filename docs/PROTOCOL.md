@@ -2057,11 +2057,26 @@ packet has one text code unit, a false flag, and values `(2001004, 0, 0)`.
 The opcode-`385` tuple index is a keyboard key code: index `29` is the Linux
 evdev Left Ctrl code. Selector `1` is a skill binding and its value is the
 skill id. The capture binds key `29` to learned skill `2001005` and key `71`
-to learned skill `2001002`. Selector `0` is an empty binding; selector meanings
-`2/4/6`, selector-`5` action id `52`, and all opcode-`156` field meanings
-remain neutral. Selector `5` is a keyboard action binding: action `50` is
-pickup, `51` is chair sit, `53` is jump, and `54` is NPC interaction, as
-established by the live controls below. No security meaning is inferred.
+to learned skill `2001002`. Selector `0` is an empty binding, opcode-`158`
+changes identify selector `2` as an item binding, and selector `5` is an action
+binding. Live controls identify actions `50`, `51`, `53`, and `54` as pickup,
+chair sit, jump, and NPC interaction respectively.
+
+An independent legacy-client implementation names the remaining type ids
+`4`/`6` as menu/face and action ids `50..54` as pickup, sit, attack, jump, and
+interact/harvest in exactly the observed numeric order. Its default map also
+places faces `100..106` on F1..F8 and menu actions on ordinary keyboard keys:
+[KeyType.h](https://github.com/ryantpayton/MapleStory-Client/blob/4712e2233836fd265fc9ece7e40179ab76704da2/IO/KeyType.h#L24-L47),
+[KeyAction.h](https://github.com/ryantpayton/MapleStory-Client/blob/4712e2233836fd265fc9ece7e40179ab76704da2/IO/KeyAction.h#L27-L108),
+and [UIKeyConfig.h](https://github.com/ryantpayton/MapleStory-Client/blob/4712e2233836fd265fc9ece7e40179ab76704da2/IO/UITypes/UIKeyConfig.h#L134-L178).
+The exact Protocol-300 snapshot agrees: selector `4` has 26 menu entries,
+selector `6` has seven face-expression entries `100..106`, and action `52` is
+bound to keypad zero. A focused `M` input opened the current client's local
+`GAME MENU` without emitting an action packet. A controlled keypad-zero press
+likewise emitted no dedicated packet in the empty-platform state; that negative
+result limits network claims but does not contradict the source-backed attack
+identity. Opcode-`156` field meanings remain neutral, and no security meaning
+is inferred.
 
 All four forms now have full shape coverage and exact typed round trips. The
 fold records opcode/variant counts, 89 selector/value entries per expanded
@@ -2069,9 +2084,9 @@ opcode `385`, three typed int32 values per expanded opcode `156`, zero opaque
 bytes, field epoch, and `variable_server_record_received` events. Safe output
 retains only text length, flag, value/entry counts, and never the opcode-`156`
 text or raw values. Expanded opcode `385` additionally updates the current
-keyboard selector distribution plus skill- and action-binding maps, validates
-bound skill ids against initial progression, exposes the proven Left Ctrl, Z,
-Left Alt, Space, pickup, jump, and NPC-interaction bindings, and emits a
+keyboard selector distribution plus skill, item, menu, action, and
+face-expression maps, validates bound skill ids against initial progression,
+exposes the named pickup/sit/attack/jump/NPC-interaction key sets, and emits a
 `keyboard_bindings_loaded` event.
 
 The empty-binding role comes from a one-byte live A/B/A, not the zero value.
@@ -2082,9 +2097,9 @@ other 88 entries. Physical key `71` first emitted opcode `104`; under selector
 followed the input; restoring the exact original record restored opcode
 `104`. Folded selector counts changed `45 -> 46 -> 45`, skill-binding counts
 `2 -> 1 -> 2`, and the warning-free active snapshot retained 437/437 matched
-heartbeats with none pending. Safe state/events expose `empty_binding_count`
-while selector-`2/4/6` values remain suppressed; selector-`5` action ids are
-exposed numerically without assigning the roles not proven below.
+heartbeats with none pending. Safe state/events expose `empty_binding_count`,
+the six selector ids, and the five binding maps. Opcode-`156` text and raw
+int32 values remain suppressed.
 
 Selector `5` has a separate one-entry causal control. The expanded official map
 contains six selector-`5` entries with values `50,51,53,54,50,52`; value `50`
@@ -2096,13 +2111,14 @@ produced authentic pickup opcode `185`. Folded snapshots show action-binding
 counts `6 -> 5 -> 6`, skill-binding counts `2 -> 3 -> 2`, and pickup keys
 `(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
 and value `50` as pickup. The later controls below assign `51`, `53`, and `54`;
-only action `52` remains neutral.
+the independent enum assigns the remaining action `52` as attack.
 
 `--generate-variable-server-records` re-emits every bounded observation at its
 original frame index after length/reparse/uniqueness/conflict validation.
 `protocol.variable_server_record_emitter` exposes only frame index, opcode,
-variant, text length, flag, value/entry counts, field epoch, patch count, and
-the predicted unchanged player/phase state.
+variant, text length, flag, value/entry counts, per-family binding counts,
+named action key sets, field epoch, patch count, and the predicted unchanged
+player/phase state.
 
 A browser-free stream-`114` proof regenerated frames `9` and `11`, composed
 with the initial, fixed, and NPC emitters. A later opt-in HTTP experiment sent
@@ -2159,7 +2175,7 @@ Safe state therefore carries `server_acknowledgement_modeled: false`. The live
 transcript is valid, warning-free, and back to zero unknown packets after these
 three codecs.
 
-## Jump and NPC-interaction keyboard actions
+## Jump, attack, and NPC-interaction keyboard actions
 
 The same unchanged opcode-`385` map binds action `53` to evdev Left Alt (`56`)
 and action `54` to Space (`57`). After restoring real host pointer focus to the
@@ -2169,13 +2185,13 @@ id resolved to the active NPC and establishes the request grammar documented
 above. Holding Space produced three repeats, so the fold counts raw requests
 rather than coalescing input repetition.
 
-Evdev keypad zero (`82`) remains bound to action `52`, but the controlled input
-did not produce a distinguishable action. The nearby blue `10` recovery display
-and alternating client opcode-`101` HP/MP recovery requests were already
-occurring automatically; they are not evidence for action `52`. Safe keyboard
-state now
-publishes the validated key codes and the proven jump/NPC-interaction action
-ids and bindings while leaving action `52` unnamed.
+The independent `KeyAction` enum above identifies action `52` as attack. Evdev
+keypad zero (`82`) is the captured binding. Its controlled input did not emit a
+dedicated packet in the empty-platform state; the nearby blue `10` recovery
+display and alternating client opcode-`101` HP/MP recovery requests were
+already occurring automatically and are not attributed to that input. Safe
+keyboard state publishes sit/attack/jump/NPC-interaction action ids and key
+sets while preserving this no-packet observation as a runtime boundary.
 
 ## Skill-record change transaction (`client 103`, `server 46`, `client 293`)
 

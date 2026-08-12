@@ -1,4 +1,4 @@
-# Status as of 2026-08-11
+# Status as of 2026-08-12
 
 ## Working
 
@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The custom-server suite currently passes all 245 tests.
+- The tracked custom-server suite currently passes all 320 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -509,9 +509,13 @@
   admitted nearby drop produced opcode `185`. Folded action/skill counts moved
   `6/2 -> 5/3 -> 6/2`, and pickup keys moved `(44,78) -> (78) -> (44,78)`.
   Later physical-input controls identify action `53`/Left Alt as jump and
-  action `54`/Space as NPC interaction. Action `52` and selectors `4/6`
-  remain neutral; opcode-`158` mode-`0` changes identify selector `2` as an
-  item binding.
+  action `54`/Space as NPC interaction. An independent legacy-client enum
+  names selectors `4`/`6` as menu/face-expression and action `52` as attack;
+  its exact numeric layout matches the Protocol-300 snapshot. Focused `M`
+  opened the local `GAME MENU` without emitting an action packet. The fold,
+  JSON, text report, replay plan, and HTTP emitter telemetry now expose menu/
+  face maps plus pickup/sit/attack/jump/NPC-interaction key sets. Opcode-`158`
+  remains strict to the observed `0/1/2/5` types.
 - Client opcode `158` mode `0` is now the counted keymap-change request. Its
   11 stream-`126` packets all carry one `u32 key, u8 type, i32 action` change;
   types `0/1/2/5` are empty, skill, item, and action bindings. The updates use
@@ -534,9 +538,10 @@
   interaction and emitted three full opcode-`64` requests for active NPC
   template `1032005`. The current live fold resolves all three targets and
   movement positions, with one expected warning because the custom replay does
-  not serve their opcode-`348` response. Keypad-zero action `52` remains
-  unassigned; the adjacent blue `10` display and typed opcode-`101` HP/MP
-  recovery cadence were automatic, not caused by that input.
+  not serve their opcode-`348` response. Keypad-zero is the captured action-
+  `52` attack binding. Its controlled input emitted no dedicated packet in the
+  empty-platform state; the adjacent blue `10` display and typed opcode-`101`
+  HP/MP recovery cadence were automatic, not caused by that input.
 - `--generate-variable-server-records` regenerates those records with exact
   reparse/length/index/conflict checks. A browser-free live run patched stream
   `114` frames `9` and `11` together with the initial, fixed, and NPC emitters.
@@ -1329,14 +1334,9 @@ Use only short validated patches or the transparent opcode-`2` trampoline.
    additional item/request shapes only from independently admitted evidence,
    and continue serving `[39,49,312]` only after an authentic opcode-`185` or
    compact opcode-`222` request.
-2. Keep opcode-`385` selectors `4/6` and selector-`5` action `52` neutral
-   until an independently identifiable input/action permits another control.
-   Selector `0` is the bounded empty binding, selector `1` the skill binding,
-   selector `5` the action binding; actions `50`, `51`, `53`, and `54` are
-   pickup, chair sit, jump, and NPC interaction respectively.
-3. Capture a ranked or multi-character login to exercise the typed
+2. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
-4. Keep packet injection an explicit loopback-only opt-in while expanding
+3. Keep packet injection an explicit loopback-only opt-in while expanding
    stateful handlers only from independently validated evidence.
 
 ## Useful proof artifacts

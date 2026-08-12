@@ -3804,7 +3804,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
             analysis.state.keyboard_skill_bindings, {29: 2_001_005}
         )
         self.assertEqual(analysis.state.keyboard_item_bindings, {})
+        self.assertEqual(analysis.state.keyboard_menu_bindings, {})
         self.assertEqual(analysis.state.keyboard_action_bindings, {82: 52})
+        self.assertEqual(analysis.state.keyboard_face_expression_bindings, {})
         self.assertEqual(analysis.state.left_ctrl_skill_id, 2_001_005)
         observations = [
             observation
@@ -5342,7 +5344,11 @@ class GameplayStateFoldTest(unittest.TestCase):
             safe["prediction"]["final_left_ctrl_skill_id"], 2_001_005
         )
         self.assertEqual(safe["frames"][2]["skill_binding_count"], 2)
+        self.assertEqual(safe["frames"][2]["menu_binding_count"], 1)
         self.assertEqual(safe["frames"][2]["action_binding_count"], 0)
+        self.assertEqual(
+            safe["frames"][2]["face_expression_binding_count"], 0
+        )
         self.assertEqual(safe["frames"][2]["pickup_binding_count"], 0)
         self.assertEqual(safe["frames"][2]["pickup_key_codes"], ())
         self.assertEqual(safe["frames"][2]["empty_binding_count"], 86)
@@ -5367,7 +5373,9 @@ class GameplayStateFoldTest(unittest.TestCase):
             keyboard_state["skill_bindings"],
             {29: 2_001_005, 71: 2_001_002},
         )
+        self.assertEqual(keyboard_state["menu_bindings"], {2: 10})
         self.assertEqual(keyboard_state["action_bindings"], {})
+        self.assertEqual(keyboard_state["face_expression_bindings"], {})
         self.assertEqual(keyboard_state["pickup_key_codes"], ())
         self.assertEqual(keyboard_state["empty_binding_count"], 86)
         self.assertEqual(
@@ -7797,6 +7805,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         entries[45] = VariableServerEntry(selector=5, value=51)
         entries[56] = VariableServerEntry(selector=5, value=53)
         entries[57] = VariableServerEntry(selector=5, value=54)
+        entries[59] = VariableServerEntry(selector=6, value=100)
         entries[78] = VariableServerEntry(selector=5, value=50)
         entries[82] = VariableServerEntry(selector=5, value=52)
         bound = replace(original, entries=tuple(entries))
@@ -7815,10 +7824,16 @@ class GameplayStateFoldTest(unittest.TestCase):
         )
         self.assertEqual(keyboard_state["pickup_action_id"], 50)
         self.assertEqual(keyboard_state["pickup_key_codes"], (44, 78))
+        self.assertEqual(keyboard_state["sit_action_id"], 51)
+        self.assertEqual(keyboard_state["sit_key_codes"], (45,))
+        self.assertEqual(keyboard_state["attack_action_id"], 52)
+        self.assertEqual(keyboard_state["attack_key_codes"], (82,))
         self.assertEqual(keyboard_state["jump_action_id"], 53)
         self.assertEqual(keyboard_state["jump_key_codes"], (56,))
         self.assertEqual(keyboard_state["npc_interaction_action_id"], 54)
         self.assertEqual(keyboard_state["npc_interaction_key_codes"], (57,))
+        self.assertEqual(keyboard_state["menu_bindings"], {2: 10})
+        self.assertEqual(keyboard_state["face_expression_bindings"], {59: 100})
         self.assertEqual(
             keyboard_state["validated_key_codes"],
             {
@@ -7837,8 +7852,12 @@ class GameplayStateFoldTest(unittest.TestCase):
             if event.kind == "keyboard_bindings_loaded"
         )
         self.assertEqual(loaded.details["action_binding_count"], 6)
+        self.assertEqual(loaded.details["menu_binding_count"], 1)
+        self.assertEqual(loaded.details["face_expression_binding_count"], 1)
         self.assertEqual(loaded.details["pickup_binding_count"], 2)
         self.assertEqual(loaded.details["pickup_key_codes"], (44, 78))
+        self.assertEqual(loaded.details["sit_key_codes"], (45,))
+        self.assertEqual(loaded.details["attack_key_codes"], (82,))
 
     def test_plans_typed_post_transcript_hp_stat_update(self) -> None:
         transcript = fixture_gameplay_transcript(

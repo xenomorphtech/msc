@@ -385,6 +385,14 @@ empty, skill, item, and action bindings across evdev Left Ctrl, Left Shift,
 Home, and keypad zero. Modes `1` and `2` remain the count-zero field-load
 sequence; one counted manifest shape consumes both branches exactly.
 
+Use independent client enums as semantic corroboration only after the local
+wire shape is exact. Here the legacy-client `KeyType` values `4`/`6` name the
+already captured opcode-`385` selector families as menu/face, and `KeyAction`
+keeps pickup/sit/attack/jump/interact consecutive at `50..54`. The current
+snapshot's seven selector-`6` values `100..106` and focused `M` menu control
+agree. This is enough to name safe state fields, but not to widen opcode-`158`
+mode-`0` beyond binding types `0/1/2/5` actually observed on the wire.
+
 Client opcode `114` is bounded directly from all 44 long-corpus packets rather
 than from a server handler. Offsets `3..4` are a little-endian UTF-16 code-unit
 count, followed by exactly that many code units, a required zero byte, and one

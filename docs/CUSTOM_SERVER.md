@@ -17,7 +17,7 @@ cd /home/sdancer/ms/tools/maplestory_classic_server
 python -m unittest discover -s tests -v
 ```
 
-The last run passed all 296 tests.
+The last tracked-source run passed all 320 tests.
 
 ## Inspect and compare captures
 
@@ -978,15 +978,20 @@ skill id. Index `29` is the evdev Left Ctrl key. A later selector-only A/B/A
 establishes selector `0` as an empty binding. A subsequent one-entry Z-key
 control establishes selector `5` as an action binding and value `50` as
 pickup; later physical-input controls identify action `51` as chair sit, `53`
-as jump, and `54` as NPC interaction. Selectors `2/4/6` and action `52` remain
-unnamed.
+as jump, and `54` as NPC interaction. Opcode-`158` mode-`0` changes identify
+selector `2` as item. An independent legacy-client
+[type enum](https://github.com/ryantpayton/MapleStory-Client/blob/4712e2233836fd265fc9ece7e40179ab76704da2/IO/KeyType.h#L24-L47)
+names selectors `4`/`6` as menu/face, and its
+[action enum](https://github.com/ryantpayton/MapleStory-Client/blob/4712e2233836fd265fc9ece7e40179ab76704da2/IO/KeyAction.h#L27-L108)
+names action `52` as attack. The exact Protocol-300 values agree, and a focused
+`M` input opened the local `GAME MENU` without a wire action.
 
 The option performs the same valid-fold, exact-length, reparse, unique-index,
 and patch-conflict checks as the fixed emitter. Runtime status exposes only
 opcode, variant, text length, flag, value/entry counts, field epoch, and frame
 index under `protocol.variable_server_record_emitter`. Opcode-`156` text/raw
-values and selector-`2/4/6` values are not included; the proven skill/action/
-pickup counts, pickup key codes, and Left Ctrl skill id are included.
+values are not included; binding-family counts, pickup/sit/attack key sets, and
+the Left Ctrl skill id are included.
 
 The 2026-08-09 browser-free live run regenerated expanded server frames `9`
 and `11` together with one initial snapshot, 11 fixed records, and nine NPC
@@ -1026,7 +1031,8 @@ restoring the exact `5/50` entry and presenting an admitted nearby drop
 produced authentic opcode `185`. The three folded snapshots report action
 counts `6 -> 5 -> 6`, skill counts `2 -> 3 -> 2`, and pickup key codes
 `(44,78) -> (78) -> (44,78)`. This identifies selector `5` as an action binding
-and action `50` as pickup; the controls below assign `51`, `53`, and `54`.
+and action `50` as pickup; the controls below assign `51`, `53`, and `54`, while
+the independent enum assigns `52` as attack.
 
 The same unchanged map identifies action `51` through physical evdev X at key
 `45`. The client rendered its Setup-slot-`1` chair item `3010370` and sent
@@ -1050,10 +1056,10 @@ opcode-`64` ids independently resolve to active NPC templates `2003` and
 than a neutral position action. It exposes jump and NPC-interaction key sets in
 safe keyboard state.
 
-Keypad zero at evdev key `82` remains action `52`. Its controlled press produced
-no distinguishable action. The blue `10` display and typed opcode-`101` HP/MP
-recovery requests were already running automatically, so neither is attributed
-to action `52`.
+Keypad zero at evdev key `82` is the captured action-`52` attack binding. Its
+controlled press produced no dedicated packet in the empty-platform state. The
+blue `10` display and typed opcode-`101` HP/MP recovery requests were already
+running automatically, so neither is attributed to the attack input.
 
 ## Opt-in live server-packet injection
 
@@ -1236,8 +1242,8 @@ frame restored variant `18`, two hits, damage `[29,25]`. The frozen transcript
 folds validly with no issues/warnings, three `keyboard_bindings_loaded` events,
 two injection events, final Left Ctrl skill `2001005`, active map `101000000`,
 HP `50`, and 91/91 matched heartbeats. This is a causal key-binding result;
-selectors `4/6` remain unnamed. Later opcode-`158` mode-`0` changes identify
-selector `2` as an item binding.
+later independent client enums name selectors `4`/`6` as menu/face, while
+opcode-`158` mode-`0` changes identify selector `2` as an item binding.
 
 A second browser-free A/B/A exercised physical evdev key code `71`. Under the
 captured `71 -> 2001002` binding, the client emitted the exact 13-byte skill-use

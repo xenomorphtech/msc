@@ -201,13 +201,15 @@ variants end there. Expanded opcode `156` contains a packet UTF-16 string,
 bool, and three int32 values; expanded opcode `385` contains 89 keyboard
 bindings whose tuple index is the key code. Selector `1` binds a skill id, and
 selector `0` is an empty binding. Opcode-`158` mode-`0` changes independently
-identify selector `2` as an item binding. Selector `5` binds an action id; live controls
-identify action `50` as pickup, `51` as chair sit, `53` as jump, and `54` as
-NPC interaction. Key codes `29`, `44`, `56`, and `57` are validated evdev Left
+identify selector `2` as an item binding. Selector `5` binds an action id; live
+controls identify action `50` as pickup, `51` as chair sit, `53` as jump, and
+`54` as NPC interaction. An independent legacy-client type/action enum
+identifies selectors `4`/`6` as menu/face and action `52` as attack; the exact
+Protocol-300 snapshot agrees, and focused `M` opens the current client's local
+`GAME MENU`. Key codes `29`, `44`, `56`, and `57` are validated evdev Left
 Ctrl, Z, Left Alt, and Space. The emitter round-trips and replaces the complete
-records; selectors `4/6`, action `52`, and opcode-`156` field meanings remain
-neutral. Safe output reports empty, skill, item, action, pickup, jump, and NPC-
-interaction bindings without naming action `52`.
+records. Safe output reports all six binding families plus pickup/sit/attack/
+jump/NPC-interaction key sets; opcode-`156` field meanings remain neutral.
 
 Use `?keyboard-skill=KEY_CODE:SKILL_ID` on an expanded opcode-`385` PCAP
 reference to replace only the value of an existing selector-`1` binding. For
@@ -233,9 +235,9 @@ map has six selector-`5` entries with action ids `50,51,53,54,50,52`; action
 to an authentic opcode-`104` skill request. Restoring the exact `5/50` entry
 and presenting an admitted nearby drop produced authentic opcode `185`. The
 folded snapshot sequence reports pickup keys `(44,78) -> (78) -> (44,78)`.
-This names selector `5` as an action binding and value `50` as pickup while
-leaving action `52` neutral; later physical-input controls identify `53` as
-jump and `54` as NPC interaction.
+This names selector `5` as an action binding and value `50` as pickup; later
+physical-input controls identify `53` as jump and `54` as NPC interaction,
+while the independent action enum identifies `52` as attack.
 
 Physical X at key `45` independently identifies action `51` as chair sit. It
 rendered setup-slot-`1` item `3010370` and emitted client opcode `49` as
@@ -257,9 +259,10 @@ held. Each targeted active object `3294`/template `1032005` and carried the
 folded player position `(677,-2695)`. The two reference opcode-`64` ids also
 resolve to active NPCs, templates `2003` and `22000`, so the packet is now a
 full `ClientNpcInteractionRequest` rather than a neutral position action.
-Keypad-zero action `52` remains unnamed; its apparent blue `10` recovery and
-typed opcode-`101` HP/MP recovery requests were already occurring
-automatically.
+Keypad-zero is the captured action-`52` attack binding. Its controlled input
+emitted no dedicated packet in the empty-platform state; the apparent blue
+`10` recovery and typed opcode-`101` HP/MP recovery requests were already
+occurring automatically.
 
 The second captured selector-`1` binding is also causal. Physical evdev key
 code `71` under `71 -> 2001002` emitted client opcode `104` as the exact
@@ -2374,8 +2377,8 @@ preserve distinct Unity scan codes in this setup.
 92. Promote opcode-`385` selector `5` to an action binding and value `50` to
     pickup from a one-entry live Z-key control: `5/50 -> 1/2001002` emitted
     opcode `104`, exact restoration plus a nearby admitted drop emitted opcode
-    `185`, and folded pickup keys changed `(44,78) -> (78) -> (44,78)` while
-    selector-`5` values `51..54` remain unnamed action ids.
+    `185`, and folded pickup keys changed `(44,78) -> (78) -> (44,78)`; later
+    live controls and independent enums name action ids `51..54`.
 93. Identify selector-`5` action `51` as chair sit from physical X, model live
     client opcode `49` as the exact Setup-item request, the 20.006-second empty
     opcode `82` as seated recovery, and opcode `48` as the signed-`-1` stand
@@ -2386,7 +2389,8 @@ preserve distinct Unity scan codes in this setup.
     interaction from focused physical inputs. Promote opcode `64` to
     `ClientNpcInteractionRequest`, resolve both reference targets and three live
     requests to active NPCs, validate movement positions and opcode-`348`
-    response correlation, and leave only keypad-zero action `52` unnamed.
+    response correlation, and leave only keypad-zero action `52` for later
+    independent-source identification as attack.
 95. Re-segment opcode `101` as constant type `20` plus HP/MP recovery u16
     fields, correlate all `219/219` reference requests with authoritative
     opcode-`41` stat updates, distinguish exact/capped/baseline-unverified
@@ -2418,3 +2422,8 @@ preserve distinct Unity scan codes in this setup.
     from independent v79 handler code, retain the existing exact authoritative
     response correlations, and promote all 23 reference inventory-action
     requests to full semantic coverage.
+102. Name opcode-`385` selectors `4`/`6` as menu/face-expression and action
+    `52` as attack from an independent legacy-client type/action enum, confirm
+    exact compatibility with the Protocol-300 snapshot, expose the maps and
+    named action key sets in safe analysis/HTTP emitter telemetry, and retain
+    opcode-`158` validation at the four selector types observed on the wire.
