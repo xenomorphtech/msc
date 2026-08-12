@@ -510,9 +510,12 @@ arguments followed by a reserved 13-byte region. Two independent server
 handlers support option/activity and skill-id/level placement, while differing
 on whether the final two bytes form one option or separate values. The codec
 therefore exposes option flags, signed activity code, skill id/level, and two
-neutral auxiliary bytes, but leaves the 13-byte tail opaque. Stream `92`
-validates that split across 12,100 paths and stream `126` across another
-22,855; captured option flags are `0`, `1`, and `17`, while signed activities
+neutral auxiliary bytes. Guida83 reads the remaining 13 bytes as `u8` plus
+three `u32` values, closing the source-backed structural boundary while leaving
+their behavior neutral. Across both captures, the marker is zero, the first
+u32 is `0/1`, and the final pair is `0x00ffddcc`. Stream `92` validates that
+split across 12,100 paths and stream `126` across another 22,855, all at full
+coverage; captured option flags are `0`, `1`, and `17`, while signed activities
 are mainly `-1` with `12`, `13`, and `24` also observed. Acknowledgement flag
 prediction now names the typed option field instead of indexing an opaque byte.
 

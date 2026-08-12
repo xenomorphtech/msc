@@ -5189,10 +5189,16 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 acknowledgement_events[0].details["activity_code"], 0
             )
             self.assertEqual(
-                acknowledgement_events[0].details[
-                    "opaque_control_tail_bytes"
-                ],
-                13,
+                acknowledgement_events[0].details["control_marker"], 0
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["control_value_1"], 0
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["control_value_2"], 0
+            )
+            self.assertEqual(
+                acknowledgement_events[0].details["control_value_3"], 0
             )
             self.assertTrue(
                 acknowledgement_events[0].details["target_known"]

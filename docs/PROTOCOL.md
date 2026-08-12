@@ -3293,7 +3293,10 @@ uint8  skill_id
 uint8  skill_level
 uint8  action_auxiliary_1
 uint8  action_auxiliary_2
-byte[13] opaque_control_tail
+uint8  control_marker
+uint32 control_value_1
+uint32 control_value_2
+uint32 control_value_3
 int16  reference_x
 int16  reference_y
 uint8  command_count                 # nonzero
@@ -3313,7 +3316,10 @@ exactly; stream `126` validates the same boundaries across another 22,855
 submissions. The six-byte action prefix is also typed. The signed activity is
 predominantly `-1`, with captured `12`, `13`, and `24` values; option flags are
 captured as `0`, `1`, and `17`. The two auxiliary bytes retain neutral names,
-and the following 13 bytes remain opaque.
+and the following 13 bytes split exactly as one marker plus three little-endian
+u32 values. The marker is always zero; `control_value_1` is `0` or `1`; and
+both final values are the stable captured `0x00ffddcc`. Their behavioral roles
+remain neutral.
 
 This split follows the original v83 client writer, which emits six one-byte
 arguments and then reserves 13 bytes before the reference point. Independent
@@ -3323,7 +3329,10 @@ bytes, so the model does not assign those two bytes behavioral meaning.
 [Original client writer](https://github.com/ryantpayton/MapleStory-Client/blob/cbb0fe27cf9683a12eca0a569121d8033cdc2a4d/Net/Packets/GameplayPackets.h),
 [Guida83 handler](https://github.com/v3921358/Guida83/blob/b6b3c69f099169c2a60c9ef156220a87dd4b09b1/src/main/java/guida/net/channel/handler/MoveLifeHandler.java),
 and [gms083 handler](https://github.com/akhuting/gms083/blob/2ac781b5012ffdbf7c9c3200c756e660149ff00/src/main/java/net/server/channel/handlers/MoveLifeHandler.java)
-provide the independent source anchors.
+provide the independent source anchors. Guida83 independently reads this tail
+at the same `u8 + u32 + u32 + u32` boundary. With every byte structurally
+typed, all 12,100 stream-`92` and 22,855 stream-`126` submissions are full
+coverage.
 
 Server opcode `282` broadcasts movement for one field-local mob without the
 client sequence or nine-byte trailer:
@@ -3380,7 +3389,7 @@ movement. Heartbeats and the world connection remained active.
 
 The current replay also records each reactive submission and outcome as a
 safe runtime event. Request details retain template, sequence, command count,
-the typed action prefix, opaque-tail length, and reference/start/end
+the typed action prefix, four neutral control values, and reference/start/end
 coordinates, but omit the runtime object id. A fresh browser-free run produced
 13 alternating
 `mob_movement_submission_observed` and

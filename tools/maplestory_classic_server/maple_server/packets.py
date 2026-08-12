@@ -8465,6 +8465,22 @@ class MobMovementPath:
     def opaque_control_tail(self) -> bytes:
         return self._validated_control()[6:]
 
+    @property
+    def control_marker(self) -> int:
+        return self._validated_control()[6]
+
+    @property
+    def control_value_1(self) -> int:
+        return int.from_bytes(self._validated_control()[7:11], "little")
+
+    @property
+    def control_value_2(self) -> int:
+        return int.from_bytes(self._validated_control()[11:15], "little")
+
+    @property
+    def control_value_3(self) -> int:
+        return int.from_bytes(self._validated_control()[15:19], "little")
+
     def safe_control_dict(self) -> dict[str, object]:
         return {
             "option_flags": self.option_flags,
@@ -8473,7 +8489,10 @@ class MobMovementPath:
             "skill_level": self.skill_level,
             "action_auxiliary_1": self.action_auxiliary_1,
             "action_auxiliary_2": self.action_auxiliary_2,
-            "opaque_control_tail_bytes": len(self.opaque_control_tail),
+            "control_marker": self.control_marker,
+            "control_value_1": self.control_value_1,
+            "control_value_2": self.control_value_2,
+            "control_value_3": self.control_value_3,
         }
 
     @classmethod

@@ -1091,8 +1091,9 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `282`: server mob-movement broadcast with a seven-byte control
   prefix, signed reference position, and the same typed movement commands,
 - client opcode `207`: correlated mob movement submissions with a bounded
-  19-byte control prefix, signed reference position, command count, typed
-  commands, and zero-marked start/end-position trailer,
+  typed 19-byte option/activity/skill/neutral-control prefix, signed reference
+  position, command count, typed commands, and zero-marked start/end-position
+  trailer,
 - server opcode `283`: complete correlated mob movement acknowledgements with
   a one-byte boolean flag, 16-bit little-endian status/resource value, and two
   one-byte auxiliary fields,
@@ -1369,9 +1370,11 @@ stance byte, and duration; types `1` and `2` decode into signed relative
 velocity, stance, and duration. All 40,090 typed commands and all 12,100 paths
 round-trip byte-for-byte. The first six control bytes now expose option flags,
 signed activity code, skill id/level, and two neutral auxiliary bytes. The
-remaining 13-byte tail stays opaque. Reports emit these fields,
-reference/start/end coordinates, and decoded command records instead of one
-undifferentiated movement blob.
+remaining 13 bytes expose one neutral marker and three neutral u32 values; the
+captures hold marker `0`, first value `0/1`, and final pair `0x00ffddcc`.
+Reports emit these fields, reference/start/end coordinates, and decoded command
+records instead of one undifferentiated movement blob. Every reference opcode-
+`207` submission is now full structural coverage.
 
 All 11,949 acknowledgement bodies also fit one exact primitive boundary: flag
 `0` or `1`, a 16-bit little-endian value in `{0,25,30,35,100}`, and two zero
@@ -2075,8 +2078,8 @@ preserve distinct Unity scan codes in this setup.
 13. Bound all captured opcode-`207` movement command streams and fold command
     counts/types plus reference/start/end positions into gameplay state/events.
 14. Decode type-`0` absolute and type-`1`/`2` relative movement fields with
-    exact command/path round trips, while retaining the 19-byte control prefix
-    as opaque.
+    exact command/path round trips, then close the 19-byte control prefix at its
+    source-backed neutral primitive boundaries.
 15. Decode and fold mob entry/leave/controller/broadcast lifecycle, separating
     visible membership from field-local template knowledge retained after leave.
 16. Fully type opcode `283`, validate its flag/auxiliary rules across every

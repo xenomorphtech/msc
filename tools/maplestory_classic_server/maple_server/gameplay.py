@@ -7353,13 +7353,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="mob_movement_submission",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=movement,
                 details=details,
-                issues=(
-                    "movement action auxiliary meanings remain neutral and "
-                    "the 13-byte control tail remains opaque",
-                ),
             )
         if opcode == 293:
             acknowledgement = SkillRecordUpdateAcknowledgement.parse(payload)

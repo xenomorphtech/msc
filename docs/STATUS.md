@@ -1066,10 +1066,11 @@ the rejection event remains nonfatal and produces no guessed response.
 
 The client-opcode-`207` request model now resolves its first six control bytes
 as option flags, signed activity code, skill id/level, and two neutral action
-auxiliaries. The following 13 bytes remain opaque because independent v83
-handlers disagree on their adjacent option grouping. This source-backed split
-round-trips all 12,100 stream-`92` and 22,855 stream-`126` submissions;
-fold/runtime reports expose the typed prefix and tail length, and generated
+auxiliaries. Its remaining 13 bytes now use the independent handler's exact
+`u8 + u32 + u32 + u32` boundary with neutral names: all markers are zero, the
+first u32 is `0/1`, and the final pair is `0x00ffddcc`. This source-backed split
+round-trips all 12,100 stream-`92` and 22,855 stream-`126` submissions at full
+coverage; fold/runtime reports expose every structural field, and generated
 opcode-`283` flags derive from the named option field.
 
 One state-driven opcode-`282` primitive is now proven too. From 5,284 stream-

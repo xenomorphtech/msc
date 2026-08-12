@@ -4152,7 +4152,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
     def test_movement_header_and_ack_round_trip(self) -> None:
         movement_path = MobMovementPath(
             opaque_control=bytes((17, 0xFF, 96, 112, 18, 0))
-            + b"\x00" * 13,
+            + struct.pack("<BIII", 7, 1, 0x00FFDDCC, 0x12345678),
             reference_x=-12,
             reference_y=34,
             commands=(
@@ -4216,7 +4216,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "skill_level": 112,
                 "action_auxiliary_1": 18,
                 "action_auxiliary_2": 0,
-                "opaque_control_tail_bytes": 13,
+                "control_marker": 7,
+                "control_value_1": 1,
+                "control_value_2": 0x00FFDDCC,
+                "control_value_3": 0x12345678,
             },
         )
         self.assertEqual(
@@ -9976,7 +9979,10 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(movement_event.details["activity_code"], -1)
         self.assertEqual(movement_event.details["skill_id"], 0)
         self.assertEqual(movement_event.details["skill_level"], 0)
-        self.assertEqual(movement_event.details["opaque_control_tail_bytes"], 13)
+        self.assertEqual(movement_event.details["control_marker"], 0)
+        self.assertEqual(movement_event.details["control_value_1"], 0)
+        self.assertEqual(movement_event.details["control_value_2"], 0)
+        self.assertEqual(movement_event.details["control_value_3"], 0)
         self.assertEqual(event_kinds[-1], "session_ended")
         self.assertEqual(
             [event.index for event in analysis.events],
