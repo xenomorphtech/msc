@@ -11304,7 +11304,8 @@ class ServerU32OpaqueTailEnvelope:
         234: frozenset({3}),
         235: frozenset({6}),
     }
-    RESERVED_ZERO_TAIL_LENGTHS = {234: 3, 235: 6}
+    RESERVED_ZERO_TAIL_LENGTHS = {228: 4, 231: 20, 234: 3, 235: 6}
+    RESERVED_CONSTANT_TAILS = {230: frozenset({b"\x09"})}
 
     @property
     def fully_bounded(self) -> bool:
@@ -11313,6 +11314,8 @@ class ServerU32OpaqueTailEnvelope:
             reserved_length is not None
             and len(self.opaque_tail) == reserved_length
             and not any(self.opaque_tail)
+        ) or self.opaque_tail in self.RESERVED_CONSTANT_TAILS.get(
+            self.opcode, ()
         )
 
     @classmethod
@@ -11354,14 +11357,38 @@ class ServerU32OpaqueTailEnvelope:
             raise PacketShapeError(
                 f"server opcode-{self.opcode} reserved tail must be all zero"
             )
+        allowed_constants = self.RESERVED_CONSTANT_TAILS.get(self.opcode)
+        if (
+            allowed_constants is not None
+            and len(self.opaque_tail) == 1
+            and self.opaque_tail not in allowed_constants
+        ):
+            raise PacketShapeError(
+                f"server opcode-{self.opcode} one-byte reserved tail must be 0x09"
+            )
 
     def safe_dict(self) -> dict[str, int | bool]:
-        reserved_zero_length = len(self.opaque_tail) if self.fully_bounded else 0
+        reserved_zero_length = (
+            len(self.opaque_tail)
+            if self.opcode in self.RESERVED_ZERO_TAIL_LENGTHS
+            and self.fully_bounded
+            else 0
+        )
+        reserved_constant_length = (
+            len(self.opaque_tail)
+            if self.opcode in self.RESERVED_CONSTANT_TAILS and self.fully_bounded
+            else 0
+        )
         return {
             "primary_value_redacted": True,
             "typed_value_count": 1,
             "reserved_zero_length": reserved_zero_length,
-            "opaque_tail_length": len(self.opaque_tail) - reserved_zero_length,
+            "reserved_constant_length": reserved_constant_length,
+            "opaque_tail_length": (
+                len(self.opaque_tail)
+                - reserved_zero_length
+                - reserved_constant_length
+            ),
             "opaque_tail_redacted": (
                 bool(self.opaque_tail) and not self.fully_bounded
             ),

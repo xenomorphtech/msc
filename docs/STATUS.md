@@ -829,6 +829,14 @@
   opaque bytes total. The active saved transcript contains neither promoted
   opcode and stays warning-free at `2,980/54/0/0`. Safe JSON and HTTP-derived
   analysis redact the u32 and expose only structural suffix lengths.
+- The remaining generated-u32 suffix audit promotes opcode `228`'s four zero
+  bytes, opcode `231`'s 20 zero bytes, and both cross-capture short opcode-`230`
+  suffixes (`0x09`). All four observations pass native validation. This leaves
+  only the long opcode-`230` and opcode-`232` records partial with 23 opaque
+  bytes, and advances streams `126`/`92` to `69,940/1,160/0/0` and
+  `34,544/663/0/0`. The active saved transcript contains none of the family and
+  remains warning-free at `2,980/54/0/0`; safe JSON and HTTP-derived analysis
+  publish suffix lengths, never the redacted u32 or constant byte.
 - `--reactive-mob-health-responses` now provides a narrower exact transition
   for custom-server-owned state. It adopts typed opcode-`279` spawns for known
   max-HP templates, subtracts each nonzero opcode-`50`/`52` damage word, emits

@@ -2520,3 +2520,6 @@ preserve distinct Unity scan codes in this setup.
 112. Promote all six generated-u32 opcode-`234`/`235` records by validating
     their exact three-/six-byte reserved-zero suffixes, retaining the sibling
     `228/230/231/232` suffixes as explicit opaque partial data.
+113. Complete the generated-u32 suffix audit by bounding zero-suffix opcodes
+    `228`/`231` and both short opcode-`230` constant-`09` records, leaving only
+    long opcode `230` and opcode `232` partial with 23 opaque bytes.

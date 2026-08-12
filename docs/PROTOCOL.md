@@ -2046,10 +2046,10 @@ Only these observed opcode/tail-length combinations are accepted:
 
 | Opcode | Tail bytes | Packet bytes | Occurrences |
 | ---: | ---: | ---: | ---: |
-| `228` | `4` | `10` | `1` in stream `92` |
-| `230` | `1` | `7` | `1` in stream `92`, `1` in stream `126` |
+| `228` | `4` reserved zero | `10` | `1` in stream `92` |
+| `230` | `1` reserved `0x09` | `7` | `1` in stream `92`, `1` in stream `126` |
 | `230` | `7` | `13` | `1` in stream `126` |
-| `231` | `20` | `26` | `1` in stream `126` |
+| `231` | `20` reserved zero | `26` | `1` in stream `126` |
 | `232` | `16` | `22` | `1` in stream `92` |
 | `234` | `3` reserved zero | `9` | `1` in stream `92`, `2` in stream `126` |
 | `235` | `6` reserved zero | `12` | `1` in stream `92`, `2` in stream `126` |
@@ -2059,18 +2059,22 @@ Safe state and `neutral_server_record_received` events publish only opcode,
 typed-value count, reserved-zero length, and opaque-tail length; the `u32` and
 non-reserved tail bytes are redacted. Across both captures, all three opcode-
 `234` suffixes are three zero bytes and all three opcode-`235` suffixes are six
-zero bytes. Capture-bounded zero validation promotes these six observations to
-full coverage; the other six family observations remain partial because their
-suffix bytes have no readable role. Seven semantic manifest declarations replace
+zero bytes. Opcode `228` likewise ends in four zero bytes, opcode `231` in 20
+zero bytes, and both cross-capture seven-byte opcode-`230` packets end in
+constant `0x09`. Capture-bounded constant validation promotes ten observations
+to full coverage; only the long opcode-`230` and opcode-`232` observations
+remain partial because their suffix bytes have no readable role. Seven
+semantic manifest declarations replace
 the five matching `111` opaque pins and add the two widths found only in
 `1-10FS`; targeted native validation passes `12/12` with no unsupported or
 consumption failures.
 
-The current strict totals after this refinement are `69,938/1,162/0/0` for
-stream `126`, `34,542/665/0/0` for stream `92`, and `64/12/0/0` for stream
-`114`. The family retains 49 opaque bytes and separately accounts for 27
-reserved-zero bytes. The active saved transcript contains neither opcode and
-remains warning-free at `2,980/54/0/0`.
+The current strict totals after this refinement are `69,940/1,160/0/0` for
+stream `126`, `34,544/663/0/0` for stream `92`, and `64/12/0/0` for stream
+`114`. The family retains 23 opaque bytes and separately accounts for 51
+reserved-zero bytes plus two reserved constant bytes. The active saved
+transcript contains none of these opcodes and remains warning-free at
+`2,980/54/0/0`.
 
 At its original introduction, the family moved seven long-stream and five
 stream-`92` observations from unknown to partial; the current totals are the

@@ -532,10 +532,7 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     }
 
     for (name, opcode, length) in [
-        ("server_opcode_228_u32_opaque_tail", 228, 10),
-        ("server_opcode_230_u32_short_tail", 230, 7),
         ("server_opcode_230_u32_long_tail", 230, 13),
-        ("server_opcode_231_u32_opaque_tail", 231, 26),
         ("server_opcode_232_u32_opaque_tail", 232, 22),
     ] {
         let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
@@ -545,6 +542,8 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     }
 
     for (name, opcode, length, reserved_length) in [
+        ("server_opcode_228_u32_reserved_zero", 228, 10, 4),
+        ("server_opcode_231_u32_reserved_zero", 231, 26, 20),
         ("server_opcode_234_u32_reserved_zero", 234, 9, 3),
         ("server_opcode_235_u32_reserved_zero", 235, 12, 6),
     ] {
@@ -561,6 +560,21 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
                 && value == &"00".repeat(reserved_length)
         ));
     }
+
+    let short_opcode_230 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_230_u32_short_reserved_09")
+        .unwrap();
+    assert_eq!(short_opcode_230.opcode, 230);
+    assert_eq!(short_opcode_230.length, Some(7));
+    assert!(matches!(
+        short_opcode_230.operations.last().unwrap(),
+        ShapeOp::Bytes {
+            length: 1,
+            equals_hex: Some(value),
+            ..
+        } if value == "09"
+    ));
 
     let opcode_272 = shapes
         .iter()

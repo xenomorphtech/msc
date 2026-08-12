@@ -3428,8 +3428,12 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 primary_value=2_345_678 + index,
                 opaque_tail=(
                     b"\x00" * tail_length
-                    if opcode in {234, 235}
-                    else bytes((index + 1,)) * tail_length
+                    if opcode in {228, 231, 234, 235}
+                    else (
+                        b"\x09"
+                        if opcode == 230 and tail_length == 1
+                        else bytes((index + 1,)) * tail_length
+                    )
                 ),
             )
             for index, (opcode, tail_length) in enumerate(
@@ -3469,6 +3473,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
             PacketShapeError, "reserved tail must be all zero"
         ):
             replace(envelopes[-1], opaque_tail=b"\x00" * 5 + b"\x01").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must be 0x09"):
+            replace(envelopes[1], opaque_tail=b"\x08").to_bytes()
 
     def test_server_opcode_137_pair_ledger_round_trip(self) -> None:
         ledger = ServerOpcode137PairLedger(
@@ -7963,10 +7969,10 @@ class GameplayStateFoldTest(unittest.TestCase):
                 record_count=12,
                 records_blob=b"\xa5" * 1_632,
             ),
-            ServerU32OpaqueTailEnvelope(101, b"\x01" * 4, 228),
-            ServerU32OpaqueTailEnvelope(102, b"\x02", 230),
+            ServerU32OpaqueTailEnvelope(101, b"\x00" * 4, 228),
+            ServerU32OpaqueTailEnvelope(102, b"\x09", 230),
             ServerU32OpaqueTailEnvelope(103, b"\x03" * 7, 230),
-            ServerU32OpaqueTailEnvelope(104, b"\x04" * 20, 231),
+            ServerU32OpaqueTailEnvelope(104, b"\x00" * 20, 231),
             ServerU32OpaqueTailEnvelope(105, b"\x05" * 16, 232),
             ServerU32OpaqueTailEnvelope(106, b"\x00" * 3, 234),
             ServerU32OpaqueTailEnvelope(107, b"\x00" * 6, 235),
@@ -8000,7 +8006,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             },
         )
         self.assertEqual(analysis.state.neutral_server_typed_values, 57)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_680)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_655)
         self.assertEqual(analysis.state.pet_activations, 1)
         self.assertEqual(analysis.state.pet_activations_for_local_player, 0)
         self.assertEqual(
@@ -8029,10 +8035,10 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "full",
                 "full",
                 "partial",
+                "full",
+                "full",
                 "partial",
-                "partial",
-                "partial",
-                "partial",
+                "full",
                 "partial",
                 "full",
                 "full",
