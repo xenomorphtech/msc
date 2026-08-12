@@ -868,6 +868,9 @@
   already been removed. Handler-confirmed branching and independent exact
   validation promote all 257 reference-corpus pickup-result notices to full
   structural coverage while retaining neutral labels for unresolved roles.
+  The corresponding 234 base, 17 extended-proof, and six compact requests also
+  pass exact independent validation and now have full structural coverage;
+  control/token/proof roles and contents remain neutral or redacted.
 - Server opcode `311` is typed across animated item/mesos, field-load item,
   and field-load mesos variants. Stream `92` has 125 packets/66 drop
   lifecycles; the level-1-to-10 corpus adds four exact 30-byte mode-`2` mesos

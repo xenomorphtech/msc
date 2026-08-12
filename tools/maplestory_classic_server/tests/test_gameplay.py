@@ -9555,6 +9555,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.item_pickup_field_epoch_mismatches, 0)
         self.assertEqual(analysis.state.item_pickup_known_drops, 3)
         self.assertEqual(analysis.state.item_pickup_unknown_drops, 0)
+        request_observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "item_pickup_request"
+        ]
+        self.assertEqual(len(request_observations), 3)
+        self.assertTrue(
+            all(
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
+                for observation in request_observations
+            )
+        )
         self.assertEqual(analysis.state.item_pickup_results, 3)
         self.assertEqual(
             analysis.state.item_pickup_results_by_kind,
@@ -9949,7 +9962,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertTrue(
             all(
                 observation.kind == "item_pickup_request"
-                and observation.coverage.value == "partial"
+                and observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
                 and observation.details["shape"] == "compact"
                 and observation.details["control_value"] is None
                 for observation in compact_packets

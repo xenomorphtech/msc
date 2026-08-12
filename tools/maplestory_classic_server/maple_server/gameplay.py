@@ -7203,17 +7203,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="item_pickup_request",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=request,
                 details=details,
-                issues=(
-                    (
-                        "pickup validation-token semantics remain neutral"
-                        if request.opcode == 222
-                        else "pickup control, validation token, and optional "
-                        "proof semantics remain neutral"
-                    ),
-                ),
             )
         if opcode == 47:
             submission = LifeMovementSubmission.parse(payload)

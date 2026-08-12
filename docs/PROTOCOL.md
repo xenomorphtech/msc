@@ -2873,6 +2873,10 @@ therefore validates all 203 long-corpus pickup chains with zero unknown drops,
 epoch/effect/result/removal mismatches, or pending requests. Safe output adds a
 `compact` shape/counter while continuing to alias runtime drop ids and omit the
 validation token itself.
+Across both reference gameplay streams, the 234 base, 17 extended, and six
+compact requests all pass independent manifest validation with exact byte
+consumption. These 257 records now report full structural coverage while the
+control, validation-token, and proof meanings remain neutral and redacted.
 
 Requests repeating for the same `(field_epoch, drop_object_id)` before the
 effect/result/removal completes are retry attempts on one logical chain, not

@@ -885,7 +885,9 @@ The gameplay fold currently models these capture-backed boundaries:
   drop id, neutral validation token, and an opcode-`185` optional proof; all
   203 long-corpus requests form 203 admitted chains and complete their
   effect/result/removal chain, while live pre-response retries coalesce by
-  field epoch and drop without hiding their raw packet count,
+  field epoch and drop without hiding their raw packet count; all three wire
+  branches have full structural coverage while validation/proof roles remain
+  neutral,
 - server opcode `311`: 44-byte animated item, 36-byte animated mesos, 38-byte
   field-load item, and 30-byte field-load mesos drop spawns; the fold tracks
   mode-`1`/mode-`0` refresh pairs, source mobs, ownership-neutral fields, and

@@ -2582,6 +2582,10 @@ project's own `README.md` for all options.
   streams have full structural coverage and pass the independent manifest
   validator across item, mesos, and special branches. Still-unresolved result
   flag, mesos subtype/tail, and special-value roles retain neutral labels.
+- All 257 client pickup requests in those streams likewise pass exact manifest
+  validation: 234 base, 17 extended-proof, and six compact records. They now
+  have full structural coverage while control, validation-token, and proof
+  roles remain neutral and proof/token contents remain omitted from safe output.
 - All 125 stream-`92` opcode-`311` packets round-trip and fold into 66 drop
   lifecycles. All 54 pickup requests, gain values, effects, and local removals
   correlate with an active spawn; stream `114` ends with one modeled active
