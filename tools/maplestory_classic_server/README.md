@@ -919,7 +919,8 @@ The gameplay fold currently models these capture-backed boundaries:
   it is not the response boundary for client field transfers,
 - client opcode `114`: one neutral redacted envelope with a control byte,
   counted UTF-16 field, required zero terminator, and omitted trailing u32;
-  tutorial/UI timing remains a hypothesis rather than a semantic name,
+  all records have full structural coverage while tutorial/UI timing remains a
+  hypothesis rather than a semantic name,
 - client opcode `101`: exact 11-byte HP/MP recovery request with constant
   prefix/tail, one non-zero recovery amount, and authoritative opcode-`41`
   stat-update correlation,

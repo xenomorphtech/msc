@@ -677,6 +677,9 @@ directly from text lengths `8/9/11`; the fold exposes only control-value and
 text-length distributions plus the count of omitted trailing values. Although
 most packets occur within tens of seconds of tutorial/UI traffic, there is no
 immediate one-for-one response and the higher-level purpose remains neutral.
+Exact counted-text consumption and independent validation promote all 44
+records to full structural coverage while the redacted text and trailing-value
+roles remain deliberately neutral.
 The active idle level-12 custom-server client emits none, and this
 client-to-server family is not synthesized or injected in the opposite
 direction.

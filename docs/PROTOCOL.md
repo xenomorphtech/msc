@@ -358,6 +358,11 @@ across 26 observed values and are nondecreasing in capture order, but that alone
 does not establish a sequence or tutorial-step role. There are 13 distinct
 redacted strings and 43 distinct trailing values; the trailing values decrease
 22 times, so they are not modeled as a monotonic client tick.
+Because the counted text and required terminator delimit the record exactly,
+redaction and neutral roles do not imply structural opacity. All 44 records now
+report full structural coverage and pass the independent manifest validator
+with exact consumption; text, trailing-value meaning, and higher-level purpose
+remain deliberately unresolved.
 
 Forty-three packets have prior opcode-`244`/`247` tutorial/UI traffic, with 29
 within 30 seconds and a median gap of 15.285 seconds. That supports a possible

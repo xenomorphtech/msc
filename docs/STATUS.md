@@ -382,7 +382,9 @@
   only control and text-length distributions plus an omitted-value count;
   indirect tutorial/UI timing is documented as a hypothesis, not a semantic
   name. The active idle custom-server client emits none, so no reverse-direction
-  replay is claimed.
+  replay is claimed. Exact counted-text consumption and independent validation
+  now promote all 44 records to full structural coverage without exposing or
+  semantically naming the redacted fields.
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly, every leave matches the
   current field epoch, and all opcode-`202`/`217` movement broadcasts now

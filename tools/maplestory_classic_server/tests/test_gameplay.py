@@ -6912,7 +6912,8 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(len(observations), 2)
         self.assertTrue(
             all(
-                observation.coverage.value == "partial"
+                observation.coverage == ShapeCoverage.FULL
+                and observation.issues == ()
                 for observation in observations
             )
         )

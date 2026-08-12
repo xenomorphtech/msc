@@ -8128,13 +8128,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="client_opcode_114_text_envelope",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=envelope,
                 details=details,
-                issues=(
-                    "client opcode-114 text, trailing value, and "
-                    "higher-level purpose remain semantically unresolved",
-                ),
             )
         if opcode == 115:
             request = ClientInnerPortalRequest.parse(payload)
