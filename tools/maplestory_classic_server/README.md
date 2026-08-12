@@ -488,6 +488,26 @@ heartbeat pairs at the proof sample. HTTP status exposes the admission rule,
 source evidence, request counters, last response, and current modeled slots at
 `protocol.inventory_move_responses`.
 
+`--reactive-ability-point-allocation-responses` answers modeled opcode-`100`
+base-stat allocations during hold-open. It requires a positive request total
+within current AP and `u16`-safe results, then emits one opcode-`41` update with
+request flag `1`, the requested stat masks plus AP, and the captured zero tail.
+The option requires `--keep-world-open` with a positive hold duration and
+cannot be combined with a captured opcode-`100` reply. Add it as:
+
+```sh
+--reactive-ability-point-allocation-responses
+```
+
+Both references prove exact positive LUK/INT gains and AP expenditure. A fresh
+UI control additionally produced count `2` with `LUK +0, INT +1`, establishing
+that individual entries may be zero while the request total remains positive.
+After a typed AP-`1` injection, the responder served `1/1` requests with zero
+rejection and one mask-`0x00004300` response, kept LUK `15`, raised INT
+`57 -> 58`, and reduced AP `1 -> 0`. The independent live fold is warning-free
+at `159/133/0/0`, matches in `0.213` ms with none pending, stays active on map
+`101000000`, and had `54/54` heartbeat pairs at the proof sample.
+
 `--rewrite-final-field-drop-position X:Y` changes only the typed position in
 the final field's sole active mode-`2` item-drop packet.
 `--rewrite-final-field-drop-owner-to-player` independently rewrites only its
@@ -1791,6 +1811,10 @@ When reactive inventory-move responses are enabled,
 `protocol.inventory_move_responses` reports the captured admission constants,
 modeled Equip slots, observed/served/rejected request counts, response packet
 count, last response or rejection, and the current move-or-swap state.
+When reactive ability-point allocation responses are enabled,
+`protocol.ability_point_allocation_responses` reports the modeled base-stat/AP
+state, capture evidence, admission rule, observed/served/rejected counts,
+response packet count, and last response or rejection.
 When the final drop position is rewritten,
 `protocol.final_field_drop_position_rewrite` reports its alias/template,
 original and rewritten coordinates, field epoch, server-frame index, patch

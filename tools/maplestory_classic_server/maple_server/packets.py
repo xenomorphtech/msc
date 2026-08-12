@@ -11568,9 +11568,9 @@ class AbilityPointAllocationEntry:
 
     def _validate(self) -> None:
         _ = self.stat_name
-        if not 1 <= self.increment <= 0xFFFF_FFFF:
+        if not 0 <= self.increment <= 0xFFFF_FFFF:
             raise PacketShapeError(
-                "ability-point allocation increment must be a positive u32"
+                "ability-point allocation increment must fit u32"
             )
 
     def safe_dict(self) -> dict[str, int | str]:
@@ -11643,6 +11643,10 @@ class ClientAbilityPointAllocationRequest:
                     "ability-point allocation stat masks must be unique"
                 )
             seen_masks.add(allocation.stat_mask)
+        if self.total_increment == 0:
+            raise PacketShapeError(
+                "ability-point allocation request must spend at least one point"
+            )
 
     @property
     def total_increment(self) -> int:

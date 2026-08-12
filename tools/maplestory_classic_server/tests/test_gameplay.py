@@ -23,6 +23,7 @@ from maple_server.gameplay import (  # noqa: E402
     PlayerMobProximityPredicate,
     analyze_gameplay_transcript,
     build_mob_movement_planning_context,
+    derive_ability_point_allocation_response_policy,
     derive_client_recovery_response_policy,
     derive_inventory_move_response_policy,
     derive_item_pickup_response_policy,
@@ -3419,6 +3420,41 @@ class GameplayPacketShapeTest(unittest.TestCase):
             ],
         )
         self.assertEqual(request.total_increment, 38)
+        zero_entry_request = ClientAbilityPointAllocationRequest(
+            client_tick=292_645,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=0,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=1,
+                ),
+            ),
+        )
+        self.assertEqual(
+            zero_entry_request.to_bytes(),
+            bytes.fromhex(
+                "6400257704000200000000020000000000000001000001000000"
+            ),
+        )
+        self.assertEqual(
+            ClientAbilityPointAllocationRequest.parse(
+                zero_entry_request.to_bytes()
+            ),
+            zero_entry_request,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "at least one point"):
+            ClientAbilityPointAllocationRequest(
+                client_tick=1,
+                allocations=(
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=0,
+                    ),
+                ),
+            ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "must be unique"):
             ClientAbilityPointAllocationRequest(
                 client_tick=1,
@@ -8348,6 +8384,62 @@ class GameplayStateFoldTest(unittest.TestCase):
                     source_slot=-11,
                     destination_slot=2,
                     trailing_count=0,
+                )
+            )
+
+    def test_derives_captured_ability_point_allocation_response(self) -> None:
+        source = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                CharacterStatUpdate(
+                    request_flag=0,
+                    stat_mask=CharacterStatUpdate.ABILITY_POINTS,
+                    ability_points=5,
+                ).to_bytes(),
+            ),
+        )
+        policy = derive_ability_point_allocation_response_policy(source)
+        request = ClientAbilityPointAllocationRequest(
+            client_tick=564_468,
+            allocations=(
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.LUCK,
+                    increment=0,
+                ),
+                AbilityPointAllocationEntry(
+                    stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                    increment=1,
+                ),
+            ),
+        )
+
+        plan = policy.respond(request)
+
+        response = CharacterStatUpdate.parse(plan.plaintexts[0])
+        self.assertEqual(response.request_flag, 1)
+        self.assertEqual(response.stat_mask, 0x0000_4300)
+        self.assertEqual(response.intelligence, 58)
+        self.assertEqual(response.luck, 15)
+        self.assertEqual(response.ability_points, 4)
+        self.assertEqual(plan.stat_values_before, {"luck": 15, "intelligence": 57})
+        self.assertEqual(plan.stat_values_after, {"luck": 15, "intelligence": 58})
+        self.assertEqual(policy.intelligence, 58)
+        self.assertEqual(policy.luck, 15)
+        self.assertEqual(policy.ability_points, 4)
+        self.assertEqual(
+            policy.safe_dict()["prediction"]["stat_mask"],
+            "requested_stats_plus_ability_points",
+        )
+        with self.assertRaisesRegex(ValueError, "available points"):
+            policy.respond(
+                ClientAbilityPointAllocationRequest(
+                    client_tick=564_469,
+                    allocations=(
+                        AbilityPointAllocationEntry(
+                            stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                            increment=5,
+                        ),
+                    ),
                 )
             )
 

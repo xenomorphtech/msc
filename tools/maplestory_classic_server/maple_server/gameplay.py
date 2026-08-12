@@ -1977,6 +1977,144 @@ class ClientRecoveryResponsePolicy:
 
 
 @dataclass(frozen=True)
+class AbilityPointAllocationResponsePlan:
+    request: ClientAbilityPointAllocationRequest = field(repr=False)
+    stat_update: CharacterStatUpdate = field(repr=False)
+    ability_points_before: int
+    ability_points_after: int
+    stat_values_before: dict[str, int]
+    stat_values_after: dict[str, int]
+
+    @property
+    def plaintexts(self) -> tuple[bytes]:
+        return (self.stat_update.to_bytes(),)
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "ability_points_before": self.ability_points_before,
+            "ability_points_after": self.ability_points_after,
+            "stat_values_before": self.stat_values_before,
+            "stat_values_after": self.stat_values_after,
+            "request_flag": self.stat_update.request_flag,
+            "stat_mask": f"0x{self.stat_update.stat_mask:08x}",
+            "server_opcodes": [self.stat_update.opcode],
+        }
+
+
+@dataclass
+class AbilityPointAllocationResponsePolicy:
+    strength: int
+    dexterity: int
+    intelligence: int
+    luck: int
+    ability_points: int
+    field_epoch: int
+    source_requests: int = 0
+    source_matches: int = 0
+    source_points: int = 0
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "field_epoch": self.field_epoch,
+            "stats": {
+                "strength": self.strength,
+                "dexterity": self.dexterity,
+                "intelligence": self.intelligence,
+                "luck": self.luck,
+                "ability_points": self.ability_points,
+            },
+            "source_evidence": {
+                "requests": self.source_requests,
+                "matches": self.source_matches,
+                "points": self.source_points,
+            },
+            "admission": {
+                "stats": [
+                    "strength",
+                    "dexterity",
+                    "intelligence",
+                    "luck",
+                ],
+                "points": "modeled_available",
+                "result": "u16",
+            },
+            "prediction": {
+                "server_opcodes": [41],
+                "request_flag": 1,
+                "stat_mask": "requested_stats_plus_ability_points",
+                "tail": "00",
+            },
+        }
+
+    def apply_server_packet(self, plaintext: bytes) -> None:
+        if len(plaintext) < 2:
+            return
+        if int.from_bytes(plaintext[:2], "little") != 41:
+            return
+        update = CharacterStatUpdate.parse(plaintext)
+        for field_name in (
+            "strength",
+            "dexterity",
+            "intelligence",
+            "luck",
+            "ability_points",
+        ):
+            value = update.values.get(field_name)
+            if value is not None:
+                setattr(self, field_name, value)
+
+    def respond(
+        self, request: ClientAbilityPointAllocationRequest
+    ) -> AbilityPointAllocationResponsePlan:
+        if request.total_increment > self.ability_points:
+            raise ValueError(
+                "ability-point allocation exceeds modeled available points"
+            )
+        stat_values_before = {
+            allocation.stat_name: getattr(self, allocation.stat_name)
+            for allocation in request.allocations
+        }
+        stat_values_after = {
+            allocation.stat_name: (
+                stat_values_before[allocation.stat_name]
+                + allocation.increment
+            )
+            for allocation in request.allocations
+        }
+        overflowing = {
+            name: value
+            for name, value in stat_values_after.items()
+            if value > 0xFFFF
+        }
+        if overflowing:
+            raise ValueError(
+                "ability-point allocation result does not fit modeled u16 "
+                "stat fields"
+            )
+        ability_points_after = self.ability_points - request.total_increment
+        stat_mask = CharacterStatUpdate.ABILITY_POINTS
+        for allocation in request.allocations:
+            stat_mask |= allocation.stat_mask
+        stat_update = CharacterStatUpdate(
+            request_flag=1,
+            stat_mask=stat_mask,
+            ability_points=ability_points_after,
+            **stat_values_after,
+        )
+        plan = AbilityPointAllocationResponsePlan(
+            request=request,
+            stat_update=stat_update,
+            ability_points_before=self.ability_points,
+            ability_points_after=ability_points_after,
+            stat_values_before=stat_values_before,
+            stat_values_after=stat_values_after,
+        )
+        self.apply_server_packet(stat_update.to_bytes())
+        return plan
+
+
+@dataclass(frozen=True)
 class InventoryMoveResponsePlan:
     request: InventoryMoveRequest
     inventory_update: InventoryChangeSet = field(repr=False)
@@ -11926,6 +12064,54 @@ def derive_inventory_move_response_policy(
         field_epoch=state.field_epoch,
         source_requests=state.inventory_move_requests,
         source_matches=state.inventory_move_request_matches,
+    )
+
+
+def derive_ability_point_allocation_response_policy(
+    transcript: Transcript,
+) -> AbilityPointAllocationResponsePolicy:
+    """Build mutable base-stat/AP state from one validated world replay."""
+
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("world transcript failed packet/state validation")
+    state = analysis.state
+    if state.pending_ability_point_allocations:
+        raise ValueError(
+            "world transcript has unresolved ability-point allocations"
+        )
+    if (
+        state.ability_point_allocation_response_matches
+        != state.ability_point_allocation_requests
+    ):
+        raise ValueError(
+            "world transcript has unmatched ability-point allocations"
+        )
+    stat_values = (
+        state.strength,
+        state.dexterity,
+        state.intelligence,
+        state.luck,
+        state.ability_points,
+    )
+    if any(value is None for value in stat_values):
+        raise ValueError("world transcript has incomplete base-stat/AP state")
+    strength, dexterity, intelligence, luck, ability_points = stat_values
+    assert strength is not None
+    assert dexterity is not None
+    assert intelligence is not None
+    assert luck is not None
+    assert ability_points is not None
+    return AbilityPointAllocationResponsePolicy(
+        strength=strength,
+        dexterity=dexterity,
+        intelligence=intelligence,
+        luck=luck,
+        ability_points=ability_points,
+        field_epoch=state.field_epoch,
+        source_requests=state.ability_point_allocation_requests,
+        source_matches=state.ability_point_allocation_response_matches,
+        source_points=state.ability_points_requested,
     )
 
 

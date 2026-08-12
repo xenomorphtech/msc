@@ -1480,6 +1480,30 @@ pending, and remains active on map `101000000`. At the proof sample the same
 connection had `67/67` natural-recovery replies and `222/222` matched heartbeat
 probes with zero failed connections.
 
+## Reactive ability-point allocation validation
+
+`--reactive-ability-point-allocation-responses` serves client opcode `100`
+during hold-open from mutable STR/DEX/INT/LUK/AP state. It admits only a
+positive total within modeled available AP whose resulting stat values fit
+`u16`, then emits one opcode-`41` update with request flag `1`, requested stat
+bits plus the AP bit, and a one-zero tail. The option requires
+`--keep-world-open` and cannot share opcode `100` with a configured captured
+reply. Runtime status exposes source evidence, request counts, the last
+response or rejection, and current state under
+`protocol.ability_point_allocation_responses`.
+
+The two captures independently prove positive-only LUK/INT allocations of
+`1/4` and `9/29`, spending `5` and `38` AP exactly. The live client supplied a
+new auto-allocation form: count `2` with `LUK +0, INT +1`. This bounds each
+entry as a possibly-zero `u32` while retaining a positive request total. After
+a typed AP-`1` injection made the point visible, direct UI confirmation
+produced that request; the handler returned one mask-`0x00004300` opcode `41`,
+kept LUK `15`, raised INT `57 -> 58`, and reduced AP `1 -> 0`. Runtime served
+`1/1` with zero rejection and the connection remained active at `54/54`
+heartbeats. Independent transcript analysis is warning-free at
+`159/133/0/0`, matches the response in `0.213` ms, and leaves none pending on
+map `101000000`.
+
 ## Pickup request/effect validation
 
 The gameplay analyzer now decodes the complete capture-observed pickup chain:

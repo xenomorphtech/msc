@@ -45,6 +45,7 @@ from maple_server.server import (  # noqa: E402
     rewrite_channel_transition_world_from_selection,
 )
 from maple_server.gameplay import (  # noqa: E402
+    AbilityPointAllocationResponsePolicy,
     ClientRecoveryResponsePolicy,
     FieldDropEntity,
     InventoryItemEntity,
@@ -68,8 +69,10 @@ from maple_server.protocol import (  # noqa: E402
     shuffle_iv,
 )
 from maple_server.packets import (  # noqa: E402
+    AbilityPointAllocationEntry,
     ChannelTransitionResponse,
     CharacterStatUpdate,
+    ClientAbilityPointAllocationRequest,
     ClientRecoveryRequest,
     ClientAttackAction,
     FieldDropRemoval,
@@ -645,6 +648,24 @@ class TranscriptTest(unittest.TestCase):
         )
 
         self.assertTrue(arguments.reactive_inventory_move_responses)
+
+    def test_replay_parser_accepts_reactive_ability_point_responses(
+        self,
+    ) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "12857",
+                "--transcript",
+                "world.jsonl",
+                "--reactive-ability-point-allocation-responses",
+            ]
+        )
+
+        self.assertTrue(
+            arguments.reactive_ability_point_allocation_responses
+        )
 
     def test_replay_parser_accepts_typed_item_pickup_options(self) -> None:
         arguments = build_parser().parse_args(
@@ -2389,6 +2410,152 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 ],
             )
             self.assertEqual(move_events[-1].details["server_opcodes"], [39])
+
+    async def test_replay_responds_to_ability_point_allocation_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = CharacterStatUpdate(
+                request_flag=0,
+                stat_mask=(
+                    CharacterStatUpdate.INTELLIGENCE
+                    | CharacterStatUpdate.LUCK
+                    | CharacterStatUpdate.ABILITY_POINTS
+                ),
+                intelligence=57,
+                luck=15,
+                ability_points=5,
+            ).to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-ability-points", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = AbilityPointAllocationResponsePolicy(
+                strength=4,
+                dexterity=4,
+                intelligence=57,
+                luck=15,
+                ability_points=5,
+                field_epoch=1,
+            )
+            runtime_protocol = {
+                "ability_point_allocation_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            ability_point_allocation_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = ClientAbilityPointAllocationRequest(
+                client_tick=564_468,
+                allocations=(
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.LUCK,
+                        increment=0,
+                    ),
+                    AbilityPointAllocationEntry(
+                        stat_mask=CharacterStatUpdate.INTELLIGENCE,
+                        increment=1,
+                    ),
+                ),
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+            response_wire = await reader.readexactly(18)
+            response = CharacterStatUpdate.parse(
+                crypt_payload(response_wire[4:], shuffle_iv(server_iv))
+            )
+            self.assertEqual(response.request_flag, 1)
+            self.assertEqual(response.stat_mask, 0x0000_4300)
+            self.assertEqual(response.intelligence, 58)
+            self.assertEqual(response.luck, 15)
+            self.assertEqual(response.ability_points, 4)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+            metrics = runtime_protocol[
+                "ability_point_allocation_responses"
+            ]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 1)
+            self.assertEqual(metrics["last_response"]["ability_points_after"], 4)
+            self.assertEqual(policy.intelligence, 58)
+            self.assertEqual(policy.luck, 15)
+            self.assertEqual(policy.ability_points, 4)
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(
+                analysis.state.ability_point_allocation_response_matches, 1
+            )
+            self.assertEqual(
+                analysis.state.pending_ability_point_allocations, 0
+            )
+            allocation_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("ability_point_allocation_")
+            ]
+            self.assertEqual(
+                [event.kind for event in allocation_events],
+                [
+                    "ability_point_allocation_request_observed",
+                    "ability_point_allocation_response_completed",
+                ],
+            )
+            self.assertEqual(
+                allocation_events[-1].details["server_opcodes"], [41]
+            )
 
     async def test_replay_responds_to_modeled_item_pickup_during_hold_open(
         self,

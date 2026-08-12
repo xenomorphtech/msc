@@ -240,6 +240,17 @@
   coverage is `13,420/21,787/0/0` for stream `92` and
   `26,662/44,438/0/0` for stream `126`. At this checkpoint only client opcodes
   `307/310` remained fixed opaque records.
+- `--reactive-ability-point-allocation-responses` now serves opcode `100` with
+  one typed opcode-`41` update derived from mutable base-stat/AP state. It
+  rejects insufficient AP and `u16` overflow, emits request flag `1`, requested
+  stat bits plus AP, and the captured zero tail, and conflicts with configured
+  opcode-`100` replies. A fresh live auto-allocation exposed a new exact
+  count-`2` variant, `LUK +0, INT +1`; zero entries are admitted only when the
+  request total is positive. The handler served `1/1` with zero rejection,
+  kept LUK `15`, raised INT `57 -> 58`, and spent AP `1 -> 0`. Its independent
+  fold is warning-free at `159/133/0/0`, matches in `0.213` ms with none
+  pending, remains active on map `101000000`, and had `54/54` heartbeat pairs
+  at the proof sample.
 - The final fixed-opaque client bucket is now gone. Opcode `307` is typed from
   two reference and 28 live samples as `redacted u32 + redacted u32 + zero
   u32`; the middle value is zero 26 times and page-aligned in all four nonzero

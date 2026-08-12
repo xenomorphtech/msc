@@ -1661,7 +1661,7 @@ three controlled local-Wine menu confirmations:
 
 | opcode | packet/body bytes | stream `92` | stream `126` | local Wine | bounded observation |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `100` | `26/24` | 1 | 1 | 0 | counted ability-point allocation request |
+| `100` | `26/24` | 1 | 1 | 1 | counted ability-point allocation request |
 | `307` | `14/12` | 1 | 1 | 28 | two redacted words plus zero trailer near bootstrap |
 | `308` | `74/72` | 2 | 11 | 13 | typed mirrored-value record; approximately 300-second cadence while continuously running |
 | `310` | `41/39` | 0 | 0 | 3 | counted redacted UTF-16 plus zero suffix |
@@ -1685,6 +1685,31 @@ two stats by exactly `1/4` and lowers AP from `5` to `0`. Stream `126` requests
 lowers AP from `38` to `0`. The fold correlates both responses with zero
 pending, mismatched, or unverified requests and exposes safe per-stat totals and
 latency.
+
+The local client's auto-allocation control adds a bounded request variant: it
+keeps the same count-`2` LUK/INT layout but may encode zero for the unchanged
+stat. An exact live request used `LUK +0, INT +1`. Individual increments are
+therefore unsigned `u32` values that may be zero, while the request total must
+remain positive.
+
+`--reactive-ability-point-allocation-responses` turns the correlation into an
+opt-in hold-open handler. It derives mutable STR/DEX/INT/LUK/AP state from the
+validated replay, rejects requests that exceed available AP or overflow a
+`u16` result, and emits one opcode-`41` record with request flag `1`, the
+requested stat bits plus AP, updated stat/AP values, and the captured zero
+tail. Configured opcode-`100` replies are mutually exclusive. HTTP telemetry
+is published at `protocol.ability_point_allocation_responses`.
+
+For the live control, one typed opcode-`41` injection made AP `1` visible in
+the client, and direct nested-Wayland auto-allocation produced `LUK +0,
+INT +1`. The responder returned mask `0x00004300`, kept LUK at `15`, raised INT
+`57 -> 58`, and lowered AP `1 -> 0`. The client remained active on map
+`101000000`; runtime recorded `1/1` requests, zero rejection, one response
+packet, and `54/54` heartbeat pairs at the proof sample. Independent analysis
+of
+`downloads/maple_custom_server_observed/ability_point_live_20260811/world/1786491988812896059_replay_12857.jsonl`
+is warning-free at `159/133/0/0`, matches the allocation exactly in `0.213` ms,
+and leaves none pending.
 
 Opcode `307` decodes as `redacted u32 + redacted u32 + zero u32` in two
 references and 28 live records. The middle value is zero in 26 samples and all
