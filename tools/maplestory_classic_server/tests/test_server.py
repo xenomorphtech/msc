@@ -100,6 +100,7 @@ from maple_server.packets import (  # noqa: E402
     MobMovementPath,
     MobMovementSubmission,
     MobSpawnData,
+    MobSpawnTemporaryStatus,
     NpcSpawn,
     NpcStateUpdate,
     PlayerMovementCommand,
@@ -1292,14 +1293,15 @@ class TranscriptTest(unittest.TestCase):
             spawn=MobSpawnData(
                 spawn_marker=1,
                 template_id=100_100,
-                opaque_status=b"\x00" * 22,
+                temporary_status=MobSpawnTemporaryStatus(),
                 x=82,
                 y=234,
                 stance=3,
                 foothold_id=258,
                 origin_foothold_id=213,
-                spawn_effect=-1,
-                opaque_tail=b"\x00" * 4,
+                appear_type=-1,
+                team=0xFF,
+                effect_item_id=0,
             ),
         ).to_bytes()
         with patch(
@@ -4212,14 +4214,15 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 spawn=MobSpawnData(
                     spawn_marker=1,
                     template_id=template_id,
-                    opaque_status=b"\x00" * 22,
+                    temporary_status=MobSpawnTemporaryStatus(),
                     x=100,
                     y=-200,
                     stance=3,
                     foothold_id=7,
                     origin_foothold_id=7,
-                    spawn_effect=-1,
-                    opaque_tail=b"\x00" * 4,
+                    appear_type=-1,
+                    team=0xFF,
+                    effect_item_id=0,
                 ),
             ).to_bytes()
 
@@ -4997,14 +5000,15 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 spawn=MobSpawnData(
                     spawn_marker=1,
                     template_id=210_100,
-                    opaque_status=b"\x00" * 22,
+                    temporary_status=MobSpawnTemporaryStatus(),
                     x=100,
                     y=-200,
                     stance=3,
                     foothold_id=7,
                     origin_foothold_id=7,
-                    spawn_effect=-1,
-                    opaque_tail=b"\x00" * 4,
+                    appear_type=-1,
+                    team=0xFF,
+                    effect_item_id=0,
                 ),
             ).to_bytes()
             broadcast = MobMovementBroadcast(

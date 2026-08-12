@@ -589,6 +589,16 @@
   `0 -> 1 -> 0`, rendered and removed template `3210800`, and retained
   1,424/1,424 heartbeat pairs. No unique visual marker distinguished the set
   interval, so the bit's specific client-visible meaning remains neutral.
+- Server mob-entry opcode `279` and spawn-bearing controller opcode `281` no
+  longer retain opaque status/tail bytes. Pinned handler structure plus a live
+  primitive-reader trace prove four temporary-status mask words, an optional
+  `i16/i32/i16` tuple, common `i32/bool/bool` controls, and the final
+  appear-type/team/effect-item fields. All 1,884 spawn-bearing reference
+  packets now round-trip at full coverage. Stream `126` reaches
+  `68,527/2,573/0/0`, stream `92` reaches
+  `34,220/987/0/0`, and stream `114` remains `61/15/0/0`; a fresh active
+  transcript also accepted and fully folded injected common and extended
+  opcode-`279` packets with zero unknown observations.
 - `?keyboard-skill=KEY_CODE:SKILL_ID` now performs a typed single-value change
   to an existing opcode-`385` selector-`1` binding. On a fresh client, Left Ctrl
   under `2001005` emitted opcode-`52` variant `18` with two hits `[27,32]`;

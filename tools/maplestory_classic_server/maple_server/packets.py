@@ -3616,17 +3616,167 @@ class NpcStateUpdate:
 
 
 @dataclass(frozen=True)
+class MobSpawnTemporaryStatus:
+    """Temporary-status prefix embedded in one mob spawn record."""
+
+    EXTENDED_MASK = 0x0000_0080
+
+    mask_words: tuple[int, int, int, int] = (0, 0, 0, 0x8800_0000)
+    value: int | None = None
+    source_skill_id: int | None = None
+    duration_units: int | None = None
+    control_value: int = 0
+    flag_1: bool = False
+    flag_2: bool = False
+    raw_flag_1: int | None = field(default=None, repr=False, compare=False)
+    raw_flag_2: int | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def extended(self) -> bool:
+        return self.value is not None
+
+    @property
+    def enabled_bit_indices(self) -> tuple[int, ...]:
+        return tuple(
+            word_index * 32 + bit_index
+            for word_index, word in enumerate(self.mask_words)
+            for bit_index in range(32)
+            if word & (1 << bit_index)
+        )
+
+    @property
+    def mask_pattern(self) -> str:
+        return ":".join(f"{word:08x}" for word in self.mask_words)
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, extended: bool
+    ) -> "MobSpawnTemporaryStatus":
+        mask_words = tuple(
+            reader.u32(f"temporary_status.mask_word_{word_index}")
+            for word_index in range(4)
+        )
+        value = reader.i16("temporary_status.value") if extended else None
+        source_skill_id = (
+            reader.i32("temporary_status.source_skill_id")
+            if extended
+            else None
+        )
+        duration_units = (
+            reader.i16("temporary_status.duration_units")
+            if extended
+            else None
+        )
+        control_value = reader.i32("temporary_status.control_value")
+        raw_flag_1 = reader.u8("temporary_status.flag_1")
+        raw_flag_2 = reader.u8("temporary_status.flag_2")
+        record = cls(
+            mask_words=mask_words,
+            value=value,
+            source_skill_id=source_skill_id,
+            duration_units=duration_units,
+            control_value=control_value,
+            flag_1=bool(raw_flag_1),
+            flag_2=bool(raw_flag_2),
+            raw_flag_1=raw_flag_1,
+            raw_flag_2=raw_flag_2,
+        )
+        record._validate()
+        return record
+
+    def _validate(self) -> None:
+        if len(self.mask_words) != 4 or any(
+            not 0 <= word <= 0xFFFF_FFFF for word in self.mask_words
+        ):
+            raise PacketShapeError(
+                "mob spawn temporary-status mask needs four uint32 words"
+            )
+        optional_values = (
+            self.value,
+            self.source_skill_id,
+            self.duration_units,
+        )
+        if any(value is None for value in optional_values) and any(
+            value is not None for value in optional_values
+        ):
+            raise PacketShapeError(
+                "mob spawn extended temporary status requires value, source "
+                "skill, and duration units together"
+            )
+        mask_has_extended_status = bool(
+            self.mask_words[3] & self.EXTENDED_MASK
+        )
+        if self.extended != mask_has_extended_status:
+            raise PacketShapeError(
+                "mob spawn temporary-status extended tuple does not match "
+                "mask word 3 bit 7"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "mask_words": list(self.mask_words),
+            "mask_pattern": self.mask_pattern,
+            "enabled_bit_indices": list(self.enabled_bit_indices),
+            "extended": self.extended,
+            "value": self.value,
+            "source_skill_id": self.source_skill_id,
+            "duration_units": self.duration_units,
+            "control_value": self.control_value,
+            "flag_1": self.flag_1,
+            "flag_2": self.flag_2,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        encoded_flag_1 = _il2cpp_boolean_byte(
+            self.flag_1,
+            self.raw_flag_1,
+            field_name="mob spawn temporary-status flag 1",
+        )
+        encoded_flag_2 = _il2cpp_boolean_byte(
+            self.flag_2,
+            self.raw_flag_2,
+            field_name="mob spawn temporary-status flag 2",
+        )
+        try:
+            result = struct.pack("<4I", *self.mask_words)
+            if self.extended:
+                if (
+                    self.value is None
+                    or self.source_skill_id is None
+                    or self.duration_units is None
+                ):
+                    raise AssertionError(
+                        "validated mob spawn temporary status is incomplete"
+                    )
+                result += struct.pack(
+                    "<hih",
+                    self.value,
+                    self.source_skill_id,
+                    self.duration_units,
+                )
+            return result + struct.pack(
+                "<iBB", self.control_value, encoded_flag_1, encoded_flag_2
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"mob spawn temporary-status value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class MobSpawnData:
     spawn_marker: int
     template_id: int
-    opaque_status: bytes
+    temporary_status: MobSpawnTemporaryStatus
     x: int
     y: int
     stance: int
     foothold_id: int
     origin_foothold_id: int
-    spawn_effect: int
-    opaque_tail: bytes
+    appear_type: int
+    team: int
+    effect_item_id: int
 
     @classmethod
     def parse(cls, payload: bytes) -> "MobSpawnData":
@@ -3641,51 +3791,55 @@ class MobSpawnData:
                 f"mob spawn marker is {spawn_marker}, expected one"
             )
         template_id = reader.u32("template_id")
-        opaque_status = reader.bytes(len(payload) - 20, "opaque_status")
+        temporary_status = MobSpawnTemporaryStatus.parse_from(
+            reader, extended=len(payload) == 50
+        )
         x = reader.i16("x")
         y = reader.i16("y")
         stance = reader.u8("stance")
         foothold_id = reader.u16("foothold_id")
         origin_foothold_id = reader.u16("origin_foothold_id")
-        spawn_effect = reader.i16("spawn_effect")
-        opaque_tail = reader.bytes(4, "opaque_tail")
+        appear_type = reader.i8("appear_type")
+        team = reader.u8("team")
+        effect_item_id = reader.i32("effect_item_id")
         reader.finish()
         return cls(
             spawn_marker=spawn_marker,
             template_id=template_id,
-            opaque_status=opaque_status,
+            temporary_status=temporary_status,
             x=x,
             y=y,
             stance=stance,
             foothold_id=foothold_id,
             origin_foothold_id=origin_foothold_id,
-            spawn_effect=spawn_effect,
-            opaque_tail=opaque_tail,
+            appear_type=appear_type,
+            team=team,
+            effect_item_id=effect_item_id,
         )
 
     def to_bytes(self) -> bytes:
         if self.spawn_marker != 1:
             raise PacketShapeError("mob spawn marker must be one")
-        if len(self.opaque_status) not in {22, 30}:
+        try:
+            return (
+                struct.pack("<BI", self.spawn_marker, self.template_id)
+                + self.temporary_status.to_bytes()
+                + struct.pack(
+                    "<hhBHHbBi",
+                    self.x,
+                    self.y,
+                    self.stance,
+                    self.foothold_id,
+                    self.origin_foothold_id,
+                    self.appear_type,
+                    self.team,
+                    self.effect_item_id,
+                )
+            )
+        except struct.error as error:
             raise PacketShapeError(
-                "mob spawn opaque status must contain 22 or 30 bytes"
-            )
-        if len(self.opaque_tail) != 4:
-            raise PacketShapeError("mob spawn opaque tail must contain four bytes")
-        return (
-            struct.pack("<BI", self.spawn_marker, self.template_id)
-            + self.opaque_status
-            + struct.pack(
-                "<hhBHHh",
-                self.x,
-                self.y,
-                self.stance,
-                self.foothold_id,
-                self.origin_foothold_id,
-                self.spawn_effect,
-            )
-            + self.opaque_tail
-        )
+                f"mob spawn field is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)

@@ -131,6 +131,7 @@ from maple_server.packets import (  # noqa: E402
     MobMovementPath,
     MobMovementSubmission,
     MobSpawnData,
+    MobSpawnTemporaryStatus,
     MobTemporaryStatReset,
     MobTemporaryStatSet,
     NpcLifecycleControl,
@@ -544,17 +545,28 @@ def fixture_cash_inventory_item(*, slot: int) -> InitialInventoryItem:
 
 
 def fixture_mob_spawn(*, extended_status: bool = False) -> MobSpawnData:
+    temporary_status = (
+        MobSpawnTemporaryStatus(
+            mask_words=(0, 0, 0, 0x8800_0080),
+            value=1,
+            source_skill_id=3_101_005,
+            duration_units=0,
+        )
+        if extended_status
+        else MobSpawnTemporaryStatus()
+    )
     return MobSpawnData(
         spawn_marker=1,
         template_id=210_100,
-        opaque_status=b"\x00" * (30 if extended_status else 22),
+        temporary_status=temporary_status,
         x=100,
         y=-200,
         stance=2,
         foothold_id=7,
         origin_foothold_id=8,
-        spawn_effect=-1,
-        opaque_tail=b"\x00" * 4,
+        appear_type=-1,
+        team=0xFF,
+        effect_item_id=0,
     )
 
 
@@ -4440,6 +4452,37 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(len(released.to_bytes()), 7)
         self.assertEqual(len(controlled.to_bytes()), 49)
         self.assertEqual(len(broadcast.to_bytes()), 32)
+        self.assertEqual(
+            extended_enter.spawn.temporary_status.safe_dict(),
+            {
+                "mask_words": [0, 0, 0, 0x8800_0080],
+                "mask_pattern": "00000000:00000000:00000000:88000080",
+                "enabled_bit_indices": [103, 123, 127],
+                "extended": True,
+                "value": 1,
+                "source_skill_id": 3_101_005,
+                "duration_units": 0,
+                "control_value": 0,
+                "flag_1": False,
+                "flag_2": False,
+            },
+        )
+        captured_extended = bytes.fromhex(
+            "1701ea1143000130fe30000000000000000000000000008000008801004d512f"
+            "0000000000000000007301cefd0486008100ffff00000000"
+        )
+        parsed_extended = MobEnterField.parse(captured_extended)
+        self.assertEqual(parsed_extended.to_bytes(), captured_extended)
+        self.assertEqual(parsed_extended.spawn.appear_type, -1)
+        self.assertEqual(parsed_extended.spawn.team, 0xFF)
+        self.assertEqual(parsed_extended.spawn.effect_item_id, 0)
+        self.assertEqual(
+            parsed_extended.spawn.temporary_status.source_skill_id,
+            3_101_005,
+        )
+        self.assertEqual(
+            parsed_extended.spawn.temporary_status.duration_units, 0
+        )
         alternate_control = replace(
             broadcast,
             control_flag_2=True,
@@ -10331,7 +10374,7 @@ class GameplayStateFoldTest(unittest.TestCase):
 
         self.assertIn("kind=npc_spawned", report)
         self.assertIn("opcode=300 kind=npc_spawn coverage=full", report)
-        self.assertIn("opcode=279 kind=mob_enter_field coverage=partial", report)
+        self.assertIn("opcode=279 kind=mob_enter_field coverage=full", report)
         self.assertIn("mobs=active:1 entries:1 leaves:0", report)
         self.assertIn("matched_submission\":true", report)
         self.assertIn("command_types\":[0]", report)

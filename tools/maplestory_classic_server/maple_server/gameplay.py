@@ -4124,7 +4124,9 @@ class GameplayAnalysis:
                 "temporary_stat_bits": sorted(entity.temporary_stats),
                 "foothold_id": entity.foothold_id,
                 "origin_foothold_id": entity.spawn.origin_foothold_id,
-                "spawn_effect": entity.spawn.spawn_effect,
+                "appear_type": entity.spawn.appear_type,
+                "team": entity.spawn.team,
+                "effect_item_id": entity.spawn.effect_item_id,
             }
             if show_identifiers:
                 record["object_id"] = object_id
@@ -6242,14 +6244,15 @@ class GameplayStateFold:
     def _mob_spawn_details(spawn: MobSpawnData) -> dict[str, object]:
         return {
             "template_id": spawn.template_id,
-            "opaque_status_bytes": len(spawn.opaque_status),
+            "temporary_status": spawn.temporary_status.safe_dict(),
             "x": spawn.x,
             "y": spawn.y,
             "stance": spawn.stance,
             "foothold_id": spawn.foothold_id,
             "origin_foothold_id": spawn.origin_foothold_id,
-            "spawn_effect": spawn.spawn_effect,
-            "opaque_tail_bytes": len(spawn.opaque_tail),
+            "appear_type": spawn.appear_type,
+            "team": spawn.team,
+            "effect_item_id": spawn.effect_item_id,
         }
 
     @staticmethod
@@ -11578,10 +11581,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="mob_enter_field",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=entered,
                 details=details,
-                issues=("mob temporary status and spawn tail remain opaque",),
             )
         if opcode == 280:
             left = MobLeaveField.parse(payload)
@@ -11695,22 +11697,12 @@ class GameplayStateFold:
                 details=details,
                 identifiers={"object_id": change.object_id},
             )
-            issues = (
-                ("mob temporary status and spawn tail remain opaque",)
-                if change.spawn is not None
-                else ()
-            )
             return self._observation(
                 frame,
                 kind="mob_controller_change",
-                coverage=(
-                    ShapeCoverage.PARTIAL
-                    if change.spawn is not None
-                    else ShapeCoverage.FULL
-                ),
+                coverage=ShapeCoverage.FULL,
                 parsed=change,
                 details=details,
-                issues=issues,
             )
         if opcode == 282:
             broadcast = MobMovementBroadcast.parse(payload)

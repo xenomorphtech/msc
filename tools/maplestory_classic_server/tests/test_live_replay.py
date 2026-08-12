@@ -35,6 +35,7 @@ from maple_server.packets import (  # noqa: E402
     MobEnterField,
     MobControllerChange,
     MobSpawnData,
+    MobSpawnTemporaryStatus,
     MobTemporaryStatReset,
     MobTemporaryStatSet,
     SkillRecordUpdate,
@@ -583,14 +584,20 @@ class LiveReplayTest(unittest.TestCase):
             spawn=MobSpawnData(
                 spawn_marker=1,
                 template_id=3210800,
-                opaque_status=bytes(30),
+                temporary_status=MobSpawnTemporaryStatus(
+                    mask_words=(0, 0, 0, 0x8800_0080),
+                    value=1,
+                    source_skill_id=3_101_005,
+                    duration_units=0,
+                ),
                 x=371,
                 y=-562,
                 stance=4,
                 foothold_id=134,
                 origin_foothold_id=134,
-                spawn_effect=-1,
-                opaque_tail=bytes(4),
+                appear_type=-1,
+                team=0xFF,
+                effect_item_id=0,
             ),
         )
         set_stat = MobTemporaryStatSet(
@@ -607,14 +614,15 @@ class LiveReplayTest(unittest.TestCase):
             spawn=MobSpawnData(
                 spawn_marker=1,
                 template_id=3210800,
-                opaque_status=bytes(22),
+                temporary_status=MobSpawnTemporaryStatus(),
                 x=1348,
                 y=-562,
                 stance=4,
                 foothold_id=110,
                 origin_foothold_id=110,
-                spawn_effect=-1,
-                opaque_tail=bytes(4),
+                appear_type=-1,
+                team=0xFF,
+                effect_item_id=0,
             ),
         )
         short_set = MobTemporaryStatSet(

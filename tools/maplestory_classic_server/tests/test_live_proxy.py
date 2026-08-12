@@ -21,7 +21,11 @@ from maple_server.live_proxy import (  # noqa: E402
     LiveProxyConfig,
     live_proxy_connection,
 )
-from maple_server.packets import MobSpawnData, NpcSpawn  # noqa: E402
+from maple_server.packets import (  # noqa: E402
+    MobSpawnData,
+    MobSpawnTemporaryStatus,
+    NpcSpawn,
+)
 from maple_server.protocol import crypt_payload, encode_frame_header  # noqa: E402
 from maple_server.server import CaptureProxyConfig  # noqa: E402
 
@@ -107,14 +111,15 @@ class LiveGameStateSessionTest(unittest.TestCase):
         mob_spawn = MobSpawnData(
             spawn_marker=1,
             template_id=210_100,
-            opaque_status=bytes(22),
+            temporary_status=MobSpawnTemporaryStatus(),
             x=180,
             y=210,
             stance=0,
             foothold_id=17,
             origin_foothold_id=17,
-            spawn_effect=0,
-            opaque_tail=bytes(4),
+            appear_type=0,
+            team=0,
+            effect_item_id=0,
         )
         state.mobs[2] = MobEntity(
             alias="mob:1",

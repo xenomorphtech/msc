@@ -1096,8 +1096,10 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `303`: an 8-byte typed NPC state prefix plus an optional typed
   absolute/relative movement path; client opcode `217` carries the same body
   and adds a nine-byte marker/start/end trailer only on movement submissions,
-- server opcode `279`: mob-entry envelope with object id, template id,
-  temporary-status block, position/stance/footholds, spawn effect, and tail,
+- server opcode `279`: complete mob-entry envelope with object id, template
+  id, four-word temporary-status mask, optional signed status tuple, common
+  status controls, position/stance/footholds, appear type, team, and effect
+  item id,
 - server opcode `280`: complete object-id plus one-byte mob-leave record,
 - server opcode `281`: controller level/object id with spawn data for nonzero
   controller assignments and no body for level zero,
@@ -2477,3 +2479,9 @@ preserve distinct Unity scan codes in this setup.
     consume exactly, while retaining partial coverage for all 106 packets with
     lossless but opaque add-item metadata. Revalidate both reference captures
     and the active transcript with zero unknown or invalid observations.
+104. Replace the shared opcode-`279`/`281` mob-spawn status and tail blobs with
+    the pinned client's live-traced primitive layout: four mask words, an
+    optional `i16/i32/i16` status tuple, common `i32/bool/bool` controls, and
+    appear-type/team/effect-item suffix fields. Promote all 1,884 spawn-bearing
+    reference packets to full coverage, validate both corpora independently,
+    and accept both widths in the active local client.

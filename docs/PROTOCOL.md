@@ -4272,6 +4272,51 @@ HP. That warning also records the
 `{-1: 1, +1: 5}` inferred damage-delta histogram and that all six lack an
 intervening modeled relay hit.
 
+## Mob spawn and controller assignment (`server 279` / `281`)
+
+Both spawn-bearing opcodes delegate to the same client parser. Opcode `279`
+places the object id directly before the spawn body; opcode `281` places a
+one-byte controller level before the object id and omits the spawn body when
+that level is zero. The complete shared body is:
+
+```text
+uint8  spawn_marker = 1
+uint32 template_id
+uint32 temporary_status_mask[4]
+if temporary_status_mask[3] & 0x00000080:
+    int16 value
+    int32 source_skill_id
+    int16 duration_units
+int32  status_control_value
+bool   status_flag_1
+bool   status_flag_2
+int16  x
+int16  y
+uint8  stance
+uint16 foothold_id
+uint16 origin_foothold_id
+int8   appear_type
+uint8  team
+int32  effect_item_id
+```
+
+The conditional status tuple accounts for the exact `42`/`50`-byte shared
+body and `48`/`56`-byte opcode-`279` packet widths. A live GDB trace against
+the pinned client injected one captured packet of each width and observed the
+optional reads as exactly `i16 + i32 + i16`, followed in both branches by
+`i32 + bool + bool`. The suffix trace and disassembly identify the former
+signed-`i16` “spawn effect” as separate signed appear-type and team bytes, then
+one client-read `i32` effect item id. All 1,884 spawn-bearing packets across
+reference streams `92` and `126` parse and re-emit exactly; the mask/control
+and optional tuple retain neutral behavioral names.
+
+The independent manifest validator consumes every opcode-`279`/`281` packet
+in both corpora without a failure. Promoting the 1,884 spawn-bearing records
+from partial to full coverage moves stream `126` to `68,527/2,573/0/0` and
+stream `92` to `34,220/987/0/0`; stream `114` remains `61/15/0/0`. The same
+live trace transcript folds injected common and extended opcode-`279` packets
+at full coverage and remains valid with no unknown observations.
+
 Primary captures live in:
 
 ```text

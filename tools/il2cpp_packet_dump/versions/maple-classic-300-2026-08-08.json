@@ -852,64 +852,78 @@
     },
     {
       "name":"mob_enter_field_short_status","direction":"server_to_client","opcode":279,"length":48,
-      "source":"IL2CPP opcode-279 handler e13fd581... reads object/marker/template then b3052290... parses status; MobSpawnData; capture 111",
+      "source":"IL2CPP opcode-279 handler e13fd581... plus live primitive-reader trace of both captured branches; MobSpawnData; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":279},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":22},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {
       "name":"mob_enter_field_extended_status","direction":"server_to_client","opcode":279,"length":56,
-      "source":"IL2CPP opcode-279 handler e13fd581... reads object/marker/template then b3052290... parses status; MobSpawnData; capture 111",
+      "source":"IL2CPP opcode-279 handler e13fd581... plus live primitive-reader trace of both captured branches; MobSpawnData; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":279},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":30},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_value","kind":"i16"},{"op":"read","name":"status_source_skill_id","kind":"i32"},
+        {"op":"read","name":"status_duration_units","kind":"i16"},{"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {
       "name":"mob_controller_spawn_short_status","direction":"server_to_client","opcode":281,"length":49,
-      "source":"IL2CPP opcode-281 handler f0e98d8f... branches on control level and delegates spawn parser; MobControllerChange; capture 111",
+      "source":"IL2CPP opcode-281 handler f0e98d8f... delegates the same live-traced spawn parser; MobControllerChange; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":281},
         {"op":"read","name":"control_level","kind":"u8"},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":22},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {
       "name":"mob_controller_spawn_extended_status","direction":"server_to_client","opcode":281,"length":57,
-      "source":"IL2CPP opcode-281 handler f0e98d8f... branches on control level and delegates spawn parser; MobControllerChange; capture 111",
+      "source":"IL2CPP opcode-281 handler f0e98d8f... delegates the same live-traced spawn parser; MobControllerChange; captures 111 and 1-10FS",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":281},
         {"op":"read","name":"control_level","kind":"u8"},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"spawn_marker","kind":"u8","equals":1},
         {"op":"read","name":"template_id","kind":"u32"},
-        {"op":"bytes","name":"status","length":30},
+        {"op":"read","name":"status_mask_0","kind":"u32"},{"op":"read","name":"status_mask_1","kind":"u32"},
+        {"op":"read","name":"status_mask_2","kind":"u32"},{"op":"read","name":"status_mask_3","kind":"u32"},
+        {"op":"read","name":"status_value","kind":"i16"},{"op":"read","name":"status_source_skill_id","kind":"i32"},
+        {"op":"read","name":"status_duration_units","kind":"i16"},{"op":"read","name":"status_control_value","kind":"i32"},
+        {"op":"read","name":"status_flag_1","kind":"bool"},{"op":"read","name":"status_flag_2","kind":"bool"},
         {"op":"read","name":"x","kind":"i16"},{"op":"read","name":"y","kind":"i16"},
         {"op":"read","name":"stance","kind":"u8"},{"op":"read","name":"foothold_id","kind":"u16"},
-        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"spawn_effect","kind":"i16"},
-        {"op":"bytes","name":"tail","length":4}
+        {"op":"read","name":"origin_foothold_id","kind":"u16"},{"op":"read","name":"appear_type","kind":"i8"},
+        {"op":"read","name":"team","kind":"u8"},{"op":"read","name":"effect_item_id","kind":"i32"}
       ]
     },
     {

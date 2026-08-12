@@ -338,7 +338,9 @@ class MobTemporaryStatLiveReplayPlan:
                 "stance": spawn.stance,
                 "foothold_id": spawn.foothold_id,
                 "origin_foothold_id": spawn.origin_foothold_id,
-                "spawn_effect": spawn.spawn_effect,
+                "appear_type": spawn.appear_type,
+                "team": spawn.team,
+                "effect_item_id": spawn.effect_item_id,
             },
             "set": {
                 "opcode": self.set_stat.opcode,
