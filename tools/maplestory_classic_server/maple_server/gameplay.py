@@ -96,6 +96,7 @@ from .packets import (
     PlayerMovementSubmission,
     PickupGainNotice,
     RemotePlayerEnterField,
+    RemotePlayerInstruction,
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
     ServerAttackRelay,
@@ -604,6 +605,13 @@ class GameplayGameState:
     remote_player_entry_masked_appearance_records: int = 0
     remote_player_leaves: int = 0
     remote_player_unknown_leaves: int = 0
+    remote_player_instructions: int = 0
+    remote_player_instructions_for_known_players: int = 0
+    remote_player_instructions_for_unknown_players: int = 0
+    remote_player_instruction_selectors: Counter[int] = field(
+        default_factory=Counter
+    )
+    remote_player_instruction_extended_records: int = 0
     remote_player_mob_value_records: int = 0
     remote_player_mob_values_for_known_players: int = 0
     remote_player_mob_values_for_unknown_players: int = 0
@@ -4545,6 +4553,21 @@ class GameplayAnalysis:
                 "remote_player_unknown_leaves": (
                     self.state.remote_player_unknown_leaves
                 ),
+                "remote_player_instructions": {
+                    "packet_count": self.state.remote_player_instructions,
+                    "known_player_count": (
+                        self.state.remote_player_instructions_for_known_players
+                    ),
+                    "unknown_player_count": (
+                        self.state.remote_player_instructions_for_unknown_players
+                    ),
+                    "selectors": dict(
+                        self.state.remote_player_instruction_selectors
+                    ),
+                    "extended_record_count": (
+                        self.state.remote_player_instruction_extended_records
+                    ),
+                },
                 "remote_player_mob_values": {
                     "packet_count": (
                         self.state.remote_player_mob_value_records
@@ -10978,7 +11001,6 @@ class GameplayStateFold:
             201,
             205,
             228,
-            230,
             231,
             232,
             234,
@@ -11105,6 +11127,42 @@ class GameplayStateFold:
                 )
                 if partial
                 else (),
+            )
+        if opcode == 230:
+            instruction = RemotePlayerInstruction.parse(payload)
+            alias = self._alias(
+                self._player_aliases, instruction.object_id, "player"
+            )
+            known_player = instruction.object_id in self.state.observed_players
+            self.state.remote_player_instructions += 1
+            self.state.remote_player_instruction_selectors[
+                instruction.selector
+            ] += 1
+            self.state.remote_player_instruction_extended_records += (
+                instruction.selector == 1
+            )
+            if known_player:
+                self.state.remote_player_instructions_for_known_players += 1
+            else:
+                self.state.remote_player_instructions_for_unknown_players += 1
+            details = {
+                **instruction.safe_dict(),
+                "entity": alias,
+                "known_player": known_player,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "remote_player_instruction_received",
+                details=details,
+                identifiers={"object_id": instruction.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="remote_player_instruction",
+                coverage=ShapeCoverage.FULL,
+                parsed=instruction,
+                details=details,
             )
         if opcode in FIXED_SERVER_OPCODES:
             if opcode in FixedServerEmptyRecord.SUPPORTED_OPCODES:
@@ -15228,6 +15286,18 @@ def render_gameplay_analysis(
             f"{state.remote_player_movement_commands} "
             "remote_command_types:"
             f"{remote_player_movement_command_types}"
+        ),
+        (
+            "remote_player_instructions="
+            f"packets:{state.remote_player_instructions} "
+            "known_players:"
+            f"{state.remote_player_instructions_for_known_players} "
+            "unknown_players:"
+            f"{state.remote_player_instructions_for_unknown_players} "
+            "selectors:"
+            f"{dict(sorted(state.remote_player_instruction_selectors.items()))} "
+            "extended:"
+            f"{state.remote_player_instruction_extended_records}"
         ),
         (
             "remote_player_mob_values="

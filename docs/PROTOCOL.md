@@ -2099,9 +2099,9 @@ followed the debugger session rather than a synchronous packet rejection; a
 fresh browser-free direct-Wayland launch returned to the field with sound
 muted and a ready world connection.
 
-## Generated `u32` envelopes (`228`, `230`, `231`, `232`, `234`, `235`)
+## Generated `u32` envelopes (`228`, `231`, `232`, `234`, `235`)
 
-These six opcodes are registered on the same generated handler class. Each
+These five opcodes are registered on the same generated handler class. Each
 handler makes exactly one direct `PacketReader` call, a `u32`, then invokes its
 local state method without another reader call. The captures contain additional
 bytes after that value, so the shared boundary starts as a typed leading value
@@ -2118,40 +2118,56 @@ Only these observed opcode/tail-length combinations are accepted:
 | Opcode | Tail bytes | Packet bytes | Occurrences |
 | ---: | ---: | ---: | ---: |
 | `228` | `4` reserved zero | `10` | `1` in stream `92` |
-| `230` | `1` reserved `0x09` | `7` | `1` in stream `92`, `1` in stream `126` |
-| `230` | `7` | `13` | `1` in stream `126` |
 | `231` | `20` reserved zero | `26` | `1` in stream `126` |
 | `232` | `16` | `22` | `1` in stream `92` |
 | `234` | `3` reserved zero | `9` | `1` in stream `92`, `2` in stream `126` |
 | `235` | `6` reserved zero | `12` | `1` in stream `92`, `2` in stream `126` |
 
-The shared Python envelope consumes and re-emits all 12 packets exactly.
+The shared Python envelope consumes and re-emits the nine packets exactly.
 Safe state and `neutral_server_record_received` events publish only opcode,
 typed-value count, reserved-zero length, and opaque-tail length; the `u32` and
 non-reserved tail bytes are redacted. Across both captures, all three opcode-
 `234` suffixes are three zero bytes and all three opcode-`235` suffixes are six
-zero bytes. Opcode `228` likewise ends in four zero bytes, opcode `231` in 20
-zero bytes, and both cross-capture seven-byte opcode-`230` packets end in
-constant `0x09`. Capture-bounded constant validation promotes ten observations
-to full coverage; only the long opcode-`230` and opcode-`232` observations
-remain partial because their suffix bytes have no readable role. Seven
-semantic manifest declarations replace
-the five matching `111` opaque pins and add the two widths found only in
-`1-10FS`; targeted native validation passes `12/12` with no unsupported or
-consumption failures.
+zero bytes. Opcode `228` likewise ends in four zero bytes and opcode `231` in
+20 zero bytes. Eight observations are full; only opcode `232` retains 16
+opaque bytes.
 
-The current strict totals after this refinement are `69,940/1,160/0/0` for
-stream `126`, `34,544/663/0/0` for stream `92`, and `64/12/0/0` for stream
-`114`. The family retains 23 opaque bytes and separately accounts for 51
-reserved-zero bytes plus two reserved constant bytes. The active saved
-transcript contains none of these opcodes and remains warning-free at
-`2,980/54/0/0`.
+Opcode `230` is a separate remote-player instruction family. Native handler
+`e49edb9d...` reads the leading `u32` as a remote-player object lookup key and
+delegates the remainder to object method `ee73017d...`. That method reads a
+`u8` selector. Capture-observed selector `9` ends immediately; selector `1`
+jumps to native arm `0x180FF62BA`, which reads `i32`, `u8`, `u8`:
+
+```text
+uint16 opcode = 230
+uint32 remote_player_object_id
+uint8 selector
+
+selector 9:
+    end
+selector 1:
+    int32 value
+    uint8 value_1
+    uint8 value_2
+```
+
+The stream-`92` and stream-`126` compact records both use selector `9`. The
+one long stream-`126` record uses selector `1` and values
+`(4101003, 54, 6)`. All three object ids match active remote players already
+introduced by opcode `189`. The dedicated codec consumes and re-emits all
+three packets exactly; safe folds expose only the aliased player, selector,
+and extended-value presence/count while redacting the object id and extended
+values. All three observations are full.
+
+The current strict totals are `70,075/1,025/0/0` for stream `126`,
+`34,571/636/0/0` for stream `92`, and `67/9/0/0` for stream `114`.
+Opcode `232` now accounts for the only 16 opaque bytes in this generated-u32
+set. The active saved transcript contains no opcode-`230` record.
 
 At its original introduction, the family moved seven long-stream and five
 stream-`92` observations from unknown to partial; the current totals are the
-refined values above. Live replay remains deferred: the leading value may
-identify session-local state, and replaying a captured value across sessions
-would not be a bounded semantic test.
+refined values above. Live replay remains deferred because the leading value
+is demonstrably a session-local remote-player object id.
 
 ## Variable server records (`156`, `385`)
 

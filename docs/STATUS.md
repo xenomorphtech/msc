@@ -103,16 +103,15 @@
   inventory, or progression state. A fresh browser-free direct-Wayland launch
   is back in the field with the programmatic audio-mute service active and one
   healthy world connection.
-- Server opcodes `228`, `230`, `231`, `232`, `234`, and `235` share one
-  generated-handler boundary: each reads exactly one leading `u32`, while the
-  12 captured packets retain opcode/width-specific ignored tails. Seven
-  semantic width declarations and one redacted Python envelope now preserve
-  and re-emit the `1/3/4/6/7/16/20`-byte tails exactly. All 12 packets pass the
-  native and Python round-trip validators; the fold emits neutral events and
-  marks them partial, because the tail bytes have no handler-backed semantics.
-  Primary values and tails are omitted from safe analysis. Cross-state live
-  replay is intentionally deferred because the leading value may be a
-  session-local identifier and the ignored tails are not yet typed.
+- Server opcodes `228`, `231`, `232`, `234`, and `235` retain the shared
+  generated-u32 envelope. Eight of nine records have reserved-zero tails and
+  fold fully; only opcode `232` retains a 16-byte partial tail. Opcode `230` is
+  now a dedicated remote-player instruction: native code proves the leading
+  `u32` is an object lookup key, then reads selector `9` with no body or
+  selector `1` with `i32/u8/u8`. All three capture records target active
+  remote players, round-trip exactly, and fold fully with object ids and
+  extended values redacted. Cross-state replay remains deferred because the
+  object id is session-local.
 - Server opcode `276` is now a full automatic-dump-backed boolean record. Its
   two captured payloads use raw byte `0x05`; ISIL proves the pinned reader calls
   `BitConverter.ToBoolean`, so the shared native validator now treats every

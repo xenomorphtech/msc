@@ -1585,14 +1585,14 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":228},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"reserved_zero","length":4,"equals_hex":"00000000"}]
     },
     {
-      "name":"server_opcode_230_u32_short_reserved_09","direction":"server_to_client","opcode":230,"length":7,
-      "source":"generated handler e49edb9d... reads one u32; the stream-92 and stream-126 short packets both end in reserved byte 0x09",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"reserved_constant","length":1,"equals_hex":"09"}]
+      "name":"remote_player_instruction_selector_9","direction":"server_to_client","opcode":230,"length":7,
+      "source":"generated handler e49edb9d... reads a u32 remote-player object lookup key and delegates to object method ee73017d...; that method reads a u8 selector, whose capture-observed arm 9 consumes no further fields",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"object_id","kind":"u32"},{"op":"read","name":"selector","kind":"u8","equals":9}]
     },
     {
-      "name":"server_opcode_230_u32_long_tail","direction":"server_to_client","opcode":230,"length":13,
-      "source":"generated handler e49edb9d... reads one u32; one 1-10FS gameplay packet retains seven unconsumed capture-bounded bytes",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":7}]
+      "name":"remote_player_instruction_selector_1","direction":"server_to_client","opcode":230,"length":13,
+      "source":"generated handler e49edb9d... reads a u32 remote-player object lookup key and delegates to object method ee73017d...; selector arm 1 at native 0x180FF62BA reads i32/u8/u8 and exactly consumes the sole long 1-10FS packet",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":230},{"op":"read","name":"object_id","kind":"u32"},{"op":"read","name":"selector","kind":"u8","equals":1},{"op":"read","name":"value","kind":"i32"},{"op":"read","name":"value_1","kind":"u8"},{"op":"read","name":"value_2","kind":"u8"}]
     },
     {
       "name":"server_opcode_231_u32_reserved_zero","direction":"server_to_client","opcode":231,"length":26,

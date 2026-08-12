@@ -11863,15 +11863,12 @@ class ServerU32OpaqueTailEnvelope:
 
     CAPTURED_TAIL_LENGTHS = {
         228: frozenset({4}),
-        230: frozenset({1, 7}),
         231: frozenset({20}),
         232: frozenset({16}),
         234: frozenset({3}),
         235: frozenset({6}),
     }
     RESERVED_ZERO_TAIL_LENGTHS = {228: 4, 231: 20, 234: 3, 235: 6}
-    RESERVED_CONSTANT_TAILS = {230: frozenset({b"\x09"})}
-
     @property
     def fully_bounded(self) -> bool:
         reserved_length = self.RESERVED_ZERO_TAIL_LENGTHS.get(self.opcode)
@@ -11879,8 +11876,6 @@ class ServerU32OpaqueTailEnvelope:
             reserved_length is not None
             and len(self.opaque_tail) == reserved_length
             and not any(self.opaque_tail)
-        ) or self.opaque_tail in self.RESERVED_CONSTANT_TAILS.get(
-            self.opcode, ()
         )
 
     @classmethod
@@ -11922,16 +11917,6 @@ class ServerU32OpaqueTailEnvelope:
             raise PacketShapeError(
                 f"server opcode-{self.opcode} reserved tail must be all zero"
             )
-        allowed_constants = self.RESERVED_CONSTANT_TAILS.get(self.opcode)
-        if (
-            allowed_constants is not None
-            and len(self.opaque_tail) == 1
-            and self.opaque_tail not in allowed_constants
-        ):
-            raise PacketShapeError(
-                f"server opcode-{self.opcode} one-byte reserved tail must be 0x09"
-            )
-
     def safe_dict(self) -> dict[str, int | bool]:
         reserved_zero_length = (
             len(self.opaque_tail)
@@ -11939,21 +11924,12 @@ class ServerU32OpaqueTailEnvelope:
             and self.fully_bounded
             else 0
         )
-        reserved_constant_length = (
-            len(self.opaque_tail)
-            if self.opcode in self.RESERVED_CONSTANT_TAILS and self.fully_bounded
-            else 0
-        )
         return {
             "primary_value_redacted": True,
             "typed_value_count": 1,
             "reserved_zero_length": reserved_zero_length,
-            "reserved_constant_length": reserved_constant_length,
-            "opaque_tail_length": (
-                len(self.opaque_tail)
-                - reserved_zero_length
-                - reserved_constant_length
-            ),
+            "reserved_constant_length": 0,
+            "opaque_tail_length": len(self.opaque_tail) - reserved_zero_length,
             "opaque_tail_redacted": (
                 bool(self.opaque_tail) and not self.fully_bounded
             ),
@@ -11970,6 +11946,84 @@ class ServerU32OpaqueTailEnvelope:
             raise PacketShapeError(
                 f"server opcode-{self.opcode} primary value is out of range: "
                 f"{error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class RemotePlayerInstruction:
+    """Opcode-230 selector instruction for one remote-player object."""
+
+    object_id: int = field(repr=False)
+    selector: int
+    value: int | None = None
+    value_1: int | None = None
+    value_2: int | None = None
+    opcode: int = 230
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "RemotePlayerInstruction":
+        reader = PacketReader(payload, packet_name="remote_player_instruction")
+        _expect_opcode(reader, 230)
+        object_id = reader.u32("object_id")
+        selector = reader.u8("selector")
+        instruction = cls(
+            object_id=object_id,
+            selector=selector,
+            value=reader.i32("value") if selector == 1 else None,
+            value_1=reader.u8("value_1") if selector == 1 else None,
+            value_2=reader.u8("value_2") if selector == 1 else None,
+        )
+        reader.finish()
+        instruction._validate()
+        return instruction
+
+    def _validate(self) -> None:
+        if self.opcode != 230:
+            raise PacketShapeError("remote-player instruction opcode must be 230")
+        if self.selector not in {1, 9}:
+            raise PacketShapeError(
+                "remote-player instruction selector must be captured value 1 or 9"
+            )
+        extended_values = (self.value, self.value_1, self.value_2)
+        if self.selector == 1 and any(
+            value is None for value in extended_values
+        ):
+            raise PacketShapeError(
+                "remote-player instruction selector 1 requires three values"
+            )
+        if self.selector == 9 and any(
+            value is not None for value in extended_values
+        ):
+            raise PacketShapeError(
+                "remote-player instruction selector 9 cannot include values"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "object_id_redacted": True,
+            "selector": self.selector,
+            "extended_values_present": self.selector == 1,
+            "extended_value_count": 3 if self.selector == 1 else 0,
+            "extended_values_redacted": self.selector == 1,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            encoded = struct.pack(
+                "<HIB", self.opcode, self.object_id, self.selector
+            )
+            if self.selector == 1:
+                assert self.value is not None
+                assert self.value_1 is not None
+                assert self.value_2 is not None
+                encoded += struct.pack(
+                    "<iBB", self.value, self.value_1, self.value_2
+                )
+            return encoded
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player instruction field is out of range: {error}"
             ) from error
 
 

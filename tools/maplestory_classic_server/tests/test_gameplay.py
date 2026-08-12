@@ -153,6 +153,7 @@ from maple_server.packets import (  # noqa: E402
     PickupGainNotice,
     RemotePlayerEnterField,
     RemotePlayerEntryBody,
+    RemotePlayerInstruction,
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
     ServerAttackRelay,
@@ -3533,6 +3534,37 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "needs 4 bytes"):
             RemotePlayerMobValueRecord.parse(payload[:-1])
 
+    def test_remote_player_instruction_round_trip(self) -> None:
+        compact = RemotePlayerInstruction(object_id=232_412, selector=9)
+        extended = RemotePlayerInstruction(
+            object_id=45_471,
+            selector=1,
+            value=4_101_003,
+            value_1=54,
+            value_2=6,
+        )
+
+        self.assertEqual(compact.to_bytes().hex(), "e600dc8b030009")
+        self.assertEqual(
+            extended.to_bytes().hex(), "e6009fb10000018b933e003606"
+        )
+        for instruction in (compact, extended):
+            self.assertEqual(
+                RemotePlayerInstruction.parse(instruction.to_bytes()),
+                instruction,
+            )
+            safe = str(instruction.safe_dict())
+            self.assertNotIn(str(instruction.object_id), safe)
+            if instruction.value is not None:
+                self.assertNotIn(str(instruction.value), safe)
+
+        with self.assertRaisesRegex(PacketShapeError, "captured value 1 or 9"):
+            replace(compact, selector=2).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires three values"):
+            replace(extended, value_2=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "cannot include values"):
+            replace(compact, value=1).to_bytes()
+
     def test_neutral_server_records_round_trip_and_redact_primary_values(
         self,
     ) -> None:
@@ -3630,17 +3662,13 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     b"\x00" * tail_length
                     if opcode in {228, 231, 234, 235}
                     else (
-                        b"\x09"
-                        if opcode == 230 and tail_length == 1
-                        else bytes((index + 1,)) * tail_length
+                        bytes((index + 1,)) * tail_length
                     )
                 ),
             )
             for index, (opcode, tail_length) in enumerate(
                 (
                     (228, 4),
-                    (230, 1),
-                    (230, 7),
                     (231, 20),
                     (232, 16),
                     (234, 3),
@@ -3673,8 +3701,6 @@ class GameplayPacketShapeTest(unittest.TestCase):
             PacketShapeError, "reserved tail must be all zero"
         ):
             replace(envelopes[-1], opaque_tail=b"\x00" * 5 + b"\x01").to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "must be 0x09"):
-            replace(envelopes[1], opaque_tail=b"\x08").to_bytes()
 
     def test_server_opcode_137_pair_ledger_round_trip(self) -> None:
         ledger = ServerOpcode137PairLedger(
@@ -8259,8 +8285,6 @@ class GameplayStateFoldTest(unittest.TestCase):
                 records_blob=b"\xa5" * 1_632,
             ),
             ServerU32OpaqueTailEnvelope(101, b"\x00" * 4, 228),
-            ServerU32OpaqueTailEnvelope(102, b"\x09", 230),
-            ServerU32OpaqueTailEnvelope(103, b"\x03" * 7, 230),
             ServerU32OpaqueTailEnvelope(104, b"\x00" * 20, 231),
             ServerU32OpaqueTailEnvelope(105, b"\x05" * 16, 232),
             ServerU32OpaqueTailEnvelope(106, b"\x00" * 3, 234),
@@ -8274,7 +8298,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 20)
+        self.assertEqual(analysis.state.neutral_server_records, 18)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
             {
@@ -8285,7 +8309,6 @@ class GameplayStateFoldTest(unittest.TestCase):
                 148: 5,
                 205: 1,
                 228: 1,
-                230: 2,
                 231: 1,
                 232: 1,
                 234: 1,
@@ -8294,8 +8317,8 @@ class GameplayStateFoldTest(unittest.TestCase):
                 379: 2,
             },
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 57)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_655)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 55)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_648)
         self.assertEqual(analysis.state.pet_activations, 1)
         self.assertEqual(analysis.state.pet_activations_for_local_player, 0)
         self.assertEqual(
@@ -8328,8 +8351,6 @@ class GameplayStateFoldTest(unittest.TestCase):
                 "full",
                 "partial",
                 "full",
-                "partial",
-                "full",
                 "full",
             ],
         )
@@ -8341,7 +8362,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            20,
+            18,
         )
         pet_event = next(
             event for event in analysis.events if event.kind == "pet_activated"
@@ -8353,11 +8374,72 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("1386640", str(pet_event.safe_dict()))
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:20 opcodes:",
+            "neutral_server_records=packets:18 opcodes:",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(
             "pet_activations=packets:1 local:0 remote:0 unknown:1",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_remote_player_instructions(self) -> None:
+        entered = RemotePlayerEnterField(
+            object_id=PLAYER_OBJECT_ID,
+            level=54,
+            name="P9",
+            body=fixture_remote_player_entry_body(),
+        )
+        instructions = (
+            RemotePlayerInstruction(object_id=PLAYER_OBJECT_ID, selector=9),
+            RemotePlayerInstruction(
+                object_id=PLAYER_OBJECT_ID,
+                selector=1,
+                value=4_101_003,
+                value_1=54,
+                value_2=6,
+            ),
+            RemotePlayerInstruction(object_id=99_999, selector=9),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                entered.to_bytes(),
+                *(instruction.to_bytes() for instruction in instructions),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.remote_player_instructions, 3)
+        self.assertEqual(
+            analysis.state.remote_player_instructions_for_known_players, 2
+        )
+        self.assertEqual(
+            analysis.state.remote_player_instructions_for_unknown_players, 1
+        )
+        self.assertEqual(
+            analysis.state.remote_player_instruction_selectors, {9: 2, 1: 1}
+        )
+        self.assertEqual(
+            analysis.state.remote_player_instruction_extended_records, 1
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "remote_player_instruction"
+        ]
+        self.assertEqual(
+            [observation.coverage.value for observation in observations],
+            ["full", "full", "full"],
+        )
+        self.assertEqual(observations[0].details["entity"], "player:1")
+        self.assertTrue(observations[0].details["known_player"])
+        self.assertFalse(observations[-1].details["known_player"])
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("4101003", safe)
+        self.assertIn(
+            "remote_player_instructions=packets:3 known_players:2",
             render_gameplay_analysis(analysis),
         )
 

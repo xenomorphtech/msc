@@ -556,15 +556,13 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         }));
     }
 
-    for (name, opcode, length) in [
-        ("server_opcode_230_u32_long_tail", 230, 13),
-        ("server_opcode_232_u32_opaque_tail", 232, 22),
-    ] {
-        let shape = shapes.iter().find(|shape| shape.name == name).unwrap();
-        assert_eq!(shape.opcode, opcode);
-        assert_eq!(shape.length, Some(length));
-        assert_eq!(shape.operations.len(), 3);
-    }
+    let opaque_opcode_232 = shapes
+        .iter()
+        .find(|shape| shape.name == "server_opcode_232_u32_opaque_tail")
+        .unwrap();
+    assert_eq!(opaque_opcode_232.opcode, 232);
+    assert_eq!(opaque_opcode_232.length, Some(22));
+    assert_eq!(opaque_opcode_232.operations.len(), 3);
 
     for (name, opcode, length, reserved_length) in [
         ("server_opcode_228_u32_reserved_zero", 228, 10, 4),
@@ -586,19 +584,36 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         ));
     }
 
-    let short_opcode_230 = shapes
+    let compact_opcode_230 = shapes
         .iter()
-        .find(|shape| shape.name == "server_opcode_230_u32_short_reserved_09")
+        .find(|shape| shape.name == "remote_player_instruction_selector_9")
         .unwrap();
-    assert_eq!(short_opcode_230.opcode, 230);
-    assert_eq!(short_opcode_230.length, Some(7));
+    assert_eq!(compact_opcode_230.opcode, 230);
+    assert_eq!(compact_opcode_230.length, Some(7));
     assert!(matches!(
-        short_opcode_230.operations.last().unwrap(),
-        ShapeOp::Bytes {
-            length: 1,
-            equals_hex: Some(value),
-            ..
-        } if value == "09"
+        compact_opcode_230.operations.last().unwrap(),
+        ShapeOp::Read {
+            name,
+            kind: ReadKind::U8,
+            equals: Some(9),
+        } if name == "selector"
+    ));
+    let extended_opcode_230 = shapes
+        .iter()
+        .find(|shape| shape.name == "remote_player_instruction_selector_1")
+        .unwrap();
+    assert_eq!(extended_opcode_230.opcode, 230);
+    assert_eq!(extended_opcode_230.length, Some(13));
+    assert!(matches!(
+        extended_opcode_230.operations.as_slice(),
+        [
+            ShapeOp::Read { kind: ReadKind::U16, equals: Some(230), .. },
+            ShapeOp::Read { name: object_id, kind: ReadKind::U32, .. },
+            ShapeOp::Read { name: selector, kind: ReadKind::U8, equals: Some(1) },
+            ShapeOp::Read { name: value, kind: ReadKind::I32, .. },
+            ShapeOp::Read { kind: ReadKind::U8, .. },
+            ShapeOp::Read { kind: ReadKind::U8, .. },
+        ] if object_id == "object_id" && selector == "selector" && value == "value"
     ));
 
     let opcode_272 = shapes
