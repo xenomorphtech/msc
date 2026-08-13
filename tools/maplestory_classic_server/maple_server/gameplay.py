@@ -99,6 +99,7 @@ from .packets import (
     RemotePlayerInstruction,
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
+    RemotePlayerTemporaryStatReset,
     ServerAttackRelay,
     ServerOpcode43Envelope,
     ServerOpcode69Record,
@@ -612,6 +613,15 @@ class GameplayGameState:
         default_factory=Counter
     )
     remote_player_instruction_extended_records: int = 0
+    remote_player_temporary_stat_resets: int = 0
+    remote_player_temporary_stat_resets_for_known_players: int = 0
+    remote_player_temporary_stat_resets_for_unknown_players: int = 0
+    remote_player_temporary_stat_reset_mask_patterns: Counter[str] = field(
+        default_factory=Counter
+    )
+    remote_player_temporary_stat_reset_bits: Counter[int] = field(
+        default_factory=Counter
+    )
     remote_player_mob_value_records: int = 0
     remote_player_mob_values_for_known_players: int = 0
     remote_player_mob_values_for_unknown_players: int = 0
@@ -4566,6 +4576,26 @@ class GameplayAnalysis:
                     ),
                     "extended_record_count": (
                         self.state.remote_player_instruction_extended_records
+                    ),
+                },
+                "remote_player_temporary_stat_resets": {
+                    "packet_count": (
+                        self.state.remote_player_temporary_stat_resets
+                    ),
+                    "known_player_count": (
+                        self.state
+                        .remote_player_temporary_stat_resets_for_known_players
+                    ),
+                    "unknown_player_count": (
+                        self.state
+                        .remote_player_temporary_stat_resets_for_unknown_players
+                    ),
+                    "mask_patterns": dict(
+                        self.state
+                        .remote_player_temporary_stat_reset_mask_patterns
+                    ),
+                    "enabled_bits": dict(
+                        self.state.remote_player_temporary_stat_reset_bits
                     ),
                 },
                 "remote_player_mob_values": {
@@ -11002,7 +11032,6 @@ class GameplayStateFold:
             205,
             228,
             231,
-            232,
             234,
             235,
             276,
@@ -11162,6 +11191,43 @@ class GameplayStateFold:
                 kind="remote_player_instruction",
                 coverage=ShapeCoverage.FULL,
                 parsed=instruction,
+                details=details,
+            )
+        if opcode == 232:
+            reset = RemotePlayerTemporaryStatReset.parse(payload)
+            alias = self._alias(
+                self._player_aliases, reset.object_id, "player"
+            )
+            known_player = reset.object_id in self.state.observed_players
+            self.state.remote_player_temporary_stat_resets += 1
+            self.state.remote_player_temporary_stat_reset_mask_patterns[
+                reset.mask_pattern
+            ] += 1
+            self.state.remote_player_temporary_stat_reset_bits.update(
+                reset.enabled_bit_indices
+            )
+            state = self.state
+            if known_player:
+                state.remote_player_temporary_stat_resets_for_known_players += 1
+            else:
+                state.remote_player_temporary_stat_resets_for_unknown_players += 1
+            details = {
+                **reset.safe_dict(),
+                "entity": alias,
+                "known_player": known_player,
+                "field_epoch": self.state.field_epoch,
+            }
+            self._event(
+                frame,
+                "remote_player_temporary_stat_reset_received",
+                details=details,
+                identifiers={"object_id": reset.object_id},
+            )
+            return self._observation(
+                frame,
+                kind="remote_player_temporary_stat_reset",
+                coverage=ShapeCoverage.FULL,
+                parsed=reset,
                 details=details,
             )
         if opcode in FIXED_SERVER_OPCODES:
@@ -14896,6 +14962,16 @@ def render_gameplay_analysis(
     local_temporary_stat_mask_patterns = json.dumps(
         dict(sorted(state.local_temporary_stat_mask_patterns.items()))
     )
+    remote_player_temporary_stat_reset_mask_patterns = json.dumps(
+        dict(
+            sorted(
+                state.remote_player_temporary_stat_reset_mask_patterns.items()
+            )
+        )
+    )
+    remote_player_temporary_stat_reset_bits = json.dumps(
+        dict(sorted(state.remote_player_temporary_stat_reset_bits.items()))
+    )
     server_opcode_49_variants = json.dumps(
         dict(sorted(state.server_opcode_49_by_variant.items()))
     )
@@ -15298,6 +15374,18 @@ def render_gameplay_analysis(
             f"{dict(sorted(state.remote_player_instruction_selectors.items()))} "
             "extended:"
             f"{state.remote_player_instruction_extended_records}"
+        ),
+        (
+            "remote_player_temporary_stat_resets="
+            f"packets:{state.remote_player_temporary_stat_resets} "
+            "known_players:"
+            f"{state.remote_player_temporary_stat_resets_for_known_players} "
+            "unknown_players:"
+            f"{state.remote_player_temporary_stat_resets_for_unknown_players} "
+            "mask_patterns:"
+            f"{remote_player_temporary_stat_reset_mask_patterns} "
+            "enabled_bits:"
+            f"{remote_player_temporary_stat_reset_bits}"
         ),
         (
             "remote_player_mob_values="

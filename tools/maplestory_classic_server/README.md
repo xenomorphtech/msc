@@ -1086,12 +1086,15 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `425`: a primitive-traced `u16` count, repeated signed values,
   and four-word trailer; all three gameplay captures use count `12`, trailer
   `(0,0,1,1)`, and the repeated values are redacted,
-- server opcodes `228`/`231`/`232`/`234`/`235`: generated-handler envelopes
-  with one redacted `u32` and capture-bounded tails; reserved-zero forms fold
-  fully while opcode `232` retains 16 opaque bytes,
+- server opcodes `228`/`231`/`234`/`235`: generated-handler envelopes with one
+  redacted `u32` and capture-bounded reserved-zero tails; all eight records
+  fold fully,
 - server opcode `230`: full remote-player object-id plus selector instruction;
   selector `9` has no body and selector `1` carries native-read `i32/u8/u8`
   values, all redacted except selector and structural presence/count,
+- server opcode `232`: full remote-player object-id plus four-`u32`, 128-bit
+  temporary-stat reset mask; the raw id is redacted while safe state reports
+  only the player alias, mask pattern, and enabled bit indices,
 - server opcodes `11`/`24`/`56`/`58`/`59`/`60`/`96`/`105`/`178`/`386`/`388`/`389`:
   complete fixed-width neutral records, including a character-context record
   whose identifier must match world entry; `--generate-fixed-server-records`

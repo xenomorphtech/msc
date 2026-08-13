@@ -103,15 +103,16 @@
   inventory, or progression state. A fresh browser-free direct-Wayland launch
   is back in the field with the programmatic audio-mute service active and one
   healthy world connection.
-- Server opcodes `228`, `231`, `232`, `234`, and `235` retain the shared
-  generated-u32 envelope. Eight of nine records have reserved-zero tails and
-  fold fully; only opcode `232` retains a 16-byte partial tail. Opcode `230` is
-  now a dedicated remote-player instruction: native code proves the leading
+- Server opcodes `228`, `231`, `234`, and `235` retain the shared generated-u32
+  envelope; all eight records have reserved-zero tails and fold fully. Opcode
+  `230` is now a dedicated remote-player instruction: native code proves the leading
   `u32` is an object lookup key, then reads selector `9` with no body or
   selector `1` with `i32/u8/u8`. All three capture records target active
   remote players, round-trip exactly, and fold fully with object ids and
   extended values redacted. Cross-state replay remains deferred because the
-  object id is session-local.
+  object id is session-local. Opcode `232` is now a full remote-player
+  temporary-stat reset: the delegated native helper reads four `u32` mask
+  words, and the sole record targets an active player with bit `103` enabled.
 - Server opcode `276` is now a full automatic-dump-backed boolean record. Its
   two captured payloads use raw byte `0x05`; ISIL proves the pinned reader calls
   `BitConverter.ToBoolean`, so the shared native validator now treats every

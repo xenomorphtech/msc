@@ -556,13 +556,20 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         }));
     }
 
-    let opaque_opcode_232 = shapes
+    let remote_player_stat_reset = shapes
         .iter()
-        .find(|shape| shape.name == "server_opcode_232_u32_opaque_tail")
+        .find(|shape| shape.name == "remote_player_temporary_stat_reset")
         .unwrap();
-    assert_eq!(opaque_opcode_232.opcode, 232);
-    assert_eq!(opaque_opcode_232.length, Some(22));
-    assert_eq!(opaque_opcode_232.operations.len(), 3);
+    assert_eq!(remote_player_stat_reset.opcode, 232);
+    assert_eq!(remote_player_stat_reset.length, Some(22));
+    assert_eq!(remote_player_stat_reset.operations.len(), 6);
+    assert!(remote_player_stat_reset.operations.iter().any(|operation| {
+        matches!(
+            operation,
+            ShapeOp::Read { name, kind, .. }
+                if name == "mask_word_3" && matches!(kind, ReadKind::U32)
+        )
+    }));
 
     for (name, opcode, length, reserved_length) in [
         ("server_opcode_228_u32_reserved_zero", 228, 10, 4),

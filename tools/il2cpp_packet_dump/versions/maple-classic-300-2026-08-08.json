@@ -1600,9 +1600,9 @@
       "operations":[{"op":"read","name":"opcode","kind":"u16","equals":231},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"reserved_zero","length":20,"equals_hex":"0000000000000000000000000000000000000000"}]
     },
     {
-      "name":"server_opcode_232_u32_opaque_tail","direction":"server_to_client","opcode":232,"length":22,
-      "source":"generated handler a73a2819... reads one u32; the sole 111 gameplay packet retains 16 unconsumed capture-bounded bytes",
-      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":232},{"op":"read","name":"primary_value","kind":"u32"},{"op":"bytes","name":"opaque_tail","length":16}]
+      "name":"remote_player_temporary_stat_reset","direction":"server_to_client","opcode":232,"length":22,
+      "source":"generated handler a73a2819... reads a u32 remote-player object lookup key and delegates to object method abda8547...; native helper 0x181CDC300 parses a 128-bit temporary-stat mask as four u32 words and the sole stream-92 packet exactly consumes those fields",
+      "operations":[{"op":"read","name":"opcode","kind":"u16","equals":232},{"op":"read","name":"object_id","kind":"u32"},{"op":"read","name":"mask_word_0","kind":"u32"},{"op":"read","name":"mask_word_1","kind":"u32"},{"op":"read","name":"mask_word_2","kind":"u32"},{"op":"read","name":"mask_word_3","kind":"u32"}]
     },
     {
       "name":"server_opcode_234_u32_reserved_zero","direction":"server_to_client","opcode":234,"length":9,

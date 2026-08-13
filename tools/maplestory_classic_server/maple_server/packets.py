@@ -11864,11 +11864,11 @@ class ServerU32OpaqueTailEnvelope:
     CAPTURED_TAIL_LENGTHS = {
         228: frozenset({4}),
         231: frozenset({20}),
-        232: frozenset({16}),
         234: frozenset({3}),
         235: frozenset({6}),
     }
     RESERVED_ZERO_TAIL_LENGTHS = {228: 4, 231: 20, 234: 3, 235: 6}
+
     @property
     def fully_bounded(self) -> bool:
         reserved_length = self.RESERVED_ZERO_TAIL_LENGTHS.get(self.opcode)
@@ -11917,6 +11917,7 @@ class ServerU32OpaqueTailEnvelope:
             raise PacketShapeError(
                 f"server opcode-{self.opcode} reserved tail must be all zero"
             )
+
     def safe_dict(self) -> dict[str, int | bool]:
         reserved_zero_length = (
             len(self.opaque_tail)
@@ -11945,6 +11946,76 @@ class ServerU32OpaqueTailEnvelope:
         except struct.error as error:
             raise PacketShapeError(
                 f"server opcode-{self.opcode} primary value is out of range: "
+                f"{error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class RemotePlayerTemporaryStatReset:
+    """Opcode-232 128-bit temporary-stat reset for one remote player."""
+
+    object_id: int = field(repr=False)
+    mask_words: tuple[int, int, int, int]
+    opcode: int = 232
+
+    @property
+    def enabled_bit_indices(self) -> tuple[int, ...]:
+        return tuple(
+            word_index * 32 + bit_index
+            for word_index, word in enumerate(self.mask_words)
+            for bit_index in range(32)
+            if word & (1 << bit_index)
+        )
+
+    @property
+    def mask_pattern(self) -> str:
+        return ":".join(f"{word:08x}" for word in self.mask_words)
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "RemotePlayerTemporaryStatReset":
+        reader = PacketReader(
+            payload, packet_name="remote_player_temporary_stat_reset"
+        )
+        _expect_opcode(reader, 232)
+        reset = cls(
+            object_id=reader.u32("object_id"),
+            mask_words=tuple(
+                reader.u32(f"mask_word_{word_index}")
+                for word_index in range(4)
+            ),
+        )
+        reader.finish()
+        reset._validate()
+        return reset
+
+    def _validate(self) -> None:
+        if self.opcode != 232:
+            raise PacketShapeError(
+                "remote-player temporary-stat reset opcode must be 232"
+            )
+        if len(self.mask_words) != 4:
+            raise PacketShapeError(
+                "remote-player temporary-stat reset requires four mask words"
+            )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "object_id_redacted": True,
+            "mask_words": list(self.mask_words),
+            "mask_pattern": self.mask_pattern,
+            "enabled_bit_indices": list(self.enabled_bit_indices),
+            "enabled_bit_count": len(self.enabled_bit_indices),
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack(
+                "<HI4I", self.opcode, self.object_id, *self.mask_words
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                "remote-player temporary-stat reset field is out of range: "
                 f"{error}"
             ) from error
 

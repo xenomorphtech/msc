@@ -156,6 +156,7 @@ from maple_server.packets import (  # noqa: E402
     RemotePlayerInstruction,
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
+    RemotePlayerTemporaryStatReset,
     ServerAttackRelay,
     ServerOpcode43Envelope,
     ServerOpcode69Record,
@@ -3565,6 +3566,24 @@ class GameplayPacketShapeTest(unittest.TestCase):
         with self.assertRaisesRegex(PacketShapeError, "cannot include values"):
             replace(compact, value=1).to_bytes()
 
+    def test_remote_player_temporary_stat_reset_round_trip(self) -> None:
+        payload = bytes.fromhex("e800451d050000000000000000000000000080000000")
+        reset = RemotePlayerTemporaryStatReset(
+            object_id=335_173,
+            mask_words=(0, 0, 0, 0x80),
+        )
+
+        self.assertEqual(reset.to_bytes(), payload)
+        self.assertEqual(RemotePlayerTemporaryStatReset.parse(payload), reset)
+        self.assertEqual(reset.enabled_bit_indices, (103,))
+        safe = reset.safe_dict()
+        self.assertNotIn("335173", str(safe))
+        self.assertEqual(safe["enabled_bit_indices"], [103])
+        with self.assertRaisesRegex(PacketShapeError, "four mask words"):
+            replace(reset, mask_words=(0, 0, 0)).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 4 bytes"):
+            RemotePlayerTemporaryStatReset.parse(payload[:-1])
+
     def test_neutral_server_records_round_trip_and_redact_primary_values(
         self,
     ) -> None:
@@ -3670,7 +3689,6 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 (
                     (228, 4),
                     (231, 20),
-                    (232, 16),
                     (234, 3),
                     (235, 6),
                 )
@@ -8286,7 +8304,6 @@ class GameplayStateFoldTest(unittest.TestCase):
             ),
             ServerU32OpaqueTailEnvelope(101, b"\x00" * 4, 228),
             ServerU32OpaqueTailEnvelope(104, b"\x00" * 20, 231),
-            ServerU32OpaqueTailEnvelope(105, b"\x05" * 16, 232),
             ServerU32OpaqueTailEnvelope(106, b"\x00" * 3, 234),
             ServerU32OpaqueTailEnvelope(107, b"\x00" * 6, 235),
         )
@@ -8298,7 +8315,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 18)
+        self.assertEqual(analysis.state.neutral_server_records, 17)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
             {
@@ -8310,15 +8327,14 @@ class GameplayStateFoldTest(unittest.TestCase):
                 205: 1,
                 228: 1,
                 231: 1,
-                232: 1,
                 234: 1,
                 235: 1,
                 276: 1,
                 379: 2,
             },
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 55)
-        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_648)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 54)
+        self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_632)
         self.assertEqual(analysis.state.pet_activations, 1)
         self.assertEqual(analysis.state.pet_activations_for_local_player, 0)
         self.assertEqual(
@@ -8332,27 +8348,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            [
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "full",
-                "partial",
-                "full",
-                "full",
-                "partial",
-                "full",
-                "full",
-            ],
+            ["full"] * 13 + ["partial"] + ["full"] * 4,
         )
         self.assertEqual(
             len(
@@ -8362,7 +8358,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            18,
+            17,
         )
         pet_event = next(
             event for event in analysis.events if event.kind == "pet_activated"
@@ -8374,7 +8370,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("1386640", str(pet_event.safe_dict()))
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:18 opcodes:",
+            "neutral_server_records=packets:17 opcodes:",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(
@@ -8440,6 +8436,75 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("4101003", safe)
         self.assertIn(
             "remote_player_instructions=packets:3 known_players:2",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_folds_remote_player_temporary_stat_resets(self) -> None:
+        entered = RemotePlayerEnterField(
+            object_id=PLAYER_OBJECT_ID,
+            level=54,
+            name="P9",
+            body=fixture_remote_player_entry_body(),
+        )
+        resets = (
+            RemotePlayerTemporaryStatReset(
+                object_id=PLAYER_OBJECT_ID,
+                mask_words=(0, 0, 0, 0x80),
+            ),
+            RemotePlayerTemporaryStatReset(
+                object_id=99_999,
+                mask_words=(1, 0, 0, 0),
+            ),
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                entered.to_bytes(),
+                *(reset.to_bytes() for reset in resets),
+            ),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        state = analysis.state
+        self.assertEqual(state.remote_player_temporary_stat_resets, 2)
+        self.assertEqual(
+            state.remote_player_temporary_stat_resets_for_known_players, 1
+        )
+        self.assertEqual(
+            state.remote_player_temporary_stat_resets_for_unknown_players, 1
+        )
+        self.assertEqual(
+            state.remote_player_temporary_stat_reset_mask_patterns,
+            {
+                "00000000:00000000:00000000:00000080": 1,
+                "00000001:00000000:00000000:00000000": 1,
+            },
+        )
+        self.assertEqual(
+            state.remote_player_temporary_stat_reset_bits, {103: 1, 0: 1}
+        )
+        observations = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "remote_player_temporary_stat_reset"
+        ]
+        self.assertEqual(
+            [observation.coverage.value for observation in observations],
+            ["full", "full"],
+        )
+        self.assertEqual(observations[0].details["entity"], "player:1")
+        self.assertTrue(observations[0].details["known_player"])
+        self.assertFalse(observations[1].details["known_player"])
+        reset_events = [
+            event
+            for event in analysis.events
+            if event.kind == "remote_player_temporary_stat_reset_received"
+        ]
+        self.assertNotIn("99999", str(reset_events[-1].safe_dict()))
+        self.assertIn(
+            "remote_player_temporary_stat_resets=packets:2 known_players:1",
             render_gameplay_analysis(analysis),
         )
 

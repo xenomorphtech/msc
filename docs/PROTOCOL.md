@@ -2099,9 +2099,9 @@ followed the debugger session rather than a synchronous packet rejection; a
 fresh browser-free direct-Wayland launch returned to the field with sound
 muted and a ready world connection.
 
-## Generated `u32` envelopes (`228`, `231`, `232`, `234`, `235`)
+## Generated `u32` envelopes (`228`, `231`, `234`, `235`)
 
-These five opcodes are registered on the same generated handler class. Each
+These four opcodes are registered on the same generated handler class. Each
 handler makes exactly one direct `PacketReader` call, a `u32`, then invokes its
 local state method without another reader call. The captures contain additional
 bytes after that value, so the shared boundary starts as a typed leading value
@@ -2119,18 +2119,16 @@ Only these observed opcode/tail-length combinations are accepted:
 | ---: | ---: | ---: | ---: |
 | `228` | `4` reserved zero | `10` | `1` in stream `92` |
 | `231` | `20` reserved zero | `26` | `1` in stream `126` |
-| `232` | `16` | `22` | `1` in stream `92` |
 | `234` | `3` reserved zero | `9` | `1` in stream `92`, `2` in stream `126` |
 | `235` | `6` reserved zero | `12` | `1` in stream `92`, `2` in stream `126` |
 
-The shared Python envelope consumes and re-emits the nine packets exactly.
+The shared Python envelope consumes and re-emits the eight packets exactly.
 Safe state and `neutral_server_record_received` events publish only opcode,
 typed-value count, reserved-zero length, and opaque-tail length; the `u32` and
 non-reserved tail bytes are redacted. Across both captures, all three opcode-
 `234` suffixes are three zero bytes and all three opcode-`235` suffixes are six
 zero bytes. Opcode `228` likewise ends in four zero bytes and opcode `231` in
-20 zero bytes. Eight observations are full; only opcode `232` retains 16
-opaque bytes.
+20 zero bytes. All eight observations are full and contain no opaque bytes.
 
 Opcode `230` is a separate remote-player instruction family. Native handler
 `e49edb9d...` reads the leading `u32` as a remote-player object lookup key and
@@ -2159,15 +2157,33 @@ three packets exactly; safe folds expose only the aliased player, selector,
 and extended-value presence/count while redacting the object id and extended
 values. All three observations are full.
 
+Opcode `232` is a separate remote-player temporary-stat reset. Generated
+handler `a73a2819...` reads a `u32` remote-player object lookup key and
+delegates the reader to object method `abda8547...`. Native helper
+`0x181CDC300` then fills a 128-bit mask struct by reading four `u32` words. The
+object method intersects that mask with the player's current temporary-stat
+mask and runs reset-side effects when the intersection is nonempty:
+
+```text
+uint16 opcode = 232
+uint32 remote_player_object_id
+uint32 temporary_stat_mask[4]
+```
+
+The sole stream-`92` packet targets object `335173`, which opcode `189`
+introduced in the same field epoch and opcode `190` removed later. Its mask is
+`(0, 0, 0, 0x80)`, enabling bit index `103`. The dedicated codec consumes and
+re-emits the packet exactly; safe folds expose only the player alias and mask
+structure while redacting the raw object id. The observation is full.
+
 The current strict totals are `70,075/1,025/0/0` for stream `126`,
-`34,571/636/0/0` for stream `92`, and `67/9/0/0` for stream `114`.
-Opcode `232` now accounts for the only 16 opaque bytes in this generated-u32
-set. The active saved transcript contains no opcode-`230` record.
+`34,572/635/0/0` for stream `92`, and `67/9/0/0` for stream `114`.
+The active saved transcript contains no opcode-`230` or opcode-`232` record.
 
 At its original introduction, the family moved seven long-stream and five
 stream-`92` observations from unknown to partial; the current totals are the
-refined values above. Live replay remains deferred because the leading value
-is demonstrably a session-local remote-player object id.
+refined values above. Live replay remains deferred because opcodes `230` and
+`232` demonstrably target session-local remote-player object ids.
 
 ## Variable server records (`156`, `385`)
 

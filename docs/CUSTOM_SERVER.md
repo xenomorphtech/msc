@@ -295,14 +295,17 @@ provides 131 full and four partial observations, 332 typed numeric values, and
 record count, fixed width, and reserved-zero byte total.
 Potentially identifying values are retained for exact re-emission but omitted
 from safe state, events, and reports.
-The shared generated-u32 envelope now fully bounds eight of nine reference
-records. Opcodes `228/231/234/235` end in capture-bounded reserved-zero suffixes
-of 4/20/3/6 bytes; only the 16-byte opcode-`232` suffix remains partial.
+The shared generated-u32 envelope now fully bounds all eight reference records.
+Opcodes `228/231/234/235` end in capture-bounded reserved-zero suffixes of
+4/20/3/6 bytes.
 Opcode `230` is no longer part of that opaque family: its leading `u32` is an
 active remote-player object id, followed by selector `9` and no body or
 selector `1` plus native-read `i32/u8/u8` values. All three records fold as
 full `remote_player_instruction` observations; safe analysis aliases the
 player and redacts the raw id and selector-1 values.
+Opcode `232` is likewise no longer opaque: it targets an active remote player
+and carries a native-parsed 128-bit temporary-stat reset mask as four `u32`
+words. Its sole reference record folds fully with object id redacted.
 
 Server opcode `43` is likewise structurally complete for the captured
 family: all three reference packets use message type zero and the same fixed
