@@ -2595,3 +2595,8 @@ preserve distinct Unity scan codes in this setup.
     grammar across all three reference sessions and the active saved login.
     Promote all four acknowledgement observations to full coverage while
     retaining the broader bootstrap role and exposing only structural state.
+120. Correlate the redacted world opcode-`13` sequence across both independent
+    `111.pcapng` sessions: server type `12`, server type `14` about 4.94 seconds
+    later, then a same-length client type `13` within `27.305..77.244` ms.
+    Publish only FIFO/length/timing telemetry, retain partial coverage for every
+    opaque body, and keep synthesis/replay disabled.

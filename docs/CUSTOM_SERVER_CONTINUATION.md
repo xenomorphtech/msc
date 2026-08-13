@@ -504,6 +504,22 @@ After the opcode-`189` checkpoint, recompute the partial/unknown inventory and
 continue from the strongest capture-bounded family. Do not stop merely because
 the checkpoint is pushed.
 
+This opcode-`13` increment keeps all non-type-`1` bodies opaque but records
+the cross-session exchange evidence. Streams `92` and `114` each contain one
+server type `12`, a server type `14` `4934.955..4945.945` ms later, and a
+same-length client type `13` another `27.305..30.942` ms later. Stream `92`
+adds four type-`14`/type-`13` pairs at `180.722..184.383` second server
+intervals; all six client messages follow in `27.305..77.244` ms and match the
+392-byte server body length. The fold publishes redacted FIFO correlation,
+length-match, pending/unmatched, and latency state/events. Structural coverage
+does not change (`35020/187`, `69/7`, and `71047/53` full/partial for streams
+`92`, `114`, and `126`), and no replay policy is enabled.
+
+The correlation checkpoint reran all 332 tracked Python tests, 17 Rust unit
+tests, the pinned-client ignored integration test, and the private capture-JSONL
+ignored test. All passed. The three gameplay analyses remain valid with zero
+issues; stream `126` retains only its previously known one-HP warning.
+
 ## Files to read first when resuming
 
 Use the codebase-memory graph before filesystem search for structural code

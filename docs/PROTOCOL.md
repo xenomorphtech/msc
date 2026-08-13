@@ -280,6 +280,19 @@ exposing any body. Server packets fold as partial
 `server_opcode_13_message_received` events. The payload meanings remain
 partial rather than being labeled as security traffic.
 
+The two independent `111.pcapng` world sessions also establish a redacted
+ordering/cadence relationship without identifying those bodies. Each begins
+with one server type `12`; its first server type `14` follows after
+`4934.955..4945.945` ms, and a client type `13` follows after another
+`27.305..30.942` ms. Stream `92` contains four later type-`14`/type-`13` pairs:
+the server messages recur `180.722..184.383` seconds apart and all five client
+messages follow within `27.305..77.244` ms. Every one of the six cross-stream
+type-`14`/type-`13` pairs has equal 392-byte body lengths, but none of the bodies
+is byte-equal and their content remains redacted and opaque. The gameplay fold
+publishes FIFO correlation counts, length-match counts, pending/unmatched
+counts, and correlation timing through safe analysis while retaining partial
+coverage and leaving replay disabled.
+
 ## Client opcode `43` field-transfer requests
 
 Client opcode `43` requests a field transfer. Its leading byte is the active

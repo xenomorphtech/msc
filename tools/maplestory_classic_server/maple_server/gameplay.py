@@ -998,6 +998,17 @@ class GameplayGameState:
     server_opcode_13_opaque_lengths: Counter[int] = field(
         default_factory=Counter
     )
+    opcode_13_type_12_to_14_correlations: int = 0
+    pending_server_opcode_13_type_12_messages: int = 0
+    last_opcode_13_type_12_to_14_ms: float | None = None
+    max_opcode_13_type_12_to_14_ms: float | None = None
+    opcode_13_type_14_to_13_correlations: int = 0
+    opcode_13_type_14_to_13_length_matches: int = 0
+    opcode_13_type_14_to_13_length_mismatches: int = 0
+    unmatched_client_opcode_13_type_13_messages: int = 0
+    pending_server_opcode_13_type_14_messages: int = 0
+    last_opcode_13_type_14_to_13_ms: float | None = None
+    max_opcode_13_type_14_to_13_ms: float | None = None
     client_field_transfer_requests: int = 0
     client_field_transfer_variants: Counter[str] = field(
         default_factory=Counter
@@ -5406,6 +5417,58 @@ class GameplayAnalysis:
                     ),
                     "body_redacted": True,
                 },
+                "opcode_13_exchange_correlations": {
+                    "type_12_to_14": (
+                        self.state.opcode_13_type_12_to_14_correlations
+                    ),
+                    "pending_type_12": (
+                        self.state.pending_server_opcode_13_type_12_messages
+                    ),
+                    "last_type_12_to_14_ms": (
+                        None
+                        if self.state.last_opcode_13_type_12_to_14_ms is None
+                        else round(
+                            self.state.last_opcode_13_type_12_to_14_ms, 3
+                        )
+                    ),
+                    "max_type_12_to_14_ms": (
+                        None
+                        if self.state.max_opcode_13_type_12_to_14_ms is None
+                        else round(
+                            self.state.max_opcode_13_type_12_to_14_ms, 3
+                        )
+                    ),
+                    "type_14_to_13": (
+                        self.state.opcode_13_type_14_to_13_correlations
+                    ),
+                    "type_14_to_13_length_matches": (
+                        self.state.opcode_13_type_14_to_13_length_matches
+                    ),
+                    "type_14_to_13_length_mismatches": (
+                        self.state.opcode_13_type_14_to_13_length_mismatches
+                    ),
+                    "unmatched_client_type_13": (
+                        self.state.unmatched_client_opcode_13_type_13_messages
+                    ),
+                    "pending_type_14": (
+                        self.state.pending_server_opcode_13_type_14_messages
+                    ),
+                    "last_type_14_to_13_ms": (
+                        None
+                        if self.state.last_opcode_13_type_14_to_13_ms is None
+                        else round(
+                            self.state.last_opcode_13_type_14_to_13_ms, 3
+                        )
+                    ),
+                    "max_type_14_to_13_ms": (
+                        None
+                        if self.state.max_opcode_13_type_14_to_13_ms is None
+                        else round(
+                            self.state.max_opcode_13_type_14_to_13_ms, 3
+                        )
+                    ),
+                    "body_redacted": True,
+                },
                 "client_field_transfer": {
                     "request_count": (
                         self.state.client_field_transfer_requests
@@ -6201,6 +6264,10 @@ class GameplayStateFold:
             "current_mp": deque(),
         }
         self._pending_server_opcode_394: deque[tuple[int, str]] = deque()
+        self._pending_server_opcode_13_type_12: deque[tuple[int, int]] = deque()
+        self._pending_server_opcode_13_type_14: deque[
+            tuple[int, int, int]
+        ] = deque()
         self._pending_world_exit_requests: deque[int] = deque()
         self._last_client_periodic_report_timestamp_ns: dict[int, int] = {}
         self._last_client_inner_portal_destination: (
@@ -7994,6 +8061,44 @@ class GameplayStateFold:
                     "opaque_payload_bytes": opaque_bytes,
                     "field_epoch": self.state.field_epoch,
                 }
+                if message_type == 13:
+                    if self._pending_server_opcode_13_type_14:
+                        (
+                            server_frame_index,
+                            server_timestamp_ns,
+                            server_body_length,
+                        ) = self._pending_server_opcode_13_type_14.popleft()
+                        self.state.pending_server_opcode_13_type_14_messages -= 1
+                        self.state.opcode_13_type_14_to_13_correlations += 1
+                        correlation_ms = (
+                            frame.timestamp_ns - server_timestamp_ns
+                        ) / 1e6
+                        self.state.last_opcode_13_type_14_to_13_ms = correlation_ms
+                        self.state.max_opcode_13_type_14_to_13_ms = max(
+                            self.state.max_opcode_13_type_14_to_13_ms or 0.0,
+                            correlation_ms,
+                        )
+                        body_length_matches = server_body_length == opaque_bytes
+                        if body_length_matches:
+                            self.state.opcode_13_type_14_to_13_length_matches += 1
+                        else:
+                            self.state.opcode_13_type_14_to_13_length_mismatches += 1
+                        details.update(
+                            {
+                                "correlated_server_message_type": 14,
+                                "correlated_server_frame": server_frame_index,
+                                "correlation_ms": round(correlation_ms, 3),
+                                "body_length_matches": body_length_matches,
+                            }
+                        )
+                        self._event(
+                            frame,
+                            "opcode_13_type_14_to_13_correlated",
+                            details={**details, "body_redacted": True},
+                        )
+                    else:
+                        self.state.unmatched_client_opcode_13_type_13_messages += 1
+                        details["correlated_server_message_type"] = None
                 coverage = ShapeCoverage.PARTIAL
                 issues = ("client opcode-13 payload remains opaque",)
             self._event(
@@ -10452,6 +10557,49 @@ class GameplayStateFold:
                 "body_redacted": True,
                 "field_epoch": self.state.field_epoch,
             }
+            if message_type == 12:
+                self._pending_server_opcode_13_type_12.append(
+                    (frame.index, frame.timestamp_ns)
+                )
+                self.state.pending_server_opcode_13_type_12_messages += 1
+                details["pending_type_14_messages"] = (
+                    self.state.pending_server_opcode_13_type_12_messages
+                )
+            elif message_type == 14:
+                if self._pending_server_opcode_13_type_12:
+                    (
+                        type_12_frame_index,
+                        type_12_timestamp_ns,
+                    ) = self._pending_server_opcode_13_type_12.popleft()
+                    self.state.pending_server_opcode_13_type_12_messages -= 1
+                    self.state.opcode_13_type_12_to_14_correlations += 1
+                    bootstrap_ms = (
+                        frame.timestamp_ns - type_12_timestamp_ns
+                    ) / 1e6
+                    self.state.last_opcode_13_type_12_to_14_ms = bootstrap_ms
+                    self.state.max_opcode_13_type_12_to_14_ms = max(
+                        self.state.max_opcode_13_type_12_to_14_ms or 0.0,
+                        bootstrap_ms,
+                    )
+                    details.update(
+                        {
+                            "correlated_server_message_type": 12,
+                            "correlated_server_frame": type_12_frame_index,
+                            "correlation_ms": round(bootstrap_ms, 3),
+                        }
+                    )
+                    self._event(
+                        frame,
+                        "opcode_13_type_12_to_14_correlated",
+                        details={**details, "body_redacted": True},
+                    )
+                self._pending_server_opcode_13_type_14.append(
+                    (frame.index, frame.timestamp_ns, opaque_bytes)
+                )
+                self.state.pending_server_opcode_13_type_14_messages += 1
+                details["pending_client_type_13_messages"] = (
+                    self.state.pending_server_opcode_13_type_14_messages
+                )
             self._event(
                 frame,
                 "server_opcode_13_message_received",
@@ -15654,6 +15802,27 @@ def render_gameplay_analysis(
             f"message_types:{server_opcode_13_message_types} "
             f"opaque_lengths:{server_opcode_13_opaque_lengths} "
             f"opaque_bytes:{state.server_opcode_13_opaque_bytes}"
+        ),
+        (
+            "opcode_13_exchange="
+            "type_12_to_14:"
+            f"{state.opcode_13_type_12_to_14_correlations} "
+            "pending_type_12:"
+            f"{state.pending_server_opcode_13_type_12_messages} "
+            "type_14_to_13:"
+            f"{state.opcode_13_type_14_to_13_correlations} "
+            "length_matches:"
+            f"{state.opcode_13_type_14_to_13_length_matches} "
+            "length_mismatches:"
+            f"{state.opcode_13_type_14_to_13_length_mismatches} "
+            "unmatched_client_type_13:"
+            f"{state.unmatched_client_opcode_13_type_13_messages} "
+            "pending_type_14:"
+            f"{state.pending_server_opcode_13_type_14_messages} "
+            f"last_type_12_to_14_ms:{state.last_opcode_13_type_12_to_14_ms} "
+            f"max_type_12_to_14_ms:{state.max_opcode_13_type_12_to_14_ms} "
+            f"last_type_14_to_13_ms:{state.last_opcode_13_type_14_to_13_ms} "
+            f"max_type_14_to_13_ms:{state.max_opcode_13_type_14_to_13_ms}"
         ),
         (
             "neutral_server_records="

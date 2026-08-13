@@ -502,6 +502,17 @@ type/body-length distributions and redaction flags. Stream `92` moves to
 No replay is enabled because the bodies remain opaque and may contain
 session-local transport state.
 
+Both independent `111.pcapng` world sessions nevertheless establish the same
+redacted exchange ordering. One server type `12` is followed about 4.94 seconds
+later by a 392-byte server type `14`, then by a same-length client type `13`
+within `27.305..30.942` ms. Stream `92` has four more type-`14`/type-`13`
+correlations at a roughly three-minute server cadence; all six cross-stream
+client messages arrive within `27.305..77.244` ms and match the corresponding
+body length. The gameplay fold and its HTTP-derived safe analysis now report
+only correlation counts, length matches/mismatches, pending/unmatched counts,
+and timing. Bodies remain redacted/opaque, observations remain partial, and the
+server does not synthesize or replay this exchange.
+
 The remaining stream-`92` opcode-`394`/client-opcode-`279` pair is now bounded
 without assigning it a security role. The automatic
 `tools/il2cpp_packet_dump` output confirms enum opcode `394` but has no

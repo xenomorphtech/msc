@@ -191,6 +191,15 @@
   distributions and a redaction flag. The 20 stream-`92` and two stream-`114`
   packets move from unknown to partial, producing `13,412/21,782/13/0` and
   `52/22/2/0`. Opaque bodies are not replayed.
+- Opcode-`13` world-session ordering is now folded without exposing or naming
+  the opaque transport bodies. Both `111.pcapng` world streams contain
+  `type 12 -> type 14 -> client type 13`: the first gap is
+  `4934.955..4945.945` ms and the second is `27.305..30.942` ms. Stream `92`
+  adds four later type-`14`/type-`13` pairs at a roughly three-minute server
+  cadence. All six client messages follow within `27.305..77.244` ms and match
+  their correlated server body's 392-byte length. Safe state/events expose only
+  FIFO correlation, length-match, pending/unmatched, and timing fields; all
+  affected observations remain partial and replay stays disabled.
 - Server opcode `394` and client opcode `279` now use exact redacted text
   envelopes instead of opaque width pins. The automatic dump confirms the
   server enum member but attributes no managed handler; the sole capture pair

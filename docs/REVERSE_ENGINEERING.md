@@ -266,6 +266,17 @@ the earlier false zero-world result. The corrected dump reports `worlds=1`.
 Attaching before NGS finishes startup can still invalidate the run. Do not
 leave a breakpoint probe attached, and always restore process-local patches.
 
+Offline ordering comparison is the safe boundary for the remaining world
+opcode-`13` bodies. Streams `92` and `114` each contain one server type `12`, a
+server type `14` after `4934.955..4945.945` ms, and a client type `13` after a
+further `27.305..30.942` ms. Four later stream-`92` type-`14` messages recur
+`180.722..184.383` seconds apart and receive a client type `13` within the
+combined `27.305..77.244` ms range. All six correlated bodies are 392 bytes on
+both directions, but they are not byte-equal and offline comparison does not
+establish a capture-stable inner primitive boundary. Model only FIFO timing and
+equal-length evidence; do not
+trace, label, synthesize, or replay the opaque body.
+
 `gdb_trace_packet_reads.py` traces the build's packet primitive readers by RVA.
 Its manifest-backed labels now cover all 12 readers used by this build:
 `u16=0x1cd0300`, `u8=0x1cd0530`, `bool=0x1cd0560`, `i8=0x1cd0700`,

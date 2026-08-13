@@ -6645,6 +6645,140 @@ class GameplayStateFoldTest(unittest.TestCase):
             render_gameplay_analysis(analysis),
         )
 
+    def test_correlates_redacted_opcode_13_exchange_chain(self) -> None:
+        payloads = (
+            Opcode13Envelope(
+                message_type=12,
+                opaque_payload=b"sensitive bootstrap body",
+            ).to_bytes(),
+            Opcode13Envelope(
+                message_type=14,
+                opaque_payload=b"sensitive challenge",
+            ).to_bytes(),
+            Opcode13Envelope(
+                message_type=13,
+                opaque_payload=b"sensitive response!",
+            ).to_bytes(),
+        )
+        timestamps_ns = (1_000_000_000, 5_940_000_000, 5_970_000_000)
+        directions = (
+            "server_to_client",
+            "server_to_client",
+            "client_to_server",
+        )
+        fold = GameplayStateFold()
+
+        observations = tuple(
+            fold.consume(
+                PlainFrame(
+                    index=index,
+                    direction_index=index,
+                    timestamp_ns=timestamp_ns,
+                    direction=direction,
+                    wire_offset=0,
+                    wire_length=len(payload),
+                    plaintext=payload,
+                )
+            )
+            for index, (timestamp_ns, direction, payload) in enumerate(
+                zip(timestamps_ns, directions, payloads, strict=True)
+            )
+        )
+
+        self.assertTrue(
+            all(
+                observation.coverage.value == "partial"
+                for observation in observations
+            )
+        )
+        self.assertEqual(fold.state.opcode_13_type_12_to_14_correlations, 1)
+        self.assertEqual(fold.state.pending_server_opcode_13_type_12_messages, 0)
+        self.assertEqual(fold.state.last_opcode_13_type_12_to_14_ms, 4940.0)
+        self.assertEqual(fold.state.opcode_13_type_14_to_13_correlations, 1)
+        self.assertEqual(fold.state.opcode_13_type_14_to_13_length_matches, 1)
+        self.assertEqual(fold.state.opcode_13_type_14_to_13_length_mismatches, 0)
+        self.assertEqual(fold.state.unmatched_client_opcode_13_type_13_messages, 0)
+        self.assertEqual(fold.state.pending_server_opcode_13_type_14_messages, 0)
+        self.assertEqual(fold.state.last_opcode_13_type_14_to_13_ms, 30.0)
+        self.assertTrue(observations[1].details["body_redacted"])
+        self.assertEqual(observations[1].details["correlated_server_frame"], 0)
+        self.assertEqual(observations[2].details["correlated_server_frame"], 1)
+        self.assertTrue(observations[2].details["body_length_matches"])
+        self.assertEqual(observations[2].details["correlation_ms"], 30.0)
+        self.assertEqual(
+            sum(
+                event.kind == "opcode_13_type_12_to_14_correlated"
+                for event in fold.events
+            ),
+            1,
+        )
+        self.assertEqual(
+            sum(
+                event.kind == "opcode_13_type_14_to_13_correlated"
+                for event in fold.events
+            ),
+            1,
+        )
+        analysis = replace(
+            analyze_gameplay_transcript(fixture_gameplay_transcript()),
+            state=fold.state,
+            observations=observations,
+            events=tuple(fold.events),
+        )
+        safe = str(analysis.safe_dict())
+        self.assertNotIn("sensitive bootstrap body", safe)
+        self.assertNotIn("sensitive challenge", safe)
+        self.assertNotIn("sensitive response", safe)
+        self.assertIn("'type_12_to_14': 1", safe)
+        self.assertIn("'type_14_to_13_length_matches': 1", safe)
+        self.assertIn(
+            "opcode_13_exchange=type_12_to_14:1 pending_type_12:0 "
+            "type_14_to_13:1 length_matches:1 length_mismatches:0",
+            render_gameplay_analysis(analysis),
+        )
+
+    def test_opcode_13_exchange_tracks_length_mismatch_and_unmatched_reply(
+        self,
+    ) -> None:
+        payloads = (
+            Opcode13Envelope(message_type=14, opaque_payload=b"three").to_bytes(),
+            Opcode13Envelope(message_type=13, opaque_payload=b"four!!").to_bytes(),
+            Opcode13Envelope(message_type=13, opaque_payload=b"orphan").to_bytes(),
+        )
+        directions = (
+            "server_to_client",
+            "client_to_server",
+            "client_to_server",
+        )
+        fold = GameplayStateFold()
+
+        observations = tuple(
+            fold.consume(
+                PlainFrame(
+                    index=index,
+                    direction_index=index,
+                    timestamp_ns=1_000_000_000 + index * 10_000_000,
+                    direction=direction,
+                    wire_offset=0,
+                    wire_length=len(payload),
+                    plaintext=payload,
+                )
+            )
+            for index, (direction, payload) in enumerate(
+                zip(directions, payloads, strict=True)
+            )
+        )
+
+        self.assertEqual(fold.state.opcode_13_type_14_to_13_correlations, 1)
+        self.assertEqual(fold.state.opcode_13_type_14_to_13_length_matches, 0)
+        self.assertEqual(fold.state.opcode_13_type_14_to_13_length_mismatches, 1)
+        self.assertEqual(fold.state.unmatched_client_opcode_13_type_13_messages, 1)
+        self.assertEqual(fold.state.pending_server_opcode_13_type_14_messages, 0)
+        self.assertFalse(observations[1].details["body_length_matches"])
+        self.assertIsNone(
+            observations[2].details["correlated_server_message_type"]
+        )
+
     def test_folds_non_pickup_server_opcode_49_without_pickup_effects(
         self,
     ) -> None:
