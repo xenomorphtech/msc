@@ -104,12 +104,13 @@ version-specific body. Its pre-appearance bridge now begins with four native-
 reader-confirmed `u32` mask words; safe output reports only nonzero-word and
 enabled-bit counts. Static recovery also types an optional direct `u8`, two
 fixed `u8`s, and all seven following virtual records with exact widths
-`15/15/15/13/20/17/15`. The double-false conditional-tail path stops before
-its runtime-selected suffix. Although a downstream parser begins with a
-counted UTF-16 read, the call site first checks the player object's parser field
-at RVA `0x118381e`; 16 stream-`126` records disprove the former packet-only
-interpretation. Across the corpus the conservative model types 31,165 body
-bytes and leaves `5,171` opaque body bytes. Opcode `190` is
+`15/15/15/13/20/17/15`. Both continuation arms reconverge before reading the
+follow-up bool, then stop at the runtime-selected suffix. The later runtime
+parser's null path throws and its successful path begins with a packet-string
+read, but no instruction-resolved path yet reconciles that read with the
+common final 12-byte `i32`-plus-DateTime-shaped sequence. Across the corpus the
+conservative model types 31,189 body bytes and leaves `5,147` opaque body
+bytes. Opcode `190` is
 its exact u32-id removal, not a neutral fixed
 record. Across streams `92/114/126`, all 114 entries and 39 leaves round-trip
 exactly, all leaves match current-epoch entries, and every one of 563 opcode-
@@ -1352,9 +1353,10 @@ reader path.
 The bridge typing contains two fixed `u8`s and seven virtual records with
 exact widths `15/15/15/13/20/17/15`. The later conditional envelope contains
 optional text, two conditional `i64` pairs, a conditional `u32/u32/i32` group,
-a continuation bool, and the follow-up bool read on its false path. The saved
-transcript remains valid and exact with 1,116 typed body bytes and 210 opaque
-body bytes. This is a structural accounting refinement only; it does not
+a continuation bool, and the follow-up bool reached after both continuation
+arms reconverge. The saved transcript remains valid and exact with 1,118 typed
+body bytes and 208 opaque body bytes. This is a structural accounting
+refinement only; it does not
 change the already proven live enter/move/leave behavior or assign meanings to
 the newly bounded values.
 

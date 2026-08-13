@@ -999,8 +999,8 @@ opcode 189:
         uint32 conditional_numeric_value_2
         int32 conditional_numeric_value_3
     bool conditional_continuation
-    if not conditional_continuation:
-        bool conditional_followup
+    # Both continuation arms reconverge before this read.
+    bool conditional_followup
     byte[] opaque_tail                 # non-empty runtime-selected suffix
 
 opcode 190:
@@ -1036,7 +1036,7 @@ beyond those native type boundaries remain deliberately neutral.
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-31,165 bytes and leaves 5,171 bytes explicit. The full bridge is 128 bytes in
+31,189 bytes and leaves 5,147 bytes explicit. The full bridge is 128 bytes in
 112 records and 129 bytes in two stream-`92` records; after its typed 16-byte
 mask, all 112/113 bytes are typed before the appearance.
 The masks contain one nonzero word and seven enabled bits in 112 entries, or
@@ -1048,26 +1048,26 @@ reads, and one `u8`. All 114 captured loop terminators and variant bytes are
 zero, so none enters the loop. The three-value zero masks are
 `000 x 74`, `011 x 24`, and `111 x 16`, where `1` denotes a zero value; these
 values remain semantically neutral and are omitted from safe output. The next
-native conditional prefix consumes 6, 24, or 34 bytes in 83, 24, and seven
+native conditional prefix consumes 6, 25, or 34 bytes in 83, 24, and seven
 entries respectively. Its first bool selects an optional packet UTF-16 record
 in 24 entries; every observed string is empty and its preserved trailing u8 is
 `16` (`18` records) or `20` (`6` records). The first `i64` pair is absent
 throughout, the second occurs in 31 entries, the `u32/u32/i32` group in seven,
-and the continuation bool is true in 24. Its 90 false paths read one follow-up
-bool at native RVA `0x1183725`; 87 captured values are zero and three
-stream-`92` values are one. The codec preserves every raw flag and scalar for
-exact replay while safe output exposes only presence/count summaries. The 87
-double-false paths are not a packet-only selector for the later parser. At RVA
-`0x118381e`, the call site loads and checks the player object's parser field;
-only the selected non-null path calls RVA `0x16ca1d0` at `0x1183857`. That
-callee starts with a counted UTF-16 read at `0x16ca271`, then conditionally
-dispatches four more counted strings plus `u8` and/or an `i32` plus DateTime
-read from two runtime subobjects. Sixteen stream-`126` double-false records
-retain a 12-byte suffix for which consuming an apparent two-byte empty string
-leaves ten bytes that cannot satisfy those downstream shapes. Because no wire
-flag establishes which runtime path ran, the entire suffix remains opaque.
-Per-stream typed/opaque body accounting is therefore `16,382/3,348`,
-`1,116/210`, and `13,667/1,613`. The
+and the continuation bool is true in 24. Its true arm performs runtime-state
+work, but both arms reconverge at RVA `0x1183720` and all 114 records read the
+follow-up bool at `0x1183725`. The captured values are 111 zero and three one;
+all 24 true-continuation records have a zero follow-up. The codec preserves
+every raw flag and scalar for exact replay while safe output exposes only
+presence/count summaries. At RVA `0x118381e`, the call site loads the player
+object's parser field. The null path throws; the successful non-null path calls
+RVA `0x16ca1d0` at `0x1183857`. That callee starts with a packet-string helper
+at `0x16ca271`, then conditionally dispatches four more packet strings plus
+`u8` and/or an `i32` plus DateTime read from two runtime subobjects. Every
+captured suffix ends in the same 12-byte `i32`-plus-DateTime-shaped sequence,
+but no instruction-resolved nested path yet explains it together with the
+preceding string read. The entire suffix therefore remains opaque.
+Per-stream typed/opaque body accounting is `16,404/3,326`, `1,118/208`, and
+`13,667/1,613`. The
 appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,
@@ -1098,8 +1098,8 @@ header/prefix-presence counts,
 post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
 conditional-branch presence/count summaries, and position when known. It never
 emits a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with four entries, 1,116 typed body
-bytes, and 210 opaque body bytes.
+custom-server transcript remains valid with four entries, 1,118 typed body
+bytes, and 208 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+c5dfb17 Restore opcode 189 runtime tail boundary
 3251036 Type opcode 189 direct residual text
 3492af3 Fully type opcode 189 bridge
 a18b72e Type opcode 189 bridge records
@@ -175,14 +176,14 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - at the residual-tail boundary: a bool-terminated repeated-`i32` loop, three
   `i32`s, and one `u8`;
 - after variant zero: optional packet UTF-16, two conditional `i64` pairs, a
-  conditional `u32/u32/i32` group, a continuation bool, and its false-path
-  follow-up bool;
+  conditional `u32/u32/i32` group, a continuation bool, and the follow-up bool
+  reached after both continuation arms reconverge;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
 The remaining opaque portion is the residual tail after the typed prefixes.
-Across all entries, current accounting measures 31,165 typed body bytes and
-5,171 opaque body bytes. Per stream, the typed/opaque counts are
-`16,382/3,348`, `1,116/210`, and `13,667/1,613` for
+Across all entries, current accounting measures 31,189 typed body bytes and
+5,147 opaque body bytes. Per stream, the typed/opaque counts are
+`16,404/3,326`, `1,118/208`, and `13,667/1,613` for
 streams `92`, `114`, and `126`. The full bridge is 128 bytes in 112 entries and
 129 bytes in two entries. Its 16-byte mask is followed by 112 typed bytes, or
 113 typed bytes when the direct `u8` is present.
@@ -193,17 +194,27 @@ only for re-emission and never reported. Residual tail lengths now range from
 terminating bools and final `u8`
 values are zero; none of the captured records enters the repeated-value loop.
 The three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
-meaning zero. The next conditional prefix is 6/24/34 bytes in 83/24/7 entries:
+meaning zero. The next conditional prefix is 6/25/34 bytes in 83/24/7 entries:
 24 optional text records are empty, the first `i64` pair is absent, the second
 appears 31 times, the numeric group seven times, and continuation is true 24
-times. The 90 false paths read a follow-up bool: 87 are zero and three are one.
-The 87 double-false paths remain opaque at this boundary. The call site first
-checks a runtime parser field at RVA `0x118381e`; only its selected non-null path
-calls the downstream parser at `0x1183857`. Sixteen stream-`126` entries are a
-capture counterexample to the former two-byte promotion: interpreting the first
-two suffix bytes as an empty string leaves ten bytes that cannot satisfy the
-downstream parser's remaining native read shapes. These are checked corpus
-results; their roles remain neutral.
+times. Both continuation arms converge at RVA `0x1183720` and read a follow-up
+bool at `0x1183725`: all 114 records execute it, with 111 zero values and three
+one values. The 24 true-continuation records all have a zero follow-up. The
+remaining suffix stays opaque. At RVA `0x118381e`, a null runtime parser field
+leads to a throw, while the successful non-null path calls the downstream
+parser at `0x1183857`. Every suffix ends in the same 12 bytes, whose shape
+matches an `i32` plus DateTime, but the exact nested reader path that consumes
+them has not been established alongside the delegated parser's preceding
+packet-string read. These are checked corpus results; their roles remain
+neutral.
+
+This follow-up convergence increment keeps structural coverage at
+`35020/187`, `69/7`, and `71047/53` full/partial for streams `92`, `114`, and
+`126`; opcode `189` remains partial. All 333 tracked Python tests, 17 Rust
+tests, the pinned-build ignored test, and the private capture-JSONL ignored
+test pass. All three gameplay analyses remain valid; stream `126` retains only
+its known one-HP warning. Focused native-manifest validation consumes all 52
+stream-`126` opcode-`189` packets with zero unsupported or failed shapes.
 
 The first stream-`114` entry is a useful controlled packet:
 
@@ -353,16 +364,18 @@ to zero and selects RVA `0x1183116`. The subsequent reader calls are bool at
 conditional `i64` pairs at `0x1183272/0x118327c` and
 `0x11832aa/0x11832b4`, a bool and conditional `u32/u32/i32` group at
 `0x11832c4` and `0x11832e2/0x11832f2/0x1183302`, then continuation bool at
-`0x11833a8`. Its false path jumps to `0x1183720` and reads the follow-up bool at
-`0x1183725`; the true path first depends on runtime field state. Deeper control
-flow consults runtime object state before a delegated parser at `0x16ca1d0`,
-so the codec stops at the uniform packet-controlled boundary. Even on a
-double-false path, RVA `0x118381e` loads and checks the player object's parser
-field before the call at `0x1183857`. The callee begins with the counted UTF-16
-reader at `0x16ca271`, but the packet flags do not establish that the call ran;
-its two later subrecords are themselves runtime-selected. The implementation
-therefore preserves the entire suffix as opaque bytes and reports only the
-proven structural summaries.
+`0x11833a8`. Its false path jumps to `0x1183720`; the true path first performs
+runtime-state-dependent work, then every arm reconverges at `0x1183720` and
+reads the follow-up bool at `0x1183725`. Deeper control flow consults runtime
+object state before a delegated parser at `0x16ca1d0`. RVA `0x118381e` loads
+the player object's parser field; the null path throws, while the non-null path
+calls the parser at `0x1183857`. The callee begins with a packet-string helper
+at `0x16ca271`, and its two later subrecords are runtime-selected. Every
+captured suffix shares a final 12-byte `i32`-plus-DateTime-shaped sequence, but
+the exact native path consuming it remains unresolved because it must also be
+reconciled with that preceding string read. The implementation therefore
+preserves the entire suffix as opaque bytes and reports only the proven
+structural summaries.
 
 ## Exact browser-free relaunch and navigation
 

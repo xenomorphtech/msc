@@ -3753,8 +3753,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     numeric_group_flag_byte=7,
                     numeric_group=(5, 6, -7),
                     continuation_flag_byte=9,
-                    followup_flag_byte=None,
+                    followup_flag_byte=0xA5,
                 ),
+                opaque_tail=bytes.fromhex("5a010203"),
             ),
         )
         self.assertEqual(
@@ -3769,10 +3770,19 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "conditional_tail_i64_pairs_present": 2,
                 "conditional_tail_numeric_group_present": True,
                 "conditional_tail_continuation": True,
-                "conditional_tail_followup_present": False,
-                "conditional_tail_followup_nonzero": False,
-                "typed_conditional_tail_prefix_bytes": 72,
+                "conditional_tail_followup_present": True,
+                "conditional_tail_followup_nonzero": True,
+                "typed_conditional_tail_prefix_bytes": 73,
             },
+        )
+        self.assertEqual(
+            populated_conditional_tail.body.conditional_tail_prefix
+            .followup_flag_byte,
+            0xA5,
+        )
+        self.assertEqual(
+            populated_conditional_tail.body.opaque_tail,
+            b"\x5a\x01\x02\x03",
         )
         self.assertNotIn(
             "SecretTail",
@@ -3888,7 +3898,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     entered.body,
                     conditional_tail_prefix=replace(
                         entered.body.conditional_tail_prefix,
-                        followup_flag_byte=None,
+                        followup_flag_byte=0x100,
                     ),
                 ),
             ).to_bytes()

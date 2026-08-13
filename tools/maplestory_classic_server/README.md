@@ -977,11 +977,11 @@ The gameplay fold currently models these capture-backed boundaries:
   native `u16/i32/u32/4*i32/2*i16/u8/u16` reads followed by a typed
   bool-terminated repeated-`i32` loop, three `i32`s, a `u8`, optional text,
   two conditional `i64` pairs, a conditional `u32/u32/i32` group, a
-  continuation bool and its false-path follow-up bool before the remaining
-  runtime-selected opaque region; the later parser call first depends on a
-  runtime object field, and a 16-record stream-`126` counterexample prevents
-  treating the double-false flag pair as proof of a counted-string read. All
-  114 reference entries round-trip
+  continuation bool and the follow-up bool read after both arms reconverge,
+  before the remaining runtime-selected opaque region; the later parser's
+  successful path starts with a packet-string helper, and its exact relationship
+  to the common final 12-byte `i32`-plus-DateTime-shaped sequence is unresolved.
+  All 114 reference entries round-trip
   losslessly with zero captured loop iterations or nonzero tail variants and a
   completely typed pre-appearance bridge (raw mask words stay redacted), while
   server opcode `190` is the exact

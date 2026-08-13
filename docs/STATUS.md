@@ -426,23 +426,25 @@
   record, 31 typed post-appearance bytes, and the delegate-proven tail prefix:
   a bool-terminated repeated-`i32` loop, three `i32`s, one `u8`, then optional
   text, two conditional `i64` pairs, a conditional `u32/u32/i32` group, a
-  continuation bool, and its false-path follow-up bool. A separately recovered
+  continuation bool, and the follow-up bool reached after both arms reconverge.
+  A separately recovered
   bridge reader types its first four consecutive `u32` mask words. Static
   recovery then types the optional direct `u8`, two fixed `u8`s, and all seven
   virtual records with exact widths `15/15/15/13/20/17/15`. All 114
   loop terminators and tail variants are zero; the next prefix observes 24
   empty optional-text records, 31 second `i64` pairs, seven numeric groups, and
-  24 true continuations; the 90 false paths contain 87 zero and three one
-  follow-up values. The 87 double-false paths now stop there: the call site
-  checks runtime parser state at RVA `0x118381e` before reaching the delegated
-  parser at `0x1183857`, so the flag pair alone does not prove its first counted
-  UTF-16 read executed. Sixteen stream-`126` records provide the counterexample:
-  treating their first two suffix bytes as an empty string leaves ten bytes,
-  which cannot satisfy the downstream parser's remaining native read shapes.
+  24 true continuations. Both continuation arms reconverge at RVA `0x1183720`,
+  so all 114 records execute the follow-up read: 111 values are zero and three
+  are one; all true-continuation records have a zero follow-up. The runtime
+  parser check at RVA `0x118381e` throws on null and reaches the delegated
+  parser at `0x1183857` on the successful path. Every captured suffix ends in
+  the same 12-byte `i32`-plus-DateTime-shaped sequence, but its exact nested
+  read path remains unresolved alongside the delegated parser's preceding
+  packet-string read, so the entire suffix stays opaque.
   The masks have `1/2` nonzero words and
   `7/8` enabled bits
-  in `112/2` entries, with raw words redacted. Exact replay types 31,165 body
-  bytes while retaining 5,171 runtime-selected tail bytes. Every
+  in `112/2` entries, with raw words redacted. Exact replay types 31,189 body
+  bytes while retaining 5,147 runtime-selected tail bytes. Every
   leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
