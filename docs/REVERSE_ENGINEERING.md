@@ -387,14 +387,18 @@ overrun and re-emits them byte-for-byte. Encoded prefix lengths are `6 x 83`,
 byte is `16 x 18` or `20 x 6`. The first `i64` pair is absent, the second occurs
 31 times, the numeric group seven times, and the continuation branch 24 times.
 The other 90 records execute the follow-up bool: 87 values are zero and three
-stream-`92` values are one. A zero follow-up takes a direct path to
-`e3ad4d05...::ef3213da...` at RVA `0x16ca1d0`. Its first packet operation is
-the counted UTF-16 read at `0x16ca271`, before it checks either runtime
-subobject. All 87 matching records carry an empty value, so the codec safely
-types those 174 bytes. Nonzero follow-up and continuation paths consult
-runtime state before that same parser, and the callee itself conditionally
-dispatches further readers from runtime subobjects; those remaining bytes stay
-explicitly opaque. Values and text remain redacted and semantically neutral.
+stream-`92` values are one. A zero follow-up does not by itself prove the later
+parser executes. The call site loads the player object's parser field at RVA
+`0x118381e`, branches on its runtime value, and calls
+`e3ad4d05...::ef3213da...` at `0x1183857` only on the selected non-null path.
+That callee begins with the counted UTF-16 read at `0x16ca271`, then checks two
+runtime subobjects before optionally reading four more strings plus a `u8` and
+an `i32` plus DateTime. Sixteen double-false stream-`126` records disprove the
+earlier packet-only interpretation: treating their first two suffix bytes as
+an empty string leaves ten bytes, which cannot satisfy any remaining callee
+shape. The codec therefore stops after the follow-up bool and keeps the whole
+runtime-selected suffix explicitly opaque. Values and text remain redacted and
+semantically neutral.
 
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then

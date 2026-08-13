@@ -392,8 +392,7 @@ def fixture_remote_player_entry_body(
             continuation_flag_byte=0,
             followup_flag_byte=0,
         ),
-        residual_text="",
-        opaque_tail=b"\x00" * (opaque_tail_length - 2),
+        opaque_tail=b"\x00" * opaque_tail_length,
     )
 
 
@@ -3571,8 +3570,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
         encoded = entered.to_bytes()
         parsed = RemotePlayerEnterField.parse(encoded)
         self.assertEqual(parsed, entered)
-        self.assertEqual(parsed.body.typed_bytes, 237)
-        self.assertEqual(parsed.body.opaque_bytes, 71)
+        self.assertEqual(parsed.body.typed_bytes, 235)
+        self.assertEqual(parsed.body.opaque_bytes, 73)
         self.assertEqual(
             parsed.body.safe_dict()["pre_appearance_mask_nonzero_words"], 1
         )
@@ -3662,8 +3661,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         )
         self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
-        self.assertEqual(entered.body.typed_bytes, 125)
-        self.assertEqual(entered.body.opaque_bytes, 183)
+        self.assertEqual(entered.body.typed_bytes, 123)
+        self.assertEqual(entered.body.opaque_bytes, 185)
         self.assertEqual(
             entered.body.safe_dict()["pre_appearance_mask_nonzero_words"], 0
         )
@@ -3692,15 +3691,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "typed_conditional_tail_prefix_bytes": 6,
             },
         )
-        self.assertEqual(
-            entered.body.safe_dict()["residual_text_present"], True
-        )
-        self.assertEqual(
-            entered.body.safe_dict()["residual_text_code_units"], 0
-        )
-        self.assertEqual(
-            entered.body.safe_dict()["typed_residual_text_bytes"], 2
-        )
+        self.assertEqual(entered.body.safe_dict()["opaque_tail_bytes"], 73)
         adjacent_fields = replace(
             entered,
             body=replace(
@@ -3764,7 +3755,6 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     continuation_flag_byte=9,
                     followup_flag_byte=None,
                 ),
-                residual_text=None,
             ),
         )
         self.assertEqual(
@@ -3796,7 +3786,6 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     entered.body.conditional_tail_prefix,
                     followup_flag_byte=0xFF,
                 ),
-                residual_text=None,
             ),
         )
         self.assertEqual(
@@ -3808,16 +3797,19 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "conditional_tail_followup_nonzero"
             ]
         )
-        populated_residual_text = replace(
+        state_selected_tail = replace(
             entered,
-            body=replace(entered.body, residual_text="SecretResidual"),
+            body=replace(
+                entered.body,
+                opaque_tail=bytes.fromhex("010000000080000000000000"),
+            ),
         )
         self.assertEqual(
-            RemotePlayerEnterField.parse(populated_residual_text.to_bytes()),
-            populated_residual_text,
+            RemotePlayerEnterField.parse(state_selected_tail.to_bytes()),
+            state_selected_tail,
         )
-        self.assertNotIn(
-            "SecretResidual", str(populated_residual_text.safe_dict())
+        self.assertEqual(
+            state_selected_tail.body.safe_dict()["opaque_tail_bytes"], 12
         )
         self.assertEqual(left.to_bytes().hex(), "be00189c0400")
         self.assertEqual(RemotePlayerLeaveField.parse(left.to_bytes()), left)
@@ -3898,13 +3890,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                         entered.body.conditional_tail_prefix,
                         followup_flag_byte=None,
                     ),
-                    residual_text=None,
                 ),
-            ).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "residual text"):
-            replace(
-                entered,
-                body=replace(entered.body, residual_text=None),
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "needs 8 bytes"):
             RemotePlayerEnterField.parse(bytes.fromhex("bd00010000000c0400"))
@@ -9547,9 +9533,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.remote_player_refreshes, 1)
         self.assertEqual(
             analysis.state.remote_player_entry_opaque_bytes,
-            3 * (112 + 71) + 1,
+            3 * (112 + 73) + 1,
         )
-        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 391)
+        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 385)
         self.assertEqual(analysis.state.remote_player_entry_secondary_texts, 1)
         self.assertEqual(analysis.state.remote_player_entry_nonzero_headers, 1)
         self.assertEqual(

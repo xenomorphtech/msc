@@ -433,12 +433,16 @@
   loop terminators and tail variants are zero; the next prefix observes 24
   empty optional-text records, 31 second `i64` pairs, seven numeric groups, and
   24 true continuations; the 90 false paths contain 87 zero and three one
-  follow-up values. The 87 double-false paths also type the delegated parser's
-  first counted UTF-16 value before runtime object state controls any further
-  reads; every captured value is empty. The masks have `1/2` nonzero words and
+  follow-up values. The 87 double-false paths now stop there: the call site
+  checks runtime parser state at RVA `0x118381e` before reaching the delegated
+  parser at `0x1183857`, so the flag pair alone does not prove its first counted
+  UTF-16 read executed. Sixteen stream-`126` records provide the counterexample:
+  treating their first two suffix bytes as an empty string leaves ten bytes,
+  which cannot satisfy the downstream parser's remaining native read shapes.
+  The masks have `1/2` nonzero words and
   `7/8` enabled bits
-  in `112/2` entries, with raw words redacted. Exact replay types 31,339 body
-  bytes while retaining 4,997 residual-tail bytes. Every
+  in `112/2` entries, with raw words redacted. Exact replay types 31,165 body
+  bytes while retaining 5,171 runtime-selected tail bytes. Every
   leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and

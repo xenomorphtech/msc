@@ -10576,7 +10576,6 @@ class RemotePlayerEntryBody:
     post_appearance_u16: int
     tail_prefix: RemotePlayerEntryTailPrefix
     conditional_tail_prefix: RemotePlayerEntryConditionalTailPrefix
-    residual_text: str | None = field(repr=False)
     opaque_tail: bytes = field(repr=False)
 
     @classmethod
@@ -10672,14 +10671,6 @@ class RemotePlayerEntryBody:
         conditional_tail_prefix = (
             RemotePlayerEntryConditionalTailPrefix.parse_from(tail_reader)
         )
-        residual_text = None
-        if (
-            conditional_tail_prefix.continuation_flag_byte == 0
-            and conditional_tail_prefix.followup_flag_byte == 0
-        ):
-            residual_text = tail_reader.utf16_string(
-                "residual_text", trailing_byte=False
-            )
         record = cls(
             secondary_text=secondary_text,
             header_u16_1=header_u16_1,
@@ -10701,7 +10692,6 @@ class RemotePlayerEntryBody:
             post_appearance_u16=post_appearance_u16,
             tail_prefix=tail_prefix,
             conditional_tail_prefix=conditional_tail_prefix,
-            residual_text=residual_text,
             opaque_tail=tail_reader.bytes(
                 tail_reader.remaining, "opaque_tail"
             ),
@@ -10712,18 +10702,6 @@ class RemotePlayerEntryBody:
     @property
     def secondary_text_code_units(self) -> int:
         return len(self.secondary_text.encode("utf-16-le")) // 2
-
-    @property
-    def residual_text_code_units(self) -> int:
-        if self.residual_text is None:
-            return 0
-        return len(self.residual_text.encode("utf-16-le")) // 2
-
-    @property
-    def residual_text_encoded_bytes(self) -> int:
-        if self.residual_text is None:
-            return 0
-        return 2 + self.residual_text_code_units * 2
 
     @property
     def opaque_bytes(self) -> int:
@@ -10814,15 +10792,6 @@ class RemotePlayerEntryBody:
                 "remote-player entry post-appearance vector must contain "
                 "two i16 values"
             )
-        residual_text_expected = (
-            self.conditional_tail_prefix.continuation_flag_byte == 0
-            and self.conditional_tail_prefix.followup_flag_byte == 0
-        )
-        if (self.residual_text is not None) != residual_text_expected:
-            raise PacketShapeError(
-                "remote-player entry residual text must match the direct "
-                "false conditional-tail path"
-            )
         if not self.opaque_tail:
             raise PacketShapeError(
                 "remote-player entry post-appearance region cannot be empty"
@@ -10883,9 +10852,6 @@ class RemotePlayerEntryBody:
             ),
             **self.tail_prefix.safe_dict(),
             **self.conditional_tail_prefix.safe_dict(),
-            "residual_text_present": self.residual_text is not None,
-            "residual_text_code_units": self.residual_text_code_units,
-            "typed_residual_text_bytes": self.residual_text_encoded_bytes,
             "typed_body_bytes": self.typed_bytes,
             "opaque_tail_bytes": len(self.opaque_tail),
             "opaque_body_bytes": self.opaque_bytes,
@@ -10949,13 +10915,6 @@ class RemotePlayerEntryBody:
                 post_appearance,
                 self.tail_prefix.to_bytes(),
                 self.conditional_tail_prefix.to_bytes(),
-                (
-                    encode_utf16_string(
-                        self.residual_text, trailing_byte=False
-                    )
-                    if self.residual_text is not None
-                    else b""
-                ),
                 bytes(self.opaque_tail),
             )
         )

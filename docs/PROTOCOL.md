@@ -1001,9 +1001,7 @@ opcode 189:
     bool conditional_continuation
     if not conditional_continuation:
         bool conditional_followup
-        if not conditional_followup:
-            PacketUtf16 residual_text       # redacted; no trailing u8
-    byte[] opaque_tail                 # non-empty residual after typed prefixes
+    byte[] opaque_tail                 # non-empty runtime-selected suffix
 
 opcode 190:
     uint16 opcode
@@ -1038,12 +1036,12 @@ beyond those native type boundaries remain deliberately neutral.
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-31,339 bytes and leaves 4,997 bytes explicit. The full bridge is 128 bytes in
+31,165 bytes and leaves 5,171 bytes explicit. The full bridge is 128 bytes in
 112 records and 129 bytes in two stream-`92` records; after its typed 16-byte
 mask, all 112/113 bytes are typed before the appearance.
 The masks contain one nonzero word and seven enabled bits in 112 entries, or
 two nonzero words and eight enabled bits in two entries. Raw words remain
-redacted. Residual tails are 10..83 bytes. The 14-byte tail prefix
+redacted. Runtime-selected tails are 12..83 bytes. The 14-byte tail prefix
 follows the pinned delegate's
 executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
 reads, and one `u8`. All 114 captured loop terminators and variant bytes are
@@ -1059,13 +1057,17 @@ and the continuation bool is true in 24. Its 90 false paths read one follow-up
 bool at native RVA `0x1183725`; 87 captured values are zero and three
 stream-`92` values are one. The codec preserves every raw flag and scalar for
 exact replay while safe output exposes only presence/count summaries. The 87
-double-false paths reach the delegated parser at RVA `0x16ca1d0` without an
-intervening packet read. Its first operation is one counted UTF-16 read at RVA
-`0x16ca271`; every captured value is empty. The parser then consults runtime
-subobjects before any further optional reads, so the codec types those 174
-bytes and deliberately leaves the state-dependent suffix opaque. Per-stream
-typed/opaque body accounting is now `16,448/3,282`, `1,120/206`, and
-`13,771/1,509`. The
+double-false paths are not a packet-only selector for the later parser. At RVA
+`0x118381e`, the call site loads and checks the player object's parser field;
+only the selected non-null path calls RVA `0x16ca1d0` at `0x1183857`. That
+callee starts with a counted UTF-16 read at `0x16ca271`, then conditionally
+dispatches four more counted strings plus `u8` and/or an `i32` plus DateTime
+read from two runtime subobjects. Sixteen stream-`126` double-false records
+retain a 12-byte suffix for which consuming an apparent two-byte empty string
+leaves ten bytes that cannot satisfy those downstream shapes. Because no wire
+flag establishes which runtime path ran, the entire suffix remains opaque.
+Per-stream typed/opaque body accounting is therefore `16,382/3,348`,
+`1,116/210`, and `13,667/1,613`. The
 appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,
