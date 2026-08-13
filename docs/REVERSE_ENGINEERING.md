@@ -387,8 +387,13 @@ overrun and re-emits them byte-for-byte. Encoded prefix lengths are `6 x 83`,
 byte is `16 x 18` or `20 x 6`. The first `i64` pair is absent, the second occurs
 31 times, the numeric group seven times, and the continuation branch 24 times.
 The other 90 records execute the follow-up bool: 87 values are zero and three
-stream-`92` values are one. Subsequent control flow consults runtime object
-state before a delegated parser at RVA `0x16ca1d0`, so those bytes remain
+stream-`92` values are one. A zero follow-up takes a direct path to
+`e3ad4d05...::ef3213da...` at RVA `0x16ca1d0`. Its first packet operation is
+the counted UTF-16 read at `0x16ca271`, before it checks either runtime
+subobject. All 87 matching records carry an empty value, so the codec safely
+types those 174 bytes. Nonzero follow-up and continuation paths consult
+runtime state before that same parser, and the callee itself conditionally
+dispatches further readers from runtime subobjects; those remaining bytes stay
 explicitly opaque. Values and text remain redacted and semantically neutral.
 
 The same short-lived method closed both expanded variable-server records. For

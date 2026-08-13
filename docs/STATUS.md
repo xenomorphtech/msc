@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The tracked custom-server suite currently passes all 330 tests.
+- The tracked custom-server suite currently passes all 333 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -433,15 +433,18 @@
   loop terminators and tail variants are zero; the next prefix observes 24
   empty optional-text records, 31 second `i64` pairs, seven numeric groups, and
   24 true continuations; the 90 false paths contain 87 zero and three one
-  follow-up values. The masks have `1/2` nonzero words and `7/8` enabled bits
-  in `112/2` entries, with raw words redacted. Exact replay types 31,165 body
-  bytes while retaining 5,171 residual-tail bytes. Every
+  follow-up values. The 87 double-false paths also type the delegated parser's
+  first counted UTF-16 value before runtime object state controls any further
+  reads; every captured value is empty. The masks have `1/2` nonzero words and
+  `7/8` enabled bits
+  in `112/2` entries, with raw words redacted. Exact replay types 31,339 body
+  bytes while retaining 4,997 residual-tail bytes. Every
   leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
   `4 -> 3 -> 4`; the active saved transcript still validates with four typed
-  entries, 1,116 typed body bytes, and 210 opaque body bytes.
+  entries, 1,120 typed body bytes, and 206 opaque body bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template

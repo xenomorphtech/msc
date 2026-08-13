@@ -1001,6 +1001,8 @@ opcode 189:
     bool conditional_continuation
     if not conditional_continuation:
         bool conditional_followup
+        if not conditional_followup:
+            PacketUtf16 residual_text       # redacted; no trailing u8
     byte[] opaque_tail                 # non-empty residual after typed prefixes
 
 opcode 190:
@@ -1036,12 +1038,12 @@ beyond those native type boundaries remain deliberately neutral.
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-31,165 bytes and leaves 5,171 bytes explicit. The full bridge is 128 bytes in
+31,339 bytes and leaves 4,997 bytes explicit. The full bridge is 128 bytes in
 112 records and 129 bytes in two stream-`92` records; after its typed 16-byte
 mask, all 112/113 bytes are typed before the appearance.
 The masks contain one nonzero word and seven enabled bits in 112 entries, or
 two nonzero words and eight enabled bits in two entries. Raw words remain
-redacted. Residual tails are 12..83 bytes. The 14-byte tail prefix
+redacted. Residual tails are 10..83 bytes. The 14-byte tail prefix
 follows the pinned delegate's
 executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
 reads, and one `u8`. All 114 captured loop terminators and variant bytes are
@@ -1056,7 +1058,14 @@ throughout, the second occurs in 31 entries, the `u32/u32/i32` group in seven,
 and the continuation bool is true in 24. Its 90 false paths read one follow-up
 bool at native RVA `0x1183725`; 87 captured values are zero and three
 stream-`92` values are one. The codec preserves every raw flag and scalar for
-exact replay while safe output exposes only presence/count summaries. The
+exact replay while safe output exposes only presence/count summaries. The 87
+double-false paths reach the delegated parser at RVA `0x16ca1d0` without an
+intervening packet read. Its first operation is one counted UTF-16 read at RVA
+`0x16ca271`; every captured value is empty. The parser then consults runtime
+subobjects before any further optional reads, so the codec types those 174
+bytes and deliberately leaves the state-dependent suffix opaque. Per-stream
+typed/opaque body accounting is now `16,448/3,282`, `1,120/206`, and
+`13,771/1,509`. The
 appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,

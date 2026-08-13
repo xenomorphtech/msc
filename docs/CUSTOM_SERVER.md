@@ -104,7 +104,10 @@ version-specific body. Its pre-appearance bridge now begins with four native-
 reader-confirmed `u32` mask words; safe output reports only nonzero-word and
 enabled-bit counts. Static recovery also types an optional direct `u8`, two
 fixed `u8`s, and all seven following virtual records with exact widths
-`15/15/15/13/20/17/15`. Opcode `190` is
+`15/15/15/13/20/17/15`. The direct double-false conditional-tail path also
+types one redacted counted UTF-16 value before runtime object state controls
+the remaining suffix. Across the corpus this reclassifies 174 bytes without
+exposing text and leaves `4,997` opaque body bytes. Opcode `190` is
 its exact u32-id removal, not a neutral fixed
 record. Across streams `92/114/126`, all 114 entries and 39 leaves round-trip
 exactly, all leaves match current-epoch entries, and every one of 563 opcode-

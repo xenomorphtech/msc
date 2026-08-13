@@ -175,19 +175,21 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - after variant zero: optional packet UTF-16, two conditional `i64` pairs, a
   conditional `u32/u32/i32` group, a continuation bool, and its false-path
   follow-up bool;
+- when both of those final booleans are false, one additional counted UTF-16
+  value before the native parser consults runtime object state;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
 The remaining opaque portion is the residual tail after the typed prefixes.
-Across all entries, current accounting measures 31,165 typed body bytes and
-5,171 opaque body bytes. Per stream, the typed/opaque counts are
-`16,382/3,348`, `1,116/210`, and `13,667/1,613` for
+Across all entries, current accounting measures 31,339 typed body bytes and
+4,997 opaque body bytes. Per stream, the typed/opaque counts are
+`16,448/3,282`, `1,120/206`, and `13,771/1,509` for
 streams `92`, `114`, and `126`. The full bridge is 128 bytes in 112 entries and
 129 bytes in two entries. Its 16-byte mask is followed by 112 typed bytes, or
 113 typed bytes when the direct `u8` is present.
 The masks have one nonzero word and seven enabled bits in 112 entries, and two
 nonzero words and eight enabled bits in two entries. Raw words are retained
 only for re-emission and never reported. Residual tail lengths now range from
-12 through 83 bytes. All 114
+10 through 83 bytes. All 114
 terminating bools and final `u8`
 values are zero; none of the captured records enters the repeated-value loop.
 The three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
@@ -195,7 +197,11 @@ meaning zero. The next conditional prefix is 6/24/34 bytes in 83/24/7 entries:
 24 optional text records are empty, the first `i64` pair is absent, the second
 appears 31 times, the numeric group seven times, and continuation is true 24
 times. The 90 false paths read a follow-up bool: 87 are zero and three are one.
-These are checked corpus results; their roles remain neutral.
+The 87 double-false paths then read a counted UTF-16 value; every captured
+value is empty, so this types two bytes per matching entry without exposing
+content. The other 27 paths remain opaque at this boundary because they first
+depend on runtime object state. These are checked corpus results; their roles
+remain neutral.
 
 The first stream-`114` entry is a useful controlled packet:
 
@@ -348,7 +354,13 @@ conditional `i64` pairs at `0x1183272/0x118327c` and
 `0x11833a8`. Its false path jumps to `0x1183720` and reads the follow-up bool at
 `0x1183725`; the true path first depends on runtime field state. Deeper control
 flow consults runtime object state before a delegated parser at `0x16ca1d0`,
-so the codec stops at the uniform packet-controlled boundary. The
+so the codec stops at the uniform packet-controlled boundary. On the direct
+double-false path, control reaches
+`e3ad4d05...::ef3213da...` at RVA `0x16ca1d0` without an intervening packet
+read. That callee first invokes the counted UTF-16 reader at `0x16ca271`; only
+afterward does it inspect its runtime subobjects and optionally dispatch more
+readers. The codec therefore types exactly that one additional value for the
+87 matching records and stops before the state-dependent suffix. The
 implementation preserves raw flag bytes and values, redacts the optional
 text/scalars, and reports only structural summaries.
 
