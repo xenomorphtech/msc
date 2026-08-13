@@ -1826,20 +1826,52 @@ sudo ip netns exec mapleproxy sudo -u sdancer env \
 The rewrite changes only the typed coordinates in the 38-byte captured spawn;
 the drop id, item template, ownership-neutral fields, expiration, and flags are
 preserved and round-trip. The reactive policy accepts only the known active
-drop, current field epoch, deterministic captured template effect, and exactly
-one existing stack with capacity. It predicts and emits opcode `39` (`74 ->
-75`), opcode `49` (item `4000004`, quantity `1`), and opcode `312` (reason `5`)
-in that order, then removes the drop from mutable server state. Mesos, special,
-new-slot, ambiguous-stack, and unknown-template cases remain rejected. The
-client still supplies its own validation token; the server does not synthesize
-or assign semantics to it. The same policy now accepts compact opcode `222`
-and mirrors its captured 11-byte reason-`2` removal instead of the full
-opcode-`185` 15-byte reason-`5` form.
+drop and current field epoch. Item drops additionally require a deterministic
+captured template effect and exactly one existing stack with capacity. That
+branch predicts and emits opcode `39` (`74 -> 75`), opcode `49` (item
+`4000004`, quantity `1`), and opcode `312` (reason `5`) in that order.
+
+Mesos drops are now bounded separately. The policy requires a known absolute
+balance, a positive captured drop amount, complete capture-correlated
+opcode-`41`/`49`/`312` evidence, equal capture-neutral owner values, and a
+non-overflowing 64-bit result. It emits opcode `41` with the new absolute
+balance, opcode `49` with the drop amount, and opcode `312`, then removes the
+drop from mutable state. Stream `92` supplies 29 matching mesos chains, all
+with stat request flag `false`, trailing flag `false`, and notice shape
+`result/subkind/tail = 0/0/0`. The level-1-to-10 stream independently supplies
+117 matching chains; its stat request flags are 115 `false` and two `true`, so
+the responder selects the latest observed flag rather than hard-coding one.
+The notice and trailing shapes are deterministic across both captures.
+
+When the replay snapshot has no decoded mesos baseline, an earlier evidence
+stream may seed it only when both transcripts come from the same capture, the
+evidence stream ends before the replay stream begins, and their private entry
+character ids match. This admits stream `92`'s final `4567` balance for later
+stream `114` without reporting the character id; runtime/API state labels the
+provenance `same_capture_prior_stream`. Different captures, overlapping
+streams, unknown identities, and unknown balances do not cross-seed. Special,
+new-slot, ambiguous-stack, unknown-template, and unproven-mesos cases remain
+rejected. The client still supplies its own validation token; the server does
+not synthesize or assign semantics to it. Compact opcode `222` mirrors its
+captured 11-byte reason-`2` removal instead of the full opcode-`185` 15-byte
+reason-`5` form for both modeled item and mesos responses.
+
+A fresh browser-free run loaded that policy before any client connection. The
+HTTP surface reported mesos `4567`, provenance `same_capture_prior_stream`, 29
+mesos results, and `false:29` request-flag evidence. Login readiness changed
+from HTTP `503` to `200` after one exact handoff; world readiness changed from
+`503` to `200` after three current-connection heartbeats. The final login fold
+is warning-free at `handoff_ready` (`34/6` full/partial), and the world fold is
+warning-free at `active` on map `101000000` (`103/2`) with eight matched
+heartbeats and none pending. Stream `114`'s final active drop is an item, so
+this validates startup, login, derivation, and telemetry but does not claim a
+live official-client mesos pickup yet.
 
 Observed pickup requests now receive the same causal transcript treatment as
-item use: request, completed `[39,49,312]` response, or safe rejection. Unit
-coverage proves a second request for an already removed modeled drop is
-rejected without closing the connection and leaves zero pending pickup work.
+item use: request, completed item `[39,49,312]` or mesos `[41,49,312]`
+response, or safe rejection. Unit coverage proves a second request for an
+already removed modeled drop is rejected without closing the connection and
+leaves zero pending pickup work.
 
 The owner rewrite is a separate same-length typed patch. It validates exactly
 one initial player and one final field-load item, then changes only the two
@@ -2786,6 +2818,14 @@ project's own `README.md` for all options.
   validation: 234 base, 17 extended-proof, and six compact records. They now
   have full structural coverage while control, validation-token, and proof
   roles remain neutral and proof/token contents remain omitted from safe output.
+- The reactive pickup policy now serves capture-proven mesos drops as typed
+  `[41,49,312]` responses for both base opcode `185` and compact opcode `222`.
+  Codec, fold, and encrypted hold-open tests prove `100 -> 116`, the exact
+  16-mesos notice, reason `5`/`2` removal selection, mutable policy state, and
+  identifier-free runtime completion telemetry. Real `111.pcapng` streams
+  `92 -> 114` independently prove the guarded same-capture balance continuation
+  at `4567`; the level-1-to-10 stream independently proves the alternate early
+  request-flag variant without changing the deterministic notice shape.
 - All 125 stream-`92` opcode-`311` packets round-trip and fold into 66 drop
   lifecycles. All 54 pickup requests, gain values, effects, and local removals
   correlate with an active spawn; stream `114` ends with one modeled active

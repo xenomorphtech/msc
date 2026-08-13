@@ -27,9 +27,10 @@ files are not all part of this task. Never stage the whole tree.
 
 ## Current repository checkpoint
 
-The current pushed sequence before the login-readiness increment is:
+The current pushed sequence through the login-readiness increment is:
 
 ```text
+34cb4f9 Add login handoff readiness API
 7b1fcfb Scope Wine HTTP compatibility to local launch
 10fb9ee Add current world session readiness API
 e794153 Type native opcode 13 type 8 record
@@ -503,6 +504,53 @@ capture classification; the independent stream totals remain `35078/129`,
 `73/3`, and `71099/1` full/partial for streams `92`, `114`, and `126`, with the
 known six one-HP correlation warnings only in stream `126`.
 
+This checkpoint closes the remaining reactive pickup effect branch. The
+responder previously modeled only item `[39,49,312]` even though both captures
+contain complete mesos `[41,49,312]` chains. It now requires a known absolute
+mesos balance, positive non-overflowing spawn amount, equal capture-neutral
+owner words, fully correlated effect/result/removal evidence, and deterministic
+trailing/notice shapes. Base opcode `185` receives reason `5`; compact opcode
+`222` receives reason `2`. The opcode-`41` request flag is selected from the
+latest correlated source packet rather than assigned meaning: all 29 stream-
+`92` mesos pickups use `false`, while stream `126` has 115 `false` and two
+early `true` values across 117 pickups. Both sources use trailing flag `false`
+and notice `result/subkind/tail = 0/0/0` throughout.
+
+Stream `114` has no decoded initial mesos field, so the policy adds one narrow
+continuation rule: evidence and replay must name the same capture path, evidence
+must end before replay begins, and their private entry-character ids must match.
+That check derives stream `92`'s final balance `4567` for later stream `114`
+and exposes only `same_capture_prior_stream`. It refuses cross-capture,
+overlapping, unknown-character, and unknown-balance joins. Real-PCAP derivation
+proves this rule on streams `92 -> 114`; a separate stream-`126` derivation
+proves the mixed request-flag evidence and selects its latest `false` variant.
+
+Five new tracked tests cover base and compact codecs, guarded same-capture
+continuation and negative controls, full gameplay-fold correlation, and
+encrypted hold-open serving/runtime telemetry. The tracked suite is now 349
+tests and passes. A broad filesystem discovery also sees three unrelated
+untracked UnityPy-dependent test modules;
+they fail import in the current environment and remain outside this checkpoint.
+
+A fresh browser-free regression then started the world replay with the new
+reactive policy and both readiness APIs. Before launch, login and world routes
+returned HTTP `503`; world status already reported mesos `4567`, provenance
+`same_capture_prior_stream`, 29 source results, and request-flag counts
+`false:29`. After direct nested-Sway selection, login returned HTTP `200` for
+exactly one matching opcode-`7`/opcode-`5` handoff and world returned HTTP `200`
+at `3/3` current-connection heartbeats with none pending. The saved login
+transcript
+`mesos_reactive_live_20260813/login/1786662652130789477_replay_12082.jsonl`
+is valid and warning-free at `handoff_ready` with `34/6` full/partial packets.
+The world transcript
+`mesos_reactive_live_20260813/world/1786662721877459359_replay_12857.jsonl`
+is valid and warning-free at `active` on map `101000000` with `103/2`, eight
+matched heartbeats, and none pending. The capture ends with an item rather than
+a mesos drop, so this run proves login, policy derivation, and identifier-free
+HTTP telemetry; an authentic live mesos request remains the next bounded proof.
+The fresh client and listeners were stopped, their four ports are offline, and
+the host Wine DLL path is not a mount point.
+
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container
 whose PID matches the new `Maplestory_Classic.exe`; do not use hard-coded
@@ -609,7 +657,16 @@ utf16    0x1cd0ca0     string   0x1cd0ce0
 
 ## Next implementation plan
 
-### 1. Preserve the closed opcode-189 boundary
+### 1. Live-prove the new mesos pickup responder
+
+Use an officially admitted active mesos drop, not a synthetic proximity-only
+spawn, and require an authentic opcode-`185` or compact opcode-`222` request
+before the server emits `[41,49,312]`. Verify the visible balance, exact folded
+delta/result/removal, continued heartbeats, readiness HTTP `200`, and absence of
+identifier leakage. Preserve the command-final coordinate selector established
+by the item controls.
+
+### 2. Preserve the closed opcode-189 boundary
 
 All supported opcode-`189` bodies now exact-consume with zero opaque bytes.
 The fold reports those layouts as full structural coverage and retains partial
@@ -619,7 +676,7 @@ metadata or an independent capture proves how an unobserved value selects the
 base versus extended nested-reader path. Do not retry GDB or Frida on this Wine
 build.
 
-### 2. Use the actual remaining partial inventory
+### 3. Use the actual remaining partial inventory
 
 Opcode `77` is already closed: both long variant-`8` wrappers reuse the fully
 typed opcode-`39` equipment-item grammar and have zero opaque metadata. The
@@ -627,7 +684,7 @@ only remaining reference partials are 129 opcode-`13` observations in stream
 `92`, three opcode-`13` observations in stream `114`, and one legacy opcode-
 `148` variant-`9` packet in stream `126`.
 
-### 3. Promote only another executed boundary
+### 4. Promote only another executed boundary
 
 Offline native recovery found only an unobserved type-`8` arm: handler RVA
 `0x4a8720` resolves its comparison to `8`, calls `0x4aa500`, reads one `u32` at
@@ -637,7 +694,7 @@ grammar; do not infer one from length/frequency, and do not trace, synthesize,
 replay, or expose their session-local bodies. Keep legacy opcode `148` partial
 unless another client version or independent capture proves its record layout.
 
-### 4. Re-run all independent checks
+### 5. Re-run all independent checks
 
 For the next boundary, add exact round trips, truncation checks at every
 variable-width read, redaction assertions, typed/gap accounting, and any
@@ -645,7 +702,7 @@ justified fold assertions. Run streams `92`, `114`, and `126`, plus the
 saved active transcript; the short stream alone is not an independent variant
 check.
 
-### 5. Keep all user-facing protocol surfaces synchronized
+### 6. Keep all user-facing protocol surfaces synchronized
 
 Update `docs/PROTOCOL.md`, `docs/STATUS.md`, `docs/CUSTOM_SERVER.md`, this file,
 `docs/REVERSE_ENGINEERING.md`, and the custom-server README with exact counts,
@@ -653,7 +710,7 @@ gap behavior, native RVAs, and the distinction between observed bytes,
 native evidence, and inference. Preserve the HTTP injection preconditions and
 do not expose raw identity-bearing payloads.
 
-### 6. Run gates, stage narrowly, commit, push, continue
+### 7. Run gates, stage narrowly, commit, push, continue
 
 From the repository root:
 

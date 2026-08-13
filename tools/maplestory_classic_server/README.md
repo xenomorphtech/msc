@@ -665,8 +665,10 @@ inventory targets must come
 from validated evidence in the replay itself or from
 `--item-pickup-evidence-transcript`; when replaying a PCAP, another stream in
 that file can be selected with `--item-pickup-evidence-tcp-stream`. The policy
-serves only a known active item drop with a matching epoch and a unique
-existing stack, then emits opcodes `39`, `49`, and `312`:
+serves only a known active drop with a matching epoch. An item requires a
+unique existing stack and emits opcodes `39`, `49`, and `312`. A mesos drop
+requires a known absolute balance plus complete correlated mesos evidence and
+emits opcodes `41`, `49`, and `312`:
 
 ```sh
 python -m maple_server replay \
@@ -689,6 +691,28 @@ contains quantity `74`, and stream `92` independently proves four pickups of
 that template as an Etc delta/gain quantity of one. The server never invents a
 drop id or validation token: it preserves the captured drop id, while the
 official client supplies its own token in the request.
+
+Mesos generation is separately guarded. Stream `92` proves 29 complete
+mesos-effect/result/removal chains with stat request flag `false`, trailing
+flag `false`, and notice `result/subkind/tail = 0/0/0`; stream `126` proves 117
+more and contains both request-flag values (`115 false`, `2 true`). The policy
+uses the latest captured stat flag and requires the trailing and notice shapes
+to be deterministic. A missing snapshot balance can be continued only from an
+earlier stream of the same capture when its private entry character matches;
+that rule derives stream `114`'s starting balance as stream `92`'s final
+`4567` without exposing the identifier. Other captures, overlapping streams,
+unknown characters, and unknown balances are not joined.
+
+The first fresh browser-free regression with this policy preserved the complete
+local login: login readiness moved from HTTP `503` to `200` after one matching
+handoff, world readiness moved from `503` to `200` after three current-session
+heartbeats, and the live pickup status exposed `4567`,
+`same_capture_prior_stream`, 29 mesos results, and `false:29` request-flag
+evidence without an identifier. Its final login/world folds are warning-free at
+`handoff_ready` (`34/6`) and `active` on map `101000000` (`103/2`) with eight
+matched heartbeats. Because stream `114` ends with an item drop, this run does
+not substitute for the next official-client proof against an admitted mesos
+drop.
 
 Reactive pickup also records request/completion/rejection runtime events. A
 rejected request for a missing or already removed drop stays nonfatal and is
@@ -2041,7 +2065,9 @@ When reactive pickup responses are
 enabled, `protocol.item_pickup_responses` reports the eligible aliased drops,
 captured correlation evidence, observed/served/rejected request counts,
 response packet count, last identifier-free response, and current mutable
-inventory/drop state. Derived gameplay state separately reports raw pickup
+inventory/mesos/drop state. Mesos state also reports whether its balance came
+from the replay itself or a guarded `same_capture_prior_stream` continuation.
+Derived gameplay state separately reports raw pickup
 requests, logical chains, retries, admitted drop kinds/templates, and pending
 chains; all raw object identifiers remain aliased or omitted.
 When a typed final-field NPC update is repeated, `protocol.npc_state_replay`
@@ -2651,3 +2677,10 @@ preserve distinct Unity scan codes in this setup.
     later, then a same-length client type `13` within `27.305..77.244` ms.
     Publish only FIFO/length/timing telemetry, retain partial coverage for every
     opaque body, and keep synthesis/replay disabled.
+121. Extend the reactive pickup responder from item-only `[39,49,312]` to the
+    independently captured mesos `[41,49,312]` branch. Derive the absolute
+    balance from replay state or a strictly earlier same-capture/same-character
+    stream, select the latest captured opcode-`41` request-flag variant, require
+    deterministic trailing/notice shapes, and prove base/compact codecs, fold
+    completion, encrypted hold-open serving, identifier-free telemetry, and
+    both reference-capture evidence sets.

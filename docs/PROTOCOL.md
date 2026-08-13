@@ -3203,6 +3203,30 @@ same active drop; their actor equals both captured owner values and their tail
 is zero. This establishes the complete spawn/request/effect/result/removal
 chain without assigning a security meaning to the client validation token.
 
+The reactive responder now covers the captured mesos branch as well as item
+inventory changes. It admits an active mesos drop only with a known absolute
+balance, positive non-overflowing spawn amount, equal capture-neutral owner
+values, and complete effect/result/removal evidence. Its three typed server
+records are an opcode-`41` MESOS-mask absolute balance, opcode `49` mesos notice
+using the spawn amount, and opcode `312` exact-id removal. Base opcode `185`
+selects captured reason `5`; compact opcode `222` selects reason `2`.
+
+Stream `92` proves 29 such chains with opcode-`41` request/trailing flags
+`false/false` and opcode-`49` `result/subkind/tail = 0/0/0`. Stream `126`
+independently proves 117 chains. Its correlated request-flag distribution is
+115 `false` and two `true`, while every trailing flag is `false` and every
+notice uses the same zero triple. The responder therefore chooses the latest
+correlated request-flag value from its evidence instead of assigning a semantic
+meaning, and requires the trailing/notice shapes to remain deterministic.
+
+An undecoded replay balance can be continued from a separate evidence stream
+only if both transcript objects name the same capture path, the evidence stream
+ends before replay begins, and their private entry-character identifiers match.
+This derives `4567` from `111.pcapng` stream `92` for later stream `114`; safe
+state reports only `same_capture_prior_stream`, never the compared identifier.
+Unknown, overlapping, cross-capture, or different-character cases do not seed
+mesos state.
+
 Stream `114` ends with one active mode-`2` item drop: template `4000004` at
 `(-863,-1742)`. The final folded local-player position is `(633,-2677)`, and
 the Etc inventory contains the same template in slot `7`, quantity `74`.

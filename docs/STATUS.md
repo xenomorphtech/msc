@@ -1132,9 +1132,22 @@
   the 54 local chains have zero effect/removal mismatches and zero pending
   requests. Reactive pickup tests additionally prove ordered
   request/completion events and nonfatal rejection after the modeled drop has
-  already been removed. Handler-confirmed branching and independent exact
-  validation promote all 257 reference-corpus pickup-result notices to full
-  structural coverage while retaining neutral labels for unresolved roles.
+  already been removed. The same policy now serves capture-proven mesos drops
+  as `[41,49,312]`, using a replay balance or guarded earlier
+  same-capture/same-character balance, the latest correlated stat request flag,
+  and deterministic trailing/notice shapes. Stream `92` contributes 29 such
+  chains (`false` request flag); stream `126` contributes 117 (`115 false`,
+  `2 true`). Base/compact codec, fold, and encrypted hold-open tests prove the
+  absolute balance delta, notice amount, reason-`5`/`2` removal, mutable state,
+  and identifier-free telemetry. Handler-confirmed branching and independent
+  exact validation promote all 257 reference-corpus pickup-result notices to
+  full structural coverage while retaining neutral labels for unresolved roles.
+  A fresh browser-free regression preserved the exact local handoff and world
+  entry: readiness moved `503 -> 200` on both services, the final folds are
+  warning-free at `handoff_ready` (`34/6`) and `active` map `101000000`
+  (`103/2`), all eight heartbeats match, and live pickup status exposes only
+  the guarded `4567` balance/provenance and capture counts. Stream `114` ends
+  with an item, so authentic live mesos admission remains the next proof.
   The corresponding 234 base, 17 extended-proof, and six compact requests also
   pass exact independent validation and now have full structural coverage;
   control/token/proof roles and contents remain neutral or redacted.
@@ -1653,14 +1666,13 @@ returned HTTP `200`. No character ID is exposed by either status surface.
 
 ## Immediate next steps
 
-1. Preserve the newly typed life-movement command-final coordinate selector
-   and its pickup folded-trailer fallback as a regression boundary. Extend
-   command tags `18..22` only from independently observed packets.
-2. Preserve the pickup-specific command-final coordinate selector and its
-   folded-trailer fallback as a regression boundary. Extend pickup handling to
-   additional item/request shapes only from independently admitted evidence,
-   and continue serving `[39,49,312]` only after an authentic opcode-`185` or
-   compact opcode-`222` request.
+1. Live-validate the new reactive mesos `[41,49,312]` branch with an officially
+   admitted active mesos drop while preserving the same connection-readiness,
+   heartbeat, and identifier-redaction gates used for item pickup.
+2. Preserve the pickup-specific command-final coordinate selector and folded-
+   trailer fallback as a regression boundary. Extend drop admission or response
+   shapes only from independently admitted evidence, and continue responding
+   only after an authentic opcode-`185` or compact opcode-`222` request.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Keep packet injection an explicit loopback-only opt-in while expanding

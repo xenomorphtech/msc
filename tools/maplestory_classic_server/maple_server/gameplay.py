@@ -2856,6 +2856,42 @@ class ItemPickupResponsePlan:
         }
 
 
+@dataclass(frozen=True)
+class MesosPickupResponsePlan:
+    request: ItemPickupRequest = field(repr=False)
+    drop_alias: str
+    mesos_before: int
+    mesos_delta: int
+    mesos_after: int
+    stat_update: CharacterStatUpdate = field(repr=False)
+    gain_notice: PickupGainNotice = field(repr=False)
+    removal: FieldDropRemoval = field(repr=False)
+
+    @property
+    def plaintexts(self) -> tuple[bytes, bytes, bytes]:
+        return (
+            self.stat_update.to_bytes(),
+            self.gain_notice.to_bytes(),
+            self.removal.to_bytes(),
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            **self.request.safe_dict(),
+            "drop": self.drop_alias,
+            "kind": "mesos",
+            "mesos_before": self.mesos_before,
+            "mesos_delta": self.mesos_delta,
+            "mesos_after": self.mesos_after,
+            "removal_reason": self.removal.reason,
+            "server_opcodes": [
+                self.stat_update.opcode,
+                self.gain_notice.opcode,
+                self.removal.opcode,
+            ],
+        }
+
+
 @dataclass
 class ItemPickupResponsePolicy:
     inventory_items: dict[str, dict[int, InventoryItemEntity]] = field(
@@ -2868,6 +2904,30 @@ class ItemPickupResponsePolicy:
     source_spawn_result_matches: int = 0
     source_effect_matches: int = 0
     source_removal_matches: int = 0
+    mesos: int | None = None
+    mesos_balance_source: str | None = None
+    source_mesos_pickup_results: int = 0
+    source_mesos_stat_request_flags: Counter[bool] = field(
+        default_factory=Counter
+    )
+    mesos_stat_request_flag: bool | None = None
+    mesos_stat_trailing_flag: bool | None = None
+    mesos_stat_trailing_value: int | None = None
+    mesos_notice_result_flag: int | None = None
+    mesos_notice_subkind: int | None = None
+    mesos_notice_tail: int | None = None
+
+    @property
+    def mesos_responses_modeled(self) -> bool:
+        return (
+            self.mesos is not None
+            and self.source_mesos_pickup_results > 0
+            and self.mesos_stat_request_flag is not None
+            and self.mesos_stat_trailing_flag is not None
+            and self.mesos_notice_result_flag is not None
+            and self.mesos_notice_subkind is not None
+            and self.mesos_notice_tail is not None
+        )
 
     def _matching_stack(
         self, drop: FieldDropEntity
@@ -2896,6 +2956,25 @@ class ItemPickupResponsePolicy:
         for entity in sorted(
             self.active_drops.values(), key=lambda candidate: candidate.alias
         ):
+            if entity.spawn.drop_kind == FieldDropSpawn.MESOS:
+                if (
+                    not self.mesos_responses_modeled
+                    or entity.spawn.value <= 0
+                    or self.mesos is None
+                    or self.mesos + entity.spawn.value
+                    > 0xFFFF_FFFF_FFFF_FFFF
+                ):
+                    continue
+                modeled_drops.append(
+                    {
+                        "drop": entity.alias,
+                        "kind": entity.spawn.kind_name,
+                        "mesos_amount": entity.spawn.value,
+                        "mesos_before": self.mesos,
+                        "mesos_after": self.mesos + entity.spawn.value,
+                    }
+                )
+                continue
             try:
                 inventory, item, quantity_delta = self._matching_stack(entity)
             except ValueError:
@@ -2913,16 +2992,27 @@ class ItemPickupResponsePolicy:
             )
         return {
             "field_epoch": self.field_epoch,
+            "mesos": self.mesos,
+            "mesos_balance_source": self.mesos_balance_source,
             "modeled_drops": modeled_drops,
             "source_evidence": {
                 "requests": self.source_item_pickup_requests,
                 "spawn_result_matches": self.source_spawn_result_matches,
                 "effect_matches": self.source_effect_matches,
                 "removal_matches": self.source_removal_matches,
+                "mesos_results": self.source_mesos_pickup_results,
+                "mesos_stat_request_flags": {
+                    str(flag).lower(): count
+                    for flag, count in sorted(
+                        self.source_mesos_stat_request_flags.items()
+                    )
+                },
             },
             "prediction": {
                 "server_opcodes": [39, 49, 312],
+                "mesos_server_opcodes": [41, 49, 312],
                 "inventory_quantity_delta": "captured_template_quantity",
+                "mesos_balance_delta": "captured_drop_amount",
                 "gain_notice": "captured_template_kind_and_quantity",
                 "field_drop_removal_reason": 5,
                 "active_field_drop_count_delta": -1,
@@ -2932,7 +3022,13 @@ class ItemPickupResponsePolicy:
     def apply_server_packet(self, plaintext: bytes) -> None:
         if len(plaintext) < 2:
             return
-        if int.from_bytes(plaintext[:2], "little") != 39:
+        opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 41:
+            update = CharacterStatUpdate.parse(plaintext)
+            if update.stat_mask & CharacterStatUpdate.MESOS:
+                self.mesos = update.mesos
+            return
+        if opcode != 39:
             return
         change_set = InventoryChangeSet.parse(plaintext)
         inventory_names = {
@@ -2983,7 +3079,9 @@ class ItemPickupResponsePolicy:
             else:
                 items.pop(modification.slot, None)
 
-    def respond(self, request: ItemPickupRequest) -> ItemPickupResponsePlan:
+    def respond(
+        self, request: ItemPickupRequest
+    ) -> ItemPickupResponsePlan | MesosPickupResponsePlan:
         if request.field_epoch != self.field_epoch:
             raise ValueError(
                 f"item-pickup request field epoch {request.field_epoch} does "
@@ -2992,10 +3090,54 @@ class ItemPickupResponsePolicy:
         drop = self.active_drops.get(request.drop_object_id)
         if drop is None:
             raise ValueError("item-pickup request references an unknown active drop")
-        if drop.spawn.drop_kind != FieldDropSpawn.ITEM:
-            raise ValueError("reactive mesos pickup responses are not modeled")
         if drop.spawn.owner_value_1 != drop.spawn.owner_value_2:
             raise ValueError("active drop has unequal capture-neutral owner values")
+        removal = FieldDropRemoval(
+            reason=2 if request.opcode == 222 else 5,
+            drop_object_id=request.drop_object_id,
+            actor_id=drop.spawn.owner_value_1,
+            trailing_value=None if request.opcode == 222 else 0,
+        )
+        if drop.spawn.drop_kind == FieldDropSpawn.MESOS:
+            if not self.mesos_responses_modeled or self.mesos is None:
+                raise ValueError("reactive mesos pickup responses are not modeled")
+            mesos_before = self.mesos
+            mesos_delta = drop.spawn.value
+            mesos_after = mesos_before + mesos_delta
+            if (
+                mesos_delta <= 0
+                or mesos_after > 0xFFFF_FFFF_FFFF_FFFF
+            ):
+                raise ValueError("mesos pickup would exceed the modeled balance")
+            stat_update = CharacterStatUpdate(
+                request_flag=self.mesos_stat_request_flag,
+                stat_mask=CharacterStatUpdate.MESOS,
+                mesos=mesos_after,
+                trailing_flag=self.mesos_stat_trailing_flag,
+                trailing_value=self.mesos_stat_trailing_value,
+            )
+            gain_notice = PickupGainNotice(
+                result_flag=self.mesos_notice_result_flag,
+                kind=PickupGainNotice.MESOS,
+                mesos_subkind=self.mesos_notice_subkind,
+                mesos_amount=mesos_delta,
+                mesos_tail=self.mesos_notice_tail,
+            )
+            plan = MesosPickupResponsePlan(
+                request=request,
+                drop_alias=drop.alias,
+                mesos_before=mesos_before,
+                mesos_delta=mesos_delta,
+                mesos_after=mesos_after,
+                stat_update=stat_update,
+                gain_notice=gain_notice,
+                removal=removal,
+            )
+            self.apply_server_packet(stat_update.to_bytes())
+            self.active_drops.pop(request.drop_object_id)
+            return plan
+        if drop.spawn.drop_kind != FieldDropSpawn.ITEM:
+            raise ValueError("active drop kind is not capture-modeled")
         inventory, item, quantity_delta = self._matching_stack(drop)
         if item.quantity is None:
             raise ValueError("item-pickup target stack has no quantity")
@@ -3018,12 +3160,6 @@ class ItemPickupResponsePolicy:
             kind=PickupGainNotice.ITEM,
             item_id=drop.spawn.value,
             quantity=quantity_delta,
-        )
-        removal = FieldDropRemoval(
-            reason=2 if request.opcode == 222 else 5,
-            drop_object_id=request.drop_object_id,
-            actor_id=drop.spawn.owner_value_1,
-            trailing_value=None if request.opcode == 222 else 0,
         )
         plan = ItemPickupResponsePlan(
             request=request,
@@ -13620,21 +13756,116 @@ def derive_item_pickup_response_policy(
             evidence_state.item_pickup_item_effects_by_template.items()
         )
     }
-    if not validated_item_effects:
-        raise ValueError("item-pickup evidence has no validated item effects")
+    mesos_stat_shapes: list[tuple[bool, bool, int | None]] = []
+    mesos_notice_shapes: set[tuple[int, int, int]] = set()
+    for observation in evidence.observations:
+        if observation.kind == "character_stat_update":
+            effect = observation.details.get("item_pickup_effect")
+            if isinstance(effect, dict) and effect.get("kind") == "mesos":
+                request_flag = observation.details.get("request_flag")
+                trailing_flag = observation.details.get("trailing_flag")
+                trailing_value = observation.details.get("trailing_value")
+                if (
+                    isinstance(request_flag, bool)
+                    and isinstance(trailing_flag, bool)
+                    and (
+                        trailing_value is None
+                        or isinstance(trailing_value, int)
+                    )
+                ):
+                    mesos_stat_shapes.append(
+                        (request_flag, trailing_flag, trailing_value)
+                    )
+        elif (
+            observation.kind == "pickup_gain_notice"
+            and observation.details.get("kind") == "mesos"
+            and observation.details.get("effect_matches_notice") is True
+            and observation.details.get("spawn_matches_notice") is True
+        ):
+            result_flag = observation.details.get("result_flag")
+            subkind = observation.details.get("mesos_subkind")
+            tail = observation.details.get("mesos_tail")
+            if all(isinstance(value, int) for value in (result_flag, subkind, tail)):
+                mesos_notice_shapes.add((result_flag, subkind, tail))
+    source_mesos_pickup_results = evidence_state.item_pickup_results_by_kind.get(
+        "mesos", 0
+    )
+    mesos_stat_request_flags = Counter(
+        request_flag for request_flag, _, _ in mesos_stat_shapes
+    )
+    mesos_stat_request_flag: bool | None = None
+    mesos_stat_trailing_flag: bool | None = None
+    mesos_stat_trailing_value: int | None = None
+    mesos_notice_result_flag: int | None = None
+    mesos_notice_subkind: int | None = None
+    mesos_notice_tail: int | None = None
+    trailing_shapes = {
+        (trailing_flag, trailing_value)
+        for _, trailing_flag, trailing_value in mesos_stat_shapes
+    }
+    if (
+        source_mesos_pickup_results > 0
+        and len(mesos_stat_shapes) == source_mesos_pickup_results
+        and len(trailing_shapes) == 1
+        and len(mesos_notice_shapes) == 1
+    ):
+        mesos_stat_request_flag = mesos_stat_shapes[-1][0]
+        mesos_stat_trailing_flag, mesos_stat_trailing_value = next(
+            iter(trailing_shapes)
+        )
+        (
+            mesos_notice_result_flag,
+            mesos_notice_subkind,
+            mesos_notice_tail,
+        ) = next(iter(mesos_notice_shapes))
+    mesos = analysis.state.mesos
+    mesos_balance_source = "replay_state" if mesos is not None else None
+    if (
+        mesos is None
+        and evidence_transcript is not None
+        and evidence_transcript is not transcript
+        and transcript.path == evidence_transcript.path
+        and analysis.state.entry_character_id is not None
+        and analysis.state.entry_character_id
+        == evidence_state.entry_character_id
+        and evidence_state.mesos is not None
+        and evidence_transcript.events
+        and transcript.events
+        and max(event.timestamp_ns for event in evidence_transcript.events)
+        < min(event.timestamp_ns for event in transcript.events)
+    ):
+        mesos = evidence_state.mesos
+        mesos_balance_source = "same_capture_prior_stream"
     inventory_items = {
         inventory: {item.slot: item for item in items}
         for inventory, items in analysis.state.inventory_items.items()
         if inventory in STACK_INVENTORY_TYPES
     }
+    mesos_shapes_modeled = (
+        mesos_stat_request_flag is not None
+        and mesos_stat_trailing_flag is not None
+        and mesos_notice_result_flag is not None
+        and mesos_notice_subkind is not None
+        and mesos_notice_tail is not None
+    )
     eligible_drops: dict[int, FieldDropEntity] = {}
     for object_id, entity in analysis.state.field_drops.items():
         spawn = entity.spawn
+        if spawn.owner_value_1 != spawn.owner_value_2:
+            continue
+        if spawn.drop_kind == FieldDropSpawn.MESOS:
+            if (
+                mesos_shapes_modeled
+                and mesos is not None
+                and spawn.value > 0
+                and mesos + spawn.value <= 0xFFFF_FFFF_FFFF_FFFF
+            ):
+                eligible_drops[object_id] = entity
+            continue
         effect = validated_item_effects.get(spawn.value)
         if (
             spawn.drop_kind != FieldDropSpawn.ITEM
             or effect is None
-            or spawn.owner_value_1 != spawn.owner_value_2
         ):
             continue
         inventory, quantity_delta = effect
@@ -13651,8 +13882,8 @@ def derive_item_pickup_response_policy(
             eligible_drops[object_id] = entity
     if not eligible_drops:
         raise ValueError(
-            "world transcript has no active item drop with a uniquely modeled "
-            "captured inventory effect"
+            "world transcript has no active drop with a uniquely modeled "
+            "captured pickup effect"
         )
     return ItemPickupResponsePolicy(
         inventory_items=inventory_items,
@@ -13665,6 +13896,16 @@ def derive_item_pickup_response_policy(
         ),
         source_effect_matches=evidence_state.item_pickup_effect_matches,
         source_removal_matches=evidence_state.item_pickup_removal_matches,
+        mesos=mesos,
+        mesos_balance_source=mesos_balance_source,
+        source_mesos_pickup_results=source_mesos_pickup_results,
+        source_mesos_stat_request_flags=mesos_stat_request_flags,
+        mesos_stat_request_flag=mesos_stat_request_flag,
+        mesos_stat_trailing_flag=mesos_stat_trailing_flag,
+        mesos_stat_trailing_value=mesos_stat_trailing_value,
+        mesos_notice_result_flag=mesos_notice_result_flag,
+        mesos_notice_subkind=mesos_notice_subkind,
+        mesos_notice_tail=mesos_notice_tail,
     )
 
 

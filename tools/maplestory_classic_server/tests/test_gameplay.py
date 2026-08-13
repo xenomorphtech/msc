@@ -6371,6 +6371,200 @@ class GameplayStateFoldTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown active drop"):
             policy.respond(request)
 
+    def test_derives_typed_mesos_pickup_responses_for_base_and_compact_requests(
+        self,
+    ) -> None:
+        mesos_drop = fixture_field_drop_spawn(
+            spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+            drop_object_id=40_004,
+            drop_kind=FieldDropSpawn.MESOS,
+            value=16,
+            position_x=633,
+            position_y=-2677,
+        )
+        replay = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                CharacterStatUpdate(
+                    request_flag=False,
+                    stat_mask=CharacterStatUpdate.MESOS,
+                    mesos=100,
+                ).to_bytes(),
+                mesos_drop.to_bytes(),
+            ),
+        )
+        evidence = fixture_gameplay_transcript(item_pickup=True)
+        base_policy = derive_item_pickup_response_policy(
+            replay,
+            evidence_transcript=evidence,
+        )
+        modeled = base_policy.safe_dict()["modeled_drops"]
+        self.assertEqual(
+            modeled,
+            [
+                {
+                    "drop": "drop:1",
+                    "kind": "mesos",
+                    "mesos_amount": 16,
+                    "mesos_before": 100,
+                    "mesos_after": 116,
+                }
+            ],
+        )
+        self.assertEqual(base_policy.mesos_balance_source, "replay_state")
+        base_request = ItemPickupRequest(
+            control_value=0,
+            field_epoch=1,
+            client_tick=102_100,
+            position_x=633,
+            position_y=-2677,
+            drop_object_id=40_004,
+            item_validation_token=0,
+        )
+
+        base_plan = base_policy.respond(base_request)
+
+        self.assertEqual(base_plan.request.shape_name, "base")
+        self.assertEqual(
+            tuple(
+                int.from_bytes(payload[:2], "little")
+                for payload in base_plan.plaintexts
+            ),
+            (41, 49, 312),
+        )
+        stat_update = CharacterStatUpdate.parse(base_plan.plaintexts[0])
+        self.assertTrue(stat_update.request_flag)
+        self.assertEqual(stat_update.stat_mask, CharacterStatUpdate.MESOS)
+        self.assertEqual(stat_update.mesos, 116)
+        self.assertFalse(stat_update.trailing_flag)
+        notice = PickupGainNotice.parse(base_plan.plaintexts[1])
+        self.assertEqual(
+            (
+                notice.result_flag,
+                notice.kind,
+                notice.mesos_subkind,
+                notice.mesos_amount,
+                notice.mesos_tail,
+            ),
+            (0, PickupGainNotice.MESOS, 0, 16, 0),
+        )
+        self.assertEqual(base_plan.removal.reason, 5)
+        self.assertEqual(base_plan.removal.actor_id, CHARACTER_ID)
+        self.assertEqual(base_plan.removal.trailing_value, 0)
+        self.assertEqual(base_policy.mesos, 116)
+        self.assertEqual(base_policy.active_drops, {})
+
+        compact_policy = derive_item_pickup_response_policy(
+            replay,
+            evidence_transcript=evidence,
+        )
+        compact_request = replace(
+            base_request,
+            control_value=None,
+            item_validation_token=0,
+            opcode=222,
+        )
+        compact_plan = compact_policy.respond(compact_request)
+        self.assertEqual(compact_plan.request.shape_name, "compact")
+        self.assertEqual(compact_plan.removal.reason, 2)
+        self.assertEqual(compact_plan.removal.actor_id, CHARACTER_ID)
+        self.assertIsNone(compact_plan.removal.trailing_value)
+
+    def test_derives_mesos_balance_from_same_capture_prior_stream(self) -> None:
+        evidence = fixture_gameplay_transcript(item_pickup=True)
+        replay = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                fixture_field_drop_spawn(
+                    spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+                    drop_object_id=40_004,
+                    drop_kind=FieldDropSpawn.MESOS,
+                    value=16,
+                    position_x=633,
+                    position_y=-2677,
+                ).to_bytes(),
+            ),
+        )
+        capture_path = Path("same-capture.pcapng")
+        evidence = replace(evidence, path=capture_path)
+        replay_offset = (
+            max(event.timestamp_ns for event in evidence.events) + 100
+        )
+        replay = replace(
+            replay,
+            path=capture_path,
+            events=tuple(
+                replace(
+                    event,
+                    timestamp_ns=event.timestamp_ns + replay_offset,
+                )
+                for event in replay.events
+            ),
+        )
+
+        policy = derive_item_pickup_response_policy(
+            replay,
+            evidence_transcript=evidence,
+        )
+
+        self.assertEqual(policy.mesos, 16)
+        self.assertEqual(
+            policy.mesos_balance_source, "same_capture_prior_stream"
+        )
+        self.assertNotIn(str(CHARACTER_ID), str(policy.safe_dict()))
+
+    def test_refuses_unproven_mesos_balance_continuation(self) -> None:
+        evidence = replace(
+            fixture_gameplay_transcript(item_pickup=True),
+            path=Path("same-capture.pcapng"),
+        )
+        replay = replace(
+            fixture_gameplay_transcript(
+                initial_snapshot=True,
+                extra_server_plaintexts=(
+                    fixture_field_drop_spawn(
+                        spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+                        drop_object_id=40_004,
+                        drop_kind=FieldDropSpawn.MESOS,
+                        value=16,
+                        position_x=633,
+                        position_y=-2677,
+                    ).to_bytes(),
+                ),
+            ),
+            path=Path("same-capture.pcapng"),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "no active drop with a uniquely modeled"
+        ):
+            derive_item_pickup_response_policy(
+                replay,
+                evidence_transcript=evidence,
+            )
+
+        after_evidence = max(
+            event.timestamp_ns for event in evidence.events
+        ) + 100
+        replay = replace(
+            replay,
+            path=Path("different-capture.pcapng"),
+            events=tuple(
+                replace(
+                    event,
+                    timestamp_ns=event.timestamp_ns + after_evidence,
+                )
+                for event in replay.events
+            ),
+        )
+        with self.assertRaisesRegex(
+            ValueError, "no active drop with a uniquely modeled"
+        ):
+            derive_item_pickup_response_policy(
+                replay,
+                evidence_transcript=evidence,
+            )
+
     def test_compact_item_pickup_response_uses_reason_two_removal(self) -> None:
         policy = derive_item_pickup_response_policy(
             fixture_gameplay_transcript(
@@ -6533,6 +6727,98 @@ class GameplayStateFoldTest(unittest.TestCase):
             if item.slot == 2
         )
         self.assertEqual(item.quantity, 2)
+
+    def test_generated_mesos_pickup_response_matches_gameplay_fold(self) -> None:
+        mesos_drop = fixture_field_drop_spawn(
+            spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+            drop_object_id=40_004,
+            drop_kind=FieldDropSpawn.MESOS,
+            value=16,
+            position_x=633,
+            position_y=-2677,
+        )
+        replay = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                CharacterStatUpdate(
+                    request_flag=False,
+                    stat_mask=CharacterStatUpdate.MESOS,
+                    mesos=100,
+                ).to_bytes(),
+                mesos_drop.to_bytes(),
+            ),
+        )
+        policy = derive_item_pickup_response_policy(
+            replay,
+            evidence_transcript=fixture_gameplay_transcript(item_pickup=True),
+        )
+        request = ItemPickupRequest(
+            control_value=0,
+            field_epoch=1,
+            client_tick=102_100,
+            position_x=633,
+            position_y=-2677,
+            drop_object_id=40_004,
+            item_validation_token=0,
+        )
+        response = policy.respond(request)
+        baseline = analyze_gameplay_transcript(replay)
+        ivs = {
+            "client_to_server": FIRST_IV,
+            "server_to_client": SECOND_IV,
+        }
+        for direction in ivs:
+            for _ in range(
+                sum(
+                    frame.direction == direction
+                    for frame in baseline.decoded.frames
+                )
+            ):
+                ivs[direction] = shuffle_iv(ivs[direction])
+        events = [event for event in replay.events if event.event != "close"]
+        timestamp_ns = events[-1].timestamp_ns + 1
+
+        def append(direction: str, plaintext: bytes) -> None:
+            nonlocal timestamp_ns
+            iv = ivs[direction]
+            events.append(
+                TranscriptEvent(
+                    event="data",
+                    timestamp_ns=timestamp_ns,
+                    direction=direction,
+                    data=(
+                        encode_frame_header(
+                            len(plaintext),
+                            iv,
+                            3 if direction == "client_to_server" else ~300,
+                        )
+                        + crypt_payload(plaintext, iv)
+                    ),
+                )
+            )
+            ivs[direction] = shuffle_iv(iv)
+            timestamp_ns += 1
+
+        append("client_to_server", request.to_bytes())
+        for plaintext in response.plaintexts:
+            append("server_to_client", plaintext)
+        events.append(TranscriptEvent(event="close", timestamp_ns=timestamp_ns))
+        observed = Transcript(
+            path=Path("generated-mesos-pickup.jsonl"),
+            events=tuple(events),
+        )
+
+        analysis = analyze_gameplay_transcript(observed)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.mesos, 116)
+        self.assertEqual(analysis.state.item_pickup_known_drops, 1)
+        self.assertEqual(analysis.state.item_pickup_results_by_kind, {"mesos": 1})
+        self.assertEqual(analysis.state.item_pickup_spawn_result_matches, 1)
+        self.assertEqual(analysis.state.item_pickup_effect_matches, 1)
+        self.assertEqual(analysis.state.item_pickup_removal_matches, 1)
+        self.assertEqual(analysis.state.pending_item_pickups, 0)
+        self.assertEqual(analysis.state.field_drops, {})
 
     def test_plans_typed_initial_player_hp_rewrite(self) -> None:
         transcript = fixture_gameplay_transcript(initial_snapshot=True)

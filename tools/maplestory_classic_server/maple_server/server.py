@@ -4189,8 +4189,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "during hold-open, validate opcode-185/222 requests against active "
-            "drops and captured item-effect evidence, then emit typed "
-            "opcode-39/opcode-49/opcode-312 responses; requires "
+            "drops and captured item/mesos-effect evidence, then emit typed "
+            "opcode-39 or opcode-41, opcode-49, and opcode-312 responses; "
+            "requires "
             "--keep-world-open"
         ),
     )
@@ -4199,8 +4200,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--item-pickup-evidence-transcript",
         type=Path,
         help=(
-            "derive item-pickup result quantities and inventory targets from "
-            "a separate validated world transcript"
+            "derive item-pickup result quantities, inventory targets, and "
+            "mesos response shapes from a separate validated world transcript"
         ),
     )
     item_pickup_evidence.add_argument(

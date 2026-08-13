@@ -3253,6 +3253,176 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 "item-pickup request references an unknown active drop",
             )
 
+    async def test_replay_responds_to_modeled_mesos_pickup_during_hold_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            drop_object_id = 40_004
+            spawn = FieldDropSpawn(
+                spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+                drop_object_id=drop_object_id,
+                drop_kind=FieldDropSpawn.MESOS,
+                value=16,
+                owner_value_1=300_001,
+                owner_value_2=300_001,
+                ownership_flag=0,
+                position_x=633,
+                position_y=-2677,
+                source_mob_object_id=0,
+                final_flag=0,
+            )
+            captured_plaintext = spawn.to_bytes()
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="modeled-mesos-pickup", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            observed_directory = Path(directory) / "observed"
+            policy = ItemPickupResponsePolicy(
+                inventory_items={},
+                active_drops={
+                    drop_object_id: FieldDropEntity(
+                        alias="drop:1",
+                        spawn=spawn,
+                    )
+                },
+                validated_item_effects={},
+                field_epoch=0,
+                mesos=100,
+                mesos_balance_source="replay_state",
+                source_mesos_pickup_results=29,
+                source_mesos_stat_request_flags={False: 29},
+                mesos_stat_request_flag=False,
+                mesos_stat_trailing_flag=False,
+                mesos_notice_result_flag=0,
+                mesos_notice_subkind=0,
+                mesos_notice_tail=0,
+            )
+            runtime_protocol = {
+                "item_pickup_responses": {
+                    "requests_observed": 0,
+                    "requests_served": 0,
+                    "requests_rejected": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            transcript_directory=observed_directory,
+                            hold_open_seconds=0.2,
+                            item_pickup_response_policy=policy,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            request = ItemPickupRequest(
+                control_value=0,
+                field_epoch=0,
+                client_tick=502_040,
+                position_x=633,
+                position_y=-2677,
+                drop_object_id=drop_object_id,
+                item_validation_token=0,
+            ).to_bytes()
+            writer.write(
+                encode_frame_header(len(request), client_iv, 300)
+                + crypt_payload(request, client_iv)
+            )
+            await writer.drain()
+
+            next_server_iv = shuffle_iv(server_iv)
+            stat_wire = await reader.readexactly(20)
+            stat_update = CharacterStatUpdate.parse(
+                crypt_payload(stat_wire[4:], next_server_iv)
+            )
+            self.assertEqual(stat_update.stat_mask, CharacterStatUpdate.MESOS)
+            self.assertEqual(stat_update.mesos, 116)
+            self.assertFalse(stat_update.request_flag)
+            next_server_iv = shuffle_iv(next_server_iv)
+            notice_wire = await reader.readexactly(19)
+            notice = PickupGainNotice.parse(
+                crypt_payload(notice_wire[4:], next_server_iv)
+            )
+            self.assertEqual(notice.kind, PickupGainNotice.MESOS)
+            self.assertEqual(notice.mesos_amount, 16)
+            next_server_iv = shuffle_iv(next_server_iv)
+            removal_wire = await reader.readexactly(19)
+            removal = FieldDropRemoval.parse(
+                crypt_payload(removal_wire[4:], next_server_iv)
+            )
+            self.assertEqual(removal.reason, 5)
+            self.assertEqual(removal.actor_id, 300_001)
+
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            metrics = runtime_protocol["item_pickup_responses"]
+            self.assertEqual(metrics["requests_observed"], 1)
+            self.assertEqual(metrics["requests_served"], 1)
+            self.assertEqual(metrics["requests_rejected"], 0)
+            self.assertEqual(metrics["response_packets_sent"], 3)
+            self.assertEqual(policy.mesos, 116)
+            self.assertEqual(policy.active_drops, {})
+            analysis = analyze_gameplay_transcript(
+                Transcript.load(next(observed_directory.glob("*.jsonl")))
+            )
+            self.assertTrue(analysis.valid, analysis.issues)
+            self.assertEqual(analysis.state.mesos, 116)
+            self.assertEqual(analysis.state.item_pickup_effect_matches, 1)
+            self.assertEqual(analysis.state.item_pickup_spawn_result_matches, 1)
+            self.assertEqual(analysis.state.item_pickup_removal_matches, 1)
+            self.assertEqual(analysis.state.pending_item_pickups, 0)
+            pickup_events = [
+                event
+                for event in analysis.events
+                if event.direction == "runtime"
+                and event.kind.startswith("item_pickup_")
+            ]
+            self.assertEqual(
+                [event.kind for event in pickup_events],
+                [
+                    "item_pickup_request_observed",
+                    "item_pickup_response_completed",
+                ],
+            )
+            self.assertEqual(pickup_events[-1].details["kind"], "mesos")
+            self.assertEqual(pickup_events[-1].details["mesos_after"], 116)
+            self.assertEqual(
+                pickup_events[-1].details["server_opcodes"], [41, 49, 312]
+            )
+
     async def test_replay_delays_before_and_between_post_transcript_frames(
         self,
     ) -> None:
