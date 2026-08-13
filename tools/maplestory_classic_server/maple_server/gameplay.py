@@ -9820,6 +9820,9 @@ class GameplayStateFold:
                 if initial_snapshot is not None
                 else None
             )
+            snapshot_structurally_bounded = (
+                transition is not None or typed_initial_snapshot is not None
+            )
             cleared_npcs = len(self.state.npcs)
             cleared_mobs = len(self.state.mobs)
             cleared_mob_temporary_stats = sum(
@@ -9925,7 +9928,17 @@ class GameplayStateFold:
             )
             details = {
                 "field_epoch": self.state.field_epoch,
-                "opaque_snapshot_bytes": len(snapshot.opaque_snapshot),
+                "snapshot_body_bytes": len(snapshot.opaque_snapshot),
+                "opaque_snapshot_bytes": (
+                    0
+                    if snapshot_structurally_bounded
+                    else len(snapshot.opaque_snapshot)
+                ),
+                "unparsed_snapshot_bytes": (
+                    0
+                    if snapshot_structurally_bounded
+                    else len(snapshot.opaque_snapshot)
+                ),
                 "cleared_npcs": cleared_npcs,
                 "cleared_mobs": cleared_mobs,
                 "cleared_mob_temporary_stats": (
@@ -10225,7 +10238,7 @@ class GameplayStateFold:
                 ),
                 coverage=(
                     ShapeCoverage.FULL
-                    if transition is not None
+                    if snapshot_structurally_bounded
                     else ShapeCoverage.PARTIAL
                 ),
                 parsed=(
@@ -10240,16 +10253,8 @@ class GameplayStateFold:
                 details=details,
                 issues=(
                     ()
-                    if transition is not None
-                    else (
-                        (
-                            "initial field snapshot equipment metadata and "
-                            "neutral progression/trailer roles remain "
-                            "partially opaque",
-                        )
-                        if typed_initial_snapshot is not None
-                        else ("field snapshot body remains opaque",)
-                    )
+                    if snapshot_structurally_bounded
+                    else ("field snapshot body remains opaque",)
                 ),
             )
         if opcode in {156, 385}:

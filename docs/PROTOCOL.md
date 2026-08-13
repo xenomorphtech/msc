@@ -738,8 +738,11 @@ The tail begins with a 30-byte preamble ending in the `1900-01-01` FILETIME
 sentinel. It then contains five zero-terminated equipment groups followed by
 zero-terminated use, setup, etc, and cash groups. Each item begins with a slot,
 record type, template id, cash flag, optional cash id, and expiration. Stack
-records additionally expose a `uint16` quantity. Equipment-specific metadata
-is retained as bounded raw record bytes until its conditional fields are named.
+records additionally expose a `uint16` quantity. Equipment records materialize
+upgrade slots/level, 15 signed stat values, owner text, flags, two metadata
+values, two extension flags, five extension values, conditional identity, and
+both sentinel-framed timestamp/value groups. Stack records retain a fixed
+ten-byte reserved region; it is zero in every reference item.
 
 Stream `92` contains group counts `4/1/4/0/0/24/2/17/1`; stream `114`
 contains `4/1/4/0/0/24/2/18/1`. The inventory regions are 2,930 and 2,972
@@ -815,6 +818,15 @@ while RVAs `0x1cd0730` and `0x1cd0790` account for the two- and eight-byte gaps
 in the typed prefix. The entire packet is now structurally bounded. Semantic
 names remain neutral for the five equipment groups, keyed property roles, and
 parts of the fixed trailer until independent effects identify them.
+
+The gameplay fold therefore reports both marker-`23` keyed-property snapshots
+and marker-`26` compact snapshots at full structural coverage. Neutral field
+names do not represent unparsed bytes: all three reference packets re-emit
+exactly, their observations report `opaque_snapshot_bytes: 0` and
+`unparsed_snapshot_bytes: 0`, and the genuinely unparsed short-envelope
+fallback remains partial. Current strict totals are `34,574/633/0/0`,
+`69/7/0/0`, and `70,077/1,023/0/0` for streams `92`, `114`, and `126`.
+The latest saved world transcript independently improves to `767/15/0/0`.
 
 The first controlled typed mutation targets `current_hp`. Replay analyzes the
 entire normalized world transcript, requires exactly one valid initial

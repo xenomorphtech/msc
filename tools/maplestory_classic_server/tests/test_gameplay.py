@@ -8784,7 +8784,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             for item in analysis.observations
             if item.kind == "initial_field_snapshot"
         )
-        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(observation.coverage.value, "full")
         self.assertEqual(
             observation.details["variant"], "initial_character_snapshot"
         )
@@ -8799,7 +8799,9 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.server_local_filetime_ticks,
             134_306_812_493_680_000,
         )
-        self.assertIn("partially opaque", observation.issues[0])
+        self.assertEqual(observation.details["opaque_snapshot_bytes"], 0)
+        self.assertEqual(observation.details["unparsed_snapshot_bytes"], 0)
+        self.assertEqual(observation.issues, ())
         self.assertNotIn('"name": "player"', analysis.to_json())
 
     def test_folds_compact_initial_progression_into_player_state(self) -> None:
@@ -8825,12 +8827,35 @@ class GameplayStateFoldTest(unittest.TestCase):
             for item in analysis.observations
             if item.kind == "initial_field_snapshot"
         )
-        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(observation.coverage.value, "full")
         self.assertEqual(observation.details["progression_shape"], "compact")
         self.assertEqual(
             observation.details["compact_variant_header_hex"], "00" * 7
         )
-        self.assertIn("partially opaque", observation.issues[0])
+        self.assertEqual(observation.details["opaque_snapshot_bytes"], 0)
+        self.assertEqual(observation.details["unparsed_snapshot_bytes"], 0)
+        self.assertEqual(observation.issues, ())
+
+    def test_keeps_unparsed_field_snapshot_fallback_partial(self) -> None:
+        opaque_body = b"\xaa" * 12
+        analysis = analyze_gameplay_transcript(
+            fixture_gameplay_transcript(
+                initial_snapshot_payload=struct.pack("<H", 157) + opaque_body
+            )
+        )
+
+        observation = next(
+            item
+            for item in analysis.observations
+            if item.kind == "field_snapshot"
+        )
+        self.assertEqual(observation.coverage.value, "partial")
+        self.assertEqual(observation.details["snapshot_body_bytes"], 12)
+        self.assertEqual(observation.details["opaque_snapshot_bytes"], 12)
+        self.assertEqual(observation.details["unparsed_snapshot_bytes"], 12)
+        self.assertEqual(
+            observation.issues, ("field snapshot body remains opaque",)
+        )
 
     def test_folds_skill_record_request_update_acknowledgement_lifecycle(
         self,

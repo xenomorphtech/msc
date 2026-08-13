@@ -1225,9 +1225,12 @@ stream `114`, the emitted `field_snapshot_received` event reports level `12`,
 job `200`, map `101000000`, portal `6`, HP `50/222`, MP `97/342`, and the
 remaining base/progression values without exposing the character name or raw
 identifier. The same event includes per-group item counts and slot/template/
-quantity records. Its packet observation is deliberately `partial`, because
-equipment-specific metadata and several progression/trailer roles are
-structurally bounded but not yet semantically named.
+quantity records. Its packet observation is `full`: equipment metadata and
+both progression variants are materialized through their final fields, while
+still-neutral semantic names do not imply unparsed bytes. Reports expose the
+body length separately and set both `opaque_snapshot_bytes` and
+`unparsed_snapshot_bytes` to zero; only an unrecognized short-envelope
+fallback remains partial.
 
 The level-1 stream-`126` marker-`26` snapshot now follows the same fold and
 emitter path. Its 823 bytes split into the shared typed character state, a

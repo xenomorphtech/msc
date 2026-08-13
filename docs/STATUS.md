@@ -65,6 +65,15 @@
   exposing ticket or identifier bytes. Current strict totals are
   `70,076/1,024/0/0`, `34,573/634/0/0`, and `68/8/0/0` for streams `126`,
   `92`, and `114` respectively.
+- The three initial server opcode-`157` snapshots are now classified at full
+  structural coverage. The later equipment codec removed the stale metadata
+  gap, both keyed-property and compact progression variants consume through
+  their final fields, and all three packets re-emit exactly. Their observations
+  now distinguish total body bytes from zero opaque/unparsed bytes; a synthetic
+  short-envelope fallback proves that genuinely unparsed opcode-`157` bodies
+  remain partial. Strict totals improve to `70,077/1,023/0/0`,
+  `34,574/633/0/0`, and `69/7/0/0` for streams `126`, `92`, and `114`; the
+  latest saved world transcript independently improves to `767/15/0/0`.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
   `379` are separated into neutral, capture-bounded records. All 181 reference
   packets consume and round-trip exactly; typed branches add 81 full
