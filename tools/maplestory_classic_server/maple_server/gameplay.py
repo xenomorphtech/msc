@@ -90,6 +90,7 @@ from .packets import (
     NpcStateUpdate,
     Opcode13Envelope,
     Opcode13Type1Envelope,
+    Opcode13Type8Record,
     PacketShapeError,
     PlayerMovementBroadcast,
     PlayerMovementPath,
@@ -10539,14 +10540,18 @@ class GameplayStateFold:
             )
         if opcode == 13 and len(payload) >= 3:
             message_type = payload[2]
-            if message_type not in {7, 12, 14}:
+            if message_type not in {7, 8, 12, 14}:
                 return self._observation(
                     frame,
                     kind="server_opcode_13",
                     coverage=ShapeCoverage.UNKNOWN,
                 )
-            message = Opcode13Envelope.parse(payload)
-            opaque_bytes = len(message.opaque_payload)
+            if message_type == 8:
+                message = Opcode13Type8Record.parse(payload)
+                opaque_bytes = 0
+            else:
+                message = Opcode13Envelope.parse(payload)
+                opaque_bytes = len(message.opaque_payload)
             self.state.server_opcode_13_messages += 1
             self.state.server_opcode_13_messages_by_type[message_type] += 1
             self.state.server_opcode_13_opaque_bytes += opaque_bytes
@@ -10557,6 +10562,8 @@ class GameplayStateFold:
                 "body_redacted": True,
                 "field_epoch": self.state.field_epoch,
             }
+            if isinstance(message, Opcode13Type8Record):
+                details.update(message.safe_dict())
             if message_type == 12:
                 self._pending_server_opcode_13_type_12.append(
                     (frame.index, frame.timestamp_ns)
@@ -10608,10 +10615,18 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="server_opcode_13_envelope",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.FULL
+                    if isinstance(message, Opcode13Type8Record)
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=message,
                 details=details,
-                issues=("server opcode-13 payload remains opaque",),
+                issues=(
+                    ()
+                    if isinstance(message, Opcode13Type8Record)
+                    else ("server opcode-13 payload remains opaque",)
+                ),
             )
         if opcode == 27:
             ledger_27 = ServerOpcode27IntegerLedger.parse(payload)

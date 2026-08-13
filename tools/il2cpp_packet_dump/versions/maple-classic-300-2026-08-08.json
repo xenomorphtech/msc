@@ -523,12 +523,13 @@
     },
     {
       "name":"server_transport_envelope","direction":"server_to_client","opcode":13,
-      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator; all 23 capture-111 server packets use exact u32-length-prefixed types 7, 12, or 14; the level-1-to-10 capture has no server opcode-13 packet",
+      "source":"IL2CPP opcode-13 handler ad8499ed... reads a u8 discriminator and dispatches native type 8 to one u32 reader; all 23 capture-111 server packets instead use capture-derived exact u32-length-prefixed types 7, 12, or 14; the level-1-to-10 capture has no server opcode-13 packet",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":13},
         {"op":"read","name":"message_type","kind":"u8"},
         {"op":"switch","field":"message_type","cases":[
           {"equals":7,"operations":[{"op":"read","name":"body_length","kind":"u32"},{"op":"bytes_from","name":"body","length_from":"body_length"}]},
+          {"equals":8,"operations":[{"op":"read","name":"native_value","kind":"u32"}]},
           {"equals":12,"operations":[{"op":"read","name":"body_length","kind":"u32"},{"op":"bytes_from","name":"body","length_from":"body_length"}]},
           {"equals":14,"operations":[{"op":"read","name":"body_length","kind":"u32"},{"op":"bytes_from","name":"body","length_from":"body_length"}]}
         ]}

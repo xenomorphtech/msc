@@ -918,6 +918,45 @@ class Opcode13Type1Envelope:
 
 
 @dataclass(frozen=True)
+class Opcode13Type8Record:
+    """Native server record whose scalar is consumed by the NGSX manager."""
+
+    value: int = field(repr=False)
+    message_type: int = 8
+    opcode: int = 13
+
+    @classmethod
+    def parse(cls, payload: bytes) -> "Opcode13Type8Record":
+        reader = PacketReader(payload, packet_name="opcode_13_type_8_record")
+        _expect_opcode(reader, 13)
+        message_type = reader.u8("message_type")
+        if message_type != 8:
+            raise PacketShapeError(
+                f"opcode_13_type_8_record.message_type is {message_type}, "
+                "expected 8"
+            )
+        value = reader.u32("value")
+        reader.finish()
+        return cls(value=value)
+
+    def safe_dict(self) -> dict[str, bool]:
+        return {"value_present": True}
+
+    def to_bytes(self) -> bytes:
+        if self.message_type != 8:
+            raise PacketShapeError(
+                f"opcode-13 fixed record type is {self.message_type}, "
+                "expected 8"
+            )
+        try:
+            return struct.pack("<HBI", self.opcode, self.message_type, self.value)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"opcode-13 type-8 value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class Opcode13Envelope:
     message_type: int
     opaque_payload: bytes

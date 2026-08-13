@@ -195,6 +195,12 @@
   distributions and a redaction flag. The 20 stream-`92` and two stream-`114`
   packets move from unknown to partial, producing `13,412/21,782/13/0` and
   `52/22/2/0`. Opaque bodies are not replayed.
+  A later static correction resolves the handler's obfuscated comparison to
+  type `8`: RVA `0x4a8720` dispatches that value to `0x4aa500`, which reads one
+  `u32` at `0x4aa773` and no later packet field. The exact seven-byte type-`8`
+  record now folds at full coverage with its scalar redacted. It is absent from
+  every reference capture; types `7/12/14` remain capture-derived and partial,
+  so strict corpus totals do not change.
 - Opcode-`13` world-session ordering is now folded without exposing or naming
   the opaque transport bodies. Both `111.pcapng` world streams contain
   `type 12 -> type 14 -> client type 13`: the first gap is

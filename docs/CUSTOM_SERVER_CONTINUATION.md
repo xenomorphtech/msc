@@ -218,7 +218,7 @@ and `71047/53` full/partial while the fold still unconditionally marked opcode
 `189` partial. The follow-up coverage correction now classifies a parsed entry
 as full exactly when its body has zero opaque bytes and preserves partial for
 the explicit legacy fallback. This promotes `58/4/52` entries and moves strict
-totals to `35078/129`, `73/3`, and `71099/1`. All 337
+totals to `35078/129`, `73/3`, and `71099/1`. All 340
 tracked Python tests, 17 Rust tests, the pinned-build ignored test, and the
 private capture-JSONL ignored
 test pass. All three gameplay analyses remain valid; stream `126` retains only
@@ -558,13 +558,13 @@ only remaining reference partials are 129 opcode-`13` observations in stream
 
 ### 3. Promote only another executed boundary
 
-For opcode `13`, use offline native producer/consumer code or metadata to
-determine whether types `6/7/12/13/14` contain a client-readable inner grammar
-or an externally produced opaque blob. Do not infer one from length/frequency,
-and do not trace, synthesize, replay, or expose these session-local bodies. If
-no executed inner reader exists, preserve the current partial envelope. Keep
-legacy opcode `148` partial unless another client version or independent
-capture proves its record layout.
+Offline native recovery found only an unobserved type-`8` arm: handler RVA
+`0x4a8720` resolves its comparison to `8`, calls `0x4aa500`, reads one `u32` at
+`0x4aa773`, and performs no later packet read. Preserve that full redacted
+seven-byte codec. Types `6/7/12/13/14` still have no client-readable inner
+grammar; do not infer one from length/frequency, and do not trace, synthesize,
+replay, or expose their session-local bodies. Keep legacy opcode `148` partial
+unless another client version or independent capture proves its record layout.
 
 ### 4. Re-run all independent checks
 

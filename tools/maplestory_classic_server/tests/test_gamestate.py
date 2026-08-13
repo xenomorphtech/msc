@@ -45,6 +45,7 @@ from maple_server.packets import (  # noqa: E402
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    Opcode13Type8Record,
     ServerOpcode0AccountBootstrapProbe,
     ServerOpcode22IndexedTextLedger,
     ServerOpcode27IntegerLedger,
@@ -687,6 +688,25 @@ class PacketShapeTest(unittest.TestCase):
         self.assertEqual(Opcode13Envelope.parse(message.to_bytes()), message)
         with self.assertRaisesRegex(PacketShapeError, "needs 7 bytes"):
             Opcode13Envelope.parse(message.to_bytes()[:-1])
+
+    def test_folds_native_server_opcode_13_type_8_at_full_coverage(self) -> None:
+        record = Opcode13Type8Record(value=0xDEADBEEF)
+        transcript = fixture_login_transcript(
+            legacy_login_records=(("server_to_client", record.to_bytes()),)
+        )
+
+        analysis = analyze_login_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "opcode_13_type_8_record"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(observation.issues, ())
+        self.assertTrue(observation.details["value_present"])
+        self.assertNotIn(str(record.value), str(analysis.safe_dict()))
 
     def test_client_status_message_round_trip(self) -> None:
         status = ClientStatusMessage(

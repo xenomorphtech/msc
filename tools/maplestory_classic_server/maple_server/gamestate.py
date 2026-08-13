@@ -29,6 +29,7 @@ from .packets import (
     PacketShapeError,
     Opcode13Ack,
     Opcode13Envelope,
+    Opcode13Type8Record,
     ServerOpcode0AccountBootstrapProbe,
     ServerOpcode22IndexedTextLedger,
     ServerOpcode27IntegerLedger,
@@ -741,6 +742,18 @@ class LoginStateFold:
                     coverage=ShapeCoverage.FULL,
                     parsed=acknowledgment,
                     details={"result": acknowledgment.result},
+                )
+            if payload[2] == 8:
+                message = Opcode13Type8Record.parse(payload)
+                return self._observation(
+                    frame,
+                    kind="opcode_13_type_8_record",
+                    coverage=ShapeCoverage.FULL,
+                    parsed=message,
+                    details={
+                        "message_type": message.message_type,
+                        **message.safe_dict(),
+                    },
                 )
             message = Opcode13Envelope.parse(payload)
             return self._observation(

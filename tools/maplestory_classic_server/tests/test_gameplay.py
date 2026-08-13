@@ -145,6 +145,7 @@ from maple_server.packets import (  # noqa: E402
     NpcStateUpdate,
     Opcode13Envelope,
     Opcode13Type1Envelope,
+    Opcode13Type8Record,
     PacketReader,
     PacketShapeError,
     PlayerMovementBroadcast,
@@ -7200,6 +7201,45 @@ class GameplayStateFoldTest(unittest.TestCase):
             "server_opcode_13=messages:1 message_types:{\"7\": 1}",
             render_gameplay_analysis(analysis),
         )
+
+    def test_server_opcode_13_type_8_native_record_round_trip(self) -> None:
+        record = Opcode13Type8Record(value=0xDEADBEEF)
+
+        encoded = record.to_bytes()
+
+        self.assertEqual(Opcode13Type8Record.parse(encoded), record)
+        self.assertEqual(record.safe_dict(), {"value_present": True})
+        self.assertNotIn(str(record.value), str(record.safe_dict()))
+        for truncated_length in range(len(encoded)):
+            with self.subTest(truncated_length=truncated_length):
+                with self.assertRaises(PacketShapeError):
+                    Opcode13Type8Record.parse(encoded[:truncated_length])
+        with self.assertRaises(PacketShapeError):
+            Opcode13Type8Record.parse(encoded + b"\x00")
+        with self.assertRaisesRegex(PacketShapeError, "expected 8"):
+            replace(record, message_type=7).to_bytes()
+
+    def test_folds_server_opcode_13_type_8_at_full_coverage(self) -> None:
+        record = Opcode13Type8Record(value=0xDEADBEEF)
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(record.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertEqual(analysis.state.server_opcode_13_messages_by_type, {8: 1})
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "server_opcode_13_envelope"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(observation.issues, ())
+        self.assertEqual(observation.details["opaque_payload_bytes"], 0)
+        self.assertTrue(observation.details["value_present"])
+        self.assertNotIn(str(record.value), str(analysis.safe_dict()))
 
     def test_correlates_redacted_opcode_13_exchange_chain(self) -> None:
         payloads = (

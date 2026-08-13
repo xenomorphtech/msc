@@ -226,7 +226,7 @@ the contents but safe packet/state output exposes only the variant, zero-field
 checks, text lengths, blob length, and aggregate pattern/count telemetry. The
 text, blob contents, and higher-level role remain deliberately neutral.
 
-Opcode `13` has four bounded envelopes in the observed sessions:
+Opcode `13` has five bounded forms across capture and native evidence:
 
 ```text
 acknowledgment (3 bytes)
@@ -238,6 +238,11 @@ uint16 opcode = 13
 uint8  message_type = 1
 uint32 security_value = crc32_non_reflected_le16(outbound_iv)
 uint32 reserved = 0
+
+native server type-8 record (7 bytes)
+uint16 opcode = 13
+uint8  message_type = 8
+uint32 value                          # redacted; role remains neutral
 
 opaque envelope (7 + payload_length bytes)
 uint16 opcode = 13
@@ -266,16 +271,27 @@ prefixes and exact packet boundaries remain validated. Direct placeholder
 launches also emit a fully decoded type-`15` status message containing “Please
 check the network connection status.”
 
+The pinned handler evidence is narrower than the captured envelope family.
+Handler RVA `0x4a8720` reads the discriminator at `0x4a87b3`, and its resolved
+comparison constant is exactly `8`. Only that branch calls RVA `0x4aa500`,
+whose sole packet read is one `u32` at `0x4aa773`; the handler performs no
+later packet read. `Opcode13Type8Record` therefore models that exact seven-byte
+native shape at full structural coverage while redacting the scalar. No
+reference capture contains type `8`. The observed server types `7`, `12`, and
+`14` remain capture-derived length-prefixed opaque envelopes and stay partial.
+Both login and gameplay folds recognize the native type-`8` record.
+
 The world-session gameplay fold uses the same neutral family. Stream `92`
 contains 446 fixed client type-`1` envelopes, 104 client type-`6` envelopes,
 and five client type-`13` envelopes. Stream `126` contains 970 fixed client
 type-`1` envelopes. On the server direction, stream `92` contains 14 type-`7`,
 one type-`12`, and five type-`14` envelopes; stream `114` contains one each of
 types `12` and `14`. Across login and gameplay, all 23 captured server packets
-have a body length that reaches the exact packet end; the automatic dump's
-handler confirms the leading discriminator read. The fold emits
-direction-specific type/body-length distributions and redaction flags without
-exposing any body. Server packets fold as partial
+have a body length that reaches the exact packet end. The automatic dump
+confirms the leading discriminator read but dispatches only unobserved type
+`8`; it does not prove an inner grammar for the three captured types. The fold
+emits direction-specific type/body-length distributions and redaction flags
+without exposing any body. Captured server packets fold as partial
 `server_opcode_13_envelope` observations and
 `server_opcode_13_message_received` events. The payload meanings remain
 partial rather than being labeled as security traffic.

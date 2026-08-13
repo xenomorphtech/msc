@@ -277,6 +277,14 @@ establish a capture-stable inner primitive boundary. Model only FIFO timing and
 equal-length evidence; do not
 trace, label, synthesize, or replay the opaque body.
 
+Static recovery does establish a separate, unobserved native branch. Opcode-
+`13` handler RVA `0x4a8720` reads one `u8` at `0x4a87b3`; resolving
+`0xc771a46a + *(u32 *)0x186824348` in the pinned image yields discriminator
+`8`. The selected call at `0x4a87e3` enters RVA `0x4aa500`, whose only packet
+primitive is a `u32` read at `0x4aa773`. No later packet read occurs before
+return. Model type `8` as a redacted seven-byte record, but do not transfer
+that grammar to captured types `7`, `12`, or `14`.
+
 `gdb_trace_packet_reads.py` traces the build's packet primitive readers by RVA.
 Its manifest-backed labels now cover all 12 readers used by this build:
 `u16=0x1cd0300`, `u8=0x1cd0530`, `bool=0x1cd0560`, `i8=0x1cd0700`,

@@ -920,9 +920,11 @@ The gameplay fold currently models these capture-backed boundaries:
   value plus its reserved-zero word, exactly round-trips all 1,416 corpus
   observations, and redacts the value from safe reports; length-prefixed
   type-`6`/`13` bodies remain opaque and partial,
-- server opcode `13`: the same handler-confirmed discriminator followed by a
-  capture-bounded `uint32` body length for types `7`, `12`, and `14`; safe
-  state/events expose only type and body-length distributions,
+- server opcode `13`: the handler-confirmed discriminator has a native type-
+  `8` arm containing exactly one redacted `u32`; captured types `7`, `12`, and
+  `14` instead retain their capture-bounded `uint32` body length and opaque
+  bytes. Safe state/events expose only type, value-presence, and body-length
+  distributions,
 - client opcode `43`: field-transfer request keyed by active field epoch; the
   portal form uses map sentinel `-1`, a redacted portal name, signed player
   position, and zero reserved word, while the 12-byte death-respawn form is

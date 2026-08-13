@@ -519,12 +519,18 @@ active. Because the visible field state did not identify a bounded effect,
 replay safety is limited to this exact packet-shape/non-stall result.
 
 Server opcode `13` closes the remaining attributed automatic-dump family.
-Handler `ad8499ed...` reads the discriminator directly; every observed server
-type (`7`, `12`, and `14`) then uses a `uint32` byte count whose body consumes
+Handler `ad8499ed...` reads the discriminator directly, but its resolved branch
+constant is specifically type `8`, not any captured type. That branch calls
+RVA `0x4aa500`, reads exactly one neutral `u32` at `0x4aa773`, and performs no
+later packet read. The new redacted type-`8` codec is therefore full; no
+reference capture contains it, and both login and gameplay folds recognize it.
+Observed server types `7`, `12`, and `14`
+instead use capture-bounded `uint32` byte counts whose opaque bodies consume
 the packet exactly. This holds for all 23 server packets in `111.pcapng`; the
 level-1-to-10 capture has no server packet in this family. The gameplay fold
-now emits partial `server_opcode_13_envelope` observations and
-`server_opcode_13_message_received` events, exposing only direction-specific
+now emits partial `server_opcode_13_envelope` observations for the captured
+types and full observations for native type `8`.
+`server_opcode_13_message_received` events expose only direction-specific
 type/body-length distributions and redaction flags. Stream `92` moves to
 `13,412/21,782/13/0` and stream `114` to `52/22/2/0`; stream `126` is unchanged.
 No replay is enabled because the bodies remain opaque and may contain
