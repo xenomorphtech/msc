@@ -986,7 +986,11 @@ The gameplay fold currently models these capture-backed boundaries:
   packet end in all 114 entries. All 114 reference entries round-trip
   losslessly with zero opaque body bytes; 44 have no tail-loop records, 63
   have one, and seven have two. All 77 executed nested records take the
-  extended native path. The completely typed pre-appearance bridge retains
+  extended native path. Zero-opaque entries now report full structural
+  coverage, while the legacy opaque fallback remains partial. This promotes
+  `58/4/52` entries and moves strict full/partial totals to `35,078/129`,
+  `73/3`, and `71,099/1` for streams `92`, `114`, and `126`. The completely
+  typed pre-appearance bridge retains
   redacted raw mask words. Server opcode `190` is the exact
   object-id removal and the fold requires movement broadcasts to reference a
   current-field entry,

@@ -459,7 +459,15 @@
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
   `4 -> 3 -> 4`; the active saved transcript still validates with six terminal
-  delegated records, 2,026 typed body bytes, and zero opaque body bytes.
+  delegated records, 2,026 typed body bytes, and zero opaque body bytes. Shape
+  coverage is now selected per entry: a zero-opaque body is full, while the
+  capture-bounded legacy fallback stays partial. This promotes all `58/4/52`
+  reference entries and the six active-transcript entries without changing
+  any wire grammar or neutral field name. Strict full/partial totals become
+  `35,078/129`, `73/3`, and `71,099/1`; the active transcript becomes `940/2`.
+  Only opcode `13` remains partial in streams `92`/`114` and the active
+  transcript, while stream `126` retains only its single legacy opcode-`148`
+  packet.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template

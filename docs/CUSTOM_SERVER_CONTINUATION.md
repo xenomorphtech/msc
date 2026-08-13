@@ -30,6 +30,8 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+1191510 Type opcode 189 nested loop records
+33ce71c Realign opcode 189 appearance tail
 4b48e6f Anchor opcode 189 delegated tail at packet end
 1c248f5 Type opcode 189 delegated tail
 1ae38d5 Read opcode 189 follow-up on both branches
@@ -211,14 +213,19 @@ unique record in every entry. Streams `92/114` use code-unit shapes
 `(0,1,1,9|15|16|20,0)` and stream `126` uses `(0,0,0,0,0)`. These are checked
 corpus results; text and scalar roles remain redacted and neutral.
 
-This nested-loop-reader increment keeps semantic coverage at
-`35020/187`, `69/7`, and `71047/53` full/partial for streams `92`, `114`, and
-`126`; opcode `189` remains partial despite exact byte coverage. All 336
+The nested-loop-reader increment first kept coverage at `35020/187`, `69/7`,
+and `71047/53` full/partial while the fold still unconditionally marked opcode
+`189` partial. The follow-up coverage correction now classifies a parsed entry
+as full exactly when its body has zero opaque bytes and preserves partial for
+the explicit legacy fallback. This promotes `58/4/52` entries and moves strict
+totals to `35078/129`, `73/3`, and `71099/1`. All 337
 tracked Python tests, 17 Rust tests, the pinned-build ignored test, and the
 private capture-JSONL ignored
 test pass. All three gameplay analyses remain valid; stream `126` retains only
-its known one-HP warning. Focused native-manifest validation consumes all 52
-stream-`126` opcode-`189` packets with zero unsupported or failed shapes.
+its known one-HP warning. The saved active transcript is `940/2`; all six
+opcode-`189` entries are full and only its two server opcode-`13` envelopes
+remain partial. Focused native-manifest validation consumes all 52 stream-`126`
+opcode-`189` packets with zero unsupported or failed shapes.
 
 The first stream-`114` entry is a useful controlled packet:
 
@@ -534,26 +541,30 @@ utf16    0x1cd0ca0     string   0x1cd0ce0
 ### 1. Preserve the closed opcode-189 boundary
 
 All supported opcode-`189` bodies now exact-consume with zero opaque bytes.
+The fold reports those layouts as full structural coverage and retains partial
+coverage only for the legacy opaque fallback.
 Keep the six observed nested-`i32` variants capture-bounded until offline
 metadata or an independent capture proves how an unobserved value selects the
 base versus extended nested-reader path. Do not retry GDB or Frida on this Wine
 build.
 
-### 2. Inventory the next material opaque family
+### 2. Use the actual remaining partial inventory
 
-The two long server opcode-`77` variant-`8` wrappers still retain 75-byte
-metadata regions around an otherwise typed opcode-`39` equipment-item record.
-Use native code, metadata, and the two independent item observations to locate
-another executed reader boundary without assigning gameplay meaning from byte
-frequency.
+Opcode `77` is already closed: both long variant-`8` wrappers reuse the fully
+typed opcode-`39` equipment-item grammar and have zero opaque metadata. The
+only remaining reference partials are 129 opcode-`13` observations in stream
+`92`, three opcode-`13` observations in stream `114`, and one legacy opcode-
+`148` variant-`9` packet in stream `126`.
 
 ### 3. Promote only another executed boundary
 
-Use neutral structural names, preserve arbitrary packet-string trailing bytes,
-redact all strings and scalar values from `safe_dict()`, and retain opaque
-fallbacks for unproven opcode-`77` layouts. Opcode `189` has exact byte coverage
-but remains partial semantic coverage because the neutral field roles are not
-claimed.
+For opcode `13`, use offline native producer/consumer code or metadata to
+determine whether types `6/7/12/13/14` contain a client-readable inner grammar
+or an externally produced opaque blob. Do not infer one from length/frequency,
+and do not trace, synthesize, replay, or expose these session-local bodies. If
+no executed inner reader exists, preserve the current partial envelope. Keep
+legacy opcode `148` partial unless another client version or independent
+capture proves its record layout.
 
 ### 4. Re-run all independent checks
 
@@ -603,9 +614,10 @@ test "$maple_local_head" = "$maple_remote_head"
 git status --short --branch
 ```
 
-After the opcode-`189` checkpoint, recompute the partial/unknown inventory and
-continue from the strongest capture-bounded family. Do not stop merely because
-the checkpoint is pushed.
+The recomputed inventory is now `35078/129`, `73/3`, and `71099/1`
+full/partial for streams `92`, `114`, and `126`. Continue from the remaining
+opcode-`13` or legacy opcode-`148` evidence; do not stop merely because the
+opcode-`189` checkpoint is pushed.
 
 This opcode-`13` increment keeps all non-type-`1` bodies opaque but records
 the cross-session exchange evidence. Streams `92` and `114` each contain one
@@ -614,9 +626,10 @@ same-length client type `13` another `27.305..30.942` ms later. Stream `92`
 adds four type-`14`/type-`13` pairs at `180.722..184.383` second server
 intervals; all six client messages follow in `27.305..77.244` ms and match the
 392-byte server body length. The fold publishes redacted FIFO correlation,
-length-match, pending/unmatched, and latency state/events. Structural coverage
-does not change (`35020/187`, `69/7`, and `71047/53` full/partial for streams
-`92`, `114`, and `126`), and no replay policy is enabled.
+length-match, pending/unmatched, and latency state/events. At that earlier
+correlation checkpoint, structural coverage did not change (`35020/187`,
+`69/7`, and `71047/53` full/partial for streams `92`, `114`, and `126`), and no
+replay policy was enabled.
 
 The correlation checkpoint reran all 332 tracked Python tests, 17 Rust unit
 tests, the pinned-client ignored integration test, and the private capture-JSONL

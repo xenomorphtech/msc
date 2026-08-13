@@ -384,6 +384,13 @@ validate the full grammar across all 114 opcode-`189` records: 44 have no loop
 records, 63 have one, and seven have two. The codec exposes only record counts,
 text lengths, and presence/nonzero summaries in safe output.
 
+All three reference streams independently exact-consume every opcode-`189`
+body with zero opaque bytes. The fold therefore reports these `58/4/52`
+entries as full structural coverage even though scalar roles remain neutral;
+only the explicit legacy opaque fallback remains partial. This moves strict
+full/partial totals to `35,078/129`, `73/3`, and `71,099/1` for streams
+`92`, `114`, and `126`.
+
 The delegate computes its comparison constant from static byte `0x15 + 0xeb`,
 which wraps to zero. Equality jumps through RVA `0x118313f` to the bool at
 `0x1183144`. The 51 nonzero captured variants instead take RVA `0x1182eba`,

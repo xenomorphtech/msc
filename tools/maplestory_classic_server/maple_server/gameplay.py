@@ -11750,16 +11750,26 @@ class GameplayStateFold:
                 details=details,
                 identifiers={"object_id": entered.object_id},
             )
+            opaque_body_bytes = entered.body.opaque_bytes
             return self._observation(
                 frame,
                 kind="remote_player_enter_field",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=(
+                    ShapeCoverage.FULL
+                    if opaque_body_bytes == 0
+                    else ShapeCoverage.PARTIAL
+                ),
                 parsed=entered,
                 details=details,
                 issues=(
-                    "remote-player entry conditional bridge body and residual "
-                    "tail regions remain version-specific and opaque",
-                ),
+                    (
+                        "remote-player entry body retains "
+                        f"{opaque_body_bytes} capture-bounded opaque fallback "
+                        "bytes"
+                    ),
+                )
+                if opaque_body_bytes
+                else (),
             )
         if opcode == 190:
             left = RemotePlayerLeaveField.parse(payload)

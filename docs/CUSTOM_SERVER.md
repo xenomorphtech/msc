@@ -118,10 +118,17 @@ parses in all 114. Across the corpus the model types all 36,336 body bytes and
 leaves zero opaque body bytes. Opcode `190` is
 its exact u32-id removal, not a neutral fixed
 record. Across streams `92/114/126`, all 114 entries and 39 leaves round-trip
-exactly, all leaves match current-epoch entries, and every one of 563 opcode-
+exactly and now report full structural coverage whenever the parsed body has
+zero opaque bytes; the legacy opaque fallback remains partial. All leaves
+match current-epoch entries, and every one of 563 opcode-
 `202` and 652 server opcode-`217` broadcasts now references a known player.
 Safe events/state expose aliases, level, name length, mask shape, and optional
 position, but never the captured id, name, or raw mask words.
+
+This promotion moves strict full/partial totals to `35,078/129`, `73/3`, and
+`71,099/1` for streams `92`, `114`, and `126`. The saved active transcript is
+`940/2`; its six opcode-`189` entries are full and its two server opcode-`13`
+envelopes remain partial.
 
 Server opcode `247` is now a fully bounded tutorial-UI instruction: terminated
 counted UTF-16 text, two i16 values, one control byte, and a handler-confirmed
@@ -290,10 +297,12 @@ uniqueness only, never the redacted numeric values.
 Server opcode `77` is a separate redacted envelope family. Across streams
 `92`, `114`, and `126`, variants `3/4/5/8` contribute 515 exact round trips.
 Variants `3`, `4`, and `5` fully bound their counted UTF-16 fields and neutral
-control/value suffixes; variant `8` preserves only its 4- or 117-byte tail as
-opaque. The fold emits `server_opcode_77_received` and exposes only variant,
-text-code-unit, control/value, and opaque-byte distributions. Neither packet
-records, events, text reports, JSON, nor HTTP status return captured text.
+control/value suffixes. Variant `8` binds its four-byte short suffix and both
+117-byte wrappers through the shared equipment-item grammar, leaving zero
+opaque item metadata. The fold emits `server_opcode_77_received` and exposes
+only variant, text-code-unit, control/value, and opaque-byte distributions.
+Neither packet records, events, text reports, JSON, nor HTTP status return
+captured text.
 
 The neutral server-record fold now separates opcodes `69`, `93`, `94`, `137`,
 `148`, `205`, `276`, and `379`. Streams `92/114/126` contribute `37/5/93`

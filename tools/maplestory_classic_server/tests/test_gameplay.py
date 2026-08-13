@@ -9951,6 +9951,58 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(event_kinds.count("remote_player_entered_field"), 3)
         self.assertEqual(event_kinds.count("remote_player_left_field"), 2)
 
+    def test_folds_fully_typed_remote_player_entry_at_full_coverage(
+        self,
+    ) -> None:
+        typed_bridge = RemotePlayerEntryTypedBridge.parse(
+            bytes(112), direct_u8_present=False
+        )
+        fully_typed_body = replace(
+            fixture_remote_player_entry_body(),
+            pre_appearance_mask_words=(0, 0x01FC0000, 0, 0),
+            typed_pre_appearance=typed_bridge,
+            opaque_pre_appearance=b"",
+            delegated_tail=RemotePlayerEntryDelegatedTail(
+                primary_text="Primary",
+                primary_text_trailing_u8=0,
+                nested_texts=("One", "Two", "Three", "Four"),
+                nested_text_trailing_u8s=(0, 0, 0, 0),
+                nested_u8=0,
+                comparison_i32=0,
+                datetime_u64=0,
+            ),
+            opaque_tail=b"",
+        )
+        entered = RemotePlayerEnterField(
+            object_id=987_654_321,
+            level=12,
+            name="CaptureName",
+            body=fully_typed_body,
+        )
+        transcript = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(entered.to_bytes(),),
+        )
+
+        analysis = analyze_gameplay_transcript(transcript)
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        observation = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "remote_player_enter_field"
+        )
+        self.assertEqual(observation.coverage, ShapeCoverage.FULL)
+        self.assertEqual(observation.issues, ())
+        self.assertEqual(observation.details["opaque_body_bytes"], 0)
+        self.assertEqual(
+            observation.details["typed_body_bytes"],
+            len(fully_typed_body.to_bytes()),
+        )
+        safe = analysis.safe_dict()
+        self.assertNotIn("CaptureName", str(safe))
+        self.assertNotIn("Primary", str(safe))
+
     def test_folds_mob_temporary_stat_set_reset_lifecycle(self) -> None:
         relay = ServerAttackRelay.parse(
             struct.pack("<HIB", 219, PLAYER_OBJECT_ID, 0x11)

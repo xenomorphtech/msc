@@ -1120,9 +1120,10 @@ remain redacted from safe output.
 The appearance boundary is capture-bounded rather than inferred from byte
 frequency: parsing after the native-delegate-relative 128/129-byte bridge and
 two-byte prefix, then requiring the appearance's leading hair slot, yields
-exactly one valid record in every entry across all three streams. Neutral field
-roles keep entries at partial semantic coverage despite exact byte coverage;
-the 39 exact removals are full. Every
+exactly one valid record in every entry across all three streams. Because shape
+coverage measures structural consumption rather than whether every field has a
+gameplay name, all 114 zero-opaque entries and the 39 exact removals now report
+full coverage. The legacy opaque body fallback remains partial. Every
 removal references a player introduced in the same field epoch. More
 importantly, all 563 opcode-
 `202` player-movement broadcasts and all 652 server opcode-`217` life-movement
@@ -1141,7 +1142,12 @@ length/nonzero summaries, and position when known. It never
 emits a captured object id, string, or appearance identifier. The saved active
 custom-server transcript remains valid with six terminal delegated records,
 2,026 typed body bytes, and zero opaque body bytes. Four entries carry the
-nonzero-variant group and the other two use the zero-variant path.
+nonzero-variant group and the other two use the zero-variant path. Promoting
+only zero-opaque entry layouts moves strict full/partial totals to
+`35,078/129`, `73/3`, and `71,099/1` for streams `92`, `114`, and `126`. The
+remaining partial observations are opcode `13` in streams `92`/`114` and the
+single legacy opcode-`148` packet in stream `126`. The saved active transcript
+is `940/2`, with only its two server opcode-`13` envelopes partial.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode
