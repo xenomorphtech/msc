@@ -978,36 +978,36 @@ opcode 189:
     int16[2] post_appearance_vector
     uint8 post_appearance_value_3
     uint16 post_appearance_value_4
-    bool tail_has_repeated_value
-    while tail_has_repeated_value:
-        int32 tail_repeated_value
+    if nonoverlapping_tail_prefix_partition:
         bool tail_has_repeated_value
-    int32[3] tail_post_loop_values
-    uint8 tail_variant
-    bool conditional_optional_text_present
-    if conditional_optional_text_present:
-        PacketUtf16 conditional_optional_text  # redacted; trailing u8 preserved
-    bool conditional_first_i64_pair_present
-    if conditional_first_i64_pair_present:
-        int64[2] conditional_first_i64_pair
-    bool conditional_second_i64_pair_present
-    if conditional_second_i64_pair_present:
-        int64[2] conditional_second_i64_pair
-    bool conditional_numeric_group_present
-    if conditional_numeric_group_present:
-        uint32 conditional_numeric_value_1
-        uint32 conditional_numeric_value_2
-        int32 conditional_numeric_value_3
-    bool conditional_continuation
-    # Both continuation arms reconverge before this read.
-    bool conditional_followup
-    if delegated_tail_reader_compatible:
-        PacketUtf16 delegated_primary_text       # redacted
-        PacketUtf16[4] delegated_nested_texts    # redacted
-        uint8 delegated_nested_value
-        int32 delegated_comparison_value
-        uint64 delegated_datetime_wire_value
-    byte[] opaque_tail                 # incompatible or remaining suffix
+        while tail_has_repeated_value:
+            int32 tail_repeated_value
+            bool tail_has_repeated_value
+        int32[3] tail_post_loop_values
+        uint8 tail_variant
+        if nonoverlapping_conditional_prefix_partition:
+            bool conditional_optional_text_present
+            if conditional_optional_text_present:
+                PacketUtf16 conditional_optional_text  # redacted
+            bool conditional_first_i64_pair_present
+            if conditional_first_i64_pair_present:
+                int64[2] conditional_first_i64_pair
+            bool conditional_second_i64_pair_present
+            if conditional_second_i64_pair_present:
+                int64[2] conditional_second_i64_pair
+            bool conditional_numeric_group_present
+            if conditional_numeric_group_present:
+                uint32 conditional_numeric_value_1
+                uint32 conditional_numeric_value_2
+                int32 conditional_numeric_value_3
+            bool conditional_continuation
+            bool conditional_followup
+    byte[] opaque_pre_delegated_gap     # 2, 4, 10, 11, or 23 bytes
+    PacketUtf16 delegated_primary_text       # redacted
+    PacketUtf16[4] delegated_nested_texts    # redacted
+    uint8 delegated_nested_value
+    int32 delegated_comparison_value
+    uint64 delegated_datetime_wire_value     # terminal field
 
 opcode 190:
     uint16 opcode
@@ -1042,29 +1042,13 @@ beyond those native type boundaries remain deliberately neutral.
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-32,981 bytes and leaves 3,355 bytes explicit. The full bridge is 128 bytes in
+35,369 bytes and leaves 967 bytes explicit. The full bridge is 128 bytes in
 112 records and 129 bytes in two stream-`92` records; after its typed 16-byte
 mask, all 112/113 bytes are typed before the appearance.
 The masks contain one nonzero word and seven enabled bits in 112 entries, or
 two nonzero words and eight enabled bits in two entries. Raw words remain
-redacted. Runtime-selected tails are 12..83 bytes. The 14-byte tail prefix
-follows the pinned delegate's
-executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
-reads, and one `u8`. All 114 captured loop terminators and variant bytes are
-zero, so none enters the loop. The three-value zero masks are
-`000 x 74`, `011 x 24`, and `111 x 16`, where `1` denotes a zero value; these
-values remain semantically neutral and are omitted from safe output. The next
-native conditional prefix consumes 6, 25, or 34 bytes in 83, 24, and seven
-entries respectively. Its first bool selects an optional packet UTF-16 record
-in 24 entries; every observed string is empty and its preserved trailing u8 is
-`16` (`18` records) or `20` (`6` records). The first `i64` pair is absent
-throughout, the second occurs in 31 entries, the `u32/u32/i32` group in seven,
-and the continuation bool is true in 24. Its true arm performs runtime-state
-work, but both arms reconverge at RVA `0x1183720` and all 114 records read the
-follow-up bool at `0x1183725`. The captured values are 111 zero and three one;
-all 24 true-continuation records have a zero follow-up. The codec preserves
-every raw flag and scalar for exact replay while safe output exposes only
-presence/count summaries. At RVA `0x118381e`, the call site loads the player
+redacted. At RVA `0x1183720`, both runtime-state arms reconverge before the
+follow-up bool read. At RVA `0x118381e`, the call site loads the player
 object's parser field. The null path throws; the successful non-null path calls
 RVA `0x16ca1d0` at `0x1183857`. The player base constructor allocates this
 outer object, and its constructor allocates both nested records. The callee
@@ -1073,24 +1057,26 @@ reader for four more packet strings and one `u8`, then requires the second
 nested record and reads one `i32` plus an eight-byte DateTime wire value. Each
 packet-string helper is `u16 code units + UTF-16LE + u8`; the helper preserves
 the final byte but does not require it to be zero. Null at the outer field or
-either nested record reaches a generated null-reference throw.
+either nested record reaches a generated null-reference throw. After the call,
+the handler invokes one player virtual method without passing the packet reader
+and returns at `0x1183892`; it performs no later packet read.
 
-That exact downstream grammar has a 28-byte all-empty minimum. It can execute
-without underflow on `30/2/32` entries in streams `92/114/126`, respectively,
-so 64 entries expose a typed delegated record and the other 50 retain their
-entire suffix as an opaque fallback. All five text fields are empty in those
-64 compatible records. The 32 stream-`126` records have zero trailing bytes
-and zero scalar values; the 32 compatible stream-`92`/`114` records each have
-one nonzero string-trailing byte plus nonzero comparison and DateTime wire
-values. Safe output reports only counts and nonzero summaries. It never emits
-the text or scalar values. Because Unity prefab cloning can replace constructor
-defaults and because 50 captured suffixes do not fit the pinned reader, reader
-compatibility is modeled explicitly rather than inferred for every entry.
-Every remaining opaque suffix still ends in the shared 12-byte sequence, but
-that byte shape alone is not promoted. Remaining opaque suffixes are 10..72
-bytes.
-Per-stream typed/opaque body accounting is `17,244/2,486`, `1,174/152`, and
-`14,563/717`. The
+The downstream grammar has a 28-byte all-empty minimum. Searching only for a
+record that consumes exactly to packet end yields one and only one candidate in
+every entry across all three corpora. This corrects the earlier false-positive
+front-of-suffix alignment produced by long zero runs. Streams `92/114` have
+terminal text-code-unit shapes `(0,1,1,9|15|16|20,0)`; all 52 stream-`126`
+records are `(0,0,0,0,0)`. Text and scalar values remain redacted. The terminal
+record is 28 bytes 52 times, 50 bytes once, 62 bytes three times, 64 bytes 51
+times, and 72 bytes seven times.
+
+Seventy entries retain both earlier typed prefixes without overlap, four retain
+only the 14-byte loop/scalar prefix, and 40 conservatively demote both earlier
+prefixes. The exact opaque gap before the terminal record is 2 bytes four
+times, 4 bytes 40 times, 10 bytes seven times, 11 bytes 60 times, and 23 bytes
+three times. There are no bytes after the terminal record. Per-stream
+typed/opaque body accounting is `19,276/454`, `1,296/30`, and `14,797/483`.
+The
 appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,
@@ -1119,11 +1105,12 @@ exposes only an alias, level, both string-code-unit counts, appearance entry
 counts, typed/opaque byte counts, mask nonzero-word/enabled-bit counts,
 header/prefix-presence counts,
 post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
-conditional-branch presence/count summaries, delegated-reader compatibility
-and redacted length/nonzero summaries, and position when known. It never
+conditional-prefix presence/count summaries, terminal delegated-reader
+length/nonzero summaries, and position when known. It never
 emits a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with six entries, 1,780 typed body
-bytes, and 246 opaque body bytes; four entries use the delegated typed layout.
+custom-server transcript remains valid with six terminal delegated records,
+1,974 typed body bytes, and 52 opaque body bytes. Four entries retain both
+earlier prefixes; two conservatively retain neither.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

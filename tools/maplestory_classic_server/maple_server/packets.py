@@ -10581,6 +10581,26 @@ class RemotePlayerEntryDelegatedTail:
         record._validate()
         return record
 
+    @classmethod
+    def parse_unique_terminal(
+        cls, payload: bytes
+    ) -> tuple[int, "RemotePlayerEntryDelegatedTail"] | None:
+        candidates: list[tuple[int, RemotePlayerEntryDelegatedTail]] = []
+        for offset in range(len(payload)):
+            reader = PacketReader(
+                payload[offset:],
+                packet_name="remote_player_entry_terminal_delegated_tail",
+            )
+            try:
+                record = cls.parse_from(reader)
+                reader.finish()
+            except PacketShapeError:
+                continue
+            candidates.append((offset, record))
+        if len(candidates) != 1:
+            return None
+        return candidates[0]
+
     @staticmethod
     def _encoded_packet_string(text: str, trailing_u8: int) -> bytes:
         try:
@@ -10716,8 +10736,9 @@ class RemotePlayerEntryBody:
     post_appearance_vector_i16: tuple[int, int]
     post_appearance_u8: int
     post_appearance_u16: int
-    tail_prefix: RemotePlayerEntryTailPrefix
-    conditional_tail_prefix: RemotePlayerEntryConditionalTailPrefix
+    tail_prefix: RemotePlayerEntryTailPrefix | None
+    conditional_tail_prefix: RemotePlayerEntryConditionalTailPrefix | None
+    opaque_pre_delegated_tail: bytes = field(repr=False)
     delegated_tail: RemotePlayerEntryDelegatedTail | None
     opaque_tail: bytes = field(repr=False)
 
@@ -10810,23 +10831,59 @@ class RemotePlayerEntryBody:
         )
         post_appearance_u8 = tail_reader.u8("post_appearance_u8")
         post_appearance_u16 = tail_reader.u16("post_appearance_u16")
-        tail_prefix = RemotePlayerEntryTailPrefix.parse_from(tail_reader)
-        conditional_tail_prefix = (
-            RemotePlayerEntryConditionalTailPrefix.parse_from(tail_reader)
+        tail_payload = tail_reader.bytes(
+            tail_reader.remaining, "post_appearance_tail"
         )
+        terminal_delegated = (
+            RemotePlayerEntryDelegatedTail.parse_unique_terminal(tail_payload)
+        )
+        tail_prefix = None
+        conditional_tail_prefix = None
+        opaque_pre_delegated_tail = b""
         delegated_tail = None
-        delegated_reader = PacketReader(
-            tail_reader.payload[tail_reader.offset :],
-            packet_name="remote_player_entry_delegated_tail",
-        )
-        try:
-            delegated_tail = RemotePlayerEntryDelegatedTail.parse_from(
-                delegated_reader
+        opaque_tail = b""
+        if terminal_delegated is None:
+            prefix_reader = PacketReader(
+                tail_payload,
+                packet_name="remote_player_entry_legacy_tail",
             )
-        except PacketShapeError:
-            pass
+            tail_prefix = RemotePlayerEntryTailPrefix.parse_from(prefix_reader)
+            conditional_tail_prefix = (
+                RemotePlayerEntryConditionalTailPrefix.parse_from(
+                    prefix_reader
+                )
+            )
+            opaque_tail = prefix_reader.bytes(
+                prefix_reader.remaining, "opaque_tail"
+            )
         else:
-            tail_reader.bytes(delegated_reader.offset, "delegated_tail")
+            delegated_offset, delegated_tail = terminal_delegated
+            prefix_reader = PacketReader(
+                tail_payload[:delegated_offset],
+                packet_name="remote_player_entry_pre_delegated_tail",
+            )
+            opaque_offset = 0
+            try:
+                tail_prefix = RemotePlayerEntryTailPrefix.parse_from(
+                    prefix_reader
+                )
+            except PacketShapeError:
+                tail_prefix = None
+            else:
+                opaque_offset = prefix_reader.offset
+                try:
+                    conditional_tail_prefix = (
+                        RemotePlayerEntryConditionalTailPrefix.parse_from(
+                            prefix_reader
+                        )
+                    )
+                except PacketShapeError:
+                    conditional_tail_prefix = None
+                else:
+                    opaque_offset = prefix_reader.offset
+            opaque_pre_delegated_tail = tail_payload[
+                opaque_offset:delegated_offset
+            ]
         record = cls(
             secondary_text=secondary_text,
             header_u16_1=header_u16_1,
@@ -10848,10 +10905,9 @@ class RemotePlayerEntryBody:
             post_appearance_u16=post_appearance_u16,
             tail_prefix=tail_prefix,
             conditional_tail_prefix=conditional_tail_prefix,
+            opaque_pre_delegated_tail=opaque_pre_delegated_tail,
             delegated_tail=delegated_tail,
-            opaque_tail=tail_reader.bytes(
-                tail_reader.remaining, "opaque_tail"
-            ),
+            opaque_tail=opaque_tail,
         )
         record._validate()
         return record
@@ -10867,7 +10923,11 @@ class RemotePlayerEntryBody:
             if self.typed_pre_appearance is not None
             else len(self.opaque_pre_appearance)
         )
-        return pre_appearance + len(self.opaque_tail)
+        return (
+            pre_appearance
+            + len(self.opaque_pre_delegated_tail)
+            + len(self.opaque_tail)
+        )
 
     @property
     def typed_bytes(self) -> int:
@@ -10949,12 +11009,35 @@ class RemotePlayerEntryBody:
                 "remote-player entry post-appearance vector must contain "
                 "two i16 values"
             )
+        if self.tail_prefix is None and self.conditional_tail_prefix is not None:
+            raise PacketShapeError(
+                "remote-player conditional tail requires a typed tail prefix"
+            )
+        if self.tail_prefix is not None:
+            self.tail_prefix._validate()
+        if self.conditional_tail_prefix is not None:
+            self.conditional_tail_prefix._validate()
+        if self.delegated_tail is None and self.opaque_pre_delegated_tail:
+            raise PacketShapeError(
+                "remote-player pre-delegated opaque bytes require a delegated tail"
+            )
+        if self.delegated_tail is None and (
+            self.tail_prefix is None
+            or self.conditional_tail_prefix is None
+        ):
+            raise PacketShapeError(
+                "remote-player legacy tail requires both typed prefixes"
+            )
         if self.delegated_tail is None and not self.opaque_tail:
             raise PacketShapeError(
                 "remote-player entry post-appearance region cannot be empty"
             )
         if self.delegated_tail is not None:
             self.delegated_tail._validate()
+            if self.opaque_tail:
+                raise PacketShapeError(
+                    "remote-player delegated tail must terminate the packet"
+                )
         if (
             not self.appearance.visible_entries
             or self.appearance.visible_entries[0].slot != 0
@@ -10994,6 +11077,38 @@ class RemotePlayerEntryBody:
                 "typed_delegated_tail_bytes": 0,
             }
         )
+        tail_prefix_details = (
+            {
+                "tail_prefix_typed_layout": True,
+                **self.tail_prefix.safe_dict(),
+            }
+            if self.tail_prefix is not None
+            else {
+                "tail_prefix_typed_layout": False,
+                "tail_repeated_i32_values": 0,
+                "tail_post_loop_nonzero_i32_values": 0,
+                "tail_variant_u8_nonzero": False,
+                "typed_tail_prefix_bytes": 0,
+            }
+        )
+        conditional_tail_details = (
+            {
+                "conditional_tail_typed_layout": True,
+                **self.conditional_tail_prefix.safe_dict(),
+            }
+            if self.conditional_tail_prefix is not None
+            else {
+                "conditional_tail_typed_layout": False,
+                "conditional_tail_optional_text_present": False,
+                "conditional_tail_optional_text_code_units": 0,
+                "conditional_tail_i64_pairs_present": 0,
+                "conditional_tail_numeric_group_present": False,
+                "conditional_tail_continuation": False,
+                "conditional_tail_followup_present": False,
+                "conditional_tail_followup_nonzero": False,
+                "typed_conditional_tail_prefix_bytes": 0,
+            }
+        )
         return {
             "secondary_text_code_units": self.secondary_text_code_units,
             "header_nonzero_fields": self.header_nonzero_fields,
@@ -11024,10 +11139,13 @@ class RemotePlayerEntryBody:
             "post_appearance_nonzero_fields": (
                 self.post_appearance_nonzero_fields
             ),
-            **self.tail_prefix.safe_dict(),
-            **self.conditional_tail_prefix.safe_dict(),
+            **tail_prefix_details,
+            **conditional_tail_details,
             **delegated_tail_details,
             "typed_body_bytes": self.typed_bytes,
+            "opaque_pre_delegated_tail_bytes": len(
+                self.opaque_pre_delegated_tail
+            ),
             "opaque_tail_bytes": len(self.opaque_tail),
             "opaque_body_bytes": self.opaque_bytes,
         }
@@ -11088,8 +11206,17 @@ class RemotePlayerEntryBody:
                 appearance_prefix,
                 self.appearance.to_bytes(),
                 post_appearance,
-                self.tail_prefix.to_bytes(),
-                self.conditional_tail_prefix.to_bytes(),
+                (
+                    self.tail_prefix.to_bytes()
+                    if self.tail_prefix is not None
+                    else b""
+                ),
+                (
+                    self.conditional_tail_prefix.to_bytes()
+                    if self.conditional_tail_prefix is not None
+                    else b""
+                ),
+                bytes(self.opaque_pre_delegated_tail),
                 (
                     self.delegated_tail.to_bytes()
                     if self.delegated_tail is not None

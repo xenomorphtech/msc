@@ -423,39 +423,34 @@
   All 114 entries and 39 leaves round-trip exactly. Native control flow and
   all three reference streams bound a second terminated UTF-16 string, a fixed
   four-value header, an appearance-adjacent `u16`, exactly one appearance
-  record, 31 typed post-appearance bytes, and the delegate-proven tail prefix:
-  a bool-terminated repeated-`i32` loop, three `i32`s, one `u8`, then optional
-  text, two conditional `i64` pairs, a conditional `u32/u32/i32` group, a
-  continuation bool, and the follow-up bool reached after both arms reconverge.
+  record, 31 typed post-appearance bytes, and nonoverlapping portions of the
+  delegate-proven loop/scalar and conditional prefixes.
   A separately recovered
   bridge reader types its first four consecutive `u32` mask words. Static
   recovery then types the optional direct `u8`, two fixed `u8`s, and all seven
-  virtual records with exact widths `15/15/15/13/20/17/15`. All 114
-  loop terminators and tail variants are zero; the next prefix observes 24
-  empty optional-text records, 31 second `i64` pairs, seven numeric groups, and
-  24 true continuations. Both continuation arms reconverge at RVA `0x1183720`,
-  so all 114 records execute the follow-up read: 111 values are zero and three
-  are one; all true-continuation records have a zero follow-up. The runtime
+  virtual records with exact widths `15/15/15/13/20/17/15`. Both runtime-state
+  arms reconverge before the follow-up read at RVA `0x1183720`. The runtime
   parser check at RVA `0x118381e` throws on null and reaches the delegated
   parser at `0x1183857` on the successful path. Constructor and callee recovery
   prove a required outer packet string, a required nested record with four
   more packet strings and one `u8`, then a required `i32` plus DateTime record.
-  The 28-byte minimum reader executes without underflow for `30/2/32` entries
-  in streams `92/114/126`; those 64 records are typed and the other 50 remain
-  lossless opaque fallbacks. All five compatible text fields are empty and
-  safe output reports only lengths and nonzero summaries. Every remaining
-  suffix still ends in the shared 12-byte sequence, which remains neutral.
+  The handler performs no packet read after that call. Exactly one instance of
+  the grammar consumes to packet end in every entry; this terminal invariant
+  rejects the earlier zero-run front alignment. All 114 delegated records are
+  typed and safe output reports only lengths and nonzero summaries. Seventy
+  entries retain both earlier prefixes, four retain only the first, and 40
+  conservatively retain neither. Their only remaining opaque bytes are the
+  2/4/10/11/23-byte gaps before the terminal record.
   The masks have `1/2` nonzero words and
   `7/8` enabled bits
-  in `112/2` entries, with raw words redacted. Exact replay types 32,981 body
-  bytes while retaining 3,355 runtime-selected tail bytes. Every
+  in `112/2` entries, with raw words redacted. Exact replay types 35,369 body
+  bytes while retaining 967 runtime-selected gap bytes. Every
   leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
-  `4 -> 3 -> 4`; the active saved transcript still validates with six entries,
-  four delegated typed layouts, 1,780 typed body bytes, and 246 opaque body
-  bytes.
+  `4 -> 3 -> 4`; the active saved transcript still validates with six terminal
+  delegated records, 1,974 typed body bytes, and 52 opaque body bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template

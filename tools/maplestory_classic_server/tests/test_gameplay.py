@@ -394,10 +394,9 @@ def fixture_remote_player_entry_body(
             continuation_flag_byte=0,
             followup_flag_byte=0,
         ),
+        opaque_pre_delegated_tail=b"",
         delegated_tail=None,
-        opaque_tail=(
-            b"\xff\xff" + b"\x00" * (opaque_tail_length - 2)
-        ),
+        opaque_tail=b"\xff" * opaque_tail_length,
     )
 
 
@@ -3665,6 +3664,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
             RemotePlayerEntryDelegatedTail.parse_from(reader), delegated_tail
         )
         reader.finish()
+        self.assertIsNone(
+            RemotePlayerEntryDelegatedTail.parse_unique_terminal(
+                b"\xff" * 32
+            )
+        )
+        self.assertEqual(
+            RemotePlayerEntryDelegatedTail.parse_unique_terminal(
+                b"\xaa" + encoded_tail
+            ),
+            (1, delegated_tail),
+        )
         self.assertEqual(
             len(encoded_tail),
             28 + (13 + 12 + 2) * 2,
@@ -3702,23 +3712,28 @@ class GameplayPacketShapeTest(unittest.TestCase):
             name="RedactedPlayer",
             body=replace(
                 fixture_remote_player_entry_body(),
-                opaque_tail=encoded_tail + b"\xaa",
+                opaque_tail=b"\xaa" + encoded_tail,
             ),
         )
         parsed = RemotePlayerEnterField.parse(entered.to_bytes())
         self.assertEqual(parsed.to_bytes(), entered.to_bytes())
         self.assertEqual(parsed.body.delegated_tail, delegated_tail)
-        self.assertEqual(parsed.body.opaque_tail, b"\xaa")
+        self.assertEqual(parsed.body.opaque_pre_delegated_tail, b"\xaa")
+        self.assertEqual(parsed.body.opaque_tail, b"")
         self.assertEqual(
             parsed.body.safe_dict()["typed_delegated_tail_bytes"],
             len(encoded_tail),
         )
-        self.assertEqual(parsed.body.safe_dict()["opaque_tail_bytes"], 1)
+        self.assertEqual(
+            parsed.body.safe_dict()["opaque_pre_delegated_tail_bytes"], 1
+        )
+        self.assertEqual(parsed.body.safe_dict()["opaque_tail_bytes"], 0)
 
         fully_consumed = replace(
             entered,
             body=replace(
                 entered.body,
+                opaque_pre_delegated_tail=b"",
                 delegated_tail=delegated_tail,
                 opaque_tail=b"",
             ),
@@ -3733,6 +3748,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(delegated_tail, nested_u8=0x100).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "scalar is out of range"):
             replace(delegated_tail, comparison_i32=1 << 40).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "must terminate"):
+            replace(fully_consumed.body, opaque_tail=b"\xaa").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "requires a typed"):
+            replace(fully_consumed.body, tail_prefix=None).to_bytes()
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,
@@ -3906,12 +3925,29 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 opaque_tail=bytes.fromhex("010000000080000000000000"),
             ),
         )
-        self.assertEqual(
-            RemotePlayerEnterField.parse(state_selected_tail.to_bytes()),
-            state_selected_tail,
+        parsed_state_selected_tail = RemotePlayerEnterField.parse(
+            state_selected_tail.to_bytes()
         )
         self.assertEqual(
-            state_selected_tail.body.safe_dict()["opaque_tail_bytes"], 12
+            parsed_state_selected_tail.to_bytes(),
+            state_selected_tail.to_bytes(),
+        )
+        self.assertIsNone(parsed_state_selected_tail.body.tail_prefix)
+        self.assertIsNone(
+            parsed_state_selected_tail.body.conditional_tail_prefix
+        )
+        self.assertIsNotNone(
+            parsed_state_selected_tail.body.delegated_tail
+        )
+        self.assertEqual(
+            parsed_state_selected_tail.body.safe_dict()[
+                "opaque_pre_delegated_tail_bytes"
+            ],
+            4,
+        )
+        self.assertEqual(
+            parsed_state_selected_tail.body.safe_dict()["opaque_tail_bytes"],
+            0,
         )
         self.assertEqual(left.to_bytes().hex(), "be00189c0400")
         self.assertEqual(RemotePlayerLeaveField.parse(left.to_bytes()), left)

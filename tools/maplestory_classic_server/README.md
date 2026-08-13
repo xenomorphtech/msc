@@ -974,14 +974,14 @@ The gameplay fold currently models these capture-backed boundaries:
   optional direct `u8`, two fixed `u8`s, and all seven bridge records with
   exact widths `15/15/15/13/20/17/15`, followed by a typed appearance island
   and the appearance-adjacent
-  native `u16/i32/u32/4*i32/2*i16/u8/u16` reads followed by a typed
-  bool-terminated repeated-`i32` loop, three `i32`s, a `u8`, optional text,
-  two conditional `i64` pairs, a conditional `u32/u32/i32` group, a
-  continuation bool and the follow-up bool read after both arms reconverge,
-  before a required downstream reader of five packet strings, one `u8`, one
-  `i32`, and one DateTime. Its 28-byte-minimum grammar types 64 compatible
-  records and preserves the complete suffix as opaque for the other 50; any
-  remaining bytes, including the common final 12-byte shape, stay neutral.
+  native `u16/i32/u32/4*i32/2*i16/u8/u16` reads followed, where they do not
+  overlap the terminal record, by a bool-terminated repeated-`i32` loop, three
+  `i32`s, a `u8`, and the conditional prefix reached before both arms
+  reconverge. The required downstream reader consumes five packet strings, one
+  `u8`, one `i32`, and one DateTime. Exactly one instance consumes to packet end
+  in all 114 entries. Seventy retain both earlier prefixes, four retain the
+  first, and 40 conservatively retain neither; only 967 pre-delegated gap bytes
+  remain opaque.
   All 114 reference entries round-trip
   losslessly with zero captured loop iterations or nonzero tail variants and a
   completely typed pre-appearance bridge (raw mask words stay redacted), while

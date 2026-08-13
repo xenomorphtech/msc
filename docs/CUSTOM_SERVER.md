@@ -105,12 +105,12 @@ reader-confirmed `u32` mask words; safe output reports only nonzero-word and
 enabled-bit counts. Static recovery also types an optional direct `u8`, two
 fixed `u8`s, and all seven following virtual records with exact widths
 `15/15/15/13/20/17/15`. Both continuation arms reconverge before reading the
-follow-up bool, then stop at the runtime-selected suffix. The later runtime
-parser's null path throws and its successful path executes a required
-five-packet-string/`u8`/`i32`/DateTime reader. That 28-byte-minimum grammar is
-compatible with 64 of 114 entries; the other 50 keep the complete suffix as a
-lossless opaque fallback. Across the corpus the conservative model types
-32,981 body bytes and leaves `3,355` opaque body bytes. Opcode `190` is
+follow-up bool, then reach the required five-packet-string/`u8`/`i32`/DateTime
+reader. A unique instance of that grammar terminates every one of the 114
+entries; the earlier front-of-suffix alignment was a zero-run false positive.
+Seventy entries retain both nonoverlapping earlier tail prefixes, four retain
+the first, and 40 retain neither. Across the corpus the conservative model
+types 35,369 body bytes and leaves `967` opaque body bytes. Opcode `190` is
 its exact u32-id removal, not a neutral fixed
 record. Across streams `92/114/126`, all 114 entries and 39 leaves round-trip
 exactly, all leaves match current-epoch entries, and every one of 563 opcode-
@@ -1354,9 +1354,10 @@ The bridge typing contains two fixed `u8`s and seven virtual records with
 exact widths `15/15/15/13/20/17/15`. The later conditional envelope contains
 optional text, two conditional `i64` pairs, a conditional `u32/u32/i32` group,
 a continuation bool, and the follow-up bool reached after both continuation
-arms reconverge. Its delegated reader now types four of the six bodies in the
-saved transcript. That transcript remains valid and exact with 1,780 typed
-body bytes and 246 opaque body bytes. This is a structural accounting
+arms reconverge. The terminal delegated reader types all six bodies in the
+saved transcript; four retain both earlier prefixes and two retain neither.
+That transcript remains valid and exact with 1,974 typed body bytes and 52
+opaque body bytes. This is a structural accounting
 refinement only; it does not
 change the already proven live enter/move/leave behavior or assign meanings to
 the newly bounded values.

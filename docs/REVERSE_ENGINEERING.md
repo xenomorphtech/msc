@@ -381,14 +381,14 @@ at `0x11833a8` selects the next branch. Its false path jumps directly to RVA
 `0x1183720`. The true path first performs runtime-state-dependent work, then
 every arm reconverges at `0x1183720` and reads another bool at `0x1183725`.
 
-Exact offline execution of that grammar consumes all 114 records without
-overrun and re-emits them byte-for-byte. Encoded prefix lengths are `6 x 83`,
-`25 x 24`, and `34 x 7`. All 24 optional strings are empty; the raw trailing
-byte is `16 x 18` or `20 x 6`. The first `i64` pair is absent, the second occurs
-31 times, the numeric group seven times, and the continuation branch 24 times.
-All 114 records execute the follow-up bool after reconvergence: 111 values are
-zero and three stream-`92` values are one; every true-continuation record has a
-zero follow-up. The call site loads the player object's parser field at RVA
+The earlier forward-only capture partition could re-emit all 114 records, but
+it is not simultaneously valid with the required downstream reader: in 40
+entries that reader's unique packet-terminal record starts before both claimed
+prefixes, and in four it starts inside the conditional prefix. The codec now
+retains both earlier typed prefixes only in 70 nonoverlapping records, retains
+the 14-byte loop/scalar prefix in four, and preserves the earlier bytes opaquely
+in the other 40. The native arms still reconverge at `0x1183720` before the
+follow-up read. The call site loads the player object's parser field at RVA
 `0x118381e`; its null path throws, while the successful non-null path calls
 `e3ad4d05...::ef3213da...` at `0x1183857`. That callee begins with a
 packet-string helper at `0x16ca271`. Both later subobject checks are generated
@@ -406,13 +406,15 @@ and then the `u8` reader at `0x1cca780`. The base reader consumes `u16` code
 units followed by twice that many UTF-16LE bytes; the trailing `u8` is consumed
 without a zero check. The whole delegated record is therefore five packet
 strings, one further `u8`, one `i32`, and one eight-byte DateTime, with a
-28-byte all-empty minimum. Offline execution succeeds without underflow for
-`30/2/32` records in streams `92/114/126`. Those 64 records re-emit exactly;
-the other 50 keep the entire suffix opaque. All five compatible strings are
-empty. Safe output exposes only lengths and nonzero summaries. The remaining
-opaque suffixes still end in the shared 12-byte sequence, but that shape does
-not establish another reader boundary. Values and text remain redacted and
-semantically neutral.
+28-byte all-empty minimum. After this call the handler invokes a player virtual
+method without passing the packet reader and returns at `0x1183892`; there is no
+later reader call. Requiring the delegated grammar to consume exactly to packet
+end produces one unique candidate in every one of the 114 entries. Streams
+`92/114` use text-code-unit shapes `(0,1,1,9|15|16|20,0)`, while all stream-
+`126` records use `(0,0,0,0,0)`. This terminal constraint rejects the earlier
+front-of-suffix zero-run false positives and reduces the remaining neutral gaps
+to 967 bytes total. Safe output exposes only lengths and nonzero summaries;
+values and text remain redacted and semantically neutral.
 
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then
