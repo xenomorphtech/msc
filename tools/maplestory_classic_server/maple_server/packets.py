@@ -9858,7 +9858,14 @@ class RemotePlayerEntryBody:
     header_u16_2: int
     header_u8_2: int
     opaque_pre_appearance: bytes = field(repr=False)
+    appearance_prefix_u16: int
     appearance: CharacterListAppearance = field(repr=False)
+    post_appearance_i32_1: int
+    post_appearance_u32: int
+    post_appearance_i32_values: tuple[int, int, int, int]
+    post_appearance_vector_i16: tuple[int, int]
+    post_appearance_u8: int
+    post_appearance_u16: int
     opaque_tail: bytes = field(repr=False)
 
     @classmethod
@@ -9873,10 +9880,11 @@ class RemotePlayerEntryBody:
         header_u8_2 = reader.u8("header_u8_2")
 
         candidates: list[
-            tuple[int, int, CharacterListAppearance]
+            tuple[int, int, int, CharacterListAppearance]
         ] = []
-        for opaque_length in (130, 131):
-            appearance_offset = reader.offset + opaque_length
+        for opaque_length in (128, 129):
+            prefix_offset = reader.offset + opaque_length
+            appearance_offset = prefix_offset + 2
             if appearance_offset >= len(payload):
                 continue
             appearance_reader = PacketReader(
@@ -9895,23 +9903,56 @@ class RemotePlayerEntryBody:
             ):
                 continue
             candidates.append(
-                (appearance_offset, appearance_reader.offset, appearance)
+                (
+                    prefix_offset,
+                    appearance_offset,
+                    appearance_reader.offset,
+                    appearance,
+                )
             )
         if len(candidates) != 1:
             raise PacketShapeError(
                 "remote-player entry body does not contain exactly one "
                 "capture-bounded appearance record"
             )
-        appearance_offset, appearance_length, appearance = candidates[0]
+        (
+            prefix_offset,
+            appearance_offset,
+            appearance_length,
+            appearance,
+        ) = candidates[0]
+        tail_reader = PacketReader(
+            payload[appearance_offset + appearance_length :],
+            packet_name="remote_player_entry_post_appearance",
+        )
         record = cls(
             secondary_text=secondary_text,
             header_u16_1=header_u16_1,
             header_u8_1=header_u8_1,
             header_u16_2=header_u16_2,
             header_u8_2=header_u8_2,
-            opaque_pre_appearance=payload[reader.offset:appearance_offset],
+            opaque_pre_appearance=payload[reader.offset:prefix_offset],
+            appearance_prefix_u16=int.from_bytes(
+                payload[prefix_offset:appearance_offset], "little"
+            ),
             appearance=appearance,
-            opaque_tail=payload[appearance_offset + appearance_length :],
+            post_appearance_i32_1=tail_reader.i32(
+                "post_appearance_i32_1"
+            ),
+            post_appearance_u32=tail_reader.u32("post_appearance_u32"),
+            post_appearance_i32_values=tuple(
+                tail_reader.i32(f"post_appearance_i32_values[{index}]")
+                for index in range(4)
+            ),
+            post_appearance_vector_i16=(
+                tail_reader.i16("post_appearance_vector_i16[0]"),
+                tail_reader.i16("post_appearance_vector_i16[1]"),
+            ),
+            post_appearance_u8=tail_reader.u8("post_appearance_u8"),
+            post_appearance_u16=tail_reader.u16("post_appearance_u16"),
+            opaque_tail=tail_reader.bytes(
+                tail_reader.remaining, "opaque_tail"
+            ),
         )
         record._validate()
         return record
@@ -9940,11 +9981,35 @@ class RemotePlayerEntryBody:
             )
         )
 
+    @property
+    def post_appearance_nonzero_fields(self) -> int:
+        return sum(
+            value != 0
+            for value in (
+                self.post_appearance_i32_1,
+                self.post_appearance_u32,
+                *self.post_appearance_i32_values,
+                *self.post_appearance_vector_i16,
+                self.post_appearance_u8,
+                self.post_appearance_u16,
+            )
+        )
+
     def _validate(self) -> None:
-        if len(self.opaque_pre_appearance) not in {130, 131}:
+        if len(self.opaque_pre_appearance) not in {128, 129}:
             raise PacketShapeError(
-                "remote-player entry pre-appearance region must be 130 or "
-                "131 bytes"
+                "remote-player entry pre-appearance region must be 128 or "
+                "129 bytes"
+            )
+        if len(self.post_appearance_i32_values) != 4:
+            raise PacketShapeError(
+                "remote-player entry post-appearance i32 group must contain "
+                "four values"
+            )
+        if len(self.post_appearance_vector_i16) != 2:
+            raise PacketShapeError(
+                "remote-player entry post-appearance vector must contain "
+                "two i16 values"
             )
         if not self.opaque_tail:
             raise PacketShapeError(
@@ -9962,11 +10027,17 @@ class RemotePlayerEntryBody:
         return {
             "secondary_text_code_units": self.secondary_text_code_units,
             "header_nonzero_fields": self.header_nonzero_fields,
+            "appearance_prefix_u16_nonzero": bool(
+                self.appearance_prefix_u16
+            ),
             "appearance_visible_entries": len(
                 self.appearance.visible_entries
             ),
             "appearance_masked_entries": len(
                 self.appearance.masked_entries
+            ),
+            "post_appearance_nonzero_fields": (
+                self.post_appearance_nonzero_fields
             ),
             "typed_body_bytes": self.typed_bytes,
             "opaque_pre_appearance_bytes": len(
@@ -9990,6 +10061,24 @@ class RemotePlayerEntryBody:
             raise PacketShapeError(
                 f"remote-player entry header is out of range: {error}"
             ) from error
+        try:
+            appearance_prefix = struct.pack(
+                "<H", self.appearance_prefix_u16
+            )
+            post_appearance = struct.pack(
+                "<iI4i2hBH",
+                self.post_appearance_i32_1,
+                self.post_appearance_u32,
+                *self.post_appearance_i32_values,
+                *self.post_appearance_vector_i16,
+                self.post_appearance_u8,
+                self.post_appearance_u16,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                "remote-player entry appearance-adjacent field is out of "
+                f"range: {error}"
+            ) from error
         return b"".join(
             (
                 encode_utf16_string(
@@ -9997,7 +10086,9 @@ class RemotePlayerEntryBody:
                 ),
                 header,
                 bytes(self.opaque_pre_appearance),
+                appearance_prefix,
                 self.appearance.to_bytes(),
+                post_appearance,
                 bytes(self.opaque_tail),
             )
         )

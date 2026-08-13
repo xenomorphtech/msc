@@ -968,11 +968,12 @@ The gameplay fold currently models these capture-backed boundaries:
   same control value and command stream, and no client-only trailer,
 - server opcode `189`: remote-player entry with an aliased object id, level,
   a redacted name, second redacted terminated counted UTF-16 string, a fixed
-  four-value header, and a typed appearance island between capture-bounded
-  opaque regions; all 114 reference entries select exactly one appearance at
-  native-relative offset `130` or `131` and round-trip losslessly, while server
-  opcode `190` is the exact object-id removal and the fold requires movement
-  broadcasts to reference a current-field entry,
+  four-value header, a typed appearance island, and the appearance-adjacent
+  native `u16/i32/u32/4*i32/2*i16/u8/u16` reads between capture-bounded opaque
+  regions; all 114 reference entries round-trip losslessly with a remaining
+  `128`/`129`-byte bridge, while server opcode `190` is the exact object-id
+  removal and the fold requires movement broadcasts to reference a
+  current-field entry,
 - server opcode `224`: exact remote-player/mob-template value record with a
   fixed `0xff` marker, a repeated neutral u32 value, flag `0`/`1`, and zero
   reserved u16; the fold requires no meaning for the value but correlates the
@@ -2241,8 +2242,9 @@ preserve distinct Unity scan codes in this setup.
     distributions without leaking potentially identifying primary values;
     item 54 records the later generated-shape expansion.
 44. Model opcode-`189`/`190` remote-player entry and removal from pinned client
-    handlers, validate all 153 lifecycle packets, and live-test an exact
-    enter/move/leave/enter sequence against the rendered client.
+    handlers, validate all 153 lifecycle packets, type the appearance-adjacent
+    native reads, and live-test an exact enter/move/leave/enter sequence against
+    the rendered client.
 45. Fully decode opcode-`247` tutorial-UI instructions, round-trip all 33
     reference packets, and verify that two exact live injections are accepted
     without blocking the active client while leaving rendering state-gated.

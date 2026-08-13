@@ -328,8 +328,8 @@ def fixture_remote_player_entry_body(
     *,
     secondary_text: str = "",
     header_values: tuple[int, int, int, int] = (0, 0, 0, 0),
-    opaque_pre_appearance_length: int = 130,
-    opaque_tail_length: int = 124,
+    opaque_pre_appearance_length: int = 128,
+    opaque_tail_length: int = 93,
 ) -> RemotePlayerEntryBody:
     return RemotePlayerEntryBody(
         secondary_text=secondary_text,
@@ -338,6 +338,7 @@ def fixture_remote_player_entry_body(
         header_u16_2=header_values[2],
         header_u8_2=header_values[3],
         opaque_pre_appearance=b"\x00" * opaque_pre_appearance_length,
+        appearance_prefix_u16=0,
         appearance=CharacterListAppearance(
             gender=0,
             skin=0,
@@ -349,6 +350,12 @@ def fixture_remote_player_entry_body(
             cash_weapon_id=0,
             opaque_style_values=(0, 0, 0, 0, 0, 0, 0),
         ),
+        post_appearance_i32_1=0,
+        post_appearance_u32=0,
+        post_appearance_i32_values=(0, 0, 0, 0),
+        post_appearance_vector_i16=(0, 0),
+        post_appearance_u8=0,
+        post_appearance_u16=0,
         opaque_tail=b"\x00" * opaque_tail_length,
     )
 
@@ -3492,8 +3499,29 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         )
         self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
-        self.assertEqual(entered.body.typed_bytes, 54)
-        self.assertEqual(entered.body.opaque_bytes, 254)
+        self.assertEqual(entered.body.typed_bytes, 87)
+        self.assertEqual(entered.body.opaque_bytes, 221)
+        adjacent_fields = replace(
+            entered,
+            body=replace(
+                entered.body,
+                appearance_prefix_u16=200,
+                post_appearance_i32_1=3_010_000,
+                post_appearance_u32=123,
+                post_appearance_i32_values=(-1, 2, -3, 4),
+                post_appearance_vector_i16=(-120, 45),
+                post_appearance_u8=1,
+                post_appearance_u16=17,
+            ),
+        )
+        self.assertEqual(
+            RemotePlayerEnterField.parse(adjacent_fields.to_bytes()),
+            adjacent_fields,
+        )
+        self.assertEqual(
+            adjacent_fields.body.post_appearance_nonzero_fields,
+            10,
+        )
         self.assertEqual(left.to_bytes().hex(), "be00189c0400")
         self.assertEqual(RemotePlayerLeaveField.parse(left.to_bytes()), left)
         self.assertNotIn("302104", str(entered.safe_dict()))
@@ -8882,10 +8910,19 @@ class GameplayStateFoldTest(unittest.TestCase):
             object_id=123_456_789,
             level=9,
             name="Other",
-            body=fixture_remote_player_entry_body(
-                secondary_text="OtherTwo",
-                header_values=(1002, 11, 4018, 1),
-                opaque_pre_appearance_length=131,
+            body=replace(
+                fixture_remote_player_entry_body(
+                    secondary_text="OtherTwo",
+                    header_values=(1002, 11, 4018, 1),
+                    opaque_pre_appearance_length=129,
+                ),
+                appearance_prefix_u16=200,
+                post_appearance_i32_1=3_010_000,
+                post_appearance_u32=123,
+                post_appearance_i32_values=(-1, 2, -3, 4),
+                post_appearance_vector_i16=(-120, 45),
+                post_appearance_u8=1,
+                post_appearance_u16=17,
             ),
         )
         transcript = fixture_gameplay_transcript(
@@ -8915,11 +8952,19 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.remote_player_refreshes, 1)
         self.assertEqual(
             analysis.state.remote_player_entry_opaque_bytes,
-            3 * (130 + 124) + 1,
+            3 * (128 + 93) + 1,
         )
-        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 178)
+        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 277)
         self.assertEqual(analysis.state.remote_player_entry_secondary_texts, 1)
         self.assertEqual(analysis.state.remote_player_entry_nonzero_headers, 1)
+        self.assertEqual(
+            analysis.state.remote_player_entry_nonzero_appearance_prefixes,
+            1,
+        )
+        self.assertEqual(
+            analysis.state.remote_player_entry_post_appearance_nonzero_fields,
+            10,
+        )
         self.assertEqual(
             analysis.state.remote_player_entry_visible_appearance_records, 3
         )

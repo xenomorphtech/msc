@@ -864,9 +864,11 @@ The pinned version-300 IL2CPP opcode-`189` handler reads a u32 object id, a u8
 level, and a terminated counted UTF-16 name before delegating the remaining
 player body. Native control flow in the delegate then reads a second terminated
 counted UTF-16 string, a fixed `u16/u8/u16/u8` header, and a separately
-delegated appearance record. The bytes between those reads are not assigned a
-meaning. The adjacent opcode-`190` handler reads exactly one u32 object id and
-removes that player:
+delegated appearance record. The delegate reads one `u16` immediately before
+that appearance and, immediately afterward, an `i32`, a `u32`, four `i32`s, a
+two-`i16` vector, a `u8`, and a `u16`. The bytes between those typed islands
+are not assigned a meaning. The adjacent opcode-`190` handler reads exactly one
+u32 object id and removes that player:
 
 ```text
 opcode 189:
@@ -883,9 +885,16 @@ opcode 189:
     uint8 header_value_2
     uint16 header_value_3
     uint8 header_value_4
-    byte[130 or 131] opaque_pre_appearance
+    byte[128 or 129] opaque_pre_appearance
+    uint16 appearance_prefix_value
     CharacterListAppearance appearance
-    byte[] opaque_tail
+    int32 post_appearance_value_1
+    uint32 post_appearance_value_2
+    int32[4] post_appearance_values
+    int16[2] post_appearance_vector
+    uint8 post_appearance_value_3
+    uint16 post_appearance_value_4
+    byte[] opaque_tail                 # non-empty residual
 
 opcode 190:
     uint16 opcode
@@ -894,9 +903,11 @@ opcode 190:
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-9,901 bytes and leaves 26,435 bytes explicit: a 130-byte pre-appearance region
-in 112 records, its 131-byte variant in two stream-`92` records, and tails of
-63..151 bytes. Exactly three records exercise a five-code-unit secondary text,
+13,663 bytes and leaves 22,673 bytes explicit: a 128-byte bridge in 112
+records, its 129-byte variant in two stream-`92` records, and residual tails
+of 32..120 bytes. The appearance-prefix value is nonzero in 78 entries, and
+the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
+three records exercise a five-code-unit secondary text,
 and one of those independently exercises all four nonzero header fields
 (`1002/11/4018/1`); the other 113 headers are zero. Appearance records contain
 473 visible and 35 masked slot/template pairs in stream `92`, 32 visible and
@@ -905,11 +916,12 @@ stream `126`. Identifiers, strings, face/style values, and item templates
 remain redacted from safe output.
 
 The appearance boundary is capture-bounded rather than inferred from byte
-frequency: parsing at the native-delegate-relative 130/131-byte offsets and
-requiring the appearance's leading hair slot yields exactly one valid record
-in every entry across all three streams. The residual regions keep entries at
-partial coverage; the 39 exact removals are full. Every removal references a
-player introduced in the same field epoch. More importantly, all 563 opcode-
+frequency: parsing after the native-delegate-relative 128/129-byte bridge and
+two-byte prefix, then requiring the appearance's leading hair slot, yields
+exactly one valid record in every entry across all three streams. The residual
+regions keep entries at partial coverage; the 39 exact removals are full. Every
+removal references a player introduced in the same field epoch. More
+importantly, all 563 opcode-
 `202` player-movement broadcasts and all 652 server opcode-`217` life-movement
 broadcasts now correlate with a prior entry instead of creating players from
 movement alone.
@@ -918,10 +930,11 @@ The fold emits `remote_player_entered_field` and
 `remote_player_left_field`, clears active players at field transitions, and
 preserves entry metadata when later movement supplies a position. Safe state
 exposes only an alias, level, both string-code-unit counts, appearance entry
-counts, typed/opaque byte counts, header-presence counts, and position when
-known. It never emits a captured object id, string, or appearance identifier.
-The saved active custom-server transcript remains valid with four entries,
-356 typed body bytes, and 970 opaque body bytes.
+counts, typed/opaque byte counts, header/prefix-presence counts,
+post-appearance nonzero-field counts, and position when known. It never emits
+a captured object id, string, or appearance identifier. The saved active
+custom-server transcript remains valid with four entries, 488 typed body
+bytes, and 838 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

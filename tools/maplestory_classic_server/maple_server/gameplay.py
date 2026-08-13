@@ -602,6 +602,8 @@ class GameplayGameState:
     remote_player_entry_opaque_bytes: int = 0
     remote_player_entry_secondary_texts: int = 0
     remote_player_entry_nonzero_headers: int = 0
+    remote_player_entry_nonzero_appearance_prefixes: int = 0
+    remote_player_entry_post_appearance_nonzero_fields: int = 0
     remote_player_entry_visible_appearance_records: int = 0
     remote_player_entry_masked_appearance_records: int = 0
     remote_player_leaves: int = 0
@@ -4552,6 +4554,12 @@ class GameplayAnalysis:
                 ),
                 "remote_player_entry_nonzero_headers": (
                     self.state.remote_player_entry_nonzero_headers
+                ),
+                "remote_player_entry_nonzero_appearance_prefixes": (
+                    self.state.remote_player_entry_nonzero_appearance_prefixes
+                ),
+                "remote_player_entry_post_appearance_nonzero_fields": (
+                    self.state.remote_player_entry_post_appearance_nonzero_fields
                 ),
                 "remote_player_entry_visible_appearance_records": (
                     self.state.remote_player_entry_visible_appearance_records
@@ -11545,6 +11553,12 @@ class GameplayStateFold:
             self.state.remote_player_entry_nonzero_headers += bool(
                 entered.body.header_nonzero_fields
             )
+            self.state.remote_player_entry_nonzero_appearance_prefixes += bool(
+                entered.body.appearance_prefix_u16
+            )
+            self.state.remote_player_entry_post_appearance_nonzero_fields += (
+                entered.body.post_appearance_nonzero_fields
+            )
             self.state.remote_player_entry_visible_appearance_records += len(
                 entered.body.appearance.visible_entries
             )
@@ -11574,7 +11588,7 @@ class GameplayStateFold:
                 parsed=entered,
                 details=details,
                 issues=(
-                    "remote-player entry pre-appearance and tail regions "
+                    "remote-player entry bridge and residual tail regions "
                     "remain version-specific and opaque",
                 ),
             )
@@ -15344,6 +15358,10 @@ def render_gameplay_analysis(
             f"{state.remote_player_entry_secondary_texts} "
             "remote_entry_nonzero_headers:"
             f"{state.remote_player_entry_nonzero_headers} "
+            "remote_entry_nonzero_appearance_prefixes:"
+            f"{state.remote_player_entry_nonzero_appearance_prefixes} "
+            "remote_entry_post_appearance_nonzero_fields:"
+            f"{state.remote_player_entry_post_appearance_nonzero_fields} "
             "remote_entry_appearance_records:"
             f"{state.remote_player_entry_visible_appearance_records},"
             f"{state.remote_player_entry_masked_appearance_records} "

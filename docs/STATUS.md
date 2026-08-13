@@ -400,14 +400,15 @@
 - Server opcodes `189`/`190` now establish remote-player entry/removal state.
   All 114 entries and 39 leaves round-trip exactly. Native control flow and
   all three reference streams bound a second terminated UTF-16 string, a fixed
-  four-value header, and exactly one appearance record at relative offset
-  `130` or `131`. This types 9,901 former body bytes while retaining 26,435
-  bytes as two explicit opaque regions. Every leave matches the current field
+  four-value header, an appearance-adjacent `u16`, exactly one appearance
+  record, and 31 typed post-appearance bytes. The remaining bridge is `128` or
+  `129` bytes. This types 13,663 body bytes while retaining 22,673 bytes as two
+  explicit opaque regions. Every leave matches the current field
   epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
   `4 -> 3 -> 4`; the active saved transcript still validates with four typed
-  entries.
+  entries, 488 typed body bytes, and 838 opaque body bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template
