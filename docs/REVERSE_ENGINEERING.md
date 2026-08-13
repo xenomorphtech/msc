@@ -333,6 +333,23 @@ final `u8` is zero, while the three-`i32` zero masks are `000 x 74`, `011 x
 24`, and `111 x 16` (`1` means zero). The codec preserves generic nonzero loop
 flags and values but exposes only counts/nonzero summaries in safe output.
 
+The variant byte is zero in all captures. The delegate computes its comparison
+constant from static byte `0x15 + 0xeb`, which wraps to zero; equality selects
+RVA `0x1183116`. That path reads another bool at `0x1183144`. True selects the
+packet UTF-16 reader at `0x1183174`, preserving its otherwise discarded
+trailing byte. Both branches join at the bool read at `0x1183252`. A true value
+there gates the `i64` pair at `0x1183272/0x118327c`; the next bool at
+`0x118328c` similarly gates `0x11832aa/0x11832b4`. The bool at `0x11832c4`
+gates `u32/u32/i32` reads at `0x11832e2/0x11832f2/0x1183302`, and a final bool
+at `0x11833a8` selects the next still-residual branch.
+
+Exact offline execution of that grammar consumes all 114 records without
+overrun and re-emits them byte-for-byte. Encoded prefix lengths are `5 x 83`,
+`24 x 24`, and `33 x 7`. All 24 optional strings are empty; the raw trailing
+byte is `16 x 18` or `20 x 6`. The first `i64` pair is absent, the second occurs
+31 times, the numeric group seven times, and the continuation branch 24 times.
+Values and text remain redacted and semantically neutral.
+
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then
 89 repetitions of `u8` and `i32`, ending exactly at framed cursor `452` for the

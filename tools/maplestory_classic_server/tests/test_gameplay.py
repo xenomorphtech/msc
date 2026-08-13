@@ -153,6 +153,7 @@ from maple_server.packets import (  # noqa: E402
     PickupGainNotice,
     RemotePlayerEnterField,
     RemotePlayerEntryBody,
+    RemotePlayerEntryConditionalTailPrefix,
     RemotePlayerEntryTailPrefix,
     RemotePlayerInstruction,
     RemotePlayerLeaveField,
@@ -330,7 +331,7 @@ def fixture_remote_player_entry_body(
     secondary_text: str = "",
     header_values: tuple[int, int, int, int] = (0, 0, 0, 0),
     opaque_pre_appearance_length: int = 128,
-    opaque_tail_length: int = 79,
+    opaque_tail_length: int = 74,
 ) -> RemotePlayerEntryBody:
     return RemotePlayerEntryBody(
         secondary_text=secondary_text,
@@ -362,6 +363,18 @@ def fixture_remote_player_entry_body(
             continuation_flag_bytes=(0,),
             post_loop_i32_values=(0, 0, 0),
             variant_u8=0,
+        ),
+        conditional_tail_prefix=RemotePlayerEntryConditionalTailPrefix(
+            optional_text_flag_byte=0,
+            optional_text=None,
+            optional_text_trailing_u8=None,
+            first_i64_pair_flag_byte=0,
+            first_i64_pair=(),
+            second_i64_pair_flag_byte=0,
+            second_i64_pair=(),
+            numeric_group_flag_byte=0,
+            numeric_group=None,
+            continuation_flag_byte=0,
         ),
         opaque_tail=b"\x00" * opaque_tail_length,
     )
@@ -3506,8 +3519,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         )
         self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
-        self.assertEqual(entered.body.typed_bytes, 101)
-        self.assertEqual(entered.body.opaque_bytes, 207)
+        self.assertEqual(entered.body.typed_bytes, 106)
+        self.assertEqual(entered.body.opaque_bytes, 202)
         self.assertEqual(
             entered.body.tail_prefix.safe_dict(),
             {
@@ -3515,6 +3528,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "tail_post_loop_nonzero_i32_values": 0,
                 "tail_variant_u8_nonzero": False,
                 "typed_tail_prefix_bytes": 14,
+            },
+        )
+        self.assertEqual(
+            entered.body.conditional_tail_prefix.safe_dict(),
+            {
+                "conditional_tail_optional_text_present": False,
+                "conditional_tail_optional_text_code_units": 0,
+                "conditional_tail_i64_pairs_present": 0,
+                "conditional_tail_numeric_group_present": False,
+                "conditional_tail_continuation": False,
+                "typed_conditional_tail_prefix_bytes": 5,
             },
         )
         adjacent_fields = replace(
@@ -3563,6 +3587,43 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "typed_tail_prefix_bytes": 24,
             },
         )
+        populated_conditional_tail = replace(
+            entered,
+            body=replace(
+                entered.body,
+                conditional_tail_prefix=RemotePlayerEntryConditionalTailPrefix(
+                    optional_text_flag_byte=0x31,
+                    optional_text="SecretTail",
+                    optional_text_trailing_u8=16,
+                    first_i64_pair_flag_byte=1,
+                    first_i64_pair=(1, -2),
+                    second_i64_pair_flag_byte=0xFF,
+                    second_i64_pair=(3, -4),
+                    numeric_group_flag_byte=7,
+                    numeric_group=(5, 6, -7),
+                    continuation_flag_byte=9,
+                ),
+            ),
+        )
+        self.assertEqual(
+            RemotePlayerEnterField.parse(populated_conditional_tail.to_bytes()),
+            populated_conditional_tail,
+        )
+        self.assertEqual(
+            populated_conditional_tail.body.conditional_tail_prefix.safe_dict(),
+            {
+                "conditional_tail_optional_text_present": True,
+                "conditional_tail_optional_text_code_units": 10,
+                "conditional_tail_i64_pairs_present": 2,
+                "conditional_tail_numeric_group_present": True,
+                "conditional_tail_continuation": True,
+                "typed_conditional_tail_prefix_bytes": 72,
+            },
+        )
+        self.assertNotIn(
+            "SecretTail",
+            str(populated_conditional_tail.safe_dict()),
+        )
         self.assertEqual(left.to_bytes().hex(), "be00189c0400")
         self.assertEqual(RemotePlayerLeaveField.parse(left.to_bytes()), left)
         self.assertNotIn("302104", str(entered.safe_dict()))
@@ -3592,6 +3653,28 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     tail_prefix=replace(
                         entered.body.tail_prefix,
                         continuation_flag_bytes=(1,),
+                    ),
+                ),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "optional text"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    conditional_tail_prefix=replace(
+                        entered.body.conditional_tail_prefix,
+                        optional_text_flag_byte=1,
+                    ),
+                ),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "first i64 pair"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    conditional_tail_prefix=replace(
+                        entered.body.conditional_tail_prefix,
+                        first_i64_pair_flag_byte=1,
                     ),
                 ),
             ).to_bytes()
@@ -9054,9 +9137,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.remote_player_refreshes, 1)
         self.assertEqual(
             analysis.state.remote_player_entry_opaque_bytes,
-            3 * (128 + 79) + 1,
+            3 * (128 + 74) + 1,
         )
-        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 319)
+        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 334)
         self.assertEqual(analysis.state.remote_player_entry_secondary_texts, 1)
         self.assertEqual(analysis.state.remote_player_entry_nonzero_headers, 1)
         self.assertEqual(

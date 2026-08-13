@@ -1321,10 +1321,11 @@ folds validly with zero unknown leaves. After restoration the client remained
 active on map `101000000`, the server had no connection failures, and 209/209
 heartbeat probes were paired.
 
-Offline validation now types another 14-byte prefix in each of those four
-opcode-`189` bodies from the pinned delegate's executed bool-terminated
-repeated-`i32` loop, three following `i32` reads, and one `u8` read. The saved
-transcript remains valid and exact with 544 typed body bytes and 782 opaque
+Offline validation now types a 14-byte prefix plus the following conditional
+envelope in each of those four opcode-`189` bodies from the pinned delegate's
+executed reader path. The latter contains optional text, two conditional `i64`
+pairs, a conditional `u32/u32/i32` group, and a continuation bool. The saved
+transcript remains valid and exact with 602 typed body bytes and 724 opaque
 body bytes. This is a structural accounting refinement only; it does not
 change the already proven live enter/move/leave behavior or assign meanings to
 the newly bounded values.

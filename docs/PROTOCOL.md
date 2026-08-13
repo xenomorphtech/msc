@@ -959,7 +959,22 @@ opcode 189:
         bool tail_has_repeated_value
     int32[3] tail_post_loop_values
     uint8 tail_variant
-    byte[] opaque_tail                 # non-empty residual after typed prefix
+    bool conditional_optional_text_present
+    if conditional_optional_text_present:
+        PacketUtf16 conditional_optional_text  # redacted; trailing u8 preserved
+    bool conditional_first_i64_pair_present
+    if conditional_first_i64_pair_present:
+        int64[2] conditional_first_i64_pair
+    bool conditional_second_i64_pair_present
+    if conditional_second_i64_pair_present:
+        int64[2] conditional_second_i64_pair
+    bool conditional_numeric_group_present
+    if conditional_numeric_group_present:
+        uint32 conditional_numeric_value_1
+        uint32 conditional_numeric_value_2
+        int32 conditional_numeric_value_3
+    bool conditional_continuation
+    byte[] opaque_tail                 # non-empty residual after typed prefixes
 
 opcode 190:
     uint16 opcode
@@ -968,15 +983,22 @@ opcode 190:
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-15,259 bytes and leaves 21,077 bytes explicit: a 128-byte bridge in 112
+16,481 bytes and leaves 19,855 bytes explicit: a 128-byte bridge in 112
 records, its 129-byte variant in two stream-`92` records, and residual tails
-of 18..106 bytes. The 14-byte tail prefix follows the pinned delegate's
+of 13..84 bytes. The 14-byte tail prefix follows the pinned delegate's
 executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
 reads, and one `u8`. All 114 captured loop terminators and variant bytes are
 zero, so none enters the loop. The three-value zero masks are
 `000 x 74`, `011 x 24`, and `111 x 16`, where `1` denotes a zero value; these
-values remain semantically neutral and are omitted from safe output. The
-appearance-prefix value is nonzero in 78 entries, and
+values remain semantically neutral and are omitted from safe output. The next
+native conditional prefix consumes 5, 24, or 33 bytes in 83, 24, and seven
+entries respectively. Its first bool selects an optional packet UTF-16 record
+in 24 entries; every observed string is empty and its preserved trailing u8 is
+`16` (`18` records) or `20` (`6` records). The first `i64` pair is absent
+throughout, the second occurs in 31 entries, the `u32/u32/i32` group in seven,
+and the final continuation bool is true in 24. The codec preserves every raw
+flag and scalar for exact replay while safe output exposes only presence/count
+summaries. The appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,
 and one of those independently exercises all four nonzero header fields
@@ -1003,10 +1025,11 @@ preserves entry metadata when later movement supplies a position. Safe state
 exposes only an alias, level, both string-code-unit counts, appearance entry
 counts, typed/opaque byte counts, header/prefix-presence counts,
 post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
-and position when known. It never emits
+conditional-branch presence/count summaries, and position when known. It never
+emits
 a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with four entries, 544 typed body
-bytes, and 782 opaque body bytes.
+custom-server transcript remains valid with four entries, 602 typed body
+bytes, and 724 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

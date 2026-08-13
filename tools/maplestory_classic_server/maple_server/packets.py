@@ -9982,6 +9982,211 @@ class RemotePlayerEntryTailPrefix:
 
 
 @dataclass(frozen=True)
+class RemotePlayerEntryConditionalTailPrefix:
+    """Native-reader-bounded conditional scalars after the opcode-189 variant."""
+
+    optional_text_flag_byte: int
+    optional_text: str | None = field(repr=False)
+    optional_text_trailing_u8: int | None
+    first_i64_pair_flag_byte: int
+    first_i64_pair: tuple[int, int]
+    second_i64_pair_flag_byte: int
+    second_i64_pair: tuple[int, int]
+    numeric_group_flag_byte: int
+    numeric_group: tuple[int, int, int] | None
+    continuation_flag_byte: int
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader
+    ) -> "RemotePlayerEntryConditionalTailPrefix":
+        optional_text_flag_byte = reader.u8(
+            "conditional_tail_optional_text_flag"
+        )
+        optional_text = None
+        optional_text_trailing_u8 = None
+        if optional_text_flag_byte != 0:
+            optional_text = reader.utf16_string(
+                "conditional_tail_optional_text", trailing_byte=False
+            )
+            optional_text_trailing_u8 = reader.u8(
+                "conditional_tail_optional_text_trailing_u8"
+            )
+
+        first_i64_pair_flag_byte = reader.u8(
+            "conditional_tail_first_i64_pair_flag"
+        )
+        first_i64_pair = (
+            tuple(
+                reader.i64(f"conditional_tail_first_i64_pair[{index}]")
+                for index in range(2)
+            )
+            if first_i64_pair_flag_byte != 0
+            else ()
+        )
+
+        second_i64_pair_flag_byte = reader.u8(
+            "conditional_tail_second_i64_pair_flag"
+        )
+        second_i64_pair = (
+            tuple(
+                reader.i64(f"conditional_tail_second_i64_pair[{index}]")
+                for index in range(2)
+            )
+            if second_i64_pair_flag_byte != 0
+            else ()
+        )
+
+        numeric_group_flag_byte = reader.u8(
+            "conditional_tail_numeric_group_flag"
+        )
+        numeric_group = None
+        if numeric_group_flag_byte != 0:
+            numeric_group = (
+                reader.u32("conditional_tail_numeric_group[0]"),
+                reader.u32("conditional_tail_numeric_group[1]"),
+                reader.i32("conditional_tail_numeric_group[2]"),
+            )
+
+        record = cls(
+            optional_text_flag_byte=optional_text_flag_byte,
+            optional_text=optional_text,
+            optional_text_trailing_u8=optional_text_trailing_u8,
+            first_i64_pair_flag_byte=first_i64_pair_flag_byte,
+            first_i64_pair=first_i64_pair,
+            second_i64_pair_flag_byte=second_i64_pair_flag_byte,
+            second_i64_pair=second_i64_pair,
+            numeric_group_flag_byte=numeric_group_flag_byte,
+            numeric_group=numeric_group,
+            continuation_flag_byte=reader.u8(
+                "conditional_tail_continuation_flag"
+            ),
+        )
+        record._validate()
+        return record
+
+    @property
+    def optional_text_code_units(self) -> int:
+        if self.optional_text is None:
+            return 0
+        return len(self.optional_text.encode("utf-16-le")) // 2
+
+    @property
+    def present_i64_pairs(self) -> int:
+        return int(bool(self.first_i64_pair_flag_byte)) + int(
+            bool(self.second_i64_pair_flag_byte)
+        )
+
+    @property
+    def encoded_bytes(self) -> int:
+        return (
+            5
+            + (
+                3 + self.optional_text_code_units * 2
+                if self.optional_text_flag_byte != 0
+                else 0
+            )
+            + len(self.first_i64_pair) * 8
+            + len(self.second_i64_pair) * 8
+            + (12 if self.numeric_group is not None else 0)
+        )
+
+    def _validate(self) -> None:
+        for name, flag in (
+            ("optional-text", self.optional_text_flag_byte),
+            ("first-i64-pair", self.first_i64_pair_flag_byte),
+            ("second-i64-pair", self.second_i64_pair_flag_byte),
+            ("numeric-group", self.numeric_group_flag_byte),
+            ("continuation", self.continuation_flag_byte),
+        ):
+            if not 0 <= flag <= 0xFF:
+                raise PacketShapeError(
+                    f"remote-player conditional-tail {name} flag is out of range"
+                )
+        optional_text_present = self.optional_text is not None
+        if optional_text_present != (self.optional_text_flag_byte != 0) or (
+            (self.optional_text_trailing_u8 is not None)
+            != optional_text_present
+        ):
+            raise PacketShapeError(
+                "remote-player conditional-tail optional text must match its flag"
+            )
+        if self.optional_text_trailing_u8 is not None and not (
+            0 <= self.optional_text_trailing_u8 <= 0xFF
+        ):
+            raise PacketShapeError(
+                "remote-player conditional-tail text trailing u8 is out of range"
+            )
+        for name, flag, values in (
+            ("first", self.first_i64_pair_flag_byte, self.first_i64_pair),
+            ("second", self.second_i64_pair_flag_byte, self.second_i64_pair),
+        ):
+            expected_length = 2 if flag != 0 else 0
+            if len(values) != expected_length:
+                raise PacketShapeError(
+                    "remote-player conditional-tail "
+                    f"{name} i64 pair must match its flag"
+                )
+        if (self.numeric_group is not None) != (
+            self.numeric_group_flag_byte != 0
+        ):
+            raise PacketShapeError(
+                "remote-player conditional-tail numeric group must match its flag"
+            )
+        if self.numeric_group is not None and len(self.numeric_group) != 3:
+            raise PacketShapeError(
+                "remote-player conditional-tail numeric group must contain "
+                "two u32 values and one i32 value"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "conditional_tail_optional_text_present": (
+                self.optional_text_flag_byte != 0
+            ),
+            "conditional_tail_optional_text_code_units": (
+                self.optional_text_code_units
+            ),
+            "conditional_tail_i64_pairs_present": self.present_i64_pairs,
+            "conditional_tail_numeric_group_present": (
+                self.numeric_group is not None
+            ),
+            "conditional_tail_continuation": (
+                self.continuation_flag_byte != 0
+            ),
+            "typed_conditional_tail_prefix_bytes": self.encoded_bytes,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        encoded = bytearray((self.optional_text_flag_byte,))
+        try:
+            if self.optional_text is not None:
+                encoded.extend(
+                    encode_utf16_string(
+                        self.optional_text, trailing_byte=False
+                    )
+                )
+                encoded.append(self.optional_text_trailing_u8)
+            encoded.append(self.first_i64_pair_flag_byte)
+            if self.first_i64_pair:
+                encoded.extend(struct.pack("<2q", *self.first_i64_pair))
+            encoded.append(self.second_i64_pair_flag_byte)
+            if self.second_i64_pair:
+                encoded.extend(struct.pack("<2q", *self.second_i64_pair))
+            encoded.append(self.numeric_group_flag_byte)
+            if self.numeric_group is not None:
+                encoded.extend(struct.pack("<IIi", *self.numeric_group))
+            encoded.append(self.continuation_flag_byte)
+        except (OverflowError, struct.error, ValueError) as error:
+            raise PacketShapeError(
+                "remote-player conditional-tail field is out of range: "
+                f"{error}"
+            ) from error
+        return bytes(encoded)
+
+
+@dataclass(frozen=True)
 class RemotePlayerEntryBody:
     """Capture-bounded typed islands in an opcode-189 player body."""
 
@@ -10000,6 +10205,7 @@ class RemotePlayerEntryBody:
     post_appearance_u8: int
     post_appearance_u16: int
     tail_prefix: RemotePlayerEntryTailPrefix
+    conditional_tail_prefix: RemotePlayerEntryConditionalTailPrefix
     opaque_tail: bytes = field(repr=False)
 
     @classmethod
@@ -10085,6 +10291,9 @@ class RemotePlayerEntryBody:
             post_appearance_u8=tail_reader.u8("post_appearance_u8"),
             post_appearance_u16=tail_reader.u16("post_appearance_u16"),
             tail_prefix=RemotePlayerEntryTailPrefix.parse_from(tail_reader),
+            conditional_tail_prefix=(
+                RemotePlayerEntryConditionalTailPrefix.parse_from(tail_reader)
+            ),
             opaque_tail=tail_reader.bytes(
                 tail_reader.remaining, "opaque_tail"
             ),
@@ -10175,6 +10384,7 @@ class RemotePlayerEntryBody:
                 self.post_appearance_nonzero_fields
             ),
             **self.tail_prefix.safe_dict(),
+            **self.conditional_tail_prefix.safe_dict(),
             "typed_body_bytes": self.typed_bytes,
             "opaque_pre_appearance_bytes": len(
                 self.opaque_pre_appearance
@@ -10226,6 +10436,7 @@ class RemotePlayerEntryBody:
                 self.appearance.to_bytes(),
                 post_appearance,
                 self.tail_prefix.to_bytes(),
+                self.conditional_tail_prefix.to_bytes(),
                 bytes(self.opaque_tail),
             )
         )

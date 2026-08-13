@@ -972,8 +972,10 @@ The gameplay fold currently models these capture-backed boundaries:
   a redacted name, second redacted terminated counted UTF-16 string, a fixed
   four-value header, a typed appearance island, and the appearance-adjacent
   native `u16/i32/u32/4*i32/2*i16/u8/u16` reads followed by a typed
-  bool-terminated repeated-`i32` loop, three `i32`s, and a `u8` between
-  capture-bounded opaque regions; all 114 reference entries round-trip
+  bool-terminated repeated-`i32` loop, three `i32`s, a `u8`, optional text,
+  two conditional `i64` pairs, a conditional `u32/u32/i32` group, and a final
+  continuation bool between capture-bounded opaque regions; all 114 reference
+  entries round-trip
   losslessly with zero captured loop iterations or nonzero tail variants and a
   remaining `128`/`129`-byte bridge, while server opcode `190` is the exact
   object-id removal and the fold requires movement broadcasts to reference a

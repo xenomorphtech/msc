@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+683cedf Type opcode 189 tail prefix
 d17a077 Type opcode 13 IV security envelopes
 02f194c Document custom server continuation plan
 e3d6993 Promote bounded initial field snapshots
@@ -123,16 +124,21 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - after appearance: `i32`, `u32`, four `i32`s, two `i16`s, `u8`, and `u16`;
 - at the residual-tail boundary: a bool-terminated repeated-`i32` loop, three
   `i32`s, and one `u8`;
+- after variant zero: optional packet UTF-16, two conditional `i64` pairs, a
+  conditional `u32/u32/i32` group, and a continuation bool;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
 The remaining opaque portions are a pre-appearance bridge and the residual
-tail after that typed prefix. Across all entries, current accounting measures
-15,259 typed body bytes and 21,077 opaque body bytes. The bridge is 128 bytes
-in 112 entries and 129 bytes in two entries. Residual tail lengths now range
-from 18 through 106 bytes. All 114 terminating bools and final `u8` values are
+tail after those typed prefixes. Across all entries, current accounting
+measures 16,481 typed body bytes and 19,855 opaque body bytes. The bridge is
+128 bytes in 112 entries and 129 bytes in two entries. Residual tail lengths now range
+from 13 through 84 bytes. All 114 terminating bools and final `u8` values are
 zero and none of the captured records enters the repeated-value loop. The
 three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
-meaning zero. These are checked corpus results; their roles remain neutral.
+meaning zero. The next conditional prefix is 5/24/33 bytes in 83/24/7 entries:
+24 optional text records are empty, the first `i64` pair is absent, the second
+appears 31 times, the numeric group seven times, and continuation is true 24
+times. These are checked corpus results; their roles remain neutral.
 
 The first stream-`114` entry is a useful controlled packet:
 
@@ -251,6 +257,15 @@ and loops through the next bool at `0x1182d48`. The false exit reaches three
 `0x1182e89`. The implemented codec preserves generic nonzero loop flag bytes
 and values, round-trips all 114 reference entries, and publishes only safe
 counts/nonzero summaries.
+
+Variant zero is the static comparison-equality path: byte `0x15 + 0xeb` wraps
+to zero and selects RVA `0x1183116`. The subsequent reader calls are bool at
+`0x1183144`, conditional packet UTF-16 at `0x1183174`, bool at `0x1183252`,
+conditional `i64` pairs at `0x1183272/0x118327c` and
+`0x11832aa/0x11832b4`, a bool and conditional `u32/u32/i32` group at
+`0x11832c4` and `0x11832e2/0x11832f2/0x1183302`, then continuation bool at
+`0x11833a8`. The implementation preserves raw flag bytes and values, redacts
+the optional text/scalars, and reports only structural summaries.
 
 ## Exact browser-free relaunch and navigation
 
