@@ -331,7 +331,7 @@ def fixture_remote_player_entry_body(
     secondary_text: str = "",
     header_values: tuple[int, int, int, int] = (0, 0, 0, 0),
     opaque_pre_appearance_length: int = 128,
-    opaque_tail_length: int = 74,
+    opaque_tail_length: int = 73,
 ) -> RemotePlayerEntryBody:
     return RemotePlayerEntryBody(
         secondary_text=secondary_text,
@@ -375,6 +375,7 @@ def fixture_remote_player_entry_body(
             numeric_group_flag_byte=0,
             numeric_group=None,
             continuation_flag_byte=0,
+            followup_flag_byte=0,
         ),
         opaque_tail=b"\x00" * opaque_tail_length,
     )
@@ -3519,8 +3520,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         )
         self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
-        self.assertEqual(entered.body.typed_bytes, 106)
-        self.assertEqual(entered.body.opaque_bytes, 202)
+        self.assertEqual(entered.body.typed_bytes, 107)
+        self.assertEqual(entered.body.opaque_bytes, 201)
         self.assertEqual(
             entered.body.tail_prefix.safe_dict(),
             {
@@ -3538,7 +3539,9 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "conditional_tail_i64_pairs_present": 0,
                 "conditional_tail_numeric_group_present": False,
                 "conditional_tail_continuation": False,
-                "typed_conditional_tail_prefix_bytes": 5,
+                "conditional_tail_followup_present": True,
+                "conditional_tail_followup_nonzero": False,
+                "typed_conditional_tail_prefix_bytes": 6,
             },
         )
         adjacent_fields = replace(
@@ -3602,6 +3605,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     numeric_group_flag_byte=7,
                     numeric_group=(5, 6, -7),
                     continuation_flag_byte=9,
+                    followup_flag_byte=None,
                 ),
             ),
         )
@@ -3617,12 +3621,33 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 "conditional_tail_i64_pairs_present": 2,
                 "conditional_tail_numeric_group_present": True,
                 "conditional_tail_continuation": True,
+                "conditional_tail_followup_present": False,
+                "conditional_tail_followup_nonzero": False,
                 "typed_conditional_tail_prefix_bytes": 72,
             },
         )
         self.assertNotIn(
             "SecretTail",
             str(populated_conditional_tail.safe_dict()),
+        )
+        populated_followup = replace(
+            entered,
+            body=replace(
+                entered.body,
+                conditional_tail_prefix=replace(
+                    entered.body.conditional_tail_prefix,
+                    followup_flag_byte=0xFF,
+                ),
+            ),
+        )
+        self.assertEqual(
+            RemotePlayerEnterField.parse(populated_followup.to_bytes()),
+            populated_followup,
+        )
+        self.assertTrue(
+            populated_followup.body.conditional_tail_prefix.safe_dict()[
+                "conditional_tail_followup_nonzero"
+            ]
         )
         self.assertEqual(left.to_bytes().hex(), "be00189c0400")
         self.assertEqual(RemotePlayerLeaveField.parse(left.to_bytes()), left)
@@ -3675,6 +3700,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     conditional_tail_prefix=replace(
                         entered.body.conditional_tail_prefix,
                         first_i64_pair_flag_byte=1,
+                    ),
+                ),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "follow-up flag"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    conditional_tail_prefix=replace(
+                        entered.body.conditional_tail_prefix,
+                        followup_flag_byte=None,
                     ),
                 ),
             ).to_bytes()
@@ -9137,9 +9173,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.remote_player_refreshes, 1)
         self.assertEqual(
             analysis.state.remote_player_entry_opaque_bytes,
-            3 * (128 + 74) + 1,
+            3 * (128 + 73) + 1,
         )
-        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 334)
+        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 337)
         self.assertEqual(analysis.state.remote_player_entry_secondary_texts, 1)
         self.assertEqual(analysis.state.remote_player_entry_nonzero_headers, 1)
         self.assertEqual(

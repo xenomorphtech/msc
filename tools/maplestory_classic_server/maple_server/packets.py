@@ -9995,6 +9995,7 @@ class RemotePlayerEntryConditionalTailPrefix:
     numeric_group_flag_byte: int
     numeric_group: tuple[int, int, int] | None
     continuation_flag_byte: int
+    followup_flag_byte: int | None
 
     @classmethod
     def parse_from(
@@ -10048,6 +10049,15 @@ class RemotePlayerEntryConditionalTailPrefix:
                 reader.i32("conditional_tail_numeric_group[2]"),
             )
 
+        continuation_flag_byte = reader.u8(
+            "conditional_tail_continuation_flag"
+        )
+        followup_flag_byte = None
+        if continuation_flag_byte == 0:
+            followup_flag_byte = reader.u8(
+                "conditional_tail_followup_flag"
+            )
+
         record = cls(
             optional_text_flag_byte=optional_text_flag_byte,
             optional_text=optional_text,
@@ -10058,9 +10068,8 @@ class RemotePlayerEntryConditionalTailPrefix:
             second_i64_pair=second_i64_pair,
             numeric_group_flag_byte=numeric_group_flag_byte,
             numeric_group=numeric_group,
-            continuation_flag_byte=reader.u8(
-                "conditional_tail_continuation_flag"
-            ),
+            continuation_flag_byte=continuation_flag_byte,
+            followup_flag_byte=followup_flag_byte,
         )
         record._validate()
         return record
@@ -10089,6 +10098,7 @@ class RemotePlayerEntryConditionalTailPrefix:
             + len(self.first_i64_pair) * 8
             + len(self.second_i64_pair) * 8
             + (12 if self.numeric_group is not None else 0)
+            + int(self.followup_flag_byte is not None)
         )
 
     def _validate(self) -> None:
@@ -10138,6 +10148,19 @@ class RemotePlayerEntryConditionalTailPrefix:
                 "remote-player conditional-tail numeric group must contain "
                 "two u32 values and one i32 value"
             )
+        if (self.followup_flag_byte is not None) != (
+            self.continuation_flag_byte == 0
+        ):
+            raise PacketShapeError(
+                "remote-player conditional-tail follow-up flag must be "
+                "present exactly when continuation is zero"
+            )
+        if self.followup_flag_byte is not None and not (
+            0 <= self.followup_flag_byte <= 0xFF
+        ):
+            raise PacketShapeError(
+                "remote-player conditional-tail follow-up flag is out of range"
+            )
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
@@ -10153,6 +10176,12 @@ class RemotePlayerEntryConditionalTailPrefix:
             ),
             "conditional_tail_continuation": (
                 self.continuation_flag_byte != 0
+            ),
+            "conditional_tail_followup_present": (
+                self.followup_flag_byte is not None
+            ),
+            "conditional_tail_followup_nonzero": bool(
+                self.followup_flag_byte or 0
             ),
             "typed_conditional_tail_prefix_bytes": self.encoded_bytes,
         }
@@ -10178,6 +10207,8 @@ class RemotePlayerEntryConditionalTailPrefix:
             if self.numeric_group is not None:
                 encoded.extend(struct.pack("<IIi", *self.numeric_group))
             encoded.append(self.continuation_flag_byte)
+            if self.followup_flag_byte is not None:
+                encoded.append(self.followup_flag_byte)
         except (OverflowError, struct.error, ValueError) as error:
             raise PacketShapeError(
                 "remote-player conditional-tail field is out of range: "

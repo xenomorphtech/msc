@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+3e1a613 Type opcode 189 conditional tail
 683cedf Type opcode 189 tail prefix
 d17a077 Type opcode 13 IV security envelopes
 02f194c Document custom server continuation plan
@@ -125,20 +126,22 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - at the residual-tail boundary: a bool-terminated repeated-`i32` loop, three
   `i32`s, and one `u8`;
 - after variant zero: optional packet UTF-16, two conditional `i64` pairs, a
-  conditional `u32/u32/i32` group, and a continuation bool;
+  conditional `u32/u32/i32` group, a continuation bool, and its false-path
+  follow-up bool;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
 The remaining opaque portions are a pre-appearance bridge and the residual
 tail after those typed prefixes. Across all entries, current accounting
-measures 16,481 typed body bytes and 19,855 opaque body bytes. The bridge is
-128 bytes in 112 entries and 129 bytes in two entries. Residual tail lengths now range
-from 13 through 84 bytes. All 114 terminating bools and final `u8` values are
-zero and none of the captured records enters the repeated-value loop. The
-three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
-meaning zero. The next conditional prefix is 5/24/33 bytes in 83/24/7 entries:
+measures 16,571 typed body bytes and 19,765 opaque body bytes. The bridge is
+128 bytes in 112 entries and 129 bytes in two entries. Residual tail lengths
+now range from 12 through 83 bytes. All 114 terminating bools and final `u8`
+values are zero; none of the captured records enters the repeated-value loop.
+The three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
+meaning zero. The next conditional prefix is 6/24/34 bytes in 83/24/7 entries:
 24 optional text records are empty, the first `i64` pair is absent, the second
 appears 31 times, the numeric group seven times, and continuation is true 24
-times. These are checked corpus results; their roles remain neutral.
+times. The 90 false paths read a follow-up bool: 87 are zero and three are one.
+These are checked corpus results; their roles remain neutral.
 
 The first stream-`114` entry is a useful controlled packet:
 
@@ -264,8 +267,12 @@ to zero and selects RVA `0x1183116`. The subsequent reader calls are bool at
 conditional `i64` pairs at `0x1183272/0x118327c` and
 `0x11832aa/0x11832b4`, a bool and conditional `u32/u32/i32` group at
 `0x11832c4` and `0x11832e2/0x11832f2/0x1183302`, then continuation bool at
-`0x11833a8`. The implementation preserves raw flag bytes and values, redacts
-the optional text/scalars, and reports only structural summaries.
+`0x11833a8`. Its false path jumps to `0x1183720` and reads the follow-up bool at
+`0x1183725`; the true path first depends on runtime field state. Deeper control
+flow consults runtime object state before a delegated parser at `0x16ca1d0`,
+so the codec stops at the uniform packet-controlled boundary. The
+implementation preserves raw flag bytes and values, redacts the optional
+text/scalars, and reports only structural summaries.
 
 ## Exact browser-free relaunch and navigation
 

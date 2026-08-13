@@ -974,6 +974,8 @@ opcode 189:
         uint32 conditional_numeric_value_2
         int32 conditional_numeric_value_3
     bool conditional_continuation
+    if not conditional_continuation:
+        bool conditional_followup
     byte[] opaque_tail                 # non-empty residual after typed prefixes
 
 opcode 190:
@@ -983,22 +985,24 @@ opcode 190:
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-16,481 bytes and leaves 19,855 bytes explicit: a 128-byte bridge in 112
+16,571 bytes and leaves 19,765 bytes explicit: a 128-byte bridge in 112
 records, its 129-byte variant in two stream-`92` records, and residual tails
-of 13..84 bytes. The 14-byte tail prefix follows the pinned delegate's
+of 12..83 bytes. The 14-byte tail prefix follows the pinned delegate's
 executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
 reads, and one `u8`. All 114 captured loop terminators and variant bytes are
 zero, so none enters the loop. The three-value zero masks are
 `000 x 74`, `011 x 24`, and `111 x 16`, where `1` denotes a zero value; these
 values remain semantically neutral and are omitted from safe output. The next
-native conditional prefix consumes 5, 24, or 33 bytes in 83, 24, and seven
+native conditional prefix consumes 6, 24, or 34 bytes in 83, 24, and seven
 entries respectively. Its first bool selects an optional packet UTF-16 record
 in 24 entries; every observed string is empty and its preserved trailing u8 is
 `16` (`18` records) or `20` (`6` records). The first `i64` pair is absent
 throughout, the second occurs in 31 entries, the `u32/u32/i32` group in seven,
-and the final continuation bool is true in 24. The codec preserves every raw
-flag and scalar for exact replay while safe output exposes only presence/count
-summaries. The appearance-prefix value is nonzero in 78 entries, and
+and the continuation bool is true in 24. Its 90 false paths read one follow-up
+bool at native RVA `0x1183725`; 87 captured values are zero and three
+stream-`92` values are one. The codec preserves every raw flag and scalar for
+exact replay while safe output exposes only presence/count summaries. The
+appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,
 and one of those independently exercises all four nonzero header fields
@@ -1028,8 +1032,8 @@ post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
 conditional-branch presence/count summaries, and position when known. It never
 emits
 a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with four entries, 602 typed body
-bytes, and 724 opaque body bytes.
+custom-server transcript remains valid with four entries, 604 typed body
+bytes, and 722 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

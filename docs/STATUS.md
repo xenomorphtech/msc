@@ -412,17 +412,19 @@
   four-value header, an appearance-adjacent `u16`, exactly one appearance
   record, 31 typed post-appearance bytes, and the delegate-proven tail prefix:
   a bool-terminated repeated-`i32` loop, three `i32`s, one `u8`, then optional
-  text, two conditional `i64` pairs, a conditional `u32/u32/i32` group, and a
-  continuation bool. The remaining bridge is `128` or `129` bytes. All 114
+  text, two conditional `i64` pairs, a conditional `u32/u32/i32` group, a
+  continuation bool, and its false-path follow-up bool. The remaining bridge
+  is `128` or `129` bytes. All 114
   loop terminators and tail variants are zero; the next prefix observes 24
   empty optional-text records, 31 second `i64` pairs, seven numeric groups, and
-  24 true continuations. Exact replay types 16,481 body bytes while retaining
-  19,855 bytes as two explicit opaque regions. Every leave matches the current
+  24 true continuations; the 90 false paths contain 87 zero and three one
+  follow-up values. Exact replay types 16,571 body bytes while retaining
+  19,765 bytes as two explicit opaque regions. Every leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
   `4 -> 3 -> 4`; the active saved transcript still validates with four typed
-  entries, 602 typed body bytes, and 724 opaque body bytes.
+  entries, 604 typed body bytes, and 722 opaque body bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template

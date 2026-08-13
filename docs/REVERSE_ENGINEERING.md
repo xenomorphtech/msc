@@ -341,14 +341,19 @@ trailing byte. Both branches join at the bool read at `0x1183252`. A true value
 there gates the `i64` pair at `0x1183272/0x118327c`; the next bool at
 `0x118328c` similarly gates `0x11832aa/0x11832b4`. The bool at `0x11832c4`
 gates `u32/u32/i32` reads at `0x11832e2/0x11832f2/0x1183302`, and a final bool
-at `0x11833a8` selects the next still-residual branch.
+at `0x11833a8` selects the next branch. Its false path jumps directly to RVA
+`0x1183720` and reads another bool at `0x1183725`. The true path first branches
+on runtime field state and is therefore not a uniform packet-only grammar.
 
 Exact offline execution of that grammar consumes all 114 records without
-overrun and re-emits them byte-for-byte. Encoded prefix lengths are `5 x 83`,
-`24 x 24`, and `33 x 7`. All 24 optional strings are empty; the raw trailing
+overrun and re-emits them byte-for-byte. Encoded prefix lengths are `6 x 83`,
+`24 x 24`, and `34 x 7`. All 24 optional strings are empty; the raw trailing
 byte is `16 x 18` or `20 x 6`. The first `i64` pair is absent, the second occurs
 31 times, the numeric group seven times, and the continuation branch 24 times.
-Values and text remain redacted and semantically neutral.
+The other 90 records execute the follow-up bool: 87 values are zero and three
+stream-`92` values are one. Subsequent control flow consults runtime object
+state before a delegated parser at RVA `0x16ca1d0`, so those bytes remain
+explicitly opaque. Values and text remain redacted and semantically neutral.
 
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then
