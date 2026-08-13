@@ -10218,6 +10218,183 @@ class RemotePlayerEntryConditionalTailPrefix:
 
 
 @dataclass(frozen=True)
+class RemotePlayerEntryBridgeRecord15:
+    """Fixed-width native record used by four opcode-189 mask slots."""
+
+    first_i32: int
+    second_i32: int
+    time_flag_u8: int
+    time_i32: int
+    trailing_u16: int
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, name: str
+    ) -> "RemotePlayerEntryBridgeRecord15":
+        return cls(
+            first_i32=reader.i32(f"{name}.first_i32"),
+            second_i32=reader.i32(f"{name}.second_i32"),
+            time_flag_u8=reader.u8(f"{name}.time_flag_u8"),
+            time_i32=reader.i32(f"{name}.time_i32"),
+            trailing_u16=reader.u16(f"{name}.trailing_u16"),
+        )
+
+    @property
+    def nonzero_fields(self) -> int:
+        return sum(
+            value != 0
+            for value in (
+                self.first_i32,
+                self.second_i32,
+                self.time_flag_u8,
+                self.time_i32,
+                self.trailing_u16,
+            )
+        )
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack(
+                "<iiBiH",
+                self.first_i32,
+                self.second_i32,
+                self.time_flag_u8,
+                self.time_i32,
+                self.trailing_u16,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player bridge record field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class RemotePlayerEntryTypedBridge:
+    """Native/corpus-bounded typed islands after the opcode-189 mask."""
+
+    optional_direct_u8: int | None
+    fixed_u8_values: tuple[int, int]
+    leading_records: tuple[
+        RemotePlayerEntryBridgeRecord15,
+        RemotePlayerEntryBridgeRecord15,
+        RemotePlayerEntryBridgeRecord15,
+    ]
+    opaque_middle: bytes = field(repr=False)
+    trailing_record: RemotePlayerEntryBridgeRecord15
+
+    @classmethod
+    def parse(
+        cls, payload: bytes, *, direct_u8_present: bool
+    ) -> "RemotePlayerEntryTypedBridge":
+        reader = PacketReader(payload, packet_name="remote_player_entry_bridge")
+        optional_direct_u8 = (
+            reader.u8("optional_direct_u8") if direct_u8_present else None
+        )
+        record = cls(
+            optional_direct_u8=optional_direct_u8,
+            fixed_u8_values=(
+                reader.u8("fixed_u8_values[0]"),
+                reader.u8("fixed_u8_values[1]"),
+            ),
+            leading_records=tuple(
+                RemotePlayerEntryBridgeRecord15.parse_from(
+                    reader, name=f"leading_records[{index}]"
+                )
+                for index in range(3)
+            ),
+            opaque_middle=reader.bytes(50, "opaque_middle"),
+            trailing_record=RemotePlayerEntryBridgeRecord15.parse_from(
+                reader, name="trailing_record"
+            ),
+        )
+        reader.finish()
+        record._validate()
+        return record
+
+    @property
+    def encoded_bytes(self) -> int:
+        return 112 + int(self.optional_direct_u8 is not None)
+
+    @property
+    def typed_bytes(self) -> int:
+        return self.encoded_bytes - len(self.opaque_middle)
+
+    @property
+    def nonzero_record_fields(self) -> int:
+        return sum(
+            record.nonzero_fields
+            for record in (*self.leading_records, self.trailing_record)
+        )
+
+    def _validate(self) -> None:
+        if self.optional_direct_u8 is not None and not (
+            0 <= self.optional_direct_u8 <= 0xFF
+        ):
+            raise PacketShapeError(
+                "remote-player bridge optional direct u8 is out of range"
+            )
+        if len(self.fixed_u8_values) != 2 or any(
+            not 0 <= value <= 0xFF for value in self.fixed_u8_values
+        ):
+            raise PacketShapeError(
+                "remote-player bridge fixed u8 group must contain two bytes"
+            )
+        if len(self.leading_records) != 3:
+            raise PacketShapeError(
+                "remote-player bridge must contain three leading records"
+            )
+        if len(self.opaque_middle) != 50:
+            raise PacketShapeError(
+                "remote-player bridge opaque middle must contain 50 bytes"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "pre_appearance_typed_layout": True,
+            "pre_appearance_direct_u8_present": (
+                self.optional_direct_u8 is not None
+            ),
+            "pre_appearance_fixed_u8_nonzero_fields": sum(
+                value != 0 for value in self.fixed_u8_values
+            ),
+            "pre_appearance_typed_record_count": 4,
+            "pre_appearance_typed_record_nonzero_fields": (
+                self.nonzero_record_fields
+            ),
+            "typed_pre_appearance_bytes": self.typed_bytes,
+            "opaque_pre_appearance_bytes": len(self.opaque_middle),
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        encoded = bytearray()
+        if self.optional_direct_u8 is not None:
+            encoded.append(self.optional_direct_u8)
+        encoded.extend(self.fixed_u8_values)
+        for record in self.leading_records:
+            encoded.extend(record.to_bytes())
+        encoded.extend(self.opaque_middle)
+        encoded.extend(self.trailing_record.to_bytes())
+        return bytes(encoded)
+
+
+_REMOTE_PLAYER_ENTRY_TYPED_BRIDGE_BITS = frozenset(range(82, 89))
+
+
+def _remote_player_entry_logical_mask_bits(
+    wire_words: tuple[int, int, int, int],
+) -> frozenset[int]:
+    # The native four-u32 reader stores the wire words in reverse field order.
+    logical_words = reversed(wire_words)
+    return frozenset(
+        word_index * 32 + bit_index
+        for word_index, word in enumerate(logical_words)
+        for bit_index in range(32)
+        if word & (1 << bit_index)
+    )
+
+
+@dataclass(frozen=True)
 class RemotePlayerEntryBody:
     """Capture-bounded typed islands in an opcode-189 player body."""
 
@@ -10226,7 +10403,10 @@ class RemotePlayerEntryBody:
     header_u8_1: int
     header_u16_2: int
     header_u8_2: int
-    pre_appearance_mask_words: tuple[int, int, int, int]
+    pre_appearance_mask_words: tuple[int, int, int, int] = field(repr=False)
+    typed_pre_appearance: RemotePlayerEntryTypedBridge | None = field(
+        repr=False
+    )
     opaque_pre_appearance: bytes = field(repr=False)
     appearance_prefix_u16: int
     appearance: CharacterListAppearance = field(repr=False)
@@ -10293,6 +10473,26 @@ class RemotePlayerEntryBody:
             appearance_length,
             appearance,
         ) = candidates[0]
+        pre_appearance_mask_words = struct.unpack_from(
+            "<4I", payload, reader.offset
+        )
+        conditional_pre_appearance = payload[
+            reader.offset + 16 : prefix_offset
+        ]
+        logical_mask_bits = _remote_player_entry_logical_mask_bits(
+            pre_appearance_mask_words
+        )
+        typed_pre_appearance = None
+        opaque_pre_appearance = conditional_pre_appearance
+        if logical_mask_bits in {
+            _REMOTE_PLAYER_ENTRY_TYPED_BRIDGE_BITS,
+            _REMOTE_PLAYER_ENTRY_TYPED_BRIDGE_BITS | {7},
+        }:
+            typed_pre_appearance = RemotePlayerEntryTypedBridge.parse(
+                conditional_pre_appearance,
+                direct_u8_present=7 in logical_mask_bits,
+            )
+            opaque_pre_appearance = b""
         tail_reader = PacketReader(
             payload[appearance_offset + appearance_length :],
             packet_name="remote_player_entry_post_appearance",
@@ -10303,10 +10503,9 @@ class RemotePlayerEntryBody:
             header_u8_1=header_u8_1,
             header_u16_2=header_u16_2,
             header_u8_2=header_u8_2,
-            pre_appearance_mask_words=struct.unpack_from(
-                "<4I", payload, reader.offset
-            ),
-            opaque_pre_appearance=payload[reader.offset + 16 : prefix_offset],
+            pre_appearance_mask_words=pre_appearance_mask_words,
+            typed_pre_appearance=typed_pre_appearance,
+            opaque_pre_appearance=opaque_pre_appearance,
             appearance_prefix_u16=int.from_bytes(
                 payload[prefix_offset:appearance_offset], "little"
             ),
@@ -10342,7 +10541,12 @@ class RemotePlayerEntryBody:
 
     @property
     def opaque_bytes(self) -> int:
-        return len(self.opaque_pre_appearance) + len(self.opaque_tail)
+        pre_appearance = (
+            len(self.typed_pre_appearance.opaque_middle)
+            if self.typed_pre_appearance is not None
+            else len(self.opaque_pre_appearance)
+        )
+        return pre_appearance + len(self.opaque_tail)
 
     @property
     def typed_bytes(self) -> int:
@@ -10388,11 +10592,32 @@ class RemotePlayerEntryBody:
                 "remote-player entry pre-appearance mask must contain four "
                 "u32 words"
             )
-        if len(self.opaque_pre_appearance) not in {112, 113}:
-            raise PacketShapeError(
-                "remote-player entry opaque pre-appearance region must be "
-                "112 or 113 bytes"
+        if self.typed_pre_appearance is None:
+            if len(self.opaque_pre_appearance) not in {112, 113}:
+                raise PacketShapeError(
+                    "remote-player entry opaque pre-appearance region must "
+                    "be 112 or 113 bytes"
+                )
+        else:
+            if self.opaque_pre_appearance:
+                raise PacketShapeError(
+                    "remote-player entry typed pre-appearance bridge cannot "
+                    "also contain an opaque fallback"
+                )
+            self.typed_pre_appearance._validate()
+            logical_mask_bits = _remote_player_entry_logical_mask_bits(
+                self.pre_appearance_mask_words
             )
+            expected_mask_bits = _REMOTE_PLAYER_ENTRY_TYPED_BRIDGE_BITS | (
+                {7}
+                if self.typed_pre_appearance.optional_direct_u8 is not None
+                else set()
+            )
+            if logical_mask_bits != expected_mask_bits:
+                raise PacketShapeError(
+                    "remote-player entry typed pre-appearance bridge does "
+                    "not match its mask shape"
+                )
         if len(self.post_appearance_i32_values) != 4:
             raise PacketShapeError(
                 "remote-player entry post-appearance i32 group must contain "
@@ -10416,6 +10641,21 @@ class RemotePlayerEntryBody:
             )
 
     def safe_dict(self) -> dict[str, int | bool]:
+        pre_appearance_details = (
+            self.typed_pre_appearance.safe_dict()
+            if self.typed_pre_appearance is not None
+            else {
+                "pre_appearance_typed_layout": False,
+                "pre_appearance_direct_u8_present": False,
+                "pre_appearance_fixed_u8_nonzero_fields": 0,
+                "pre_appearance_typed_record_count": 0,
+                "pre_appearance_typed_record_nonzero_fields": 0,
+                "typed_pre_appearance_bytes": 0,
+                "opaque_pre_appearance_bytes": len(
+                    self.opaque_pre_appearance
+                ),
+            }
+        )
         return {
             "secondary_text_code_units": self.secondary_text_code_units,
             "header_nonzero_fields": self.header_nonzero_fields,
@@ -10426,8 +10666,14 @@ class RemotePlayerEntryBody:
                 self.pre_appearance_mask_enabled_bits
             ),
             "pre_appearance_bridge_bytes": (
-                16 + len(self.opaque_pre_appearance)
+                16
+                + (
+                    self.typed_pre_appearance.encoded_bytes
+                    if self.typed_pre_appearance is not None
+                    else len(self.opaque_pre_appearance)
+                )
             ),
+            **pre_appearance_details,
             "appearance_prefix_u16_nonzero": bool(
                 self.appearance_prefix_u16
             ),
@@ -10443,9 +10689,6 @@ class RemotePlayerEntryBody:
             **self.tail_prefix.safe_dict(),
             **self.conditional_tail_prefix.safe_dict(),
             "typed_body_bytes": self.typed_bytes,
-            "opaque_pre_appearance_bytes": len(
-                self.opaque_pre_appearance
-            ),
             "opaque_tail_bytes": len(self.opaque_tail),
             "opaque_body_bytes": self.opaque_bytes,
         }
@@ -10498,7 +10741,11 @@ class RemotePlayerEntryBody:
                 ),
                 header,
                 pre_appearance_mask,
-                bytes(self.opaque_pre_appearance),
+                (
+                    self.typed_pre_appearance.to_bytes()
+                    if self.typed_pre_appearance is not None
+                    else bytes(self.opaque_pre_appearance)
+                ),
                 appearance_prefix,
                 self.appearance.to_bytes(),
                 post_appearance,

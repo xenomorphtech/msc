@@ -102,8 +102,10 @@ Remote-player presence now begins with server opcode `189`, whose IL2CPP-backed
 prefix carries object id, level, and a counted UTF-16 name before a retained
 version-specific body. Its pre-appearance bridge now begins with four native-
 reader-confirmed `u32` mask words; safe output reports only nonzero-word and
-enabled-bit counts, and retains the following 112/113 conditional bytes
-losslessly. Opcode `190` is its exact u32-id removal, not a neutral fixed
+enabled-bit counts. Static recovery also types an optional direct `u8`, two
+fixed `u8`s, and four 15-byte records in the following conditional body while
+retaining its unresolved 50-byte middle subgroup losslessly. Opcode `190` is
+its exact u32-id removal, not a neutral fixed
 record. Across streams `92/114/126`, all 114 entries and 39 leaves round-trip
 exactly, all leaves match current-epoch entries, and every one of 563 opcode-
 `202` and 652 server opcode-`217` broadcasts now references a known player.
@@ -1338,12 +1340,14 @@ folds validly with zero unknown leaves. After restoration the client remained
 active on map `101000000`, the server had no connection failures, and 209/209
 heartbeat probes were paired.
 
-Offline validation now types the bridge's four-word mask, a 14-byte tail prefix,
-and the following conditional envelope in each of those four opcode-`189`
-bodies from the pinned delegate's executed reader path. The latter contains
+Offline validation now types the bridge's four-word mask, 62 bytes after that
+mask, a 14-byte tail prefix, and the following conditional envelope in each of
+those four opcode-`189` bodies from the pinned delegate's executed reader path.
+The bridge typing contains two fixed `u8`s and four 15-byte records around a
+50-byte opaque middle subgroup. The later conditional envelope contains
 optional text, two conditional `i64` pairs, a conditional `u32/u32/i32` group,
 a continuation bool, and the follow-up bool read on its false path. The saved
-transcript remains valid and exact with 668 typed body bytes and 658 opaque body
+transcript remains valid and exact with 916 typed body bytes and 410 opaque body
 bytes. This is a structural accounting refinement only; it does not
 change the already proven live enter/move/leave behavior or assign meanings to
 the newly bounded values.

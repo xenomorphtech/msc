@@ -246,7 +246,7 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         .find(|shape| shape.name == "server_opcode_189_remote_player_entry")
         .unwrap();
     assert_eq!(shape.length, None);
-    assert_eq!(shape.operations.len(), 14);
+    assert_eq!(shape.operations.len(), 38);
     assert!(shape.operations[9..13].iter().all(|operation| matches!(
         operation,
         ShapeOp::Read {
@@ -255,9 +255,28 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         }
     )));
     assert!(matches!(
+        &shape.operations[13],
+        ShapeOp::IfMask {
+            field,
+            mask: 128,
+            operations,
+        } if field == "pre_appearance_mask_word_4"
+            && matches!(
+                operations.as_slice(),
+                [ShapeOp::Read {
+                    kind: ReadKind::U8,
+                    ..
+                }]
+            )
+    ));
+    assert!(matches!(
+        &shape.operations[31],
+        ShapeOp::Bytes { length: 50, .. }
+    ));
+    assert!(matches!(
         shape.operations.last(),
         Some(ShapeOp::RemainingBytes {
-            min_length: Some(242),
+            min_length: Some(130),
             ..
         })
     ));

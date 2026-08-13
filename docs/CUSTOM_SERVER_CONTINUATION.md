@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+7f18779 Type opcode 189 bridge mask
 bdf05fe Type current opcode 148 records
 c583c23 Correlate opcode 13 world exchange
 3e1a613 Type opcode 189 conditional tail
@@ -164,6 +165,9 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - object id, level, and counted UTF-16 name;
 - a secondary counted UTF-16 value and the following `u16/u8/u16/u8` fields;
 - four consecutive `u32` mask words at the start of the pre-appearance bridge;
+- after that mask: the optional direct `u8`, two fixed `u8`s, three leading
+  15-byte records, and one trailing 15-byte record around a 50-byte opaque
+  middle subgroup;
 - a `u16` immediately before a complete `CharacterListAppearance`;
 - after appearance: `i32`, `u32`, four `i32`s, two `i16`s, `u8`, and `u16`;
 - at the residual-tail boundary: a bool-terminated repeated-`i32` loop, three
@@ -173,14 +177,17 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
   follow-up bool;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
-The remaining opaque portions are the conditional body after the bridge mask
-and the residual tail after the typed prefixes. Across all entries, current
-accounting measures 18,395 typed body bytes and 17,941 opaque body bytes. The
-full bridge is 128 bytes in 112 entries and 129 bytes in two entries; after its
-16-byte mask, 112 or 113 bytes remain opaque. The masks have one nonzero word
-and seven enabled bits in 112 entries, and two nonzero words and eight enabled
-bits in two entries. Raw words are retained only for re-emission and never
-reported. Residual tail lengths now range from 12 through 83 bytes. All 114
+The remaining opaque portions are the 50-byte middle bridge subgroup and the
+residual tail after the typed prefixes. Across all entries, current accounting
+measures 25,465 typed body bytes and 10,871 opaque body bytes. Per stream, the
+typed/opaque counts are `13,482/6,248`, `916/410`, and `11,067/4,213` for
+streams `92`, `114`, and `126`. The full bridge is 128 bytes in 112 entries and
+129 bytes in two entries. Its 16-byte mask is followed by 62 typed plus 50
+opaque bytes, or 63 typed plus 50 opaque bytes when the direct `u8` is present.
+The masks have one nonzero word and seven enabled bits in 112 entries, and two
+nonzero words and eight enabled bits in two entries. Raw words are retained
+only for re-emission and never reported. Residual tail lengths now range from
+12 through 83 bytes. All 114
 terminating bools and final `u8`
 values are zero; none of the captured records enters the repeated-value loop.
 The three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
@@ -219,7 +226,8 @@ this sequence without guessing:
 
 1. The delegate reads the secondary UTF-16 value and known scalar prefix.
 2. At delegate RVA approximately `0x1182751`, it dispatches a separate record.
-3. It calls the pre-appearance bridge parser at RVA `0xd5c740`. That method
+3. It calls the pre-appearance bridge parser
+   `fda0a837...::d8fe2358...` at RVA `0xd5c740`. That method
    invokes `cd0d0bca...::a910877d...`, which performs four consecutive
    packet-`UInt32` reads before conditional dispatch.
 4. It then reads the known pre-appearance `u16` and calls the appearance parser
@@ -234,16 +242,24 @@ Temporary disassemblies from the investigation may still exist as:
 /tmp/op189_bridge.objdump
 ```
 
-The bridge parser remains flattened after the four-word reader and includes a
-virtual nested-parser call, so a static list of later direct primitive-reader
-calls is not an execution grammar. Only the confirmed four-word prefix is
-typed; the conditional 112/113-byte remainder stays opaque. GDB and Frida are
-not safe on this Wine build, so continue from offline/native evidence or a new
-capture rather than retrying runtime attachment.
+The native reader stores the four wire words in reverse logical field order.
+After recovering that order, all 114 masks enable the seven virtual-array
+slots at logical indices `82..88`; the two 129-byte stream-`92` bridges also
+enable direct logical bit `7`, whose branch reads one `u8`. The reader then
+consumes two unconditional `u8`s and iterates an instance array of exactly
+seven virtual records. Constructor/factory control flow maps slots `82`, `83`,
+`84`, and `88` to the same 15-byte grammar: two `i32`s, a time-presence `u8`,
+the following `i32`, and a trailing `u16`. The time helper always consumes both
+the flag and `i32`. The three middle slots consume 50 bytes total, but their
+individual `13/20/17` ordering is not yet resolved, so that subgroup remains
+one lossless opaque region. This types 62/63 bytes after the mask and leaves 50
+opaque. GDB and Frida are not safe on this Wine build, so continue from
+offline/native evidence or a new capture rather than retrying runtime
+attachment.
 
-This mask increment keeps structural coverage at `35020/187`, `69/7`, and
+This bridge-record increment keeps structural coverage at `35020/187`, `69/7`, and
 `71047/53` full/partial for streams `92`, `114`, and `126`; opcode `189` stays
-partial. All 332 tracked Python tests, 17 Rust tests, the pinned-build ignored
+partial. All 333 tracked Python tests, 17 Rust tests, the pinned-build ignored
 test, and the private capture-JSONL ignored test pass. All three gameplay
 analyses remain valid; stream `126` retains only its known one-HP warning. A
 focused native-manifest validation consumes all 52 stream-`126` opcode-`189`

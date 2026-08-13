@@ -937,11 +937,14 @@ level, and a terminated counted UTF-16 name before delegating the remaining
 player body. Native control flow in the delegate then reads a second terminated
 counted UTF-16 string, a fixed `u16/u8/u16/u8` header, and a separately
 delegated appearance record. The bridge delegate first reads four consecutive
-`u32` mask words before entering its conditional body. The outer delegate reads
-one `u16` immediately before the appearance and, immediately afterward, an
-`i32`, a `u32`, four `i32`s, a two-`i16` vector, a `u8`, and a `u16`. The
-conditional bytes between the mask and appearance remain opaque. The adjacent
-opcode-`190` handler reads exactly one u32 object id and removes that player:
+`u32` mask words before entering its conditional body. In all 114 entries the
+logical mask enables seven virtual-record slots. The two longer stream-`92`
+bridges also enable one direct `u8` branch. Next come two fixed `u8`s, three
+15-byte records, a 50-byte unresolved middle subgroup, and a final 15-byte
+record. The outer delegate reads one `u16` immediately before the appearance
+and, immediately afterward, an `i32`, a `u32`, four `i32`s, a two-`i16`
+vector, a `u8`, and a `u16`. The adjacent opcode-`190` handler reads exactly
+one u32 object id and removes that player:
 
 ```text
 opcode 189:
@@ -959,7 +962,12 @@ opcode 189:
     uint16 header_value_3
     uint8 header_value_4
     uint32[4] pre_appearance_mask_words  # values redacted
-    byte[112 or 113] opaque_pre_appearance
+    if logical_mask_bit_7:
+        uint8 pre_appearance_direct_value
+    uint8[2] pre_appearance_fixed_values
+    PreAppearanceRecord15[3] pre_appearance_leading_records
+    byte[50] opaque_pre_appearance_middle
+    PreAppearanceRecord15 pre_appearance_trailing_record
     uint16 appearance_prefix_value
     CharacterListAppearance appearance
     int32 post_appearance_value_1
@@ -998,14 +1006,29 @@ opcode 190:
     uint32 object_id                 # redacted
 ```
 
+Each typed 15-byte bridge record follows the same native virtual reader:
+
+```text
+PreAppearanceRecord15:
+    int32 value_1
+    int32 value_2
+    uint8 time_present
+    int32 time_value
+    uint16 trailing_value
+```
+
+The time helper consumes the flag and following `i32` unconditionally; the
+flag changes interpretation, not width. Field roles beyond that native type
+boundary remain deliberately neutral.
+
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-18,395 bytes and leaves 17,941 bytes explicit. The full bridge is 128 bytes in
-112 records and 129 bytes in two stream-`92` records; its first 16 bytes are
-the typed four-word mask, leaving 112/113 conditional bytes opaque before the
-appearance. The masks contain one nonzero word and seven enabled bits in 112
-entries, or two nonzero words and eight enabled bits in two entries. Raw words
-remain redacted. Residual tails are 12..83 bytes. The 14-byte tail prefix
+25,465 bytes and leaves 10,871 bytes explicit. The full bridge is 128 bytes in
+112 records and 129 bytes in two stream-`92` records; after its typed 16-byte
+mask, 62/63 bytes are typed and exactly 50 remain opaque before the appearance.
+The masks contain one nonzero word and seven enabled bits in 112 entries, or
+two nonzero words and eight enabled bits in two entries. Raw words remain
+redacted. Residual tails are 12..83 bytes. The 14-byte tail prefix
 follows the pinned delegate's
 executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
 reads, and one `u8`. All 114 captured loop terminators and variant bytes are
@@ -1050,10 +1073,9 @@ counts, typed/opaque byte counts, mask nonzero-word/enabled-bit counts,
 header/prefix-presence counts,
 post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
 conditional-branch presence/count summaries, and position when known. It never
-emits
-a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with four entries, 668 typed body
-bytes, and 658 opaque body bytes.
+emits a captured object id, string, or appearance identifier. The saved active
+custom-server transcript remains valid with four entries, 916 typed body
+bytes, and 410 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

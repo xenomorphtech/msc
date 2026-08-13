@@ -153,8 +153,10 @@ from maple_server.packets import (  # noqa: E402
     PickupGainNotice,
     RemotePlayerEnterField,
     RemotePlayerEntryBody,
+    RemotePlayerEntryBridgeRecord15,
     RemotePlayerEntryConditionalTailPrefix,
     RemotePlayerEntryTailPrefix,
+    RemotePlayerEntryTypedBridge,
     RemotePlayerInstruction,
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
@@ -344,6 +346,7 @@ def fixture_remote_player_entry_body(
         header_u16_2=header_values[2],
         header_u8_2=header_values[3],
         pre_appearance_mask_words=pre_appearance_mask_words,
+        typed_pre_appearance=None,
         opaque_pre_appearance=(
             b"\x00" * (opaque_pre_appearance_length - 16)
         ),
@@ -3507,6 +3510,92 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertNotIn("35619", safe)
         with self.assertRaisesRegex(PacketShapeError, "reserved bytes"):
             replace(compact, compact_reserved=b"\x00\x00\x01").to_bytes()
+
+    def test_remote_player_entry_types_bounded_bridge_records(self) -> None:
+        record = RemotePlayerEntryBridgeRecord15(
+            first_i32=1,
+            second_i32=-2,
+            time_flag_u8=1,
+            time_i32=3,
+            trailing_u16=4,
+        )
+        typed_bridge = RemotePlayerEntryTypedBridge(
+            optional_direct_u8=None,
+            fixed_u8_values=(0, 2),
+            leading_records=(record, record, record),
+            opaque_middle=b"\xA5" * 50,
+            trailing_record=record,
+        )
+        entered = RemotePlayerEnterField(
+            object_id=302_104,
+            level=12,
+            name="小慧22",
+            body=replace(
+                fixture_remote_player_entry_body(),
+                pre_appearance_mask_words=(0, 0x01FC0000, 0, 0),
+                typed_pre_appearance=typed_bridge,
+                opaque_pre_appearance=b"",
+            ),
+        )
+
+        encoded = entered.to_bytes()
+        parsed = RemotePlayerEnterField.parse(encoded)
+        self.assertEqual(parsed, entered)
+        self.assertEqual(parsed.body.typed_bytes, 185)
+        self.assertEqual(parsed.body.opaque_bytes, 123)
+        self.assertEqual(
+            parsed.body.safe_dict()["pre_appearance_mask_nonzero_words"], 1
+        )
+        self.assertEqual(
+            parsed.body.safe_dict()["pre_appearance_mask_enabled_bits"], 7
+        )
+        self.assertEqual(
+            parsed.body.safe_dict()["typed_pre_appearance_bytes"], 62
+        )
+        self.assertEqual(
+            parsed.body.safe_dict()["opaque_pre_appearance_bytes"], 50
+        )
+        self.assertEqual(
+            parsed.body.safe_dict()[
+                "pre_appearance_typed_record_nonzero_fields"
+            ],
+            20,
+        )
+
+        with_direct = replace(
+            entered,
+            body=replace(
+                entered.body,
+                pre_appearance_mask_words=(0, 0x01FC0000, 0, 0x80),
+                typed_pre_appearance=replace(
+                    typed_bridge, optional_direct_u8=9
+                ),
+            ),
+        )
+        self.assertEqual(
+            RemotePlayerEnterField.parse(with_direct.to_bytes()), with_direct
+        )
+        self.assertEqual(len(with_direct.to_bytes()), len(encoded) + 1)
+        safe = str(with_direct.safe_dict())
+        self.assertNotIn("pre_appearance_mask_words", safe)
+        with self.assertRaisesRegex(PacketShapeError, "match its mask shape"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    pre_appearance_mask_words=(0, 0, 0, 0),
+                ),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "50 bytes"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    typed_pre_appearance=replace(
+                        typed_bridge, opaque_middle=b"\x00" * 49
+                    ),
+                ),
+            ).to_bytes()
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,

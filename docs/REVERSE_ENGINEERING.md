@@ -335,14 +335,28 @@ it is attach-safety evidence only. Do not retry Frida against this build.
 
 Offline method recovery subsequently closed the first 16 bytes of opcode
 `189`'s pre-appearance bridge without runtime attachment. Bridge parser RVA
-`0xd5c740` maps to `fda0a837...::b8438274...`; before its conditional
+`0xd5c740` maps to `fda0a837...::d8fe2358...`; before its conditional
 dispatch, it invokes `cd0d0bca...::a910877d...`. That method performs four
 consecutive packet `UInt32` reads into the four-field `cd0d0bca...` value
 type. Decoding all 114 entries confirms a 16-byte four-word mask prefix in
 every 128/129-byte bridge. The masks have one nonzero word and seven enabled
 bits in 112 entries, and two nonzero words and eight enabled bits in two; raw
-words remain redacted. The codec re-emits all four words exactly and leaves the
-remaining 112/113 conditional bytes opaque.
+words remain redacted. The codec re-emits all four words exactly.
+
+Further offline recovery established that `a910877d...` stores those wire
+words in reverse logical field order. Every captured mask enables the seven
+virtual-array slots at logical indices `82..88`; the two 129-byte stream-`92`
+bridges additionally enable direct bit `7`, whose `d8fe2358...` branch reads
+one `u8`. Two unconditional `u8` reads follow. The `fda0a837...` instance
+constructor creates exactly seven virtual records, and its factory reduces the
+slot indices to `82..88`. Slots `82`, `83`, `84`, and `88` execute the same
+15-byte reader: two `i32`s, the DateTime helper's `u8 + i32`, and one `u16`.
+The helper consumes its `i32` regardless of the flag value. The remaining
+three slots consume `13`, `20`, and `17` bytes in an as-yet unresolved order,
+so their exact 50-byte aggregate stays opaque. All 114 bridges therefore
+consume exactly: optional direct `u8` + two fixed `u8`s + three leading 15-byte
+records + 50 opaque bytes + one trailing 15-byte record. This promotes 62/63
+more bytes per entry without attaching to Wine.
 
 Static control-flow recovery closed the first residual opcode-`189` tail
 boundary without runtime attachment. The outer delegate calls the bool reader
