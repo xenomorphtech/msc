@@ -84,6 +84,7 @@ from .live_replay import (
 from .packets import (
     ChannelTransitionResponse,
     CharacterListEnvelope,
+    CharacterSelection,
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientOpcode298ItemAcquisitionRequest,
@@ -835,6 +836,15 @@ async def replay_connection(
         heartbeat_metrics, dict
     ):
         raise TypeError("runtime world_heartbeat telemetry must be a dictionary")
+    login_handoff_metrics = (
+        runtime_protocol.get("login_handoff")
+        if runtime_protocol is not None
+        else None
+    )
+    if login_handoff_metrics is not None and not isinstance(
+        login_handoff_metrics, dict
+    ):
+        raise TypeError("runtime login_handoff telemetry must be a dictionary")
     npc_state_replay_metrics = (
         runtime_protocol.get("npc_state_replay")
         if runtime_protocol is not None
@@ -1029,6 +1039,7 @@ async def replay_connection(
         parse_handshake(transcript.server_bytes).first_iv
         if (
             client_opcode_replies
+            or login_handoff_metrics is not None
             or world_heartbeat_interval_seconds is not None
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
@@ -1163,6 +1174,7 @@ async def replay_connection(
     )
     connection_error: str | None = None
     server_packet_injection_token: int | None = None
+    pending_login_character_ids: deque[int] = deque()
 
     async def read_live_frame() -> tuple[bytes, int | None, bytes]:
         nonlocal client_iv
@@ -1176,6 +1188,21 @@ async def replay_connection(
             if len(plaintext) >= 2
             else None
         )
+        if (
+            login_handoff_metrics is not None
+            and opcode == int(login_handoff_metrics["request_opcode"])
+        ):
+            try:
+                selection = CharacterSelection.parse(plaintext)
+            except PacketShapeError:
+                login_handoff_metrics["invalid_requests"] = int(
+                    login_handoff_metrics.get("invalid_requests", 0)
+                ) + 1
+            else:
+                login_handoff_metrics["requests_observed"] = int(
+                    login_handoff_metrics.get("requests_observed", 0)
+                ) + 1
+                pending_login_character_ids.append(selection.character_id)
         return frame, opcode, plaintext
 
     async def send_encrypted_frame(frame: bytes) -> None:
@@ -1412,6 +1439,38 @@ async def replay_connection(
                 await send_encrypted_frame(
                     encrypt_next_server_frame(plaintext)
                 )
+                if (
+                    login_handoff_metrics is not None
+                    and len(plaintext) >= 2
+                    and int.from_bytes(plaintext[:2], "little")
+                    == int(login_handoff_metrics["response_opcode"])
+                ):
+                    handoff = WorldHandoff.parse(plaintext)
+                    selected_character_id = (
+                        pending_login_character_ids.popleft()
+                        if pending_login_character_ids
+                        else None
+                    )
+                    character_id_matches = (
+                        selected_character_id is not None
+                        and handoff.character_id == selected_character_id
+                    )
+                    login_handoff_metrics["responses_sent"] = int(
+                        login_handoff_metrics.get("responses_sent", 0)
+                    ) + 1
+                    if character_id_matches:
+                        login_handoff_metrics["matching_transactions"] = int(
+                            login_handoff_metrics.get(
+                                "matching_transactions", 0
+                            )
+                        ) + 1
+                    login_handoff_metrics["last_transaction"] = {
+                        "request_opcode": int(
+                            login_handoff_metrics["request_opcode"]
+                        ),
+                        "response_opcode": handoff.opcode,
+                        "character_id_matches": character_id_matches,
+                    }
 
         async def send_movement_follow_up_decisions(
             *,
@@ -3776,7 +3835,7 @@ async def run_listener(
     async def tracked_handler(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        runtime.connection_started()
+        connection_id = runtime.connection_started()
         error: Exception | None = None
         try:
             await handler(reader, writer)
@@ -3784,7 +3843,7 @@ async def run_listener(
             error = exception
             raise
         finally:
-            runtime.connection_finished(error)
+            runtime.connection_finished(error, connection_id=connection_id)
 
     def start_handler(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -5420,6 +5479,30 @@ async def async_main(arguments: argparse.Namespace) -> None:
             opcode: tuple(payloads)
             for opcode, payloads in grouped_client_opcode_replies.items()
         }
+        opcode_7_replies = client_opcode_replies.get(7, ())
+        if opcode_7_replies:
+            handoff_replies = tuple(
+                WorldHandoff.parse(payload)
+                for payload in opcode_7_replies
+                if len(payload) >= 2
+                and int.from_bytes(payload[:2], "little") == 5
+            )
+            if handoff_replies:
+                if len(handoff_replies) != len(opcode_7_replies):
+                    raise ValueError(
+                        "client opcode 7 readiness requires every reply to be "
+                        "a validated world handoff"
+                    )
+                runtime_protocol["login_handoff"] = {
+                    "request_opcode": 7,
+                    "response_opcode": 5,
+                    "expected_transactions": len(handoff_replies),
+                    "requests_observed": 0,
+                    "responses_sent": 0,
+                    "matching_transactions": 0,
+                    "invalid_requests": 0,
+                    "last_transaction": None,
+                }
         if (
             mob_movement_acknowledgement_policy is not None
             and 207 in client_opcode_replies

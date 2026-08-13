@@ -1640,6 +1640,17 @@ Two debugger hazards remain: attaching during Unity/NGS startup can invalidate
 the run, and leaving GDB attached stalls Wine rendering even after startup.
 Use only short validated patches or the transparent opcode-`2` trampoline.
 
+The login replay now has a connection-scoped, identifier-free readiness API.
+For a validated reactive client opcode-`7`/server opcode-`5` rule,
+`GET /api/v1/login-session-readiness` requires exact request, response, and
+matching-character-ID counts plus no malformed request or connection failure;
+each accepted connection gets a fresh baseline. A browser-free control moved
+the route from HTTP `503` to `200` after one matching handoff. Its login fold
+is warning-free at `handoff_ready` (`34/6` full/partial), while the paired
+world fold is warning-free at `active` on map `101000000` (`150/2`) with all
+`33/33` heartbeat pairs matched. The world readiness route simultaneously
+returned HTTP `200`. No character ID is exposed by either status surface.
+
 ## Immediate next steps
 
 1. Preserve the newly typed life-movement command-final coordinate selector

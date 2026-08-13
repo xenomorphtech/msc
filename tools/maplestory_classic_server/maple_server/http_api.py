@@ -117,10 +117,31 @@ class ServerRuntime:
     _world_heartbeat_response_baseline: int = field(
         default=0, init=False, repr=False
     )
+    _login_handoff_baselines: dict[int, tuple[int, int, int, int]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _last_completed_login_handoff: dict[str, object] | None = field(
+        default=None, init=False, repr=False
+    )
 
-    def connection_started(self) -> None:
+    def _login_handoff_counts(self) -> tuple[int, int, int, int]:
+        handoff = self.protocol.get("login_handoff")
+        if not isinstance(handoff, dict):
+            return (0, 0, 0, 0)
+        return (
+            int(handoff.get("requests_observed", 0)),
+            int(handoff.get("responses_sent", 0)),
+            int(handoff.get("matching_transactions", 0)),
+            int(handoff.get("invalid_requests", 0)),
+        )
+
+    def connection_started(self) -> int:
         self.accepted_connections += 1
         self.active_connections += 1
+        connection_id = self.accepted_connections
+        self._login_handoff_baselines[connection_id] = (
+            self._login_handoff_counts()
+        )
         heartbeat = self.protocol.get("world_heartbeat")
         if isinstance(heartbeat, dict):
             self._world_heartbeat_response_baseline = int(
@@ -128,8 +149,28 @@ class ServerRuntime:
             )
         else:
             self._world_heartbeat_response_baseline = 0
+        return connection_id
 
-    def connection_finished(self, error: BaseException | None = None) -> None:
+    def connection_finished(
+        self,
+        error: BaseException | None = None,
+        *,
+        connection_id: int | None = None,
+    ) -> None:
+        if connection_id is None and self._login_handoff_baselines:
+            connection_id = max(self._login_handoff_baselines)
+        baseline = self._login_handoff_baselines.pop(
+            connection_id, (0, 0, 0, 0)
+        )
+        current = self._login_handoff_counts()
+        self._last_completed_login_handoff = {
+            "connection_id": connection_id,
+            "requests_observed": max(0, current[0] - baseline[0]),
+            "responses_sent": max(0, current[1] - baseline[1]),
+            "matching_transactions": max(0, current[2] - baseline[2]),
+            "invalid_requests": max(0, current[3] - baseline[3]),
+            "failed": error is not None,
+        }
         self.active_connections -= 1
         self.completed_connections += 1
         if self.active_connections == 0:
@@ -141,6 +182,114 @@ class ServerRuntime:
         if error is not None:
             self.failed_connections += 1
             self.last_error = f"{type(error).__name__}: {error}"
+
+    def login_session_readiness(self) -> dict[str, object]:
+        handoff = self.protocol.get("login_handoff")
+        configured = isinstance(handoff, dict)
+        expected_transactions = (
+            int(handoff.get("expected_transactions", 1))
+            if configured
+            else None
+        )
+        request_opcode = (
+            int(handoff.get("request_opcode", 7)) if configured else None
+        )
+        response_opcode = (
+            int(handoff.get("response_opcode", 5)) if configured else None
+        )
+        session: dict[str, object] | None = None
+        session_source: str | None = None
+        if self.active_connections == 1 and len(
+            self._login_handoff_baselines
+        ) == 1:
+            connection_id, baseline = next(
+                iter(self._login_handoff_baselines.items())
+            )
+            current = self._login_handoff_counts()
+            session = {
+                "connection_id": connection_id,
+                "requests_observed": max(0, current[0] - baseline[0]),
+                "responses_sent": max(0, current[1] - baseline[1]),
+                "matching_transactions": max(0, current[2] - baseline[2]),
+                "invalid_requests": max(0, current[3] - baseline[3]),
+                "failed": False,
+            }
+            session_source = "active_connection"
+        elif self.active_connections == 0:
+            session = self._last_completed_login_handoff
+            if session is not None:
+                session_source = "last_completed_connection"
+        requests_observed = int(
+            session.get("requests_observed", 0) if session is not None else 0
+        )
+        responses_sent = int(
+            session.get("responses_sent", 0) if session is not None else 0
+        )
+        matching_transactions = int(
+            session.get("matching_transactions", 0)
+            if session is not None
+            else 0
+        )
+        invalid_requests = int(
+            session.get("invalid_requests", 0) if session is not None else 0
+        )
+        connection_failed = bool(
+            session.get("failed", False) if session is not None else False
+        )
+        connection_scope_available = session is not None
+        request_count_matches = (
+            expected_transactions is not None
+            and requests_observed == expected_transactions
+        )
+        response_count_matches = (
+            expected_transactions is not None
+            and responses_sent == expected_transactions
+        )
+        all_transactions_match = (
+            expected_transactions is not None
+            and matching_transactions == expected_transactions
+        )
+        no_invalid_requests = invalid_requests == 0
+        connection_not_failed = connection_scope_available and not connection_failed
+        ready = (
+            configured
+            and connection_scope_available
+            and request_count_matches
+            and response_count_matches
+            and all_transactions_match
+            and no_invalid_requests
+            and connection_not_failed
+        )
+        return {
+            "ready": ready,
+            "requirements": {
+                "login_handoff_configured": configured,
+                "connection_scope_available": connection_scope_available,
+                "request_count_matches": request_count_matches,
+                "response_count_matches": response_count_matches,
+                "all_character_ids_match": all_transactions_match,
+                "no_invalid_requests": no_invalid_requests,
+                "connection_not_failed": connection_not_failed,
+            },
+            "connections": {
+                "active": self.active_connections,
+                "session_source": session_source,
+                "connection_id": (
+                    session.get("connection_id")
+                    if session is not None
+                    else None
+                ),
+            },
+            "login_handoff": {
+                "request_opcode": request_opcode,
+                "response_opcode": response_opcode,
+                "expected_transactions": expected_transactions,
+                "requests_observed": requests_observed,
+                "responses_sent": responses_sent,
+                "matching_transactions": matching_transactions,
+                "invalid_requests": invalid_requests,
+            },
+        }
 
     def world_session_readiness(self) -> dict[str, object]:
         heartbeat = self.protocol.get("world_heartbeat")
@@ -205,6 +354,7 @@ class ServerRuntime:
             },
             "config": self.config,
             "protocol": self.protocol,
+            "login_session_readiness": self.login_session_readiness(),
             "world_session_readiness": self.world_session_readiness(),
             "server_packet_injection": self.server_packet_injection.safe_dict(),
             "connections": {
@@ -331,6 +481,12 @@ async def handle_runtime_http_request(
             response = _json_response("200 OK", {"ok": True})
         elif target == "/api/v1/status":
             response = _json_response("200 OK", runtime.safe_dict())
+        elif target == "/api/v1/login-session-readiness":
+            readiness = runtime.login_session_readiness()
+            response = _json_response(
+                "200 OK" if readiness["ready"] else "503 Service Unavailable",
+                readiness,
+            )
         elif target == "/api/v1/world-session-readiness":
             readiness = runtime.world_session_readiness()
             response = _json_response(

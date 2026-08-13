@@ -150,6 +150,111 @@ class RuntimeHttpApiTest(unittest.IsolatedAsyncioTestCase):
             0,
         )
 
+    async def test_login_readiness_requires_current_matching_handoff(
+        self,
+    ) -> None:
+        unconfigured_status, unconfigured = await self.request(
+            b"GET /api/v1/login-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(
+            unconfigured_status, "HTTP/1.1 503 Service Unavailable"
+        )
+        self.assertFalse(unconfigured["ready"])
+        self.assertFalse(
+            unconfigured["requirements"]["login_handoff_configured"]
+        )
+
+        self.runtime.protocol["login_handoff"] = {
+            "request_opcode": 7,
+            "response_opcode": 5,
+            "expected_transactions": 1,
+            "requests_observed": 3,
+            "responses_sent": 3,
+            "matching_transactions": 3,
+            "invalid_requests": 0,
+        }
+        connection_id = self.runtime.connection_started()
+        warming_status, warming = await self.request(
+            b"GET /api/v1/login-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(warming_status, "HTTP/1.1 503 Service Unavailable")
+        self.assertEqual(warming["login_handoff"]["requests_observed"], 0)
+
+        handoff = self.runtime.protocol["login_handoff"]
+        handoff["requests_observed"] = 4
+        handoff["responses_sent"] = 4
+        handoff["matching_transactions"] = 4
+        ready_status, ready = await self.request(
+            b"GET /api/v1/login-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(ready_status, "HTTP/1.1 200 OK")
+        self.assertTrue(ready["ready"])
+        self.assertEqual(
+            ready["connections"]["session_source"], "active_connection"
+        )
+        self.assertEqual(
+            ready["login_handoff"],
+            {
+                "expected_transactions": 1,
+                "invalid_requests": 0,
+                "matching_transactions": 1,
+                "request_opcode": 7,
+                "requests_observed": 1,
+                "response_opcode": 5,
+                "responses_sent": 1,
+            },
+        )
+
+        self.runtime.connection_finished(connection_id=connection_id)
+        completed_status, completed = await self.request(
+            b"GET /api/v1/login-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+        self.assertEqual(completed_status, "HTTP/1.1 200 OK")
+        self.assertEqual(
+            completed["connections"]["session_source"],
+            "last_completed_connection",
+        )
+
+        retry_connection_id = self.runtime.connection_started()
+        retry_status, retry = await self.request(
+            b"GET /api/v1/login-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+        self.assertEqual(retry_status, "HTTP/1.1 503 Service Unavailable")
+        self.assertEqual(retry["login_handoff"]["requests_observed"], 0)
+
+        handoff["requests_observed"] = 5
+        handoff["responses_sent"] = 5
+        failed_status, failed = await self.request(
+            b"GET /api/v1/login-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+        self.assertEqual(failed_status, "HTTP/1.1 503 Service Unavailable")
+        self.assertFalse(
+            failed["requirements"]["all_character_ids_match"]
+        )
+        self.runtime.connection_finished(
+            RuntimeError("handoff failed"),
+            connection_id=retry_connection_id,
+        )
+        completed_failure_status, completed_failure = await self.request(
+            b"GET /api/v1/login-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+        self.assertEqual(
+            completed_failure_status, "HTTP/1.1 503 Service Unavailable"
+        )
+        self.assertFalse(
+            completed_failure["requirements"]["connection_not_failed"]
+        )
+
     async def test_rejects_mutating_methods_and_unknown_routes(self) -> None:
         method_status, method = await self.request(
             b"POST /api/v1/status HTTP/1.1\r\nHost: localhost\r\n\r\n"

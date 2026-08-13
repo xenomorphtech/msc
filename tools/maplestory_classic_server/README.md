@@ -1934,6 +1934,7 @@ python -m maple_server replay \
 
 curl http://127.0.0.1:8799/healthz
 curl http://127.0.0.1:8799/api/v1/status
+curl http://127.0.0.1:8799/api/v1/login-session-readiness
 curl http://127.0.0.1:8799/api/v1/world-session-readiness
 ```
 
@@ -1959,6 +1960,23 @@ and no more than one probe is in flight. It returns HTTP `200` with
 each connection, so completed or failed runs cannot make a later connection
 appear ready. The same identifier-free object is embedded in
 `GET /api/v1/status` as `world_session_readiness`.
+When the login replay has a validated reactive opcode-`7` to opcode-`5`
+handoff rule, `GET /api/v1/login-session-readiness` is the corresponding login
+automation endpoint. It returns HTTP `200` only after the current, or most
+recently completed, connection has exactly the configured request, sent-
+response, and matching-character-ID transaction counts with no malformed
+request or connection failure. Counters are baselined on each connection, and
+a new login immediately invalidates an older successful result. The response
+publishes opcodes, counts, booleans, and connection scope only; it never
+publishes either private character ID. The same object is embedded in status
+as `login_session_readiness`.
+
+A fresh browser-free control changed the login endpoint from HTTP `503` to
+HTTP `200` after exactly one matching opcode-`7`/opcode-`5` handoff. The login
+transcript folds validly and warning-free to `handoff_ready` at `34/6` full/
+partial packets. The world endpoint also returned HTTP `200`; that transcript
+folds validly and warning-free to `active` on map `101000000` at `150/2`, with
+all `33/33` heartbeats matched and none pending.
 When the baseline initial snapshot is generated,
 `protocol.initial_field_snapshot_emitter` reports its frame index, emitter,
 inventory group/item counts, skill count, progression shape/variant,

@@ -27,9 +27,10 @@ files are not all part of this task. Never stage the whole tree.
 
 ## Current repository checkpoint
 
-The current pushed sequence before the world-readiness increment is:
+The current pushed sequence before the login-readiness increment is:
 
 ```text
+7b1fcfb Scope Wine HTTP compatibility to local launch
 10fb9ee Add current world session readiness API
 e794153 Type native opcode 13 type 8 record
 32c18c7 Promote typed opcode 189 entries
@@ -478,6 +479,29 @@ is `active` on map `101000000` with 15 matched heartbeats and none pending.
 The launcher checkpoint passes all 342 tracked Python tests; the earlier same-
 turn Rust and independent capture gates remain green because this increment
 changes only launch orchestration, its shell wrapper, tests, and documentation.
+
+The next fresh browser-free run added the login-side readiness counterpart.
+Before client selection, `GET /api/v1/login-session-readiness` returned HTTP
+`503` with a zeroed current-connection baseline. After one exact client
+opcode-`7` request and transformed server opcode-`5` handoff, it returned HTTP
+`200` from the successfully completed connection: one request, one sent
+response, one matching private character ID, no invalid request, and no
+connection failure. The response exposes no character ID. The login transcript
+`login_readiness_live_20260813/login_fast/1786659928625935664_replay_12082.jsonl`
+folds validly and warning-free at `handoff_ready` with `34/6` full/partial
+packets. The paired world transcript
+`login_readiness_live_20260813/world/1786660392892517161_replay_12857.jsonl`
+folds validly and warning-free at `active` on map `101000000` with `150/2`
+full/partial packets and all `33/33` heartbeat pairs matched. During the run,
+`GET /api/v1/world-session-readiness` also returned HTTP `200` with one active
+connection, the configured threshold met, and no pending probe.
+
+The login-readiness checkpoint passes all 344 tracked Python tests, 17 Rust
+unit tests, the pinned-build ignored integration test, and the private capture-
+JSONL ignored test. The API increment changes no packet grammar or reference-
+capture classification; the independent stream totals remain `35078/129`,
+`73/3`, and `71099/1` full/partial for streams `92`, `114`, and `126`, with the
+known six one-HP correlation warnings only in stream `126`.
 
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container

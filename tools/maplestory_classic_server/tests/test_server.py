@@ -74,6 +74,7 @@ from maple_server.protocol import (  # noqa: E402
 from maple_server.packets import (  # noqa: E402
     AbilityPointAllocationEntry,
     ChannelTransitionResponse,
+    CharacterSelection,
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
     ClientOpcode298ItemAcquisitionRequest,
@@ -3464,6 +3465,110 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks)
             server.close()
             await server.wait_closed()
+
+    async def test_replay_records_matching_login_handoff_transaction(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            captured_plaintext = b"captured"
+            captured_frame = (
+                encode_frame_header(len(captured_plaintext), server_iv, ~300)
+                + crypt_payload(captured_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="login-handoff-runtime", metadata={}
+            )
+            source_writer.data("server_to_client", greeting + captured_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            character_id = 12_345
+            handoff = WorldHandoff(
+                result=0,
+                address=IPv4Address("127.0.0.1"),
+                port=12857,
+                character_id=character_id,
+            ).to_bytes()
+            runtime_protocol = {
+                "login_handoff": {
+                    "request_opcode": 7,
+                    "response_opcode": 5,
+                    "expected_transactions": 1,
+                    "requests_observed": 0,
+                    "responses_sent": 0,
+                    "matching_transactions": 0,
+                    "invalid_requests": 0,
+                    "last_transaction": None,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            hold_open_seconds=0.2,
+                            client_opcode_replies={7: handoff},
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(
+                await reader.readexactly(len(greeting + captured_frame)),
+                greeting + captured_frame,
+            )
+            selection = CharacterSelection(character_id=character_id).to_bytes()
+            writer.write(
+                encode_frame_header(len(selection), client_iv, 300)
+                + crypt_payload(selection, client_iv)
+            )
+            await writer.drain()
+            encrypted_handoff = await reader.readexactly(len(handoff) + 4)
+            observed_handoff = WorldHandoff.parse(
+                crypt_payload(
+                    encrypted_handoff[4:],
+                    shuffle_iv(server_iv),
+                )
+            )
+            self.assertEqual(observed_handoff.character_id, character_id)
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            self.assertEqual(
+                runtime_protocol["login_handoff"],
+                {
+                    "request_opcode": 7,
+                    "response_opcode": 5,
+                    "expected_transactions": 1,
+                    "requests_observed": 1,
+                    "responses_sent": 1,
+                    "matching_transactions": 1,
+                    "invalid_requests": 0,
+                    "last_transaction": {
+                        "request_opcode": 7,
+                        "response_opcode": 5,
+                        "character_id_matches": True,
+                    },
+                },
+            )
 
     async def test_replay_responds_to_modeled_mob_damage_during_hold_open(
         self,

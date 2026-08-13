@@ -987,6 +987,24 @@ at `handoff_ready`; the world transcript is valid at `active` on map
 `101000000`. This endpoint prevents aggregate heartbeat totals from an older
 connection being mistaken for a successful current login.
 
+The login listener now exposes the complementary
+`GET /api/v1/login-session-readiness` contract whenever a reactive client
+opcode-`7` rule contains a validated server opcode-`5` handoff. It baselines
+the handoff counters for each accepted connection and returns HTTP `200` only
+when the current, or most recently completed, connection has exactly the
+configured number of exact character-selection requests, sent handoffs, and
+matching request/response character IDs, with no malformed request or
+connection failure. The response deliberately publishes only opcodes, counts,
+booleans, and the connection scope; character IDs remain private.
+
+A fresh browser-free run exercised both readiness contracts together. The
+login route changed from HTTP `503` before selection to HTTP `200` after one
+opcode-`7`/opcode-`5` transaction with `1/1` matching IDs. Its 40 decoded
+packets fold validly and warning-free to `handoff_ready`. The local world route
+then returned HTTP `200`; the final 152-packet world transcript folds validly
+and warning-free to `active` on map `101000000`, with all `33/33` heartbeat
+pairs matched and none pending.
+
 For subsequent runs, start the listener composition, then launch the client
 without the browser:
 
@@ -1061,6 +1079,9 @@ sudo ip netns exec mapleproxy curl \
   http://127.0.0.1:12858/api/v1/status
 
 sudo ip netns exec mapleproxy curl \
+  http://127.0.0.1:12084/api/v1/login-session-readiness
+
+sudo ip netns exec mapleproxy curl \
   http://127.0.0.1:12858/api/v1/world-session-readiness
 ```
 
@@ -1073,6 +1094,13 @@ hold. Each connection gets a new response baseline; historical totals in
 only the boolean requirements, active-connection count, threshold, current-
 connection response count, pending count, and last round-trip time. The same
 object is included in `/api/v1/status` under `world_session_readiness`.
+The login listener's `/api/v1/login-session-readiness` route likewise returns
+HTTP `503` until its current connection has completed the configured exact
+opcode-`7` request/opcode-`5` handoff transaction count with matching private
+character IDs and no malformed request or failure. It retains the successful
+last-completed connection result after the handoff closes, then resets to the
+new connection baseline when another login begins. The identifier-free result
+is also included in `/api/v1/status` under `login_session_readiness`.
 
 The 2026-08-08 real-client run planned captured HP `50/222 -> 1/222`, patched
 one frame, entered map `101000000`, and displayed `HP 1 / 222`. Runtime status

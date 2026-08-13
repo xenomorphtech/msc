@@ -737,6 +737,13 @@ The selected character ID must equal the handoff character ID. The replay's
 `?handoff=127.0.0.1:PORT` PCAP-frame transform changes only address and port
 after validating this shape.
 
+Runtime login readiness treats the exact client opcode-`7` request and exact
+server opcode-`5` response as one FIFO transaction. Each connection receives a
+fresh metric baseline; readiness requires the configured request/response
+count, equality for every paired character ID, no malformed opcode-`7`
+request, and no connection failure. HTTP status exposes only the opcodes,
+counts, equality result, and connection scope, never either character ID.
+
 ## World entry (`client opcode 8`)
 
 All three world references use the same exact 66-byte request boundary:
