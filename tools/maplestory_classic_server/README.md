@@ -2132,6 +2132,11 @@ requires the Maple-only audio mute service to be active, launches the local
 placeholder argument tuple, waits for a Maple window whose PID belongs to the
 newly live client process set, and focuses that exact Sway container. This keeps
 stale Xwayland Maple nodes from satisfying launch readiness.
+It also enters the network namespace through
+`tools/run_with_patched_httpapi.sh`, which bind-mounts the prefix's checked
+Wine-10.12 `HttpCancelHttpRequest` compatibility DLL only inside that launch
+namespace. The launcher refuses a missing compatibility DLL or wrapper. The
+host Wine installation is not modified or left mounted after launch.
 It intentionally cannot launch an authenticated official session.
 The socket/display values are not stable across compositor restarts; the
 explicit flags are a deterministic fallback when automatic selection finds

@@ -263,6 +263,13 @@
   became ready at `3/3` current-connection responses with none pending and a
   7.575 ms last round trip. Login and world transcripts independently fold as
   valid `handoff_ready` and `active`/map-`101000000` sessions.
+- The browser-free launcher now applies the checked Wine-10.12
+  `HttpCancelHttpRequest` compatibility DLL automatically inside the
+  `mapleproxy` launch namespace. It refuses missing inputs and leaves the host
+  Wine DLL unmounted. This fixes a reproduced startup abort that previously
+  appeared as a short-lived black window. A cold ordinary launcher run, with
+  no host pre-mount, completed login and reached the readiness API at `3/3`
+  current-connection heartbeat responses with none pending.
 - Periodic client opcodes `308` and `311` are no longer opaque bodies. All 11
   stream-`126` and 13 latest-live opcode-`308` samples share two redacted
   doubles, two redacted `u64`s, a `u32` copied exactly into two doubles, and

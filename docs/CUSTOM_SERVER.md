@@ -997,7 +997,12 @@ python tools/maplestory_classic_server/tools/launch_local_game.py --restart
 
 The launcher checks both namespace listeners, nested Sway/Xwayland, and the
 persistent Maple-only audio mute service before using the local placeholder
-arguments.
+arguments. It now routes Wine through the checked
+`run_with_patched_httpapi.sh` compatibility wrapper automatically. The wrapper
+binds the prefix's patched `httpapi.dll` over Wine's unimplemented
+`HttpCancelHttpRequest` export inside the network namespace used for that
+launch; it does not leave a host mount behind. A missing wrapper or patched DLL
+is a hard launch error instead of a short-lived black window.
 
 Start the local target for the transformed handoff separately:
 

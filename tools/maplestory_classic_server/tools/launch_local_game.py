@@ -25,6 +25,9 @@ DEFAULT_PREFIX = PROJECT_ROOT / "downloads/maplestory_classic_wine_prefix"
 GAME_PROCESS_NAME = "Maplestory_Classic.exe"
 GAME_WINDOW_CLASS = "maplestory_classic.exe"
 LOCAL_GAME_ARGUMENTS = ("1", "dummy", "1", "1")
+HTTPAPI_COMPATIBILITY_WRAPPER = Path(__file__).with_name(
+    "run_with_patched_httpapi.sh"
+)
 DISPLAY_PATTERN = re.compile(r"^:\d+(?:\.\d+)?$")
 SWAY_SOCKET_PATTERN = re.compile(r"^sway-ipc\.\d+\.\d+\.sock$")
 
@@ -264,8 +267,18 @@ def launch_game(
     executable = (
         prefix / "drive_c/Program Files/Gamania/maplestory_classic/Maplestory_Classic.exe"
     )
+    patched_httpapi = prefix / "drive_c/windows/system32/httpapi.dll"
     if not executable.is_file():
         raise RuntimeError(f"MapleStory executable does not exist: {executable}")
+    if not patched_httpapi.is_file():
+        raise RuntimeError(
+            f"patched Wine HTTP API compatibility DLL does not exist: {patched_httpapi}"
+        )
+    if not HTTPAPI_COMPATIBILITY_WRAPPER.is_file():
+        raise RuntimeError(
+            "Wine HTTP API compatibility wrapper does not exist: "
+            f"{HTTPAPI_COMPATIBILITY_WRAPPER}"
+        )
     wine_log.parent.mkdir(parents=True, exist_ok=True)
     with wine_log.open("ab") as log:
         result = subprocess.run(
@@ -276,6 +289,9 @@ def launch_game(
                 "netns",
                 "exec",
                 namespace,
+                "env",
+                f"MAPLE_PATCHED_HTTPAPI={patched_httpapi}",
+                str(HTTPAPI_COMPATIBILITY_WRAPPER),
                 "sudo",
                 "-n",
                 "-u",

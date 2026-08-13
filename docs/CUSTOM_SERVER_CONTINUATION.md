@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The current pushed sequence before the world-readiness increment is:
 
 ```text
+10fb9ee Add current world session readiness API
 e794153 Type native opcode 13 type 8 record
 32c18c7 Promote typed opcode 189 entries
 1191510 Type opcode 189 nested loop records
@@ -454,6 +455,29 @@ python tools/maplestory_classic_server/tools/launch_local_game.py \
   --sway-socket /run/user/1000/sway-ipc.1000.195243.sock \
   --timeout 45
 ```
+
+The launcher now performs the required Wine compatibility bind itself. It
+enters `mapleproxy` through `tools/run_with_patched_httpapi.sh`, points the
+wrapper at the selected prefix's patched `httpapi.dll`, and only then drops to
+the desktop user and starts Wine. The bind is scoped to the temporary network-
+namespace mount context; the host `/usr/lib/wine/.../httpapi.dll` remains
+unmounted. This closes a reproduced failure where the prior command reported a
+ready black window and then Wine aborted on its unimplemented
+`HttpCancelHttpRequest` export.
+
+A cold run of the ordinary launcher command, with no pre-mounted host DLL,
+traversed the same security/world/channel/character path and reached the world
+readiness threshold again. The API became HTTP `200` at `3/3` responses,
+`pending=0`, and `last_round_trip_ms=28.598`; the process remained in map
+`101000000`, and the host DLL path was still not a mount point. Evidence is in
+`launcher_httpapi_live_20260813/login/1786658071247556545_replay_12082.jsonl`
+and
+`launcher_httpapi_live_20260813/world/1786658154684867787_replay_12857.jsonl`.
+Both final transcripts are warning-free: login is `handoff_ready`, while world
+is `active` on map `101000000` with 15 matched heartbeats and none pending.
+The launcher checkpoint passes all 342 tracked Python tests; the earlier same-
+turn Rust and independent capture gates remain green because this increment
+changes only launch orchestration, its shell wrapper, tests, and documentation.
 
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container

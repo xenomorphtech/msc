@@ -80,6 +80,9 @@ class LaunchLocalGameTest(unittest.TestCase):
             )
             executable.parent.mkdir(parents=True)
             executable.touch()
+            patched_httpapi = prefix / "drive_c/windows/system32/httpapi.dll"
+            patched_httpapi.parent.mkdir(parents=True)
+            patched_httpapi.touch()
             wine_log = root / "wine.log"
             with patch.object(
                 launch_local_game.subprocess,
@@ -98,11 +101,41 @@ class LaunchLocalGameTest(unittest.TestCase):
 
             command = run.call_args.args[0]
             self.assertEqual(command[-4:], ["1", "dummy", "1", "1"])
+            self.assertIn(
+                f"MAPLE_PATCHED_HTTPAPI={patched_httpapi}", command
+            )
+            wrapper_index = command.index(
+                str(launch_local_game.HTTPAPI_COMPATIBILITY_WRAPPER)
+            )
+            self.assertLess(wrapper_index, command.index("wine"))
             joined = " ".join(command).lower()
             self.assertNotIn("chromium", joined)
             self.assertNotIn("cdp", joined)
             self.assertNotIn("ngm", joined)
             self.assertNotIn("beanfun", joined)
+
+    def test_launch_requires_patched_httpapi_compatibility_dll(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / "prefix"
+            executable = (
+                prefix
+                / "drive_c/Program Files/Gamania/maplestory_classic/Maplestory_Classic.exe"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "compatibility DLL does not exist"
+            ):
+                launch_local_game.launch_game(
+                    namespace="mapleproxy",
+                    username="player",
+                    uid=1000,
+                    display=":1",
+                    xauthority=Path("/home/player/.Xauthority"),
+                    prefix=prefix,
+                    wine_log=Path(directory) / "wine.log",
+                )
 
 
 if __name__ == "__main__":
