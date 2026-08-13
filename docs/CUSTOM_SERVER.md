@@ -108,9 +108,12 @@ fixed `u8`s, and all seven following virtual records with exact widths
 follow-up bool, then reach the required five-packet-string/`u8`/`i32`/DateTime
 reader. A unique instance of that grammar terminates every one of the 114
 entries; the earlier front-of-suffix alignment was a zero-run false positive.
-Seventy entries retain both nonoverlapping earlier tail prefixes, four retain
-the first, and 40 retain neither. Across the corpus the conservative model
-types 35,369 body bytes and leaves `967` opaque body bytes. Opcode `190` is
+The opcode-specific appearance reader consumes three trailing style words,
+not the character-list shape's seven; correcting that four-word overread types
+the tail prefix in all 114 entries. Its loop has zero repetitions in 44 entries
+and two in 70, 51 nonzero variants include their unequal-branch group, and the
+following conditional prefix parses in 113. Across the corpus the model types
+36,013 body bytes and leaves `323` opaque body bytes. Opcode `190` is
 its exact u32-id removal, not a neutral fixed
 record. Across streams `92/114/126`, all 114 entries and 39 leaves round-trip
 exactly, all leaves match current-epoch entries, and every one of 563 opcode-
@@ -1347,17 +1350,18 @@ active on map `101000000`, the server had no connection failures, and 209/209
 heartbeat probes were paired.
 
 Offline validation now types the bridge's four-word mask, all 112 bytes after
-that mask, a 14-byte tail prefix, and the following conditional envelope in
-each of those four opcode-`189` bodies from the pinned delegate's executed
-reader path.
+that mask, the opcode-specific three-style-word appearance, and the complete
+tail prefix in each of the six opcode-`189` bodies from the pinned delegate's
+executed reader path.
 The bridge typing contains two fixed `u8`s and seven virtual records with
 exact widths `15/15/15/13/20/17/15`. The later conditional envelope contains
 optional text, two conditional `i64` pairs, a conditional `u32/u32/i32` group,
 a continuation bool, and the follow-up bool reached after both continuation
 arms reconverge. The terminal delegated reader types all six bodies in the
-saved transcript; four retain both earlier prefixes and two retain neither.
-That transcript remains valid and exact with 1,974 typed body bytes and 52
-opaque body bytes. This is a structural accounting
+saved transcript. Four take the nonzero-variant group and retain a three-byte
+gap; two take the zero-variant path with no gap. That transcript remains valid
+and exact with 2,014 typed body bytes and 12 opaque body bytes. This is a
+structural accounting
 refinement only; it does not
 change the already proven live enter/move/leave behavior or assign meanings to
 the newly bounded values.

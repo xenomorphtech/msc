@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+4b48e6f Anchor opcode 189 delegated tail at packet end
 1c248f5 Type opcode 189 delegated tail
 1ae38d5 Read opcode 189 follow-up on both branches
 c5dfb17 Restore opcode 189 runtime tail boundary
@@ -173,27 +174,31 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - four consecutive `u32` mask words at the start of the pre-appearance bridge;
 - after that mask: the optional direct `u8`, two fixed `u8`s, and all seven
   virtual records with exact widths `15/15/15/13/20/17/15`;
-- a `u16` immediately before a complete `CharacterListAppearance`;
+- a `u16` immediately before the opcode-specific three-style-word appearance;
 - after appearance: `i32`, `u32`, four `i32`s, two `i16`s, `u8`, and `u16`;
-- where they do not overlap the terminal record: a bool-terminated repeated-
-  `i32` loop, three `i32`s, one `u8`, and the following conditional prefix;
+- in every entry: a bool-terminated repeated-`i32` loop, three `i32`s, and one
+  variant `u8`;
+- for each nonzero variant: one `u32`, a packet string, bool, three `u8`s, and
+  bool, followed by the conditional prefix shared with the zero variant;
 - at packet end in every entry: five packet UTF-16 values, one further `u8`,
   one `i32`, and one eight-byte DateTime wire value;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
 The remaining opaque portion is the gap before the terminal delegated record.
-Across all entries, current accounting measures 35,369 typed body bytes and
-967 opaque body bytes. Per stream, the typed/opaque counts are
-`19,276/454`, `1,296/30`, and `14,797/483` for
+Across all entries, current accounting measures 36,013 typed body bytes and
+323 opaque body bytes. Per stream, the typed/opaque counts are
+`19,592/138`, `1,320/6`, and `15,101/179` for
 streams `92`, `114`, and `126`. The full bridge is 128 bytes in 112 entries and
 129 bytes in two entries. Its 16-byte mask is followed by 112 typed bytes, or
 113 typed bytes when the direct `u8` is present.
 The masks have one nonzero word and seven enabled bits in 112 entries, and two
 nonzero words and eight enabled bits in two entries. Raw words are retained
-only for re-emission and never reported. Seventy entries retain both earlier
-prefixes without overlap, four retain only the 14-byte loop/scalar prefix, and
-40 conservatively retain neither. The exact opaque gaps are `2 x 4`, `4 x 40`,
-`10 x 7`, `11 x 60`, and `23 x 3` bytes. Both runtime-state arms converge at
+only for re-emission and never reported. The corrected appearance boundary
+types the tail prefix in all 114 entries: 44 have zero loop repetitions and 70
+have two. Fifty-one nonzero variants type the unequal-branch group, and the
+following conditional prefix is typed in 113 entries. The exact opaque gaps
+are `0 x 44`, `1 x 17`, `3 x 43`, `14 x 6`, `15 x 2`, `28 x 1`, and
+`35 x 1` bytes. Both runtime-state arms converge at
 RVA `0x1183720` before the follow-up read. At RVA
 `0x118381e`, a null runtime parser field leads to a throw, while the successful
 non-null path calls the downstream parser at `0x1183857`. Constructor and
@@ -204,9 +209,9 @@ unique record in every entry. Streams `92/114` use code-unit shapes
 `(0,1,1,9|15|16|20,0)` and stream `126` uses `(0,0,0,0,0)`. These are checked
 corpus results; text and scalar roles remain redacted and neutral.
 
-This terminal-reader increment keeps structural coverage at
+This appearance-boundary increment keeps structural coverage at
 `35020/187`, `69/7`, and `71047/53` full/partial for streams `92`, `114`, and
-`126`; opcode `189` remains partial. All 334 tracked Python tests, 17 Rust
+`126`; opcode `189` remains partial. All 335 tracked Python tests, 17 Rust
 tests, the pinned-build ignored test, and the private capture-JSONL ignored
 test pass. All three gameplay analyses remain valid; stream `126` retains only
 its known one-HP warning. Focused native-manifest validation consumes all 52
@@ -346,16 +351,30 @@ process refused the agent load or terminated during injection. The client and
 world connection disappeared. No opcode-`189` packet was injected in this
 attempt. Do not retry Frida; continue from offline/native evidence.
 
-That static path established the next boundary. In the pinned delegate, RVA
+Offline recovery then corrected the upstream boundary. The outer method calls
+the appearance parser at RVA `0x1246ca0`; its delegated record reader at
+`0x12cca10` ends its direct fields with an `i32` at `0x12cd447`, then calls the
+array helper at `0x1cd0d60` with a statically computed count of three. The
+shared character-list appearance shape has seven trailing style words, so
+using it for opcode `189` had consumed four post-appearance words. The opcode
+now selects the three-word shape explicitly while character lists retain the
+seven-word default.
+
+With that alignment, the pinned delegate's RVA
 `0x1182ba8` reads a bool; true enters the repeated `i32` read at `0x1182be7`
 and loops through the next bool at `0x1182d48`. The false exit reaches three
 `i32` reads at `0x1182e42/0x1182e52/0x1182e62`, then a `u8` read at
 `0x1182e89`. The implemented codec preserves generic nonzero loop flag bytes
 and values, round-trips all 114 reference entries, and publishes only safe
-counts/nonzero summaries.
+counts/nonzero summaries. The executed loop has zero repetitions in 44 entries
+and two in 70.
 
-Variant zero is the static comparison-equality path: byte `0x15 + 0xeb` wraps
-to zero and selects RVA `0x1183116`. The subsequent reader calls are bool at
+Static byte `0x15 + 0xeb` wraps to zero, so variant zero selects the equality
+path at RVA `0x118313f`. The 51 nonzero variants take the unequal branch at
+`0x1182eba`, which reads `u32`, a packet UTF-16 string (including its
+unconstrained trailing `u8`), bool, three `u8`s, and bool. Six captured strings
+have nonzero trailing bytes; safe output exposes only lengths and nonzero
+summaries. Both paths reach the subsequent reader calls: bool at
 `0x1183144`, conditional packet UTF-16 at `0x1183174`, bool at `0x1183252`,
 conditional `i64` pairs at `0x1183272/0x118327c` and
 `0x11832aa/0x11832b4`, a bool and conditional `u32/u32/i32` group at
@@ -372,8 +391,9 @@ The outer player constructor creates the delegated record and its constructor
 creates both nested records, although Unity prefab serialization can replace
 constructor defaults. After the parser call, the handler invokes one player
 virtual method without the packet reader and returns at `0x1183892`. The unique
-packet-terminal parse types this reader in all 114 entries; nonoverlapping
-earlier prefixes remain typed and the intervening gaps stay opaque.
+packet-terminal parse types this reader in all 114 entries. The conditional
+prefix is typed in 113 entries; one stream-`126` record retains 35 bytes after
+its typed tail prefix. Across the corpus the remaining gap total is 323 bytes.
 
 ## Exact browser-free relaunch and navigation
 
@@ -507,11 +527,12 @@ utf16    0x1cd0ca0     string   0x1cd0ce0
 
 ### 1. Inventory the remaining pre-delegated gaps
 
-The only opaque opcode-`189` bytes are now the 2/4/10/11/23-byte gaps before
-the unique terminal delegated record. Correlate those gap families with the
-runtime-state branches between the post-appearance fields and RVA `0x118381e`.
-Do not re-promote the 40 overlapping prefix partitions merely because the old
-forward-only slices could be re-emitted.
+The only opaque opcode-`189` bytes are now the `1/3/14/15/28/35`-byte gaps
+before the unique terminal delegated record; 44 entries have no gap. Correlate
+the nonzero families with the runtime-state branches after the conditional
+prefix and before RVA `0x118381e`. Treat the single stream-`126` record whose
+conditional prefix does not parse as a separate 35-byte case until native
+control flow proves its boundary.
 
 ### 2. Resolve version/runtime selection offline
 

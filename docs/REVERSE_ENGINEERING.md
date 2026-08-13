@@ -358,22 +358,36 @@ adds `i32`. The helper consumes each `i32` regardless of its flag value. All
 114 bridges are therefore completely typed after the mask without attaching
 to Wine.
 
+The appearance boundary immediately after that bridge was also recovered from
+native code. The outer method calls the appearance parser at RVA `0x1246ca0`,
+which delegates to the record reader at `0x12cca10`. Its last direct `i32` read
+is at `0x12cd447`; it then calls the array helper at `0x1cd0d60` with count
+`0xd9c92900 + *(u32 *)0x18685d018`. The pinned image stores `0x2636d703`, so
+the low 32-bit sum is exactly three. The shared character-list codec had read
+seven trailing style words and therefore consumed four words belonging to the
+following fields. Opcode `189` now selects the native three-word appearance
+shape, while character lists keep their seven-word default.
+
 Static control-flow recovery closed the first residual opcode-`189` tail
 boundary without runtime attachment. The outer delegate calls the bool reader
 at RVA `0x1182ba8`; a true result enters an `i32` read at `0x1182be7` and the
 loop repeats through the bool read at `0x1182d48`. The false exit reaches three
 consecutive `i32` reads at `0x1182e42`, `0x1182e52`, and `0x1182e62`, then a
-`u8` at `0x1182e89`. Offline decoding and exact re-emission validate that
-grammar across all 114 opcode-`189` records. Every initial/terminating bool and
-final `u8` is zero, while the three-`i32` zero masks are `000 x 74`, `011 x
-24`, and `111 x 16` (`1` means zero). The codec preserves generic nonzero loop
-flags and values but exposes only counts/nonzero summaries in safe output.
+`u8` at `0x1182e89`. With the corrected appearance boundary, offline decoding
+and exact re-emission validate that grammar across all 114 opcode-`189`
+records. Forty-four have zero loop repetitions and 70 have two. The codec
+preserves arbitrary loop flags and values but exposes only counts/nonzero
+summaries in safe output.
 
-The variant byte is zero in all captures. The delegate computes its comparison
-constant from static byte `0x15 + 0xeb`, which wraps to zero; equality selects
-RVA `0x1183116`. That path reads another bool at `0x1183144`. True selects the
-packet UTF-16 reader at `0x1183174`, preserving its otherwise discarded
-trailing byte. Both branches join at the bool read at `0x1183252`. A true value
+The delegate computes its comparison constant from static byte `0x15 + 0xeb`,
+which wraps to zero. Equality jumps through RVA `0x118313f` to the bool at
+`0x1183144`. The 51 nonzero captured variants instead take RVA `0x1182eba`,
+which reads one `u32`, calls the packet UTF-16 helper, then reads bool, three
+`u8`s, and bool before joining the equality path. The string helper at
+`0x1cd0ca0` consumes an unconstrained trailing `u8`; six captured groups have
+a nonzero value there. The following bool at `0x1183144` selects the packet
+UTF-16 reader at `0x1183174`, preserving its otherwise discarded trailing
+byte. Both branches join at the bool read at `0x1183252`. A true value
 there gates the `i64` pair at `0x1183272/0x118327c`; the next bool at
 `0x118328c` similarly gates `0x11832aa/0x11832b4`. The bool at `0x11832c4`
 gates `u32/u32/i32` reads at `0x11832e2/0x11832f2/0x1183302`, and a final bool
@@ -381,14 +395,13 @@ at `0x11833a8` selects the next branch. Its false path jumps directly to RVA
 `0x1183720`. The true path first performs runtime-state-dependent work, then
 every arm reconverges at `0x1183720` and reads another bool at `0x1183725`.
 
-The earlier forward-only capture partition could re-emit all 114 records, but
-it is not simultaneously valid with the required downstream reader: in 40
-entries that reader's unique packet-terminal record starts before both claimed
-prefixes, and in four it starts inside the conditional prefix. The codec now
-retains both earlier typed prefixes only in 70 nonoverlapping records, retains
-the 14-byte loop/scalar prefix in four, and preserves the earlier bytes opaquely
-in the other 40. The native arms still reconverge at `0x1183720` before the
-follow-up read. The call site loads the player object's parser field at RVA
+The corrected boundary removes the apparent overlap with the required
+downstream reader. The tail prefix is typed in all 114 entries, the unequal-
+variant group is typed in 51, and the conditional prefix is typed in 113. One
+stream-`126` record preserves 35 bytes after its typed tail prefix because the
+conditional parser cannot safely consume that branch. The native arms still
+reconverge at `0x1183720` before the follow-up read. The call site loads the
+player object's parser field at RVA
 `0x118381e`; its null path throws, while the successful non-null path calls
 `e3ad4d05...::ef3213da...` at `0x1183857`. That callee begins with a
 packet-string helper at `0x16ca271`. Both later subobject checks are generated
@@ -412,8 +425,9 @@ later reader call. Requiring the delegated grammar to consume exactly to packet
 end produces one unique candidate in every one of the 114 entries. Streams
 `92/114` use text-code-unit shapes `(0,1,1,9|15|16|20,0)`, while all stream-
 `126` records use `(0,0,0,0,0)`. This terminal constraint rejects the earlier
-front-of-suffix zero-run false positives and reduces the remaining neutral gaps
-to 967 bytes total. Safe output exposes only lengths and nonzero summaries;
+front-of-suffix zero-run false positives. The residual gap distribution is
+`0 x 44`, `1 x 17`, `3 x 43`, `14 x 6`, `15 x 2`, `28 x 1`, and `35 x 1`,
+for 323 bytes total. Safe output exposes only lengths and nonzero summaries;
 values and text remain redacted and semantically neutral.
 
 The same short-lived method closed both expanded variable-server records. For

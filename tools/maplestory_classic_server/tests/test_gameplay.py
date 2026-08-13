@@ -162,6 +162,7 @@ from maple_server.packets import (  # noqa: E402
     RemotePlayerEntryDelegatedTail,
     RemotePlayerEntryTailPrefix,
     RemotePlayerEntryTypedBridge,
+    RemotePlayerEntryVariantTailGroup,
     RemotePlayerInstruction,
     RemotePlayerLeaveField,
     RemotePlayerMobValueRecord,
@@ -367,7 +368,7 @@ def fixture_remote_player_entry_body(
             ),
             masked_entries=(),
             cash_weapon_id=0,
-            opaque_style_values=(0, 0, 0, 0, 0, 0, 0),
+            opaque_style_values=(0, 0, 0),
         ),
         post_appearance_i32_1=0,
         post_appearance_u32=0,
@@ -381,6 +382,7 @@ def fixture_remote_player_entry_body(
             post_loop_i32_values=(0, 0, 0),
             variant_u8=0,
         ),
+        variant_tail_group=None,
         conditional_tail_prefix=RemotePlayerEntryConditionalTailPrefix(
             optional_text_flag_byte=0,
             optional_text=None,
@@ -3574,7 +3576,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         encoded = entered.to_bytes()
         parsed = RemotePlayerEnterField.parse(encoded)
         self.assertEqual(parsed, entered)
-        self.assertEqual(parsed.body.typed_bytes, 235)
+        self.assertEqual(parsed.body.typed_bytes, 219)
         self.assertEqual(parsed.body.opaque_bytes, 73)
         self.assertEqual(
             parsed.body.safe_dict()["pre_appearance_mask_nonzero_words"], 1
@@ -3645,6 +3647,110 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     ),
                 ),
             ).to_bytes()
+
+    def test_remote_player_entry_types_variant_tail_group(self) -> None:
+        variant_tail_group = RemotePlayerEntryVariantTailGroup(
+            leading_u32=0x1234_5678,
+            text="Hidden",
+            text_trailing_u8=0xA5,
+            first_flag_byte=1,
+            u8_values=(2, 0, 0xFF),
+            second_flag_byte=3,
+        )
+        encoded_group = variant_tail_group.to_bytes()
+        reader = PacketReader(
+            encoded_group, packet_name="test_remote_player_variant_tail"
+        )
+        self.assertEqual(
+            RemotePlayerEntryVariantTailGroup.parse_from(reader),
+            variant_tail_group,
+        )
+        reader.finish()
+        self.assertEqual(len(encoded_group), 12 + 6 * 2)
+        self.assertEqual(
+            variant_tail_group.safe_dict(),
+            {
+                "variant_tail_group_text_code_units": 6,
+                "variant_tail_group_text_trailing_u8_nonzero": True,
+                "variant_tail_group_nonzero_scalar_fields": 5,
+                "typed_variant_tail_group_bytes": len(encoded_group),
+            },
+        )
+        safe = str(variant_tail_group.safe_dict())
+        self.assertNotIn("Hidden", safe)
+        self.assertNotIn(str(0x1234_5678), safe)
+
+        for truncated_length in range(len(encoded_group)):
+            with self.subTest(truncated_length=truncated_length):
+                truncated_reader = PacketReader(
+                    encoded_group[:truncated_length],
+                    packet_name="truncated_remote_player_variant_tail",
+                )
+                with self.assertRaises(PacketShapeError):
+                    RemotePlayerEntryVariantTailGroup.parse_from(
+                        truncated_reader
+                    )
+
+        body = fixture_remote_player_entry_body()
+        appearance_reader = PacketReader(
+            body.appearance.to_bytes() + b"\xaa" * 16,
+            packet_name="three_word_remote_player_appearance",
+        )
+        self.assertEqual(
+            CharacterListAppearance.parse_from(
+                appearance_reader, opaque_style_value_count=3
+            ),
+            body.appearance,
+        )
+        self.assertEqual(appearance_reader.remaining, 16)
+        with self.assertRaisesRegex(PacketShapeError, "count must be 3 or 7"):
+            CharacterListAppearance.parse_from(
+                PacketReader(
+                    body.appearance.to_bytes(),
+                    packet_name="invalid_remote_player_appearance_count",
+                ),
+                opaque_style_value_count=4,
+            )
+
+        delegated_tail = RemotePlayerEntryDelegatedTail(
+            primary_text="PrimarySecret",
+            primary_text_trailing_u8=0,
+            nested_texts=("", "NestedSecret", "", ""),
+            nested_text_trailing_u8s=(0, 0, 0, 0),
+            nested_u8=0,
+            comparison_i32=0,
+            datetime_u64=0,
+        )
+        entered = RemotePlayerEnterField(
+            object_id=302_104,
+            level=12,
+            name="RedactedPlayer",
+            body=replace(
+                body,
+                tail_prefix=replace(body.tail_prefix, variant_u8=1),
+                variant_tail_group=variant_tail_group,
+                delegated_tail=delegated_tail,
+                opaque_tail=b"",
+            ),
+        )
+        parsed = RemotePlayerEnterField.parse(entered.to_bytes())
+        self.assertEqual(parsed, entered)
+        self.assertTrue(
+            parsed.body.safe_dict()["variant_tail_group_typed_layout"]
+        )
+        self.assertEqual(parsed.body.opaque_pre_delegated_tail, b"")
+        self.assertNotIn("Hidden", str(parsed.safe_dict()))
+
+        with self.assertRaisesRegex(PacketShapeError, "three values"):
+            replace(variant_tail_group, u8_values=(1, 2)).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "u8 is out of range"):
+            replace(
+                variant_tail_group, second_flag_byte=0x100
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "leading u32"):
+            replace(variant_tail_group, leading_u32=-1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "match its nonzero"):
+            replace(entered.body, variant_tail_group=None).to_bytes()
 
     def test_remote_player_entry_types_delegated_tail_reader(self) -> None:
         delegated_tail = RemotePlayerEntryDelegatedTail(
@@ -3765,14 +3871,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
         left = RemotePlayerLeaveField(object_id=302_104)
 
         encoded_entry = entered.to_bytes()
-        self.assertEqual(len(encoded_entry), 326)
+        self.assertEqual(len(encoded_entry), 310)
         self.assertTrue(
             encoded_entry.hex().startswith(
                 "bd00189c04000c04000f5c676132003200"
             )
         )
         self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
-        self.assertEqual(entered.body.typed_bytes, 123)
+        self.assertEqual(entered.body.typed_bytes, 107)
         self.assertEqual(entered.body.opaque_bytes, 185)
         self.assertEqual(
             entered.body.safe_dict()["pre_appearance_mask_nonzero_words"], 0
@@ -3833,6 +3939,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     continuation_flag_bytes=(1, 0xFF, 0),
                     post_loop_i32_values=(1, 0, -3),
                     variant_u8=4,
+                ),
+                variant_tail_group=RemotePlayerEntryVariantTailGroup(
+                    leading_u32=0,
+                    text="",
+                    text_trailing_u8=0,
+                    first_flag_byte=0,
+                    u8_values=(0, 0, 0),
+                    second_flag_byte=0,
                 ),
             ),
         )
@@ -9673,7 +9787,7 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.remote_player_entry_opaque_bytes,
             3 * (112 + 73) + 1,
         )
-        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 385)
+        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 337)
         self.assertEqual(analysis.state.remote_player_entry_secondary_texts, 1)
         self.assertEqual(analysis.state.remote_player_entry_nonzero_headers, 1)
         self.assertEqual(

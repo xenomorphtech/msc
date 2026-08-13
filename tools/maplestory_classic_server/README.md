@@ -973,19 +973,18 @@ The gameplay fold currently models these capture-backed boundaries:
   four-value header, four native-reader-confirmed `u32` bridge mask words, an
   optional direct `u8`, two fixed `u8`s, and all seven bridge records with
   exact widths `15/15/15/13/20/17/15`, followed by a typed appearance island
-  and the appearance-adjacent
-  native `u16/i32/u32/4*i32/2*i16/u8/u16` reads followed, where they do not
-  overlap the terminal record, by a bool-terminated repeated-`i32` loop, three
-  `i32`s, a `u8`, and the conditional prefix reached before both arms
-  reconverge. The required downstream reader consumes five packet strings, one
-  `u8`, one `i32`, and one DateTime. Exactly one instance consumes to packet end
-  in all 114 entries. Seventy retain both earlier prefixes, four retain the
-  first, and 40 conservatively retain neither; only 967 pre-delegated gap bytes
-  remain opaque.
-  All 114 reference entries round-trip
-  losslessly with zero captured loop iterations or nonzero tail variants and a
-  completely typed pre-appearance bridge (raw mask words stay redacted), while
-  server opcode `190` is the exact
+  whose opcode-specific native shape has three trailing style words instead of
+  the character-list shape's seven, and the appearance-adjacent native
+  `u16/i32/u32/4*i32/2*i16/u8/u16` reads, followed by a bool-terminated
+  repeated-`i32` loop, three `i32`s, and a variant `u8` in
+  all 114 entries. Fifty-one nonzero variants type an additional `u32`, packet
+  string, bool, three `u8`s, and bool; the following conditional prefix is
+  typed in 113. The required downstream reader consumes five packet strings,
+  one `u8`, one `i32`, and one DateTime. Exactly one instance consumes to
+  packet end in all 114 entries, leaving 323 pre-delegated gap bytes. All 114
+  reference entries round-trip losslessly; 44 have zero tail-loop repetitions
+  and 70 have two, while the completely typed pre-appearance bridge retains
+  redacted raw mask words. Server opcode `190` is the exact
   object-id removal and the fold requires movement broadcasts to reference a
   current-field entry,
 - server opcode `224`: exact remote-player/mob-template value record with a

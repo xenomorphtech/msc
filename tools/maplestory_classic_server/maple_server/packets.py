@@ -1479,7 +1479,16 @@ class CharacterListAppearance:
         return tuple(entries)
 
     @classmethod
-    def parse_from(cls, reader: PacketReader) -> "CharacterListAppearance":
+    def parse_from(
+        cls,
+        reader: PacketReader,
+        *,
+        opaque_style_value_count: int = 7,
+    ) -> "CharacterListAppearance":
+        if opaque_style_value_count not in {3, 7}:
+            raise PacketShapeError(
+                "character list appearance style-value count must be 3 or 7"
+            )
         appearance = cls(
             gender=reader.u8("appearance.gender"),
             skin=reader.u8("appearance.skin"),
@@ -1493,7 +1502,7 @@ class CharacterListAppearance:
             cash_weapon_id=reader.u32("appearance.cash_weapon_id"),
             opaque_style_values=tuple(
                 reader.u32(f"appearance.opaque_style_values[{index}]")
-                for index in range(7)
+                for index in range(opaque_style_value_count)
             ),
         )
         appearance._validate()
@@ -1520,9 +1529,10 @@ class CharacterListAppearance:
             raise PacketShapeError(
                 f"character list face id is out of range: {self.face_id}"
             )
-        if len(self.opaque_style_values) != 7:
+        if len(self.opaque_style_values) not in {3, 7}:
             raise PacketShapeError(
-                "character list appearance must contain seven style values"
+                "character list appearance must contain three or seven "
+                "style values"
             )
         for field, entries in (
             ("visible", self.visible_entries),
@@ -1545,7 +1555,10 @@ class CharacterListAppearance:
                     *(entry.to_bytes() for entry in self.masked_entries),
                     b"\xff",
                     struct.pack("<I", self.cash_weapon_id),
-                    struct.pack("<7I", *self.opaque_style_values),
+                    struct.pack(
+                        f"<{len(self.opaque_style_values)}I",
+                        *self.opaque_style_values,
+                    ),
                 )
             )
         except struct.error as error:
@@ -9982,6 +9995,120 @@ class RemotePlayerEntryTailPrefix:
 
 
 @dataclass(frozen=True)
+class RemotePlayerEntryVariantTailGroup:
+    """Native unequal-variant reader group in opcode 189."""
+
+    leading_u32: int = field(repr=False)
+    text: str = field(repr=False)
+    text_trailing_u8: int
+    first_flag_byte: int
+    u8_values: tuple[int, int, int]
+    second_flag_byte: int
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader
+    ) -> "RemotePlayerEntryVariantTailGroup":
+        record = cls(
+            leading_u32=reader.u32("variant_tail_group.leading_u32"),
+            text=reader.utf16_string(
+                "variant_tail_group.text", trailing_byte=False
+            ),
+            text_trailing_u8=reader.u8(
+                "variant_tail_group.text.trailing_u8"
+            ),
+            first_flag_byte=reader.u8("variant_tail_group.first_flag"),
+            u8_values=tuple(
+                reader.u8(f"variant_tail_group.u8_values[{index}]")
+                for index in range(3)
+            ),
+            second_flag_byte=reader.u8("variant_tail_group.second_flag"),
+        )
+        record._validate()
+        return record
+
+    @property
+    def text_code_units(self) -> int:
+        try:
+            return len(self.text.encode("utf-16-le")) // 2
+        except UnicodeEncodeError as error:
+            raise PacketShapeError(
+                "remote-player variant-tail text is not valid UTF-16"
+            ) from error
+
+    @property
+    def nonzero_scalar_fields(self) -> int:
+        return sum(
+            value != 0
+            for value in (
+                self.leading_u32,
+                self.first_flag_byte,
+                *self.u8_values,
+                self.second_flag_byte,
+            )
+        )
+
+    @property
+    def encoded_bytes(self) -> int:
+        return 12 + self.text_code_units * 2
+
+    def _validate(self) -> None:
+        if not 0 <= self.leading_u32 <= 0xFFFF_FFFF:
+            raise PacketShapeError(
+                "remote-player variant-tail leading u32 is out of range"
+            )
+        if len(self.u8_values) != 3:
+            raise PacketShapeError(
+                "remote-player variant-tail u8 group must contain three values"
+            )
+        for value in (
+            self.text_trailing_u8,
+            self.first_flag_byte,
+            *self.u8_values,
+            self.second_flag_byte,
+        ):
+            if not 0 <= value <= 0xFF:
+                raise PacketShapeError(
+                    "remote-player variant-tail u8 is out of range"
+                )
+        _ = self.text_code_units
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "variant_tail_group_text_code_units": self.text_code_units,
+            "variant_tail_group_text_trailing_u8_nonzero": bool(
+                self.text_trailing_u8
+            ),
+            "variant_tail_group_nonzero_scalar_fields": (
+                self.nonzero_scalar_fields
+            ),
+            "typed_variant_tail_group_bytes": self.encoded_bytes,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return b"".join(
+                (
+                    struct.pack("<I", self.leading_u32),
+                    encode_utf16_string(self.text, trailing_byte=False),
+                    bytes(
+                        (
+                            self.text_trailing_u8,
+                            self.first_flag_byte,
+                            *self.u8_values,
+                            self.second_flag_byte,
+                        )
+                    ),
+                )
+            )
+        except (struct.error, ValueError) as error:
+            raise PacketShapeError(
+                f"remote-player variant-tail field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class RemotePlayerEntryConditionalTailPrefix:
     """Native-reader-bounded conditional scalars after the opcode-189 variant."""
 
@@ -10737,6 +10864,7 @@ class RemotePlayerEntryBody:
     post_appearance_u8: int
     post_appearance_u16: int
     tail_prefix: RemotePlayerEntryTailPrefix | None
+    variant_tail_group: RemotePlayerEntryVariantTailGroup | None
     conditional_tail_prefix: RemotePlayerEntryConditionalTailPrefix | None
     opaque_pre_delegated_tail: bytes = field(repr=False)
     delegated_tail: RemotePlayerEntryDelegatedTail | None
@@ -10767,7 +10895,8 @@ class RemotePlayerEntryBody:
             )
             try:
                 appearance = CharacterListAppearance.parse_from(
-                    appearance_reader
+                    appearance_reader,
+                    opaque_style_value_count=3,
                 )
             except PacketShapeError:
                 continue
@@ -10838,6 +10967,7 @@ class RemotePlayerEntryBody:
             RemotePlayerEntryDelegatedTail.parse_unique_terminal(tail_payload)
         )
         tail_prefix = None
+        variant_tail_group = None
         conditional_tail_prefix = None
         opaque_pre_delegated_tail = b""
         delegated_tail = None
@@ -10848,6 +10978,10 @@ class RemotePlayerEntryBody:
                 packet_name="remote_player_entry_legacy_tail",
             )
             tail_prefix = RemotePlayerEntryTailPrefix.parse_from(prefix_reader)
+            if tail_prefix.variant_u8 != 0:
+                variant_tail_group = (
+                    RemotePlayerEntryVariantTailGroup.parse_from(prefix_reader)
+                )
             conditional_tail_prefix = (
                 RemotePlayerEntryConditionalTailPrefix.parse_from(
                     prefix_reader
@@ -10871,16 +11005,31 @@ class RemotePlayerEntryBody:
                 tail_prefix = None
             else:
                 opaque_offset = prefix_reader.offset
-                try:
-                    conditional_tail_prefix = (
-                        RemotePlayerEntryConditionalTailPrefix.parse_from(
-                            prefix_reader
+                if tail_prefix.variant_u8 != 0:
+                    try:
+                        variant_tail_group = (
+                            RemotePlayerEntryVariantTailGroup.parse_from(
+                                prefix_reader
+                            )
                         )
-                    )
-                except PacketShapeError:
-                    conditional_tail_prefix = None
-                else:
-                    opaque_offset = prefix_reader.offset
+                    except PacketShapeError:
+                        variant_tail_group = None
+                    else:
+                        opaque_offset = prefix_reader.offset
+                if (
+                    tail_prefix.variant_u8 == 0
+                    or variant_tail_group is not None
+                ):
+                    try:
+                        conditional_tail_prefix = (
+                            RemotePlayerEntryConditionalTailPrefix.parse_from(
+                                prefix_reader
+                            )
+                        )
+                    except PacketShapeError:
+                        conditional_tail_prefix = None
+                    else:
+                        opaque_offset = prefix_reader.offset
             opaque_pre_delegated_tail = tail_payload[
                 opaque_offset:delegated_offset
             ]
@@ -10904,6 +11053,7 @@ class RemotePlayerEntryBody:
             post_appearance_u8=post_appearance_u8,
             post_appearance_u16=post_appearance_u16,
             tail_prefix=tail_prefix,
+            variant_tail_group=variant_tail_group,
             conditional_tail_prefix=conditional_tail_prefix,
             opaque_pre_delegated_tail=opaque_pre_delegated_tail,
             delegated_tail=delegated_tail,
@@ -11015,6 +11165,18 @@ class RemotePlayerEntryBody:
             )
         if self.tail_prefix is not None:
             self.tail_prefix._validate()
+            variant_group_required = self.tail_prefix.variant_u8 != 0
+            if variant_group_required != (self.variant_tail_group is not None):
+                raise PacketShapeError(
+                    "remote-player variant-tail group must match its nonzero "
+                    "variant"
+                )
+        elif self.variant_tail_group is not None:
+            raise PacketShapeError(
+                "remote-player variant-tail group requires a typed tail prefix"
+            )
+        if self.variant_tail_group is not None:
+            self.variant_tail_group._validate()
         if self.conditional_tail_prefix is not None:
             self.conditional_tail_prefix._validate()
         if self.delegated_tail is None and self.opaque_pre_delegated_tail:
@@ -11109,6 +11271,20 @@ class RemotePlayerEntryBody:
                 "typed_conditional_tail_prefix_bytes": 0,
             }
         )
+        variant_tail_details = (
+            {
+                "variant_tail_group_typed_layout": True,
+                **self.variant_tail_group.safe_dict(),
+            }
+            if self.variant_tail_group is not None
+            else {
+                "variant_tail_group_typed_layout": False,
+                "variant_tail_group_text_code_units": 0,
+                "variant_tail_group_text_trailing_u8_nonzero": False,
+                "variant_tail_group_nonzero_scalar_fields": 0,
+                "typed_variant_tail_group_bytes": 0,
+            }
+        )
         return {
             "secondary_text_code_units": self.secondary_text_code_units,
             "header_nonzero_fields": self.header_nonzero_fields,
@@ -11140,6 +11316,7 @@ class RemotePlayerEntryBody:
                 self.post_appearance_nonzero_fields
             ),
             **tail_prefix_details,
+            **variant_tail_details,
             **conditional_tail_details,
             **delegated_tail_details,
             "typed_body_bytes": self.typed_bytes,
@@ -11209,6 +11386,11 @@ class RemotePlayerEntryBody:
                 (
                     self.tail_prefix.to_bytes()
                     if self.tail_prefix is not None
+                    else b""
+                ),
+                (
+                    self.variant_tail_group.to_bytes()
+                    if self.variant_tail_group is not None
                     else b""
                 ),
                 (

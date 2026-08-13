@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The tracked custom-server suite currently passes all 333 tests.
+- The tracked custom-server suite currently passes all 335 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -423,34 +423,39 @@
   All 114 entries and 39 leaves round-trip exactly. Native control flow and
   all three reference streams bound a second terminated UTF-16 string, a fixed
   four-value header, an appearance-adjacent `u16`, exactly one appearance
-  record, 31 typed post-appearance bytes, and nonoverlapping portions of the
-  delegate-proven loop/scalar and conditional prefixes.
+  record, 31 typed post-appearance bytes, and the delegate-proven loop/scalar
+  prefix in every entry. The opcode-specific appearance reader consumes three
+  final style `u32`s; using the character-list reader's seven-word default had
+  overread four following words and shifted the tail boundary.
   A separately recovered
   bridge reader types its first four consecutive `u32` mask words. Static
   recovery then types the optional direct `u8`, two fixed `u8`s, and all seven
   virtual records with exact widths `15/15/15/13/20/17/15`. Both runtime-state
   arms reconverge before the follow-up read at RVA `0x1183720`. The runtime
   parser check at RVA `0x118381e` throws on null and reaches the delegated
-  parser at `0x1183857` on the successful path. Constructor and callee recovery
+  parser at `0x1183857` on the successful path. The corrected tail has zero
+  loop repetitions in 44 entries and two in 70. Fifty-one nonzero variants
+  take the unequal branch and type its `u32`, packet string, bool, three `u8`s,
+  and bool; the following conditional prefix is typed in 113 entries.
+  Constructor and callee recovery
   prove a required outer packet string, a required nested record with four
   more packet strings and one `u8`, then a required `i32` plus DateTime record.
   The handler performs no packet read after that call. Exactly one instance of
   the grammar consumes to packet end in every entry; this terminal invariant
   rejects the earlier zero-run front alignment. All 114 delegated records are
-  typed and safe output reports only lengths and nonzero summaries. Seventy
-  entries retain both earlier prefixes, four retain only the first, and 40
-  conservatively retain neither. Their only remaining opaque bytes are the
-  2/4/10/11/23-byte gaps before the terminal record.
+  typed and safe output reports only lengths and nonzero summaries. Residual
+  gap sizes are `0/1/3/14/15/28/35` bytes, including 44 zero-gap entries; one
+  stream-`126` entry retains the 35-byte maximum after its typed tail prefix.
   The masks have `1/2` nonzero words and
   `7/8` enabled bits
-  in `112/2` entries, with raw words redacted. Exact replay types 35,369 body
-  bytes while retaining 967 runtime-selected gap bytes. Every
+  in `112/2` entries, with raw words redacted. Exact replay types 36,013 body
+  bytes while retaining 323 runtime-selected gap bytes. Every
   leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
   `4 -> 3 -> 4`; the active saved transcript still validates with six terminal
-  delegated records, 1,974 typed body bytes, and 52 opaque body bytes.
+  delegated records, 2,014 typed body bytes, and 12 opaque body bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template
