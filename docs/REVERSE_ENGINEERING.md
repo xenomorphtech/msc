@@ -314,6 +314,25 @@ there is no client-parse or acceptance evidence. Do not repeat the opcode-`189`
 GDB trace on this build; use lower-intrusion instrumentation or additional
 offline/native analysis instead.
 
+A fresh-process control showed that Frida is not a safe lower-intrusion option
+for this Wine build either. The client had completed world handoff and was
+pairing generated heartbeats before a bare Frida attach with no script or
+hooks. `frida.attach` returned `ProcessNotRespondingError` because the process
+refused the agent load or terminated during injection; the client process and
+world connection then disappeared. No packet was injected in this attempt, so
+it is attach-safety evidence only. Do not retry Frida against this build.
+
+Static control-flow recovery closed the first residual opcode-`189` tail
+boundary without runtime attachment. The outer delegate calls the bool reader
+at RVA `0x1182ba8`; a true result enters an `i32` read at `0x1182be7` and the
+loop repeats through the bool read at `0x1182d48`. The false exit reaches three
+consecutive `i32` reads at `0x1182e42`, `0x1182e52`, and `0x1182e62`, then a
+`u8` at `0x1182e89`. Offline decoding and exact re-emission validate that
+grammar across all 114 opcode-`189` records. Every initial/terminating bool and
+final `u8` is zero, while the three-`i32` zero masks are `000 x 74`, `011 x
+24`, and `111 x 16` (`1` means zero). The codec preserves generic nonzero loop
+flags and values but exposes only counts/nonzero summaries in safe output.
+
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then
 89 repetitions of `u8` and `i32`, ending exactly at framed cursor `452` for the

@@ -79,7 +79,7 @@ Normalization removes its measured 14-byte server and 28-byte client
 transport preludes before the Maple greeting. It then decrypts 71,100 frames,
 folds one marker-`26` initial snapshot plus 35 later field epochs, and validates
 all 203 pickup requests against known drops and matching epochs. It now passes
-`--fail-on-invalid`: 56,717 observations are full, 14,383 partial, none are
+`--fail-on-invalid`: 71,047 observations are full, 53 partial, none are
 unknown or invalid. One state-correlation warning remains,
 not a shape failure: the aggregate warning for six delayed combat predictions
 that differ by one HP.
@@ -1320,6 +1320,14 @@ again and restored `3 -> 4`. The live transcript at
 folds validly with zero unknown leaves. After restoration the client remained
 active on map `101000000`, the server had no connection failures, and 209/209
 heartbeat probes were paired.
+
+Offline validation now types another 14-byte prefix in each of those four
+opcode-`189` bodies from the pinned delegate's executed bool-terminated
+repeated-`i32` loop, three following `i32` reads, and one `u8` read. The saved
+transcript remains valid and exact with 544 typed body bytes and 782 opaque
+body bytes. This is a structural accounting refinement only; it does not
+change the already proven live enter/move/leave behavior or assign meanings to
+the newly bounded values.
 
 The same live session then accepted two exact 60-byte opcode-`247` tutorial
 instructions. The independent transcript fold reports both as exact full-

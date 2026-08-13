@@ -871,8 +871,8 @@ and marker-`26` compact snapshots at full structural coverage. Neutral field
 names do not represent unparsed bytes: all three reference packets re-emit
 exactly, their observations report `opaque_snapshot_bytes: 0` and
 `unparsed_snapshot_bytes: 0`, and the genuinely unparsed short-envelope
-fallback remains partial. Current strict totals are `34,574/633/0/0`,
-`69/7/0/0`, and `70,077/1,023/0/0` for streams `92`, `114`, and `126`.
+fallback remains partial. Current strict totals are `35,020/187/0/0`,
+`69/7/0/0`, and `71,047/53/0/0` for streams `92`, `114`, and `126`.
 The latest saved world transcript independently improves to `767/15/0/0`.
 
 The first controlled typed mutation targets `current_hp`. Replay analyzes the
@@ -953,7 +953,13 @@ opcode 189:
     int16[2] post_appearance_vector
     uint8 post_appearance_value_3
     uint16 post_appearance_value_4
-    byte[] opaque_tail                 # non-empty residual
+    bool tail_has_repeated_value
+    while tail_has_repeated_value:
+        int32 tail_repeated_value
+        bool tail_has_repeated_value
+    int32[3] tail_post_loop_values
+    uint8 tail_variant
+    byte[] opaque_tail                 # non-empty residual after typed prefix
 
 opcode 190:
     uint16 opcode
@@ -962,9 +968,15 @@ opcode 190:
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-13,663 bytes and leaves 22,673 bytes explicit: a 128-byte bridge in 112
+15,259 bytes and leaves 21,077 bytes explicit: a 128-byte bridge in 112
 records, its 129-byte variant in two stream-`92` records, and residual tails
-of 32..120 bytes. The appearance-prefix value is nonzero in 78 entries, and
+of 18..106 bytes. The 14-byte tail prefix follows the pinned delegate's
+executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
+reads, and one `u8`. All 114 captured loop terminators and variant bytes are
+zero, so none enters the loop. The three-value zero masks are
+`000 x 74`, `011 x 24`, and `111 x 16`, where `1` denotes a zero value; these
+values remain semantically neutral and are omitted from safe output. The
+appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,
 and one of those independently exercises all four nonzero header fields
@@ -990,10 +1002,11 @@ The fold emits `remote_player_entered_field` and
 preserves entry metadata when later movement supplies a position. Safe state
 exposes only an alias, level, both string-code-unit counts, appearance entry
 counts, typed/opaque byte counts, header/prefix-presence counts,
-post-appearance nonzero-field counts, and position when known. It never emits
+post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
+and position when known. It never emits
 a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with four entries, 488 typed body
-bytes, and 838 opaque body bytes.
+custom-server transcript remains valid with four entries, 544 typed body
+bytes, and 782 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode
@@ -2257,14 +2270,14 @@ introduced in the same field epoch and opcode `190` removed later. Its mask is
 re-emits the packet exactly; safe folds expose only the player alias and mask
 structure while redacting the raw object id. The observation is full.
 
-After the later opcode-`8` world-entry refinement, the current strict totals
-are `70,076/1,024/0/0` for stream `126`, `34,573/634/0/0` for stream `92`,
-and `68/8/0/0` for stream `114`.
+At the later opcode-`8` world-entry checkpoint, strict totals were
+`70,076/1,024/0/0` for stream `126`, `34,573/634/0/0` for stream `92`, and
+`68/8/0/0` for stream `114`.
 The active saved transcript contains no opcode-`230` or opcode-`232` record.
 
 At its original introduction, the family moved seven long-stream and five
-stream-`92` observations from unknown to partial; the current totals are the
-refined values above. Live replay remains deferred because opcodes `230` and
+stream-`92` observations from unknown to partial; the refined checkpoint values
+are above. Live replay remains deferred because opcodes `230` and
 `232` demonstrably target session-local remote-player object ids.
 
 ## Variable server records (`156`, `385`)

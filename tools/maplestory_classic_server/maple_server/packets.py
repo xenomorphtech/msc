@@ -9874,6 +9874,114 @@ class MobMovementAcknowledgement:
 
 
 @dataclass(frozen=True)
+class RemotePlayerEntryTailPrefix:
+    """Native-reader-bounded bool/i32 loop and suffix in opcode 189."""
+
+    repeated_i32_values: tuple[int, ...]
+    continuation_flag_bytes: tuple[int, ...]
+    post_loop_i32_values: tuple[int, int, int]
+    variant_u8: int
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader
+    ) -> "RemotePlayerEntryTailPrefix":
+        repeated_i32_values: list[int] = []
+        continuation_flag_bytes: list[int] = []
+        while True:
+            flag = reader.u8(
+                f"tail_continuation_flag_bytes[{len(continuation_flag_bytes)}]"
+            )
+            continuation_flag_bytes.append(flag)
+            if flag == 0:
+                break
+            repeated_i32_values.append(
+                reader.i32(
+                    f"tail_repeated_i32_values[{len(repeated_i32_values)}]"
+                )
+            )
+        record = cls(
+            repeated_i32_values=tuple(repeated_i32_values),
+            continuation_flag_bytes=tuple(continuation_flag_bytes),
+            post_loop_i32_values=tuple(
+                reader.i32(f"tail_post_loop_i32_values[{index}]")
+                for index in range(3)
+            ),
+            variant_u8=reader.u8("tail_variant_u8"),
+        )
+        record._validate()
+        return record
+
+    @property
+    def nonzero_post_loop_i32_values(self) -> int:
+        return sum(value != 0 for value in self.post_loop_i32_values)
+
+    @property
+    def encoded_bytes(self) -> int:
+        return 1 + len(self.repeated_i32_values) * 5 + 13
+
+    def _validate(self) -> None:
+        if len(self.continuation_flag_bytes) != (
+            len(self.repeated_i32_values) + 1
+        ):
+            raise PacketShapeError(
+                "remote-player tail continuation flags must contain one "
+                "terminator after the repeated i32 values"
+            )
+        if any(
+            not 0 < flag <= 0xFF
+            for flag in self.continuation_flag_bytes[:-1]
+        ) or self.continuation_flag_bytes[-1:] != (0,):
+            raise PacketShapeError(
+                "remote-player tail continuation flags must be nonzero and "
+                "end in zero"
+            )
+        if len(self.post_loop_i32_values) != 3:
+            raise PacketShapeError(
+                "remote-player tail post-loop group must contain three i32 "
+                "values"
+            )
+        if not 0 <= self.variant_u8 <= 0xFF:
+            raise PacketShapeError(
+                "remote-player tail variant u8 is out of range"
+            )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "tail_repeated_i32_values": len(self.repeated_i32_values),
+            "tail_post_loop_nonzero_i32_values": (
+                self.nonzero_post_loop_i32_values
+            ),
+            "tail_variant_u8_nonzero": self.variant_u8 != 0,
+            "typed_tail_prefix_bytes": self.encoded_bytes,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        encoded = bytearray()
+        try:
+            for flag, value in zip(
+                self.continuation_flag_bytes[:-1],
+                self.repeated_i32_values,
+                strict=True,
+            ):
+                encoded.extend(struct.pack("<Bi", flag, value))
+            encoded.extend(
+                struct.pack(
+                    "<B3iB",
+                    self.continuation_flag_bytes[-1],
+                    *self.post_loop_i32_values,
+                    self.variant_u8,
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player tail prefix field is out of range: {error}"
+            ) from error
+        return bytes(encoded)
+
+
+@dataclass(frozen=True)
 class RemotePlayerEntryBody:
     """Capture-bounded typed islands in an opcode-189 player body."""
 
@@ -9891,6 +9999,7 @@ class RemotePlayerEntryBody:
     post_appearance_vector_i16: tuple[int, int]
     post_appearance_u8: int
     post_appearance_u16: int
+    tail_prefix: RemotePlayerEntryTailPrefix
     opaque_tail: bytes = field(repr=False)
 
     @classmethod
@@ -9975,6 +10084,7 @@ class RemotePlayerEntryBody:
             ),
             post_appearance_u8=tail_reader.u8("post_appearance_u8"),
             post_appearance_u16=tail_reader.u16("post_appearance_u16"),
+            tail_prefix=RemotePlayerEntryTailPrefix.parse_from(tail_reader),
             opaque_tail=tail_reader.bytes(
                 tail_reader.remaining, "opaque_tail"
             ),
@@ -10048,7 +10158,7 @@ class RemotePlayerEntryBody:
                 "remote-player entry appearance must begin with hair slot 0"
             )
 
-    def safe_dict(self) -> dict[str, int]:
+    def safe_dict(self) -> dict[str, int | bool]:
         return {
             "secondary_text_code_units": self.secondary_text_code_units,
             "header_nonzero_fields": self.header_nonzero_fields,
@@ -10064,6 +10174,7 @@ class RemotePlayerEntryBody:
             "post_appearance_nonzero_fields": (
                 self.post_appearance_nonzero_fields
             ),
+            **self.tail_prefix.safe_dict(),
             "typed_body_bytes": self.typed_bytes,
             "opaque_pre_appearance_bytes": len(
                 self.opaque_pre_appearance
@@ -10114,6 +10225,7 @@ class RemotePlayerEntryBody:
                 appearance_prefix,
                 self.appearance.to_bytes(),
                 post_appearance,
+                self.tail_prefix.to_bytes(),
                 bytes(self.opaque_tail),
             )
         )

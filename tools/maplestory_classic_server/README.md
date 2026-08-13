@@ -848,13 +848,13 @@ python -m maple_server analyze-gameplay \
 
 Repository-root `111.pcapng` supplies login stream `83` and gameplay streams
 `92`/`114`. Repository-root `1-10FS.pcapng` supplies 71,100-frame level-1-to-10
-gameplay on stream `126`; it now passes `--fail-on-invalid` with 56,717 full,
-14,383 partial, zero unknown, and zero invalid packet observations. PCAP
+gameplay on stream `126`; it now passes `--fail-on-invalid` with 71,047 full,
+53 partial, zero unknown, and zero invalid packet observations. PCAP
 normalization locates the Maple greeting after its 14-byte server and 28-byte
 client transport preludes and records the trimmed byte counts in transcript
-metadata. Stream `92` independently passes with 27,534 full, 7,673 partial,
-zero unknown, and zero invalid observations; short stream `114` reaches 58 full,
-18 partial, zero unknown, and zero invalid.
+metadata. Stream `92` independently passes with 35,020 full, 187 partial,
+zero unknown, and zero invalid observations; short stream `114` reaches 69 full,
+7 partial, zero unknown, and zero invalid.
 
 The gameplay fold currently models these capture-backed boundaries:
 
@@ -971,10 +971,12 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `189`: remote-player entry with an aliased object id, level,
   a redacted name, second redacted terminated counted UTF-16 string, a fixed
   four-value header, a typed appearance island, and the appearance-adjacent
-  native `u16/i32/u32/4*i32/2*i16/u8/u16` reads between capture-bounded opaque
-  regions; all 114 reference entries round-trip losslessly with a remaining
-  `128`/`129`-byte bridge, while server opcode `190` is the exact object-id
-  removal and the fold requires movement broadcasts to reference a
+  native `u16/i32/u32/4*i32/2*i16/u8/u16` reads followed by a typed
+  bool-terminated repeated-`i32` loop, three `i32`s, and a `u8` between
+  capture-bounded opaque regions; all 114 reference entries round-trip
+  losslessly with zero captured loop iterations or nonzero tail variants and a
+  remaining `128`/`129`-byte bridge, while server opcode `190` is the exact
+  object-id removal and the fold requires movement broadcasts to reference a
   current-field entry,
 - server opcode `224`: exact remote-player/mob-template value record with a
   fixed `0xff` marker, a repeated neutral u32 value, flag `0`/`1`, and zero

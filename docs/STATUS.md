@@ -53,9 +53,9 @@
   epochs. NPC-state movement paths and opcode-`158` mode-`0` keymap changes are
   fully typed. Strict decoding now
   succeeds across all 71,100 frames:
-  56,717 full, 14,383 partial, zero unknown, and zero invalid
-  packet observations. Stream `92` now reports 27,534 full, 7,673 partial,
-  zero unknown, and zero invalid; stream `114` reports 58/18/0/0. One
+  71,047 full, 53 partial, zero unknown, and zero invalid packet observations.
+  Stream `92` now reports 35,020 full, 187 partial, zero unknown, and zero
+  invalid; stream `114` reports 69/7/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
   one-HP combat prediction differences.
 - Client opcode `8` now exactly bounds the world-entry request suffix as zero
@@ -410,14 +410,16 @@
   All 114 entries and 39 leaves round-trip exactly. Native control flow and
   all three reference streams bound a second terminated UTF-16 string, a fixed
   four-value header, an appearance-adjacent `u16`, exactly one appearance
-  record, and 31 typed post-appearance bytes. The remaining bridge is `128` or
-  `129` bytes. This types 13,663 body bytes while retaining 22,673 bytes as two
-  explicit opaque regions. Every leave matches the current field
-  epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
+  record, 31 typed post-appearance bytes, and the delegate-proven tail prefix:
+  a bool-terminated repeated-`i32` loop, three `i32`s, and one `u8`. The
+  remaining bridge is `128` or `129` bytes. All 114 loop terminators and tail
+  variants are zero; exact replay types 15,259 body bytes while retaining
+  21,077 bytes as two explicit opaque regions. Every leave matches the current
+  field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
   `4 -> 3 -> 4`; the active saved transcript still validates with four typed
-  entries, 488 typed body bytes, and 838 opaque body bytes.
+  entries, 544 typed body bytes, and 782 opaque body bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template
@@ -753,7 +755,7 @@
   action/parameter intent remains neutral. Coverage is now
   `53,785/17,315/0/0` for stream `126`; streams `92` and `114` remain
   `26,266/8,941/0/0` and `57/19/0/0` at that checkpoint. Typed life movement
-  subsequently raises the current totals to `56,717/14,383/0/0`,
+  subsequently raised that checkpoint to `56,717/14,383/0/0`,
   `27,534/7,673/0/0`, and `58/18/0/0` respectively.
 - Empty server opcode `426` and empty client opcode `309` are now a fully typed,
   temporally correlated notification/acknowledgement pair. Stream `126` has

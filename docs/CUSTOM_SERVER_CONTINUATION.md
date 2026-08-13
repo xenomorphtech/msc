@@ -27,9 +27,10 @@ files are not all part of this task. Never stage the whole tree.
 
 ## Current repository checkpoint
 
-The most recent pushed sequence is:
+The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+d17a077 Type opcode 13 IV security envelopes
 02f194c Document custom server continuation plan
 e3d6993 Promote bounded initial field snapshots
 2567355 Type remote player appearance-adjacent fields
@@ -54,7 +55,7 @@ partial. Reference coverage after that checkpoint was:
 All tracked Python tests and all Rust gates passed before `e3d6993` was pushed.
 The tracked Python suite then contained 330 tests.
 
-The next capture-backed checkpoint types client opcode `13`, subtype `1` as a
+Checkpoint `d17a077` types client opcode `13`, subtype `1` as a
 `uint32` IV-derived security value followed by a reserved-zero `uint32`.
 Native producer evidence and an independent cipher-IV replay reproduce all
 `446/446` stream-`92` and `970/970` stream-`126` records with zero mismatches.
@@ -110,7 +111,7 @@ harness, and tests remain outside this commit. Stage only the intended hunks
 `git diff --cached` before the commit. Do not use `git add docs/PROTOCOL.md
 docs/STATUS.md` wholesale.
 
-## Strongest remaining bounded family: server opcode 189
+## Current bounded family: server opcode 189
 
 Opcode `189` is a remote-player field entry. Opcode `190` is its exact `u32`
 object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
@@ -120,16 +121,18 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - a secondary counted UTF-16 value and the following `u16/u8/u16/u8` fields;
 - a `u16` immediately before a complete `CharacterListAppearance`;
 - after appearance: `i32`, `u32`, four `i32`s, two `i16`s, `u8`, and `u16`;
+- at the residual-tail boundary: a bool-terminated repeated-`i32` loop, three
+  `i32`s, and one `u8`;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
-The remaining opaque portions are a pre-appearance bridge and a post-appearance
-tail. Across all entries, existing accounting measured 13,663 typed body bytes
-and 22,673 opaque body bytes. The bridge is 128 bytes in 112 entries and 129
-bytes in two entries. Observed tail lengths range from 32 through 120 bytes.
-Stream `92` alone has bridge lengths `128 x 56` and `129 x 2`, with tail
-families led by `95 x 28`, `68 x 16`, `76 x 6`, `120 x 3`, `80 x 3`, `81 x 1`,
-and `103 x 1`. Recompute these counts from source before putting them in a
-permanent protocol claim; they are investigative notes, not a checked-in test.
+The remaining opaque portions are a pre-appearance bridge and the residual
+tail after that typed prefix. Across all entries, current accounting measures
+15,259 typed body bytes and 21,077 opaque body bytes. The bridge is 128 bytes
+in 112 entries and 129 bytes in two entries. Residual tail lengths now range
+from 18 through 106 bytes. All 114 terminating bools and final `u8` values are
+zero and none of the captured records enters the repeated-value loop. The
+three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
+meaning zero. These are checked corpus results; their roles remain neutral.
 
 The first stream-`114` entry is a useful controlled packet:
 
@@ -214,7 +217,7 @@ the world HTTP status reported injection ready, five of five heartbeat probes
 matched, `last_round_trip_ms=3.367`, and none pending. This is the current
 end-to-end login proof.
 
-### GDB failures and why they matter
+### Runtime instrumentation failures and why they matter
 
 One attempted trace attached GDB first and tried to enable non-stop mode
 afterward. GDB correctly refused to change the setting while the inferior was
@@ -233,6 +236,21 @@ same `Fatal error in GC` / `SuspendThread loop failed` window. GDB detached
 cleanly. This proves only the serialized server write, not client parsing or
 acceptance. Do not retry opcode-`189` with GDB on this build; the next attempt
 must use lower-intrusion instrumentation or additional offline/native evidence.
+
+A fresh client then proved that Frida is not a safe lower-intrusion substitute
+on this build. After world handoff and verified heartbeat progression, a bare
+`frida.attach` with no hooks returned `ProcessNotRespondingError` because the
+process refused the agent load or terminated during injection. The client and
+world connection disappeared. No opcode-`189` packet was injected in this
+attempt. Do not retry Frida; continue from offline/native evidence.
+
+That static path established the next boundary. In the pinned delegate, RVA
+`0x1182ba8` reads a bool; true enters the repeated `i32` read at `0x1182be7`
+and loops through the next bool at `0x1182d48`. The false exit reaches three
+`i32` reads at `0x1182e42/0x1182e52/0x1182e62`, then a `u8` read at
+`0x1182e89`. The implemented codec preserves generic nonzero loop flag bytes
+and values, round-trips all 114 reference entries, and publishes only safe
+counts/nonzero summaries.
 
 ## Exact browser-free relaunch and navigation
 
@@ -294,8 +312,9 @@ installed Sway does not accept a PID criterion directly.
 
 The planned GDB trace was executed with the required live preconditions and
 failed safely enough to detach, but not safely enough to produce a read ledger.
-Do not repeat it. The extraction and injection commands below remain useful for
-a future lower-intrusion probe, but an `accepted=true` HTTP response establishes
+Do not repeat it, and do not substitute Frida on this Wine build. The extraction
+and injection commands below remain useful for a future independently safe
+probe, but an `accepted=true` HTTP response establishes
 only that the server serialized the write. Require continuing heartbeats and
 independent instrumentation before claiming that the client parsed a packet.
 
