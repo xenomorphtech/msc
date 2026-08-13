@@ -11757,8 +11757,8 @@ class GameplayStateFold:
                 parsed=entered,
                 details=details,
                 issues=(
-                    "remote-player entry bridge and residual tail regions "
-                    "remain version-specific and opaque",
+                    "remote-player entry conditional bridge body and residual "
+                    "tail regions remain version-specific and opaque",
                 ),
             )
         if opcode == 190:

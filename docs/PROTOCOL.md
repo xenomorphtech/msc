@@ -936,11 +936,12 @@ The pinned version-300 IL2CPP opcode-`189` handler reads a u32 object id, a u8
 level, and a terminated counted UTF-16 name before delegating the remaining
 player body. Native control flow in the delegate then reads a second terminated
 counted UTF-16 string, a fixed `u16/u8/u16/u8` header, and a separately
-delegated appearance record. The delegate reads one `u16` immediately before
-that appearance and, immediately afterward, an `i32`, a `u32`, four `i32`s, a
-two-`i16` vector, a `u8`, and a `u16`. The bytes between those typed islands
-are not assigned a meaning. The adjacent opcode-`190` handler reads exactly one
-u32 object id and removes that player:
+delegated appearance record. The bridge delegate first reads four consecutive
+`u32` mask words before entering its conditional body. The outer delegate reads
+one `u16` immediately before the appearance and, immediately afterward, an
+`i32`, a `u32`, four `i32`s, a two-`i16` vector, a `u8`, and a `u16`. The
+conditional bytes between the mask and appearance remain opaque. The adjacent
+opcode-`190` handler reads exactly one u32 object id and removes that player:
 
 ```text
 opcode 189:
@@ -957,7 +958,8 @@ opcode 189:
     uint8 header_value_2
     uint16 header_value_3
     uint8 header_value_4
-    byte[128 or 129] opaque_pre_appearance
+    uint32[4] pre_appearance_mask_words  # values redacted
+    byte[112 or 113] opaque_pre_appearance
     uint16 appearance_prefix_value
     CharacterListAppearance appearance
     int32 post_appearance_value_1
@@ -998,9 +1000,13 @@ opcode 190:
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-16,571 bytes and leaves 19,765 bytes explicit: a 128-byte bridge in 112
-records, its 129-byte variant in two stream-`92` records, and residual tails
-of 12..83 bytes. The 14-byte tail prefix follows the pinned delegate's
+18,395 bytes and leaves 17,941 bytes explicit. The full bridge is 128 bytes in
+112 records and 129 bytes in two stream-`92` records; its first 16 bytes are
+the typed four-word mask, leaving 112/113 conditional bytes opaque before the
+appearance. The masks contain one nonzero word and seven enabled bits in 112
+entries, or two nonzero words and eight enabled bits in two entries. Raw words
+remain redacted. Residual tails are 12..83 bytes. The 14-byte tail prefix
+follows the pinned delegate's
 executed reader sequence: a bool-terminated repeated-`i32` loop, three `i32`
 reads, and one `u8`. All 114 captured loop terminators and variant bytes are
 zero, so none enters the loop. The three-value zero masks are
@@ -1040,13 +1046,14 @@ The fold emits `remote_player_entered_field` and
 `remote_player_left_field`, clears active players at field transitions, and
 preserves entry metadata when later movement supplies a position. Safe state
 exposes only an alias, level, both string-code-unit counts, appearance entry
-counts, typed/opaque byte counts, header/prefix-presence counts,
+counts, typed/opaque byte counts, mask nonzero-word/enabled-bit counts,
+header/prefix-presence counts,
 post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
 conditional-branch presence/count summaries, and position when known. It never
 emits
 a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with four entries, 604 typed body
-bytes, and 722 opaque body bytes.
+custom-server transcript remains valid with four entries, 668 typed body
+bytes, and 658 opaque body bytes.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

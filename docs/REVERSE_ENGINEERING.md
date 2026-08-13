@@ -333,6 +333,17 @@ refused the agent load or terminated during injection; the client process and
 world connection then disappeared. No packet was injected in this attempt, so
 it is attach-safety evidence only. Do not retry Frida against this build.
 
+Offline method recovery subsequently closed the first 16 bytes of opcode
+`189`'s pre-appearance bridge without runtime attachment. Bridge parser RVA
+`0xd5c740` maps to `fda0a837...::b8438274...`; before its conditional
+dispatch, it invokes `cd0d0bca...::a910877d...`. That method performs four
+consecutive packet `UInt32` reads into the four-field `cd0d0bca...` value
+type. Decoding all 114 entries confirms a 16-byte four-word mask prefix in
+every 128/129-byte bridge. The masks have one nonzero word and seven enabled
+bits in 112 entries, and two nonzero words and eight enabled bits in two; raw
+words remain redacted. The codec re-emits all four words exactly and leaves the
+remaining 112/113 conditional bytes opaque.
+
 Static control-flow recovery closed the first residual opcode-`189` tail
 boundary without runtime attachment. The outer delegate calls the bool reader
 at RVA `0x1182ba8`; a true result enters an `i32` read at `0x1182be7` and the

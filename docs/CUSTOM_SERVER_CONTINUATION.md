@@ -30,6 +30,8 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+bdf05fe Type current opcode 148 records
+c583c23 Correlate opcode 13 world exchange
 3e1a613 Type opcode 189 conditional tail
 683cedf Type opcode 189 tail prefix
 d17a077 Type opcode 13 IV security envelopes
@@ -161,6 +163,7 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 
 - object id, level, and counted UTF-16 name;
 - a secondary counted UTF-16 value and the following `u16/u8/u16/u8` fields;
+- four consecutive `u32` mask words at the start of the pre-appearance bridge;
 - a `u16` immediately before a complete `CharacterListAppearance`;
 - after appearance: `i32`, `u32`, four `i32`s, two `i16`s, `u8`, and `u16`;
 - at the residual-tail boundary: a bool-terminated repeated-`i32` loop, three
@@ -170,11 +173,15 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
   follow-up bool;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
-The remaining opaque portions are a pre-appearance bridge and the residual
-tail after those typed prefixes. Across all entries, current accounting
-measures 16,571 typed body bytes and 19,765 opaque body bytes. The bridge is
-128 bytes in 112 entries and 129 bytes in two entries. Residual tail lengths
-now range from 12 through 83 bytes. All 114 terminating bools and final `u8`
+The remaining opaque portions are the conditional body after the bridge mask
+and the residual tail after the typed prefixes. Across all entries, current
+accounting measures 18,395 typed body bytes and 17,941 opaque body bytes. The
+full bridge is 128 bytes in 112 entries and 129 bytes in two entries; after its
+16-byte mask, 112 or 113 bytes remain opaque. The masks have one nonzero word
+and seven enabled bits in 112 entries, and two nonzero words and eight enabled
+bits in two entries. Raw words are retained only for re-emission and never
+reported. Residual tail lengths now range from 12 through 83 bytes. All 114
+terminating bools and final `u8`
 values are zero; none of the captured records enters the repeated-value loop.
 The three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
 meaning zero. The next conditional prefix is 6/24/34 bytes in 83/24/7 entries:
@@ -212,7 +219,9 @@ this sequence without guessing:
 
 1. The delegate reads the secondary UTF-16 value and known scalar prefix.
 2. At delegate RVA approximately `0x1182751`, it dispatches a separate record.
-3. It calls the pre-appearance bridge parser at RVA `0xd5c740`.
+3. It calls the pre-appearance bridge parser at RVA `0xd5c740`. That method
+   invokes `cd0d0bca...::a910877d...`, which performs four consecutive
+   packet-`UInt32` reads before conditional dispatch.
 4. It then reads the known pre-appearance `u16` and calls the appearance parser
    at RVA `0x1246ca0`.
 5. It consumes the known post-appearance scalars and continues through the
@@ -225,10 +234,22 @@ Temporary disassemblies from the investigation may still exist as:
 /tmp/op189_bridge.objdump
 ```
 
-The bridge parser is flattened and includes a virtual nested-parser call, so a
-static list of its direct primitive-reader calls is not an execution grammar.
-Static disassembly alone is insufficient to type the bridge. A live primitive
-read trace is the next authoritative step.
+The bridge parser remains flattened after the four-word reader and includes a
+virtual nested-parser call, so a static list of later direct primitive-reader
+calls is not an execution grammar. Only the confirmed four-word prefix is
+typed; the conditional 112/113-byte remainder stays opaque. GDB and Frida are
+not safe on this Wine build, so continue from offline/native evidence or a new
+capture rather than retrying runtime attachment.
+
+This mask increment keeps structural coverage at `35020/187`, `69/7`, and
+`71047/53` full/partial for streams `92`, `114`, and `126`; opcode `189` stays
+partial. All 332 tracked Python tests, 17 Rust tests, the pinned-build ignored
+test, and the private capture-JSONL ignored test pass. All three gameplay
+analyses remain valid; stream `126` retains only its known one-HP warning. A
+focused native-manifest validation consumes all 52 stream-`126` opcode-`189`
+packets with zero unsupported or failed shapes. The broad stream-`126`
+validator still reports 139 unrelated supported-shape failures, so it must not
+be described as globally clean.
 
 ## Live custom-server state and lessons from the trace attempt
 

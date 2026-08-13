@@ -1514,13 +1514,22 @@
     },
     {
       "name":"server_opcode_189_remote_player_entry","direction":"server_to_client","opcode":189,
-      "source":"generated opcode-189 handler e01645... directly reads u32 object id, u8 level, and a terminated counted UTF-16 name before delegating; all 114 entries across 111 streams 92/114 and 1-10FS stream 126 retain a non-empty partially typed body",
+      "source":"generated opcode-189 handler e01645... directly reads u32 object id, u8 level, and a terminated counted UTF-16 name before delegating; delegate fda0a837... reads the secondary text and scalar header, then bridge reader cd0d0bca...::a910877d... consumes four consecutive u32 mask words; all 114 entries across 111 streams 92/114 and 1-10FS stream 126 retain a non-empty partially typed conditional body",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":189},
         {"op":"read","name":"object_id","kind":"u32"},
         {"op":"read","name":"level","kind":"u8"},
         {"op":"utf16","name":"name","trailing_zero":true},
-        {"op":"remaining_bytes","name":"delegated_player_body","min_length":267}
+        {"op":"utf16","name":"secondary_text","trailing_zero":true},
+        {"op":"read","name":"header_u16_1","kind":"u16"},
+        {"op":"read","name":"header_u8_1","kind":"u8"},
+        {"op":"read","name":"header_u16_2","kind":"u16"},
+        {"op":"read","name":"header_u8_2","kind":"u8"},
+        {"op":"read","name":"pre_appearance_mask_word_1","kind":"u32"},
+        {"op":"read","name":"pre_appearance_mask_word_2","kind":"u32"},
+        {"op":"read","name":"pre_appearance_mask_word_3","kind":"u32"},
+        {"op":"read","name":"pre_appearance_mask_word_4","kind":"u32"},
+        {"op":"remaining_bytes","name":"conditional_player_body","min_length":242}
       ]
     },
     {

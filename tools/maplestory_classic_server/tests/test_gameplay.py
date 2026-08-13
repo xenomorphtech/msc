@@ -331,16 +331,22 @@ def fixture_remote_player_entry_body(
     *,
     secondary_text: str = "",
     header_values: tuple[int, int, int, int] = (0, 0, 0, 0),
+    pre_appearance_mask_words: tuple[int, int, int, int] = (0, 0, 0, 0),
     opaque_pre_appearance_length: int = 128,
     opaque_tail_length: int = 73,
 ) -> RemotePlayerEntryBody:
+    if opaque_pre_appearance_length < 16:
+        raise ValueError("pre-appearance bridge must include the 16-byte mask")
     return RemotePlayerEntryBody(
         secondary_text=secondary_text,
         header_u16_1=header_values[0],
         header_u8_1=header_values[1],
         header_u16_2=header_values[2],
         header_u8_2=header_values[3],
-        opaque_pre_appearance=b"\x00" * opaque_pre_appearance_length,
+        pre_appearance_mask_words=pre_appearance_mask_words,
+        opaque_pre_appearance=(
+            b"\x00" * (opaque_pre_appearance_length - 16)
+        ),
         appearance_prefix_u16=0,
         appearance=CharacterListAppearance(
             gender=0,
@@ -3521,8 +3527,14 @@ class GameplayPacketShapeTest(unittest.TestCase):
             )
         )
         self.assertEqual(RemotePlayerEnterField.parse(encoded_entry), entered)
-        self.assertEqual(entered.body.typed_bytes, 107)
-        self.assertEqual(entered.body.opaque_bytes, 201)
+        self.assertEqual(entered.body.typed_bytes, 123)
+        self.assertEqual(entered.body.opaque_bytes, 185)
+        self.assertEqual(
+            entered.body.safe_dict()["pre_appearance_mask_nonzero_words"], 0
+        )
+        self.assertEqual(
+            entered.body.safe_dict()["pre_appearance_mask_enabled_bits"], 0
+        )
         self.assertEqual(
             entered.body.tail_prefix.safe_dict(),
             {
@@ -3659,6 +3671,22 @@ class GameplayPacketShapeTest(unittest.TestCase):
             replace(
                 entered,
                 body=replace(entered.body, opaque_tail=b""),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "four u32 words"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    pre_appearance_mask_words=(0, 0, 0),
+                ),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "mask is out of range"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    pre_appearance_mask_words=(0, 0, 0, 1 << 32),
+                ),
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "one terminator"):
             replace(
@@ -9317,6 +9345,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 fixture_remote_player_entry_body(
                     secondary_text="OtherTwo",
                     header_values=(1002, 11, 4018, 1),
+                    pre_appearance_mask_words=(0xDEADBEEF, 0, 0, 0),
                     opaque_pre_appearance_length=129,
                 ),
                 appearance_prefix_u16=200,
@@ -9355,9 +9384,9 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(analysis.state.remote_player_refreshes, 1)
         self.assertEqual(
             analysis.state.remote_player_entry_opaque_bytes,
-            3 * (128 + 73) + 1,
+            3 * (112 + 73) + 1,
         )
-        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 337)
+        self.assertEqual(analysis.state.remote_player_entry_typed_bytes, 385)
         self.assertEqual(analysis.state.remote_player_entry_secondary_texts, 1)
         self.assertEqual(analysis.state.remote_player_entry_nonzero_headers, 1)
         self.assertEqual(
@@ -9396,6 +9425,24 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("987654321", str(safe))
         self.assertNotIn("CaptureName", str(safe))
         self.assertNotIn("OtherTwo", str(safe))
+        self.assertNotIn(str(0xDEADBEEF), str(safe))
+        entered = [
+            observation
+            for observation in analysis.observations
+            if observation.kind == "remote_player_enter_field"
+        ]
+        self.assertEqual(
+            entered[-1].details["pre_appearance_mask_nonzero_words"], 1
+        )
+        self.assertEqual(
+            entered[-1].details["pre_appearance_mask_enabled_bits"], 24
+        )
+        self.assertEqual(
+            entered[-1].details["pre_appearance_bridge_bytes"], 129
+        )
+        self.assertEqual(
+            entered[-1].details["opaque_pre_appearance_bytes"], 113
+        )
         self.assertEqual(safe["state"]["observed_remote_player_count"], 1)
         event_kinds = [event.kind for event in analysis.events]
         self.assertEqual(event_kinds.count("remote_player_entered_field"), 3)

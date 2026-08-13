@@ -10226,6 +10226,7 @@ class RemotePlayerEntryBody:
     header_u8_1: int
     header_u16_2: int
     header_u8_2: int
+    pre_appearance_mask_words: tuple[int, int, int, int]
     opaque_pre_appearance: bytes = field(repr=False)
     appearance_prefix_u16: int
     appearance: CharacterListAppearance = field(repr=False)
@@ -10302,7 +10303,10 @@ class RemotePlayerEntryBody:
             header_u8_1=header_u8_1,
             header_u16_2=header_u16_2,
             header_u8_2=header_u8_2,
-            opaque_pre_appearance=payload[reader.offset:prefix_offset],
+            pre_appearance_mask_words=struct.unpack_from(
+                "<4I", payload, reader.offset
+            ),
+            opaque_pre_appearance=payload[reader.offset + 16 : prefix_offset],
             appearance_prefix_u16=int.from_bytes(
                 payload[prefix_offset:appearance_offset], "little"
             ),
@@ -10357,6 +10361,14 @@ class RemotePlayerEntryBody:
         )
 
     @property
+    def pre_appearance_mask_nonzero_words(self) -> int:
+        return sum(word != 0 for word in self.pre_appearance_mask_words)
+
+    @property
+    def pre_appearance_mask_enabled_bits(self) -> int:
+        return sum(word.bit_count() for word in self.pre_appearance_mask_words)
+
+    @property
     def post_appearance_nonzero_fields(self) -> int:
         return sum(
             value != 0
@@ -10371,10 +10383,15 @@ class RemotePlayerEntryBody:
         )
 
     def _validate(self) -> None:
-        if len(self.opaque_pre_appearance) not in {128, 129}:
+        if len(self.pre_appearance_mask_words) != 4:
             raise PacketShapeError(
-                "remote-player entry pre-appearance region must be 128 or "
-                "129 bytes"
+                "remote-player entry pre-appearance mask must contain four "
+                "u32 words"
+            )
+        if len(self.opaque_pre_appearance) not in {112, 113}:
+            raise PacketShapeError(
+                "remote-player entry opaque pre-appearance region must be "
+                "112 or 113 bytes"
             )
         if len(self.post_appearance_i32_values) != 4:
             raise PacketShapeError(
@@ -10402,6 +10419,15 @@ class RemotePlayerEntryBody:
         return {
             "secondary_text_code_units": self.secondary_text_code_units,
             "header_nonzero_fields": self.header_nonzero_fields,
+            "pre_appearance_mask_nonzero_words": (
+                self.pre_appearance_mask_nonzero_words
+            ),
+            "pre_appearance_mask_enabled_bits": (
+                self.pre_appearance_mask_enabled_bits
+            ),
+            "pre_appearance_bridge_bytes": (
+                16 + len(self.opaque_pre_appearance)
+            ),
             "appearance_prefix_u16_nonzero": bool(
                 self.appearance_prefix_u16
             ),
@@ -10439,6 +10465,15 @@ class RemotePlayerEntryBody:
                 f"remote-player entry header is out of range: {error}"
             ) from error
         try:
+            pre_appearance_mask = struct.pack(
+                "<4I", *self.pre_appearance_mask_words
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                "remote-player entry pre-appearance mask is out of range: "
+                f"{error}"
+            ) from error
+        try:
             appearance_prefix = struct.pack(
                 "<H", self.appearance_prefix_u16
             )
@@ -10462,6 +10497,7 @@ class RemotePlayerEntryBody:
                     self.secondary_text, trailing_byte=True
                 ),
                 header,
+                pre_appearance_mask,
                 bytes(self.opaque_pre_appearance),
                 appearance_prefix,
                 self.appearance.to_bytes(),
