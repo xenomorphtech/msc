@@ -773,6 +773,26 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(arguments.pickup_key_hold_ms, 100)
         self.assertEqual(arguments.verify_timeout_seconds, 10.0)
 
+    def test_parser_accepts_reactive_mesos_pickup_injection(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "inject-mesos-pickup",
+                "--transcript",
+                "world.jsonl",
+                "--evidence-pcap",
+                "111.pcapng",
+                "--wayland-display",
+                "wayland-3",
+            ]
+        )
+
+        self.assertEqual(arguments.evidence_tcp_stream, 92)
+        self.assertIsNone(arguments.mesos_amount)
+        self.assertEqual(arguments.admission_index, 0)
+        self.assertEqual(arguments.pickup_key, "z")
+        self.assertEqual(arguments.pickup_key_hold_ms, 100)
+        self.assertEqual(arguments.verify_timeout_seconds, 10.0)
+
     def test_replay_parser_accepts_world_heartbeat_interval(self) -> None:
         arguments = build_parser().parse_args(
             [
@@ -3279,7 +3299,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                 source_mob_object_id=0,
                 final_flag=0,
             )
-            captured_plaintext = spawn.to_bytes()
+            captured_plaintext = b"\x34\x12captured"
             captured_frame = (
                 encode_frame_header(len(captured_plaintext), server_iv, ~300)
                 + crypt_payload(captured_plaintext, server_iv)
@@ -3293,12 +3313,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             observed_directory = Path(directory) / "observed"
             policy = ItemPickupResponsePolicy(
                 inventory_items={},
-                active_drops={
-                    drop_object_id: FieldDropEntity(
-                        alias="drop:1",
-                        spawn=spawn,
-                    )
-                },
+                active_drops={},
                 validated_item_effects={},
                 field_epoch=0,
                 mesos=100,
@@ -3319,6 +3334,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     "response_packets_sent": 0,
                 }
             }
+            injection = ServerPacketInjection(enabled=True)
             tasks: set[asyncio.Task[None]] = set()
 
             def accept(reader, writer) -> None:
@@ -3333,6 +3349,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                             hold_open_seconds=0.2,
                             item_pickup_response_policy=policy,
                             runtime_protocol=runtime_protocol,
+                            server_packet_injection=injection,
                         )
                     )
                 )
@@ -3343,6 +3360,32 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 await reader.readexactly(len(greeting + captured_frame)),
                 greeting + captured_frame,
+            )
+            for _ in range(100):
+                if injection.safe_dict()["ready"]:
+                    break
+                await asyncio.sleep(0.001)
+            self.assertTrue(injection.safe_dict()["ready"])
+            injected = await injection.inject(spawn.to_bytes())
+            injected_wire = await reader.readexactly(4 + len(spawn.to_bytes()))
+            next_server_iv = shuffle_iv(server_iv)
+            self.assertEqual(
+                FieldDropSpawn.parse(
+                    crypt_payload(injected_wire[4:], next_server_iv)
+                ),
+                spawn,
+            )
+            self.assertEqual(injected["opcode"], 311)
+            modeled_drops = runtime_protocol["item_pickup_responses"][
+                "modeled_drops"
+            ]
+            self.assertEqual(len(modeled_drops), 1)
+            self.assertEqual(modeled_drops[0]["kind"], "mesos")
+            self.assertEqual(modeled_drops[0]["mesos_amount"], 16)
+            self.assertEqual(modeled_drops[0]["drop"], "drop:runtime:1")
+            self.assertEqual(
+                modeled_drops,
+                policy.safe_dict()["modeled_drops"],
             )
             request = ItemPickupRequest(
                 control_value=0,
@@ -3359,7 +3402,7 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             )
             await writer.drain()
 
-            next_server_iv = shuffle_iv(server_iv)
+            next_server_iv = shuffle_iv(next_server_iv)
             stat_wire = await reader.readexactly(20)
             stat_update = CharacterStatUpdate.parse(
                 crypt_payload(stat_wire[4:], next_server_iv)
@@ -3393,6 +3436,8 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(metrics["requests_served"], 1)
             self.assertEqual(metrics["requests_rejected"], 0)
             self.assertEqual(metrics["response_packets_sent"], 3)
+            self.assertEqual(metrics["mesos"], 116)
+            self.assertNotIn("state", metrics)
             self.assertEqual(policy.mesos, 116)
             self.assertEqual(policy.active_drops, {})
             analysis = analyze_gameplay_transcript(

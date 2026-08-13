@@ -74,10 +74,12 @@ from .live_replay import (
     DEFAULT_PACKET_API_URL,
     inject_current_hp_live,
     inject_item_pickup_live,
+    inject_mesos_pickup_live,
     inject_mob_temporary_stat_live,
     inject_skill_record_live,
     render_current_hp_live_replay,
     render_item_pickup_live_replay,
+    render_mesos_pickup_live_replay,
     render_mob_temporary_stat_live_replay,
     render_skill_record_live_replay,
 )
@@ -1331,7 +1333,7 @@ async def replay_connection(
             if item_pickup_response_policy is not None:
                 item_pickup_response_policy.apply_server_packet(plaintext)
                 if item_pickup_metrics is not None:
-                    item_pickup_metrics["state"] = (
+                    item_pickup_metrics.update(
                         item_pickup_response_policy.safe_dict()
                     )
             if item_use_response_policy is not None:
@@ -2403,7 +2405,7 @@ async def replay_connection(
                                 + 1
                             )
                             item_pickup_metrics["last_rejection"] = str(error)
-                            item_pickup_metrics["state"] = (
+                            item_pickup_metrics.update(
                                 item_pickup_response_policy.safe_dict()
                             )
                         record_runtime_event(
@@ -2453,7 +2455,7 @@ async def replay_connection(
                         item_pickup_metrics["last_response"] = (
                             response_plan.safe_dict()
                         )
-                        item_pickup_metrics["state"] = (
+                        item_pickup_metrics.update(
                             item_pickup_response_policy.safe_dict()
                         )
                     record_runtime_event(
@@ -4651,6 +4653,66 @@ def build_parser() -> argparse.ArgumentParser:
     )
     live_item_pickup_parser.add_argument("--json", action="store_true")
 
+    live_mesos_pickup_parser = subparsers.add_parser(
+        "inject-mesos-pickup",
+        help=(
+            "retarget one capture-admitted mesos-drop pair to the latest "
+            "same-field movement-command position, send physical pickup input, "
+            "and verify the reactive server response and completed gameplay fold"
+        ),
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--transcript", required=True, type=Path
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--evidence-pcap", required=True, type=Path
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--evidence-tcp-stream", type=int, default=92
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--mesos-amount",
+        type=int,
+        help="require an admitted capture chain with this exact mesos amount",
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--admission-index",
+        type=int,
+        default=0,
+        help="zero-based eligible admitted mesos-chain index",
+    )
+    live_mesos_pickup_parser.add_argument("--pickup-key", default="z")
+    live_mesos_pickup_parser.add_argument(
+        "--pickup-key-hold-ms", type=int, default=100
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--wayland-display",
+        required=True,
+        help="nested compositor socket name, for example wayland-3",
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--wayland-runtime-directory",
+        type=Path,
+        default=Path(f"/run/user/{os.getuid()}"),
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--pickup-input-delay-seconds",
+        type=float,
+        help="override the capture-derived spawn-to-input delay",
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--http-api-url",
+        default=DEFAULT_PACKET_API_URL,
+        help="loopback POST /api/v1/server-packets endpoint",
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--api-timeout-seconds", type=float, default=5.0
+    )
+    live_mesos_pickup_parser.add_argument(
+        "--verify-timeout-seconds", type=float, default=10.0
+    )
+    live_mesos_pickup_parser.add_argument("--json", action="store_true")
+
     live_mob_stat_parser = subparsers.add_parser(
         "inject-mob-temporary-stat",
         help=(
@@ -6225,6 +6287,36 @@ def main() -> None:
             )
         else:
             print(render_item_pickup_live_replay(result))
+        return
+    if arguments.command == "inject-mesos-pickup":
+        result = inject_mesos_pickup_live(
+            arguments.transcript,
+            arguments.evidence_pcap,
+            evidence_tcp_stream=arguments.evidence_tcp_stream,
+            mesos_amount=arguments.mesos_amount,
+            admission_index=arguments.admission_index,
+            pickup_key=arguments.pickup_key,
+            pickup_key_hold_ms=arguments.pickup_key_hold_ms,
+            wayland_display=arguments.wayland_display,
+            wayland_runtime_directory=arguments.wayland_runtime_directory,
+            pickup_input_delay_seconds=(
+                arguments.pickup_input_delay_seconds
+            ),
+            api_url=arguments.http_api_url,
+            api_timeout_seconds=arguments.api_timeout_seconds,
+            verify_timeout_seconds=arguments.verify_timeout_seconds,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    result.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_mesos_pickup_live_replay(result))
         return
     if arguments.command == "inject-mob-temporary-stat":
         result = inject_mob_temporary_stat_live(

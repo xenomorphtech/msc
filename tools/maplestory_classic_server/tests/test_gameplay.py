@@ -6470,6 +6470,61 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertEqual(compact_plan.removal.actor_id, CHARACTER_ID)
         self.assertIsNone(compact_plan.removal.trailing_value)
 
+    def test_reactive_pickup_policy_tracks_injected_drop_lifecycle(self) -> None:
+        replay = fixture_gameplay_transcript(
+            initial_snapshot=True,
+            extra_server_plaintexts=(
+                CharacterStatUpdate(
+                    request_flag=False,
+                    stat_mask=CharacterStatUpdate.MESOS,
+                    mesos=100,
+                ).to_bytes(),
+                fixture_field_drop_spawn(
+                    spawn_mode=FieldDropSpawn.FIELD_LOAD_MODE,
+                    drop_object_id=40_004,
+                    drop_kind=FieldDropSpawn.MESOS,
+                    value=8,
+                    position_x=600,
+                    position_y=-2677,
+                ).to_bytes(),
+            ),
+        )
+        policy = derive_item_pickup_response_policy(
+            replay,
+            evidence_transcript=fixture_gameplay_transcript(item_pickup=True),
+        )
+        policy.apply_server_packet(
+            FieldDropRemoval(reason=1, drop_object_id=40_004).to_bytes()
+        )
+        spawn = fixture_field_drop_spawn(
+            spawn_mode=1,
+            drop_object_id=44_004,
+            drop_kind=FieldDropSpawn.MESOS,
+            value=16,
+            position_x=633,
+            position_y=-2677,
+        )
+        refresh = replace(spawn, spawn_mode=0)
+
+        policy.apply_server_packet(spawn.to_bytes())
+        first = policy.safe_dict()["modeled_drops"]
+        policy.apply_server_packet(refresh.to_bytes())
+        refreshed = policy.safe_dict()["modeled_drops"]
+
+        self.assertEqual(first, refreshed)
+        self.assertEqual(first[0]["drop"], "drop:runtime:1")
+        self.assertEqual(first[0]["kind"], "mesos")
+        self.assertEqual(first[0]["mesos_amount"], 16)
+        self.assertNotIn(str(spawn.drop_object_id), str(first))
+
+        policy.apply_server_packet(
+            FieldDropRemoval(
+                reason=1,
+                drop_object_id=spawn.drop_object_id,
+            ).to_bytes()
+        )
+        self.assertEqual(policy.safe_dict()["modeled_drops"], [])
+
     def test_derives_mesos_balance_from_same_capture_prior_stream(self) -> None:
         evidence = fixture_gameplay_transcript(item_pickup=True)
         replay = fixture_gameplay_transcript(

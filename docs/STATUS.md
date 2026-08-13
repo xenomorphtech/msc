@@ -1664,15 +1664,37 @@ world fold is warning-free at `active` on map `101000000` (`150/2`) with all
 `33/33` heartbeat pairs matched. The world readiness route simultaneously
 returned HTTP `200`. No character ID is exposed by either status surface.
 
+The reactive mesos branch is now official-client validated. The new
+`inject-mesos-pickup` command chose the first eligible four-mesos admission
+from `111.pcapng` stream `92` (frames `1453/1454/1539/1630`), retargeted only
+the typed drop/source positions and runtime object ids, injected the
+`[311,311,281]` admission lifecycle, and sent physical Z input. The client
+issued base opcode `185`; the held-open server, not the injector, emitted
+`[41,49,312]`. The clean run verified `4571 -> 4575`, one served request,
+three response packets, reason `5`, no pending pickup, and unchanged inventory
+plus non-mesos player/progression state. A preceding independent trial produced
+the same complete chain for `4567 -> 4571`.
+
+The finalized browser-free world artifact is warning-free and valid at
+`active` on map `101000000`: 255 full and two partial packet observations, two
+matched mesos request/effect/result/removal chains, no pending pickup, and
+`56/56` matched heartbeats. Its paired login is warning-free at
+`handoff_ready` with `34/6` full/partial observations. World readiness stayed
+HTTP `200` after both pickups. Post-transcript opcode-`311`/`312` emissions now
+update the reactive policy's identifier-free runtime-drop set, and HTTP pickup
+state refreshes its established top-level fields in place rather than creating
+a stale nested duplicate.
+
 ## Immediate next steps
 
-1. Live-validate the new reactive mesos `[41,49,312]` branch with an officially
-   admitted active mesos drop while preserving the same connection-readiness,
-   heartbeat, and identifier-redaction gates used for item pickup.
-2. Preserve the pickup-specific command-final coordinate selector and folded-
+1. Preserve the pickup-specific command-final coordinate selector and folded-
    trailer fallback as a regression boundary. Extend drop admission or response
    shapes only from independently admitted evidence, and continue responding
    only after an authentic opcode-`185` or compact opcode-`222` request.
+2. Remove the manual response race from `inject-item-pickup` by giving its
+   capture-backed item admission the same reactive-policy verification mode as
+   the mesos command; retain manual serving only for a replay without the
+   responder enabled.
 3. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
 4. Keep packet injection an explicit loopback-only opt-in while expanding
@@ -1686,6 +1708,8 @@ returned HTTP `200`. No character ID is exposed by either status surface.
 /home/sdancer/ms/downloads/maple_tw_postgate_screen.png
 /home/sdancer/ms/downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/login/1786477737308800256_replay_12082.jsonl
 /home/sdancer/ms/downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786477769036931470_replay_12857.jsonl
+/home/sdancer/ms/downloads/maple_custom_server_observed/mesos_pickup_live_20260813/login/1786664131727715445_replay_12082.jsonl
+/home/sdancer/ms/downloads/maple_custom_server_observed/mesos_pickup_live_20260813/world/1786664294399109003_replay_12857.jsonl
 /home/sdancer/ms/downloads/maple_protocol_captures/
 /home/sdancer/ms/downloads/maple_protocol_captures/hk_official_reference_20260808/
 /home/sdancer/ms/downloads/maple_custom_server_observed/

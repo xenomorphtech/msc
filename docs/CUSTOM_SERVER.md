@@ -1867,6 +1867,32 @@ heartbeats and none pending. Stream `114`'s final active drop is an item, so
 this validates startup, login, derivation, and telemetry but does not claim a
 live official-client mesos pickup yet.
 
+That remaining proof is now complete. `inject-mesos-pickup` selects an admitted
+mesos mode-`1`/mode-`0` pair plus its controller-level-`0` release from the
+validated evidence stream, retargets it to the latest same-field movement-
+command endpoint, injects only those three admission packets, and sends a
+physical pickup key. It never posts the response packets: the held-open replay
+must observe the official client's opcode-`185` or `222` request and serve it
+through the reactive policy. The loopback status snapshot supplies the modeled
+starting balance and verifies exactly one served request, three response
+packets, the expected final balance, and removal of the runtime drop alias.
+
+The fresh browser-free stream-`114` run admitted the first eligible stream-`92`
+chain (spawn/refresh/release/request frames `1453/1454/1539/1630`, four mesos).
+The official client issued base opcode `185` twice in two independent trials;
+both produced full `[41,49,312]` chains and reason-`5` removals. The clean
+reusable-command trial verified `4571 -> 4575`, one served request, exactly
+three response packets, unchanged inventory and non-mesos player/progression
+state, and zero pending pickup work. The finalized world transcript
+`mesos_pickup_live_20260813/world/1786664294399109003_replay_12857.jsonl` is
+valid and warning-free at `active` on map `101000000`, with two matched mesos
+chains and `56/56` heartbeats; its paired login transcript
+`mesos_pickup_live_20260813/login/1786664131727715445_replay_12082.jsonl` is
+warning-free at `handoff_ready` (`34/6` full/partial). World readiness remained
+HTTP `200` after pickup. Runtime pickup state now refreshes its existing
+top-level identifier-free HTTP fields after injected spawns, removals, and
+responses, avoiding a stale duplicate state object.
+
 Observed pickup requests now receive the same causal transcript treatment as
 item use: request, completed item `[39,49,312]` or mesos `[41,49,312]`
 response, or safe rejection. Unit coverage proves a second request for an

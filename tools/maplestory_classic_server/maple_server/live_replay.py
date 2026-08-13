@@ -12,7 +12,7 @@ import sys
 import time
 from typing import Callable
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from .gameplay import (
@@ -222,6 +222,139 @@ class ItemPickupLiveReplayResult:
                     "player_state_unchanged": True,
                     "other_inventory_unchanged": True,
                     "progression_unchanged": True,
+                },
+            },
+        }
+
+
+@dataclass(frozen=True)
+class MesosPickupLiveReplayPlan:
+    drop_spawn: FieldDropSpawn = field(repr=False)
+    drop_refresh: FieldDropSpawn = field(repr=False)
+    controller_release: MobControllerChange = field(repr=False)
+    cleanup: FieldDropRemoval = field(repr=False)
+    mesos_before: int
+    mesos_delta: int
+    mesos_after: int
+    player_x: int
+    player_y: int
+    player_position_source: str
+    folded_trailer_x: int
+    folded_trailer_y: int
+    source_offset_x: int
+    source_offset_y: int
+    evidence_tcp_stream: int
+    evidence_admission_index: int
+    evidence_spawn_frame: int
+    evidence_refresh_frame: int
+    evidence_release_frame: int
+    evidence_request_frame: int
+    release_delay_seconds: float
+    admission_delay_seconds: float
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "runtime_object_ids_redacted": True,
+            "kind": "mesos",
+            "mesos_before": self.mesos_before,
+            "mesos_delta": self.mesos_delta,
+            "mesos_after": self.mesos_after,
+            "latest_player_position": {
+                "x": self.player_x,
+                "y": self.player_y,
+            },
+            "player_position_source": self.player_position_source,
+            "folded_trailer_position": {
+                "x": self.folded_trailer_x,
+                "y": self.folded_trailer_y,
+            },
+            "drop_position": {
+                "x": self.drop_spawn.position_x,
+                "y": self.drop_spawn.position_y,
+            },
+            "animated_source_offset": {
+                "x": self.source_offset_x,
+                "y": self.source_offset_y,
+            },
+            "evidence": {
+                "tcp_stream": self.evidence_tcp_stream,
+                "admission_index": self.evidence_admission_index,
+                "frames": {
+                    "spawn": self.evidence_spawn_frame,
+                    "refresh": self.evidence_refresh_frame,
+                    "release": self.evidence_release_frame,
+                    "request": self.evidence_request_frame,
+                },
+                "release_delay_ms": round(
+                    self.release_delay_seconds * 1000.0, 3
+                ),
+                "admission_delay_ms": round(
+                    self.admission_delay_seconds * 1000.0, 3
+                ),
+            },
+            "prediction": {
+                "server_opcodes": [311, 311, 281, 41, 49, 312],
+                "requires_authentic_client_request": True,
+                "response_source": "reactive_item_pickup_policy",
+                "mesos_balance_delta": self.mesos_delta,
+                "active_field_drop_count_delta": 0,
+                "phase": "unchanged",
+                "field_epoch": "unchanged",
+                "map_id": "unchanged",
+                "player_state": "mesos_only",
+                "inventory": "unchanged",
+                "other_progression": "unchanged",
+            },
+        }
+
+
+@dataclass(frozen=True)
+class MesosPickupLiveReplayResult:
+    plan: MesosPickupLiveReplayPlan = field(repr=False)
+    api_responses: tuple[dict[str, object], ...]
+    observed_packets: tuple[dict[str, object], ...]
+    request_attempts: int
+    requests_served_delta: int
+    response_packets_sent_delta: int
+    polls: int
+    pickup_key: str
+    pickup_input_delay_seconds: float
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "accepted": True,
+            "operation": "mesos_pickup",
+            "plan": self.plan.safe_dict(),
+            "api": list(self.api_responses),
+            "verification": {
+                "matched": True,
+                "polls": self.polls,
+                "pickup_key": self.pickup_key,
+                "pickup_input_delay_ms": round(
+                    self.pickup_input_delay_seconds * 1000.0, 3
+                ),
+                "request_attempts": self.request_attempts,
+                "requests_served_delta": self.requests_served_delta,
+                "response_packets_sent_delta": (
+                    self.response_packets_sent_delta
+                ),
+                "observed_packets": list(self.observed_packets),
+                "checks": {
+                    "latest_player_position_used": True,
+                    "animated_pair_observed": True,
+                    "controller_release_observed": True,
+                    "authentic_client_request_observed": True,
+                    "reactive_response_observed": True,
+                    "mesos_effect_matched": True,
+                    "gain_result_matched": True,
+                    "drop_removal_matched": True,
+                    "pending_pickups_cleared": True,
+                    "phase_unchanged": True,
+                    "field_epoch_unchanged": True,
+                    "map_id_unchanged": True,
+                    "other_player_state_unchanged": True,
+                    "inventory_unchanged": True,
+                    "other_progression_unchanged": True,
                 },
             },
         }
@@ -446,6 +579,20 @@ class _CapturedItemPickupAdmission:
     admission_delay_seconds: float
 
 
+@dataclass(frozen=True)
+class _CapturedMesosPickupAdmission:
+    drop_spawn: FieldDropSpawn
+    drop_refresh: FieldDropSpawn
+    controller_release: MobControllerChange
+    mesos_amount: int
+    spawn_frame: int
+    refresh_frame: int
+    release_frame: int
+    request_frame: int
+    release_delay_seconds: float
+    admission_delay_seconds: float
+
+
 def validate_packet_api_url(value: str) -> str:
     """Accept only the fixed plaintext-packet endpoint on loopback HTTP."""
     parsed = urlsplit(value)
@@ -508,6 +655,41 @@ def _post_plaintext_packet(
     if payload.get("plaintext_length") != len(plaintext):
         raise RuntimeError("packet API response length does not match the request")
     return payload
+
+
+def _get_runtime_status(
+    api_url: str,
+    *,
+    timeout_seconds: float,
+) -> dict[str, object]:
+    parsed = urlsplit(validate_packet_api_url(api_url))
+    status_url = urlunsplit(parsed._replace(path="/api/v1/status"))
+    request = Request(status_url, method="GET")
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise RuntimeError(
+            f"runtime status API returned HTTP {error.code}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise RuntimeError("runtime status API did not return a JSON object")
+    return payload
+
+
+def _item_pickup_runtime_metrics(
+    status: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    protocol = status.get("protocol")
+    if not isinstance(protocol, dict):
+        raise RuntimeError("runtime status has no protocol telemetry")
+    metrics = protocol.get("item_pickup_responses")
+    if not isinstance(metrics, dict):
+        raise RuntimeError("reactive item-pickup responses are not enabled")
+    state = metrics.get("state", metrics)
+    if not isinstance(state, dict):
+        raise RuntimeError("item-pickup runtime state is not a JSON object")
+    return metrics, state
 
 
 def _captured_item_pickup_admission(
@@ -627,6 +809,140 @@ def _captured_item_pickup_admission(
         controller_release=controller_release,
         inventory=inventory,
         quantity_delta=quantity_delta,
+        spawn_frame=spawn_frame,
+        refresh_frame=refresh_frame,
+        release_frame=release_frame,
+        request_frame=request_observation.frame_index,
+        release_delay_seconds=release_delay_seconds,
+        admission_delay_seconds=admission_delay_seconds,
+    )
+
+
+def _captured_mesos_pickup_admission(
+    transcript: Transcript,
+    *,
+    mesos_amount: int | None,
+    admission_index: int,
+) -> _CapturedMesosPickupAdmission:
+    if mesos_amount is not None and not 1 <= mesos_amount <= 0xFFFF_FFFF:
+        raise ValueError("mesos amount must be a positive uint32")
+    if admission_index < 0:
+        raise ValueError("mesos-pickup admission index must be non-negative")
+    analysis = analyze_gameplay_transcript(transcript)
+    if not analysis.valid:
+        raise ValueError("mesos-pickup evidence failed packet/state validation")
+    state = analysis.state
+    if (
+        state.item_pickup_effect_mismatches
+        or state.item_pickup_spawn_result_mismatches
+        or state.item_pickup_removal_mismatches
+        or state.pending_item_pickups
+    ):
+        raise ValueError("mesos-pickup evidence has incomplete or mismatched chains")
+    candidates = tuple(
+        observation
+        for observation in analysis.observations
+        if observation.direction == "client_to_server"
+        and observation.opcode in {185, 222}
+        and observation.kind == "item_pickup_request"
+        and observation.details.get("predicted_result_kind") == "mesos"
+        and (
+            mesos_amount is None
+            or observation.details.get("predicted_mesos_amount") == mesos_amount
+        )
+        and observation.details.get("request_attempt") == 1
+        and observation.details.get("known_drop") is True
+        and type(observation.details.get("drop_spawn_frame")) is int
+        and type(observation.details.get("source_controller_release_frame"))
+        is int
+        and observation.details["source_controller_release_frame"]
+        > observation.details["drop_spawn_frame"]
+    )
+    if admission_index >= len(candidates):
+        amount_description = (
+            "any amount" if mesos_amount is None else f"amount {mesos_amount}"
+        )
+        raise ValueError(
+            f"mesos-pickup evidence has {len(candidates)} eligible admitted "
+            f"chains for {amount_description}; index {admission_index} is "
+            "unavailable"
+        )
+    request_observation = candidates[admission_index]
+    request_details = request_observation.details
+    drop_alias = request_details.get("drop")
+    spawn_frame = request_details.get("drop_spawn_frame")
+    release_frame = request_details.get("source_controller_release_frame")
+    if (
+        not isinstance(drop_alias, str)
+        or type(spawn_frame) is not int
+        or type(release_frame) is not int
+    ):
+        raise ValueError("admitted mesos-pickup evidence lacks spawn/release frames")
+    refresh_observations = tuple(
+        observation
+        for observation in analysis.observations
+        if observation.kind == "field_drop_spawn"
+        and spawn_frame < observation.frame_index < request_observation.frame_index
+        and observation.details.get("drop") == drop_alias
+        and observation.details.get("spawn_mode") == 0
+    )
+    if len(refresh_observations) != 1:
+        raise ValueError(
+            "admitted mesos-pickup evidence must have exactly one mode-0 refresh"
+        )
+    refresh_frame = refresh_observations[0].frame_index
+    decoded = decode_transcript(transcript)
+    required_frames = (
+        spawn_frame,
+        refresh_frame,
+        release_frame,
+        request_observation.frame_index,
+    )
+    if any(index < 0 or index >= len(decoded.frames) for index in required_frames):
+        raise ValueError("mesos-pickup evidence frame index is out of range")
+    spawn_decoded = decoded.frames[spawn_frame]
+    refresh_decoded = decoded.frames[refresh_frame]
+    release_decoded = decoded.frames[release_frame]
+    request_decoded = decoded.frames[request_observation.frame_index]
+    if (
+        spawn_decoded.direction != "server_to_client"
+        or refresh_decoded.direction != "server_to_client"
+        or release_decoded.direction != "server_to_client"
+        or request_decoded.direction != "client_to_server"
+    ):
+        raise ValueError("mesos-pickup evidence directions do not match the chain")
+    drop_spawn = FieldDropSpawn.parse(spawn_decoded.plaintext)
+    drop_refresh = FieldDropSpawn.parse(refresh_decoded.plaintext)
+    controller_release = MobControllerChange.parse(release_decoded.plaintext)
+    captured_amount = request_details.get("predicted_mesos_amount")
+    if (
+        type(captured_amount) is not int
+        or drop_spawn.spawn_mode != 1
+        or drop_refresh.spawn_mode != 0
+        or drop_spawn.drop_kind != FieldDropSpawn.MESOS
+        or drop_refresh.drop_kind != FieldDropSpawn.MESOS
+        or drop_spawn.drop_object_id != drop_refresh.drop_object_id
+        or drop_spawn.value != captured_amount
+        or drop_refresh.value != captured_amount
+        or drop_spawn.source_mob_object_id
+        != drop_refresh.source_mob_object_id
+        or controller_release.control_level != 0
+        or controller_release.object_id != drop_spawn.source_mob_object_id
+    ):
+        raise ValueError("mesos-pickup evidence is not one matching pair/release chain")
+    release_delay_seconds = (
+        release_decoded.timestamp_ns - spawn_decoded.timestamp_ns
+    ) / 1_000_000_000
+    admission_delay_seconds = (
+        request_decoded.timestamp_ns - spawn_decoded.timestamp_ns
+    ) / 1_000_000_000
+    if release_delay_seconds < 0 or admission_delay_seconds <= 0:
+        raise ValueError("mesos-pickup evidence has invalid event timing")
+    return _CapturedMesosPickupAdmission(
+        drop_spawn=drop_spawn,
+        drop_refresh=drop_refresh,
+        controller_release=controller_release,
+        mesos_amount=captured_amount,
         spawn_frame=spawn_frame,
         refresh_frame=refresh_frame,
         release_frame=release_frame,
@@ -814,6 +1130,114 @@ def plan_item_pickup_live_replay(
         quantity_before=item.quantity,
         quantity_delta=captured.quantity_delta,
         quantity_after=quantity_after,
+        player_x=player_x,
+        player_y=player_y,
+        player_position_source=player_position_source,
+        folded_trailer_x=folded_trailer_x,
+        folded_trailer_y=folded_trailer_y,
+        source_offset_x=source_offset_x,
+        source_offset_y=source_offset_y,
+        evidence_tcp_stream=evidence_tcp_stream,
+        evidence_admission_index=admission_index,
+        evidence_spawn_frame=captured.spawn_frame,
+        evidence_refresh_frame=captured.refresh_frame,
+        evidence_release_frame=captured.release_frame,
+        evidence_request_frame=captured.request_frame,
+        release_delay_seconds=captured.release_delay_seconds,
+        admission_delay_seconds=captured.admission_delay_seconds,
+    )
+
+
+def plan_mesos_pickup_live_replay(
+    analysis: GameplayAnalysis,
+    evidence_transcript: Transcript,
+    *,
+    mesos_before: int,
+    evidence_tcp_stream: int = 92,
+    mesos_amount: int | None = None,
+    admission_index: int = 0,
+) -> MesosPickupLiveReplayPlan:
+    """Retarget one capture-admitted mesos drop for reactive live service."""
+    if not analysis.valid:
+        raise ValueError("live world transcript failed packet/state validation")
+    state = analysis.state
+    if state.phase.value != "active":
+        raise ValueError("live world state must be active")
+    if state.pending_item_pickups:
+        raise ValueError("live world state has a pending item-pickup chain")
+    if getattr(state, "pending_item_use_requests", 0):
+        raise ValueError("live world state has a pending item-use request")
+    if state.player_x is None or state.player_y is None:
+        raise ValueError("live world state has no modeled player position")
+    if state.entry_character_id is None:
+        raise ValueError("live world state has no entry character context")
+    if evidence_tcp_stream < 0:
+        raise ValueError("evidence TCP stream must be non-negative")
+    if not 0 <= mesos_before <= 0xFFFF_FFFF_FFFF_FFFF:
+        raise ValueError("runtime mesos balance must fit uint64")
+    captured = _captured_mesos_pickup_admission(
+        evidence_transcript,
+        mesos_amount=mesos_amount,
+        admission_index=admission_index,
+    )
+    mesos_after = mesos_before + captured.mesos_amount
+    if mesos_after > 0xFFFF_FFFF_FFFF_FFFF:
+        raise ValueError("mesos pickup would exceed the runtime balance")
+    if (
+        captured.drop_spawn.source_x is None
+        or captured.drop_spawn.source_y is None
+    ):
+        raise ValueError("mesos-pickup evidence has no animated source position")
+    folded_trailer_x = state.player_x
+    folded_trailer_y = state.player_y
+    player_x, player_y, player_position_source = _item_pickup_player_position(
+        analysis
+    )
+    if not -0x8000 <= player_x <= 0x7FFF or not -0x8000 <= player_y <= 0x7FFF:
+        raise ValueError("latest player position exceeds int16 range")
+    source_offset_x = (
+        captured.drop_spawn.source_x - captured.drop_spawn.position_x
+    )
+    source_offset_y = (
+        captured.drop_spawn.source_y - captured.drop_spawn.position_y
+    )
+    source_x = player_x + source_offset_x
+    source_y = player_y + source_offset_y
+    if not -0x8000 <= source_x <= 0x7FFF or not -0x8000 <= source_y <= 0x7FFF:
+        raise ValueError("retargeted animated source position exceeds int16 range")
+    drop_object_id, source_object_id = _allocate_runtime_object_ids(analysis, 2)
+    rewrite = {
+        "drop_object_id": drop_object_id,
+        "owner_value_1": state.entry_character_id,
+        "owner_value_2": state.entry_character_id,
+        "position_x": player_x,
+        "position_y": player_y,
+        "source_mob_object_id": source_object_id,
+        "source_x": source_x,
+        "source_y": source_y,
+    }
+    drop_spawn = replace(captured.drop_spawn, **rewrite)
+    drop_refresh = replace(captured.drop_refresh, **rewrite)
+    controller_release = replace(
+        captured.controller_release,
+        object_id=source_object_id,
+    )
+    for packet_type, packet in (
+        (FieldDropSpawn, drop_spawn),
+        (FieldDropSpawn, drop_refresh),
+        (MobControllerChange, controller_release),
+    ):
+        plaintext = packet.to_bytes()
+        if packet_type.parse(plaintext).to_bytes() != plaintext:
+            raise ValueError("typed mesos-pickup admission packet did not round-trip")
+    return MesosPickupLiveReplayPlan(
+        drop_spawn=drop_spawn,
+        drop_refresh=drop_refresh,
+        controller_release=controller_release,
+        cleanup=FieldDropRemoval(reason=1, drop_object_id=drop_object_id),
+        mesos_before=mesos_before,
+        mesos_delta=captured.mesos_amount,
+        mesos_after=mesos_after,
         player_x=player_x,
         player_y=player_y,
         player_position_source=player_position_source,
@@ -2128,6 +2552,322 @@ def inject_item_pickup_live(
     )
 
 
+def inject_mesos_pickup_live(
+    transcript_path: Path,
+    evidence_pcap_path: Path,
+    *,
+    evidence_tcp_stream: int = 92,
+    mesos_amount: int | None = None,
+    admission_index: int = 0,
+    pickup_key: str = "z",
+    pickup_key_hold_ms: int = 100,
+    wayland_display: str,
+    wayland_runtime_directory: Path | None = None,
+    pickup_input_delay_seconds: float | None = None,
+    api_url: str = DEFAULT_PACKET_API_URL,
+    api_timeout_seconds: float = 5.0,
+    verify_timeout_seconds: float = 10.0,
+) -> MesosPickupLiveReplayResult:
+    """Inject and verify one capture-backed, reactively served mesos pickup."""
+    for name, value in (
+        ("API timeout", api_timeout_seconds),
+        ("verification timeout", verify_timeout_seconds),
+    ):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be positive")
+    if pickup_input_delay_seconds is not None and (
+        not math.isfinite(pickup_input_delay_seconds)
+        or pickup_input_delay_seconds < 0
+    ):
+        raise ValueError("pickup input delay must be non-negative")
+    validate_packet_api_url(api_url)
+    runtime_directory = wayland_runtime_directory or Path(
+        f"/run/user/{os.getuid()}"
+    )
+    baseline_status = _get_runtime_status(
+        api_url,
+        timeout_seconds=api_timeout_seconds,
+    )
+    baseline_metrics, baseline_policy_state = _item_pickup_runtime_metrics(
+        baseline_status
+    )
+    runtime_mesos = baseline_policy_state.get("mesos")
+    if type(runtime_mesos) is not int or runtime_mesos < 0:
+        raise RuntimeError("reactive item-pickup policy has no modeled mesos balance")
+    baseline_requests_served = baseline_metrics.get("requests_served", 0)
+    baseline_response_packets = baseline_metrics.get("response_packets_sent", 0)
+    if type(baseline_requests_served) is not int or type(
+        baseline_response_packets
+    ) is not int:
+        raise RuntimeError("item-pickup runtime counters are not integers")
+
+    baseline = analyze_gameplay_transcript(Transcript.load(transcript_path))
+    evidence = load_pcap_tcp_stream(
+        evidence_pcap_path,
+        evidence_tcp_stream,
+    )
+    plan = plan_mesos_pickup_live_replay(
+        baseline,
+        evidence,
+        mesos_before=runtime_mesos,
+        evidence_tcp_stream=evidence_tcp_stream,
+        mesos_amount=mesos_amount,
+        admission_index=admission_index,
+    )
+    input_delay = (
+        plan.admission_delay_seconds
+        if pickup_input_delay_seconds is None
+        else pickup_input_delay_seconds
+    )
+    baseline_observation_count = len(baseline.observations)
+    baseline_inventory = _inventory_item_snapshot(baseline)
+    baseline_progression_without_mesos = _progression_snapshot(baseline)[:-1]
+    baseline_player_without_mesos = _player_state_snapshot(baseline)[:-1]
+    baseline_position = (baseline.state.player_x, baseline.state.player_y)
+    baseline_drop_ids = set(baseline.state.field_drops)
+    api_responses: list[dict[str, object]] = []
+    polls = 0
+    drop_sent = False
+    removed = False
+    final = baseline
+    request_observation = None
+    runtime_drop_alias = None
+    try:
+        started_at = time.monotonic()
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.drop_spawn.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        drop_sent = True
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.drop_refresh.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        time.sleep(
+            max(
+                0.0,
+                plan.release_delay_seconds
+                - (time.monotonic() - started_at),
+            )
+        )
+        api_responses.append(
+            _post_plaintext_packet(
+                api_url,
+                plan.controller_release.to_bytes(),
+                timeout_seconds=api_timeout_seconds,
+            )
+        )
+        time.sleep(max(0.0, input_delay - (time.monotonic() - started_at)))
+        _send_wayland_evdev_key(
+            pickup_key,
+            hold_ms=pickup_key_hold_ms,
+            wayland_display=wayland_display,
+            runtime_directory=runtime_directory,
+        )
+        completion_deadline = time.monotonic() + verify_timeout_seconds
+        while time.monotonic() < completion_deadline:
+            polls += 1
+            time.sleep(0.05)
+            final = analyze_gameplay_transcript(Transcript.load(transcript_path))
+            if not final.valid:
+                raise RuntimeError(
+                    "mesos-pickup admission transcript failed validation"
+                )
+            observations = final.observations[baseline_observation_count:]
+            if not isinstance(runtime_drop_alias, str):
+                for observation in observations:
+                    if (
+                        observation.direction == "server_to_client"
+                        and observation.opcode == 311
+                        and observation.kind == "field_drop_spawn"
+                        and observation.details.get("new_drop") is True
+                        and observation.details.get("kind") == "mesos"
+                        and observation.details.get("mesos_amount")
+                        == plan.mesos_delta
+                        and observation.details.get("position_x") == plan.player_x
+                        and observation.details.get("position_y") == plan.player_y
+                    ):
+                        runtime_drop_alias = observation.details.get("drop")
+                        break
+            if isinstance(runtime_drop_alias, str):
+                request_observation = next(
+                    (
+                        observation
+                        for observation in observations
+                        if observation.direction == "client_to_server"
+                        and observation.opcode in {185, 222}
+                        and observation.kind == "item_pickup_request"
+                        and observation.details.get("drop") == runtime_drop_alias
+                        and observation.details.get("known_drop") is True
+                    ),
+                    None,
+                )
+                removed = any(
+                    observation.direction == "server_to_client"
+                    and observation.opcode == 312
+                    and observation.details.get("drop") == runtime_drop_alias
+                    for observation in observations
+                )
+            state = final.state
+            if (
+                request_observation is not None
+                and state.pending_item_pickups == 0
+                and state.item_pickup_effect_matches
+                == baseline.state.item_pickup_effect_matches + 1
+                and state.item_pickup_spawn_result_matches
+                == baseline.state.item_pickup_spawn_result_matches + 1
+                and state.item_pickup_removal_matches
+                == baseline.state.item_pickup_removal_matches + 1
+            ):
+                break
+        else:
+            if request_observation is None:
+                raise TimeoutError(
+                    "the latest-position mesos drop was injected, but no "
+                    "authentic item-pickup request arrived before the "
+                    "verification timeout"
+                )
+            raise TimeoutError(
+                "the reactive mesos response was requested, but its completed "
+                "chain did not fold before the verification timeout"
+            )
+    except BaseException:
+        if drop_sent and not removed:
+            try:
+                _post_plaintext_packet(
+                    api_url,
+                    plan.cleanup.to_bytes(),
+                    timeout_seconds=api_timeout_seconds,
+                )
+            except Exception:
+                pass
+        raise
+
+    final_status = _get_runtime_status(
+        api_url,
+        timeout_seconds=api_timeout_seconds,
+    )
+    final_metrics, final_policy_state = _item_pickup_runtime_metrics(final_status)
+    final_requests_served = final_metrics.get("requests_served")
+    final_response_packets = final_metrics.get("response_packets_sent")
+    last_response = final_metrics.get("last_response")
+    if (
+        type(final_requests_served) is not int
+        or type(final_response_packets) is not int
+        or not isinstance(last_response, dict)
+    ):
+        raise RuntimeError("reactive item-pickup completion telemetry is incomplete")
+    requests_served_delta = final_requests_served - baseline_requests_served
+    response_packets_sent_delta = (
+        final_response_packets - baseline_response_packets
+    )
+    modeled_drops = final_policy_state.get("modeled_drops")
+    if not isinstance(modeled_drops, list):
+        raise RuntimeError("reactive item-pickup state has no modeled drop list")
+    response_drop_alias = last_response.get("drop")
+
+    state = final.state
+    request_attempts = (
+        state.item_pickup_requests - baseline.state.item_pickup_requests
+    )
+    counter_checks = {
+        "requests": request_attempts >= 1,
+        "chains": (
+            state.item_pickup_request_chains
+            == baseline.state.item_pickup_request_chains + 1
+        ),
+        "retries": (
+            state.item_pickup_request_retries
+            == baseline.state.item_pickup_request_retries
+            + request_attempts
+            - 1
+        ),
+        "effects": (
+            state.item_pickup_effect_matches
+            == baseline.state.item_pickup_effect_matches + 1
+        ),
+        "results": (
+            state.item_pickup_spawn_result_matches
+            == baseline.state.item_pickup_spawn_result_matches + 1
+        ),
+        "removals": (
+            state.item_pickup_removal_matches
+            == baseline.state.item_pickup_removal_matches + 1
+        ),
+        "pending": state.pending_item_pickups == 0,
+        "runtime_requests_served": requests_served_delta == 1,
+        "runtime_response_packets": response_packets_sent_delta == 3,
+        "runtime_response_kind": last_response.get("kind") == "mesos",
+        "runtime_response_before": (
+            last_response.get("mesos_before") == plan.mesos_before
+        ),
+        "runtime_response_delta": (
+            last_response.get("mesos_delta") == plan.mesos_delta
+        ),
+        "runtime_response_after": (
+            last_response.get("mesos_after") == plan.mesos_after
+        ),
+        "runtime_balance": final_policy_state.get("mesos") == plan.mesos_after,
+        "runtime_drop_removed": all(
+            not isinstance(drop, dict)
+            or drop.get("drop") != response_drop_alias
+            for drop in modeled_drops
+        ),
+    }
+    invariant_checks = {
+        "mesos": state.mesos == plan.mesos_after,
+        "field_drops": set(state.field_drops) == baseline_drop_ids,
+        "phase": state.phase == baseline.state.phase,
+        "field_epoch": state.field_epoch == baseline.state.field_epoch,
+        "map_id": state.map_id == baseline.state.map_id,
+        "player": (
+            _player_state_snapshot(final)[:-1] == baseline_player_without_mesos
+        ),
+        "player_position": (state.player_x, state.player_y) == baseline_position,
+        "inventory": _inventory_item_snapshot(final) == baseline_inventory,
+        "progression": (
+            _progression_snapshot(final)[:-1]
+            == baseline_progression_without_mesos
+        ),
+    }
+    failed = [
+        name
+        for name, matched in {**counter_checks, **invariant_checks}.items()
+        if not matched
+    ]
+    if failed:
+        raise RuntimeError(
+            "typed mesos-pickup replay violated predicted checks: "
+            + ", ".join(failed)
+        )
+    observed_packets = tuple(
+        _safe_item_pickup_observation(observation)
+        for observation in final.observations[baseline_observation_count:]
+        if observation.opcode in {41, 49, 185, 222, 281, 311, 312}
+        and (
+            observation.details.get("drop") == runtime_drop_alias
+            or observation.opcode in {41, 49, 281}
+        )
+    )
+    return MesosPickupLiveReplayResult(
+        plan=plan,
+        api_responses=tuple(api_responses),
+        observed_packets=observed_packets,
+        request_attempts=request_attempts,
+        requests_served_delta=requests_served_delta,
+        response_packets_sent_delta=response_packets_sent_delta,
+        polls=polls,
+        pickup_key=pickup_key,
+        pickup_input_delay_seconds=input_delay,
+    )
+
+
 def inject_current_hp_live(
     transcript_path: Path,
     current_hp: int,
@@ -2293,6 +3033,42 @@ def render_item_pickup_live_replay(result: ItemPickupLiveReplayResult) -> str:
             ),
             (
                 "  unchanged: phase, field epoch, map, player, other inventory, "
+                "progression"
+            ),
+        )
+    )
+
+
+def render_mesos_pickup_live_replay(result: MesosPickupLiveReplayResult) -> str:
+    plan = result.plan.safe_dict()
+    evidence = plan["evidence"]
+    return "\n".join(
+        (
+            "live mesos-pickup replay: matched",
+            (
+                "  evidence: stream "
+                f"{evidence['tcp_stream']} admission "
+                f"{evidence['admission_index']} at "
+                f"{evidence['admission_delay_ms']} ms"
+            ),
+            (
+                "  placement: latest player position "
+                f"({plan['latest_player_position']['x']},"
+                f"{plan['latest_player_position']['y']}) from "
+                f"{plan['player_position_source']}"
+            ),
+            (
+                "  observed: "
+                f"{result.request_attempts} authentic request attempt(s), "
+                f"mesos {plan['mesos_before']} -> {plan['mesos_after']}"
+            ),
+            (
+                "  reactive: "
+                f"{result.requests_served_delta} request served with "
+                f"{result.response_packets_sent_delta} response packets"
+            ),
+            (
+                "  unchanged: phase, field epoch, map, player, inventory, "
                 "progression"
             ),
         )

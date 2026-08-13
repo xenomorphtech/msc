@@ -551,6 +551,44 @@ HTTP telemetry; an authentic live mesos request remains the next bounded proof.
 The fresh client and listeners were stopped, their four ports are offline, and
 the host Wine DLL path is not a mount point.
 
+That next bounded proof is now complete. Post-transcript opcode-`311` spawns
+and opcode-`312` removals update the reactive pickup policy, with newly injected
+drops represented only as `drop:runtime:N`. Mode-`0` refreshes preserve the
+same alias. Captured replay frames are still folded only once when the policy
+is derived; only generated or HTTP-injected packets mutate it afterward.
+
+The new `inject-mesos-pickup` command selects a fully correlated captured mesos
+admission, retargets its mode-`1`/mode-`0` pair and controller release to the
+latest movement-command endpoint, injects only `[311,311,281]`, and sends the
+physical pickup key. It reads the starting balance from the identifier-free
+loopback status API but does not synthesize the client request or post the
+response. Completion requires an authentic opcode `185` or `222`, one reactive
+`[41,49,312]` response, the predicted folded balance, exact runtime counter
+deltas, removal of the runtime alias, and unchanged non-mesos state. Timeout
+cleanup sends only a reason-`1` removal.
+
+The fresh browser-free proof used the first eligible stream-`92` chain:
+spawn/refresh/release/request frames `1453/1454/1539/1630`, four mesos, release
+at 386.352 ms, and admission at 1,592.163 ms. The official client emitted base
+opcode `185` twice across two independent trials. Both responses were complete
+reason-`5` `[41,49,312]` chains. The clean reusable-command result verified
+`4571 -> 4575`, one served request, exactly three response packets, no pending
+pickup, and unchanged inventory plus non-mesos player/progression state. World
+readiness stayed HTTP `200` after pickup.
+
+The saved world transcript
+`mesos_pickup_live_20260813/world/1786664294399109003_replay_12857.jsonl` is
+valid and warning-free at `active` on map `101000000`, with `255/2`
+full/partial observations, two matched mesos chains, and `56/56` heartbeats.
+The paired login transcript
+`mesos_pickup_live_20260813/login/1786664131727715445_replay_12082.jsonl` is
+valid and warning-free at `handoff_ready` with `34/6`. The tracked Python suite
+is now 353 tests. All 17 Rust unit tests and both ignored pinned/private gates
+pass. Independent capture gates remain `35078/129`, `73/3`, and `71099/1`
+full/partial; only stream `126` retains its one aggregate warning for the six
+known one-HP correlations. The fresh client and ports `12082/12084/12857/12858`
+were stopped, and the host Wine DLL path remains unmounted.
+
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container
 whose PID matches the new `Maplestory_Classic.exe`; do not use hard-coded

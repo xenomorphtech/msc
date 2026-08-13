@@ -3227,6 +3227,25 @@ state reports only `same_capture_prior_stream`, never the compared identifier.
 Unknown, overlapping, cross-capture, or different-character cases do not seed
 mesos state.
 
+Post-transcript opcode-`311` and `312` packets now update the same mutable
+pickup policy used by authentic client requests. New runtime drops receive
+identifier-free `drop:runtime:N` aliases; a mode-`0` refresh preserves the
+alias, and any exact removal clears it. This is intentionally limited to
+packets emitted after the captured transcript, including the opt-in loopback
+injection endpoint; replaying historical capture frames does not reapply the
+whole drop history to an already-derived final policy.
+
+The official client live proof used the admitted stream-`92` frames
+`1453/1454/1539/1630`: a four-mesos animated pair, its matching release, and
+the reference request timing. Retargeted to the live movement-command endpoint,
+it produced an authentic base opcode-`185` request followed by the reactive
+opcode sequence `[41,49,312]`. The clean verification advanced the modeled and
+folded balances from `4571` to `4575`, observed reason `5`, and left no pending
+pickup. A prior independent trial advanced `4567` to `4571`, so the finalized
+warning-free transcript contains two complete mesos chains. No client request,
+drop identifier, validation token, or actor identifier is supplied by the
+injector or exposed by its report.
+
 Stream `114` ends with one active mode-`2` item drop: template `4000004` at
 `(-863,-1742)`. The final folded local-player position is `(633,-2677)`, and
 the Etc inventory contains the same template in slot `7`, quantity `74`.
@@ -3479,9 +3498,10 @@ field epoch, a deterministic captured template effect, and exactly one
 existing stack with capacity. It emits opcodes `39`, `49`, and `312` in that
 order and removes the drop from mutable state. The response mirrors the
 request form: opcode `185` receives the captured 15-byte reason-`5` removal,
-while opcode `222` receives the captured 11-byte reason-`2` removal. Mesos
-pickups, special results, new-slot insertion, ambiguous stacks, and unknown
-templates remain rejected.
+while opcode `222` receives the captured 11-byte reason-`2` removal. A mesos
+drop follows the separately guarded `[41,49,312]` branch above. Special
+results, new-slot insertion, ambiguous stacks, unknown templates, and mesos
+without a proven balance/effect shape remain rejected.
 Runtime annotations record pickup request, completed response, or rejection;
 an exact rejection consumes its matching pending request without disconnecting
 the client. An annotation without a matching observed request is invalid.

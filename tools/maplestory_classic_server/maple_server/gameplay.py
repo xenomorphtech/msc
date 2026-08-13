@@ -2916,6 +2916,7 @@ class ItemPickupResponsePolicy:
     mesos_notice_result_flag: int | None = None
     mesos_notice_subkind: int | None = None
     mesos_notice_tail: int | None = None
+    _runtime_drop_sequence: int = field(default=0, repr=False)
 
     @property
     def mesos_responses_modeled(self) -> bool:
@@ -3023,6 +3024,29 @@ class ItemPickupResponsePolicy:
         if len(plaintext) < 2:
             return
         opcode = int.from_bytes(plaintext[:2], "little")
+        if opcode == 311:
+            spawn = FieldDropSpawn.parse(plaintext)
+            existing = self.active_drops.get(spawn.drop_object_id)
+            if existing is None:
+                self._runtime_drop_sequence += 1
+                alias = f"drop:runtime:{self._runtime_drop_sequence}"
+                first_spawn_frame_index = None
+                first_spawn_timestamp_ns = None
+            else:
+                alias = existing.alias
+                first_spawn_frame_index = existing.first_spawn_frame_index
+                first_spawn_timestamp_ns = existing.first_spawn_timestamp_ns
+            self.active_drops[spawn.drop_object_id] = FieldDropEntity(
+                alias=alias,
+                spawn=spawn,
+                first_spawn_frame_index=first_spawn_frame_index,
+                first_spawn_timestamp_ns=first_spawn_timestamp_ns,
+            )
+            return
+        if opcode == 312:
+            removal = FieldDropRemoval.parse(plaintext)
+            self.active_drops.pop(removal.drop_object_id, None)
+            return
         if opcode == 41:
             update = CharacterStatUpdate.parse(plaintext)
             if update.stat_mask & CharacterStatUpdate.MESOS:

@@ -714,6 +714,43 @@ matched heartbeats. Because stream `114` ends with an item drop, this run does
 not substitute for the next official-client proof against an admitted mesos
 drop.
 
+The official-client mesos proof is now reusable:
+
+```sh
+sudo -n ip netns exec mapleproxy sudo -n -H -u sdancer env \
+  XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-2 \
+  PYTHONPATH=/home/sdancer/ms/tools/maplestory_classic_server \
+  /usr/bin/python -m maple_server inject-mesos-pickup \
+  --transcript /path/to/active-world.jsonl \
+  --evidence-pcap /home/sdancer/ms/111.pcapng \
+  --evidence-tcp-stream 92 \
+  --admission-index 0 \
+  --wayland-display wayland-2 \
+  --http-api-url http://127.0.0.1:12858/api/v1/server-packets \
+  --json
+```
+
+The command requires an injection-ready replay with
+`--reactive-item-pickup-responses`. It selects only a fully admitted captured
+mesos pair whose controller release follows its spawn, preserves the captured
+source offset and timing, retargets the pair to the latest movement-command
+endpoint, and injects opcodes `[311,311,281]`. It then sends physical pickup
+input and waits; `[41,49,312]` must come from the replay's reactive policy after
+an authentic client opcode `185` or `222`. `--mesos-amount` can require an
+exact captured amount, and `--admission-index` selects among otherwise eligible
+chains. Timeout cleanup injects only a reason-`1` removal.
+
+In the fresh browser-free run, the first eligible evidence chain used frames
+`1453/1454/1539/1630` and four mesos. Two independent official opcode-`185`
+requests completed two reason-`5` chains; the clean command result verified
+`4571 -> 4575`, one served request, three response packets, unchanged inventory
+and non-mesos player/progression state, and zero pending work. The finalized
+world fold is valid and warning-free at map `101000000` with two matched mesos
+chains and `56/56` heartbeats; world readiness remained HTTP `200`. Runtime
+pickup state is refreshed in-place at `protocol.item_pickup_responses`, so its
+top-level safe balance and modeled-drop fields do not lag the counters or last
+response after an injected lifecycle.
+
 Reactive pickup also records request/completion/rejection runtime events. A
 rejected request for a missing or already removed drop stays nonfatal and is
 folded out of pending pickup accounting when it matches the observed request.
