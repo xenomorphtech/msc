@@ -362,11 +362,13 @@ a 12-byte extension block, an optional non-Cash `i64`, and two timestamp/value
 pairs. Isolated validation passes `2/2` with zero opaque bytes.
 Server opcode `189` replaces its 26 stream-`92`/`114` exact-width opaque pins
 with one generated-handler-backed variable shape: `u32 object id`, `u8 level`,
-terminated counted UTF-16 name, then at least 267 delegated bytes. Isolated
-validation exact-consumes all 114 entries across streams `92`, `114`, and `126`
-with no width-specific fallback. Python further types a second terminated
-string, four-value header, and one capture-bounded appearance island while
-retaining the two unresolved regions as opaque.
+two terminated counted UTF-16 strings, the four-value header, four mask words,
+an optional direct `u8`, two fixed `u8`s, and seven virtual records with exact
+widths `15/15/15/13/20/17/15`, followed by at least 130 delegated bytes.
+Isolated validation exact-consumes all 114 entries across streams `92`, `114`,
+and `126` with no width-specific fallback. Python additionally types the
+capture-bounded appearance and later conditional islands while retaining only
+the residual tail as opaque in the reference corpus.
 Client opcode `301` is the identical six-byte first client gameplay packet in
 all three reference sessions and one active custom-server login. Its manual
 shape constrains the body to `reserved_zero u32 = 0`; Python round-trips the

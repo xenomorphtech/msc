@@ -349,14 +349,14 @@ virtual-array slots at logical indices `82..88`; the two 129-byte stream-`92`
 bridges additionally enable direct bit `7`, whose `d8fe2358...` branch reads
 one `u8`. Two unconditional `u8` reads follow. The `fda0a837...` instance
 constructor creates exactly seven virtual records, and its factory reduces the
-slot indices to `82..88`. Slots `82`, `83`, `84`, and `88` execute the same
-15-byte reader: two `i32`s, the DateTime helper's `u8 + i32`, and one `u16`.
-The helper consumes its `i32` regardless of the flag value. The remaining
-three slots consume `13`, `20`, and `17` bytes in an as-yet unresolved order,
-so their exact 50-byte aggregate stays opaque. All 114 bridges therefore
-consume exactly: optional direct `u8` + two fixed `u8`s + three leading 15-byte
-records + 50 opaque bytes + one trailing 15-byte record. This promotes 62/63
-more bytes per entry without attaching to Wine.
+slot indices to `82..88`. Offline LibCpp2IL metadata resolution maps the
+factory globals to their exact classes, establishing logical-slot widths
+`15/15/15/13/20/17/15`. Every record starts with two `i32`s and the DateTime
+helper's `u8 + i32`; the 15-byte form adds `u16`, the 13-byte form stops at the
+base, the 20-byte form adds a second DateTime and `u16`, and the 17-byte form
+adds `i32`. The helper consumes each `i32` regardless of its flag value. All
+114 bridges are therefore completely typed after the mask without attaching
+to Wine.
 
 Static control-flow recovery closed the first residual opcode-`189` tail
 boundary without runtime attachment. The outer delegate calls the bool reader

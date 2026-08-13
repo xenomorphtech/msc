@@ -153,7 +153,10 @@ from maple_server.packets import (  # noqa: E402
     PickupGainNotice,
     RemotePlayerEnterField,
     RemotePlayerEntryBody,
+    RemotePlayerEntryBridgeRecord13,
     RemotePlayerEntryBridgeRecord15,
+    RemotePlayerEntryBridgeRecord17,
+    RemotePlayerEntryBridgeRecord20,
     RemotePlayerEntryConditionalTailPrefix,
     RemotePlayerEntryTailPrefix,
     RemotePlayerEntryTypedBridge,
@@ -3519,11 +3522,35 @@ class GameplayPacketShapeTest(unittest.TestCase):
             time_i32=3,
             trailing_u16=4,
         )
+        middle_record_13 = RemotePlayerEntryBridgeRecord13(
+            first_i32=1,
+            second_i32=-2,
+            time_flag_u8=1,
+            time_i32=3,
+        )
+        middle_record_20 = RemotePlayerEntryBridgeRecord20(
+            first_i32=1,
+            second_i32=-2,
+            time_flag_u8=1,
+            time_i32=3,
+            second_time_flag_u8=1,
+            second_time_i32=5,
+            trailing_u16=6,
+        )
+        middle_record_17 = RemotePlayerEntryBridgeRecord17(
+            first_i32=1,
+            second_i32=-2,
+            time_flag_u8=1,
+            time_i32=3,
+            trailing_i32=7,
+        )
         typed_bridge = RemotePlayerEntryTypedBridge(
             optional_direct_u8=None,
             fixed_u8_values=(0, 2),
             leading_records=(record, record, record),
-            opaque_middle=b"\xA5" * 50,
+            middle_record_13=middle_record_13,
+            middle_record_20=middle_record_20,
+            middle_record_17=middle_record_17,
             trailing_record=record,
         )
         entered = RemotePlayerEnterField(
@@ -3541,8 +3568,8 @@ class GameplayPacketShapeTest(unittest.TestCase):
         encoded = entered.to_bytes()
         parsed = RemotePlayerEnterField.parse(encoded)
         self.assertEqual(parsed, entered)
-        self.assertEqual(parsed.body.typed_bytes, 185)
-        self.assertEqual(parsed.body.opaque_bytes, 123)
+        self.assertEqual(parsed.body.typed_bytes, 235)
+        self.assertEqual(parsed.body.opaque_bytes, 73)
         self.assertEqual(
             parsed.body.safe_dict()["pre_appearance_mask_nonzero_words"], 1
         )
@@ -3550,16 +3577,19 @@ class GameplayPacketShapeTest(unittest.TestCase):
             parsed.body.safe_dict()["pre_appearance_mask_enabled_bits"], 7
         )
         self.assertEqual(
-            parsed.body.safe_dict()["typed_pre_appearance_bytes"], 62
+            parsed.body.safe_dict()["typed_pre_appearance_bytes"], 112
         )
         self.assertEqual(
-            parsed.body.safe_dict()["opaque_pre_appearance_bytes"], 50
+            parsed.body.safe_dict()["opaque_pre_appearance_bytes"], 0
         )
         self.assertEqual(
             parsed.body.safe_dict()[
                 "pre_appearance_typed_record_nonzero_fields"
             ],
-            20,
+            36,
+        )
+        self.assertEqual(
+            parsed.body.safe_dict()["pre_appearance_typed_record_count"], 7
         )
 
         with_direct = replace(
@@ -3586,13 +3616,26 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     pre_appearance_mask_words=(0, 0, 0, 0),
                 ),
             ).to_bytes()
-        with self.assertRaisesRegex(PacketShapeError, "50 bytes"):
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
             replace(
                 entered,
                 body=replace(
                     entered.body,
                     typed_pre_appearance=replace(
-                        typed_bridge, opaque_middle=b"\x00" * 49
+                        typed_bridge,
+                        middle_record_13=replace(
+                            middle_record_13, first_i32=1 << 40
+                        ),
+                    ),
+                ),
+            ).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "13-byte"):
+            replace(
+                entered,
+                body=replace(
+                    entered.body,
+                    typed_pre_appearance=replace(
+                        typed_bridge, middle_record_13=record
                     ),
                 ),
             ).to_bytes()

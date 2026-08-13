@@ -246,7 +246,7 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         .find(|shape| shape.name == "server_opcode_189_remote_player_entry")
         .unwrap();
     assert_eq!(shape.length, None);
-    assert_eq!(shape.operations.len(), 38);
+    assert_eq!(shape.operations.len(), 53);
     assert!(shape.operations[9..13].iter().all(|operation| matches!(
         operation,
         ShapeOp::Read {
@@ -269,10 +269,37 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
                 }]
             )
     ));
+    assert!(
+        [31, 32, 34, 35, 36, 38, 40, 42, 43, 45, 46]
+            .into_iter()
+            .all(|index| matches!(
+                &shape.operations[index],
+                ShapeOp::Read {
+                    kind: ReadKind::I32,
+                    ..
+                }
+            ))
+    );
+    assert!([33, 37, 39, 44].into_iter().all(|index| matches!(
+        &shape.operations[index],
+        ShapeOp::Read {
+            kind: ReadKind::U8,
+            ..
+        }
+    )));
     assert!(matches!(
-        &shape.operations[31],
-        ShapeOp::Bytes { length: 50, .. }
+        &shape.operations[41],
+        ShapeOp::Read {
+            kind: ReadKind::U16,
+            ..
+        }
     ));
+    assert!(
+        !shape
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, ShapeOp::Bytes { .. }))
+    );
     assert!(matches!(
         shape.operations.last(),
         Some(ShapeOp::RemainingBytes {

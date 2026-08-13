@@ -10218,13 +10218,56 @@ class RemotePlayerEntryConditionalTailPrefix:
 
 
 @dataclass(frozen=True)
-class RemotePlayerEntryBridgeRecord15:
-    """Fixed-width native record used by four opcode-189 mask slots."""
+class RemotePlayerEntryBridgeRecord13:
+    """Native base record used by every opcode-189 virtual mask slot."""
 
     first_i32: int
     second_i32: int
     time_flag_u8: int
     time_i32: int
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, name: str
+    ) -> "RemotePlayerEntryBridgeRecord13":
+        return cls(
+            first_i32=reader.i32(f"{name}.first_i32"),
+            second_i32=reader.i32(f"{name}.second_i32"),
+            time_flag_u8=reader.u8(f"{name}.time_flag_u8"),
+            time_i32=reader.i32(f"{name}.time_i32"),
+        )
+
+    @property
+    def nonzero_fields(self) -> int:
+        return sum(
+            value != 0
+            for value in (
+                self.first_i32,
+                self.second_i32,
+                self.time_flag_u8,
+                self.time_i32,
+            )
+        )
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack(
+                "<iiBi",
+                self.first_i32,
+                self.second_i32,
+                self.time_flag_u8,
+                self.time_i32,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player bridge record field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class RemotePlayerEntryBridgeRecord15(RemotePlayerEntryBridgeRecord13):
+    """Base bridge record followed by one native u16."""
+
     trailing_u16: int
 
     @classmethod
@@ -10241,16 +10284,7 @@ class RemotePlayerEntryBridgeRecord15:
 
     @property
     def nonzero_fields(self) -> int:
-        return sum(
-            value != 0
-            for value in (
-                self.first_i32,
-                self.second_i32,
-                self.time_flag_u8,
-                self.time_i32,
-                self.trailing_u16,
-            )
-        )
+        return super().nonzero_fields + (self.trailing_u16 != 0)
 
     def to_bytes(self) -> bytes:
         try:
@@ -10269,8 +10303,99 @@ class RemotePlayerEntryBridgeRecord15:
 
 
 @dataclass(frozen=True)
+class RemotePlayerEntryBridgeRecord20(RemotePlayerEntryBridgeRecord13):
+    """Base bridge record followed by a second time value and one u16."""
+
+    second_time_flag_u8: int
+    second_time_i32: int
+    trailing_u16: int
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, name: str
+    ) -> "RemotePlayerEntryBridgeRecord20":
+        return cls(
+            first_i32=reader.i32(f"{name}.first_i32"),
+            second_i32=reader.i32(f"{name}.second_i32"),
+            time_flag_u8=reader.u8(f"{name}.time_flag_u8"),
+            time_i32=reader.i32(f"{name}.time_i32"),
+            second_time_flag_u8=reader.u8(
+                f"{name}.second_time_flag_u8"
+            ),
+            second_time_i32=reader.i32(f"{name}.second_time_i32"),
+            trailing_u16=reader.u16(f"{name}.trailing_u16"),
+        )
+
+    @property
+    def nonzero_fields(self) -> int:
+        return super().nonzero_fields + sum(
+            value != 0
+            for value in (
+                self.second_time_flag_u8,
+                self.second_time_i32,
+                self.trailing_u16,
+            )
+        )
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack(
+                "<iiBiBiH",
+                self.first_i32,
+                self.second_i32,
+                self.time_flag_u8,
+                self.time_i32,
+                self.second_time_flag_u8,
+                self.second_time_i32,
+                self.trailing_u16,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player bridge record field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class RemotePlayerEntryBridgeRecord17(RemotePlayerEntryBridgeRecord13):
+    """Base bridge record followed by one native i32."""
+
+    trailing_i32: int
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, name: str
+    ) -> "RemotePlayerEntryBridgeRecord17":
+        return cls(
+            first_i32=reader.i32(f"{name}.first_i32"),
+            second_i32=reader.i32(f"{name}.second_i32"),
+            time_flag_u8=reader.u8(f"{name}.time_flag_u8"),
+            time_i32=reader.i32(f"{name}.time_i32"),
+            trailing_i32=reader.i32(f"{name}.trailing_i32"),
+        )
+
+    @property
+    def nonzero_fields(self) -> int:
+        return super().nonzero_fields + (self.trailing_i32 != 0)
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack(
+                "<iiBii",
+                self.first_i32,
+                self.second_i32,
+                self.time_flag_u8,
+                self.time_i32,
+                self.trailing_i32,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player bridge record field is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class RemotePlayerEntryTypedBridge:
-    """Native/corpus-bounded typed islands after the opcode-189 mask."""
+    """Native-typed bridge records after the opcode-189 mask."""
 
     optional_direct_u8: int | None
     fixed_u8_values: tuple[int, int]
@@ -10279,7 +10404,9 @@ class RemotePlayerEntryTypedBridge:
         RemotePlayerEntryBridgeRecord15,
         RemotePlayerEntryBridgeRecord15,
     ]
-    opaque_middle: bytes = field(repr=False)
+    middle_record_13: RemotePlayerEntryBridgeRecord13
+    middle_record_20: RemotePlayerEntryBridgeRecord20
+    middle_record_17: RemotePlayerEntryBridgeRecord17
     trailing_record: RemotePlayerEntryBridgeRecord15
 
     @classmethod
@@ -10302,7 +10429,15 @@ class RemotePlayerEntryTypedBridge:
                 )
                 for index in range(3)
             ),
-            opaque_middle=reader.bytes(50, "opaque_middle"),
+            middle_record_13=RemotePlayerEntryBridgeRecord13.parse_from(
+                reader, name="middle_record_13"
+            ),
+            middle_record_20=RemotePlayerEntryBridgeRecord20.parse_from(
+                reader, name="middle_record_20"
+            ),
+            middle_record_17=RemotePlayerEntryBridgeRecord17.parse_from(
+                reader, name="middle_record_17"
+            ),
             trailing_record=RemotePlayerEntryBridgeRecord15.parse_from(
                 reader, name="trailing_record"
             ),
@@ -10317,13 +10452,19 @@ class RemotePlayerEntryTypedBridge:
 
     @property
     def typed_bytes(self) -> int:
-        return self.encoded_bytes - len(self.opaque_middle)
+        return self.encoded_bytes
 
     @property
     def nonzero_record_fields(self) -> int:
         return sum(
             record.nonzero_fields
-            for record in (*self.leading_records, self.trailing_record)
+            for record in (
+                *self.leading_records,
+                self.middle_record_13,
+                self.middle_record_20,
+                self.middle_record_17,
+                self.trailing_record,
+            )
         )
 
     def _validate(self) -> None:
@@ -10343,9 +10484,24 @@ class RemotePlayerEntryTypedBridge:
             raise PacketShapeError(
                 "remote-player bridge must contain three leading records"
             )
-        if len(self.opaque_middle) != 50:
+        if any(
+            type(record) is not RemotePlayerEntryBridgeRecord15
+            for record in (*self.leading_records, self.trailing_record)
+        ):
             raise PacketShapeError(
-                "remote-player bridge opaque middle must contain 50 bytes"
+                "remote-player bridge 15-byte record layout mismatch"
+            )
+        if type(self.middle_record_13) is not RemotePlayerEntryBridgeRecord13:
+            raise PacketShapeError(
+                "remote-player bridge 13-byte record layout mismatch"
+            )
+        if type(self.middle_record_20) is not RemotePlayerEntryBridgeRecord20:
+            raise PacketShapeError(
+                "remote-player bridge 20-byte record layout mismatch"
+            )
+        if type(self.middle_record_17) is not RemotePlayerEntryBridgeRecord17:
+            raise PacketShapeError(
+                "remote-player bridge 17-byte record layout mismatch"
             )
 
     def safe_dict(self) -> dict[str, int | bool]:
@@ -10357,12 +10513,12 @@ class RemotePlayerEntryTypedBridge:
             "pre_appearance_fixed_u8_nonzero_fields": sum(
                 value != 0 for value in self.fixed_u8_values
             ),
-            "pre_appearance_typed_record_count": 4,
+            "pre_appearance_typed_record_count": 7,
             "pre_appearance_typed_record_nonzero_fields": (
                 self.nonzero_record_fields
             ),
             "typed_pre_appearance_bytes": self.typed_bytes,
-            "opaque_pre_appearance_bytes": len(self.opaque_middle),
+            "opaque_pre_appearance_bytes": 0,
         }
 
     def to_bytes(self) -> bytes:
@@ -10373,7 +10529,9 @@ class RemotePlayerEntryTypedBridge:
         encoded.extend(self.fixed_u8_values)
         for record in self.leading_records:
             encoded.extend(record.to_bytes())
-        encoded.extend(self.opaque_middle)
+        encoded.extend(self.middle_record_13.to_bytes())
+        encoded.extend(self.middle_record_20.to_bytes())
+        encoded.extend(self.middle_record_17.to_bytes())
         encoded.extend(self.trailing_record.to_bytes())
         return bytes(encoded)
 
@@ -10542,7 +10700,7 @@ class RemotePlayerEntryBody:
     @property
     def opaque_bytes(self) -> int:
         pre_appearance = (
-            len(self.typed_pre_appearance.opaque_middle)
+            0
             if self.typed_pre_appearance is not None
             else len(self.opaque_pre_appearance)
         )

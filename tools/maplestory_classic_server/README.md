@@ -971,8 +971,8 @@ The gameplay fold currently models these capture-backed boundaries:
 - server opcode `189`: remote-player entry with an aliased object id, level,
   a redacted name, second redacted terminated counted UTF-16 string, a fixed
   four-value header, four native-reader-confirmed `u32` bridge mask words, an
-  optional direct `u8`, two fixed `u8`s, and four 15-byte bridge records around
-  an unresolved 50-byte middle subgroup, followed by a typed appearance island
+  optional direct `u8`, two fixed `u8`s, and all seven bridge records with
+  exact widths `15/15/15/13/20/17/15`, followed by a typed appearance island
   and the appearance-adjacent
   native `u16/i32/u32/4*i32/2*i16/u8/u16` reads followed by a typed
   bool-terminated repeated-`i32` loop, three `i32`s, a `u8`, optional text,
@@ -980,8 +980,8 @@ The gameplay fold currently models these capture-backed boundaries:
   continuation bool, and its false-path follow-up bool between capture-bounded
   opaque regions; all 114 reference entries round-trip
   losslessly with zero captured loop iterations or nonzero tail variants and a
-  remaining 50-byte opaque bridge subgroup (raw mask words stay redacted),
-  while server opcode `190` is the exact
+  completely typed pre-appearance bridge (raw mask words stay redacted), while
+  server opcode `190` is the exact
   object-id removal and the fold requires movement broadcasts to reference a
   current-field entry,
 - server opcode `224`: exact remote-player/mob-template value record with a
