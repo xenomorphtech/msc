@@ -253,6 +253,16 @@
   active world connection, injection ready, and zero injection failures while
   the typed initial snapshot, fixed/variable records, and NPC spawns are
   generated. The programmatic audio mute remains active.
+- Runtime HTTP now has a current-connection world-readiness contract. The new
+  `GET /api/v1/world-session-readiness` route returns `503` until exactly one
+  connection has answered a configurable number of generated heartbeat
+  probes, with at most one probe in flight, then returns `200` with
+  `ready=true`. Response totals are baselined at each connection start. A
+  fresh browser-free login traversed the security gate, world/channel and
+  character selection, opcode-`7` handoff, and local map entry; the route
+  became ready at `3/3` current-connection responses with none pending and a
+  7.575 ms last round trip. Login and world transcripts independently fold as
+  valid `handoff_ready` and `active`/map-`101000000` sessions.
 - Periodic client opcodes `308` and `311` are no longer opaque bodies. All 11
   stream-`126` and 13 latest-live opcode-`308` samples share two redacted
   doubles, two redacted `u64`s, a `u32` copied exactly into two doubles, and

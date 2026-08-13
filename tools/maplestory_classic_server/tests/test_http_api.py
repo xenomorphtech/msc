@@ -25,6 +25,7 @@ class RuntimeHttpApiTest(unittest.IsolatedAsyncioTestCase):
             config={"keep_world_open": True},
             protocol={
                 "world_heartbeat": {
+                    "readiness_response_count": 2,
                     "probes_sent": 2,
                     "responses_observed": 2,
                     "pending": 0,
@@ -70,6 +71,83 @@ class RuntimeHttpApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["connections"]["active"], 1)
         self.assertEqual(
             status["protocol"]["world_heartbeat"]["responses_observed"], 2
+        )
+        self.assertFalse(status["world_session_readiness"]["ready"])
+
+    async def test_world_readiness_requires_current_connection_heartbeats(
+        self,
+    ) -> None:
+        unavailable_status, unavailable = await self.request(
+            b"GET /api/v1/world-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(
+            unavailable_status, "HTTP/1.1 503 Service Unavailable"
+        )
+        self.assertFalse(unavailable["ready"])
+        self.assertEqual(unavailable["connections"]["active"], 0)
+
+        self.runtime.connection_started()
+        self.runtime.protocol["world_heartbeat"]["responses_observed"] = 3
+        warming_status, warming = await self.request(
+            b"GET /api/v1/world-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(warming_status, "HTTP/1.1 503 Service Unavailable")
+        self.assertEqual(
+            warming["world_heartbeat"][
+                "responses_observed_current_connection"
+            ],
+            1,
+        )
+
+        self.runtime.protocol["world_heartbeat"]["responses_observed"] = 4
+        self.runtime.protocol["world_heartbeat"]["pending"] = 1
+        ready_status, ready = await self.request(
+            b"GET /api/v1/world-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(ready_status, "HTTP/1.1 200 OK")
+        self.assertTrue(ready["ready"])
+        self.assertEqual(
+            ready["world_heartbeat"],
+            {
+                "last_round_trip_ms": None,
+                "pending": 1,
+                "response_threshold": 2,
+                "responses_observed_current_connection": 2,
+            },
+        )
+
+        self.runtime.protocol["world_heartbeat"]["pending"] = 2
+        stalled_status, stalled = await self.request(
+            b"GET /api/v1/world-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(stalled_status, "HTTP/1.1 503 Service Unavailable")
+        self.assertFalse(
+            stalled["requirements"]["heartbeat_backlog_healthy"]
+        )
+
+        self.runtime.connection_finished()
+        self.runtime.connection_started()
+        reconnected_status, reconnected = await self.request(
+            b"GET /api/v1/world-session-readiness HTTP/1.1\r\n"
+            b"Host: localhost\r\n\r\n"
+        )
+
+        self.assertEqual(
+            reconnected_status, "HTTP/1.1 503 Service Unavailable"
+        )
+        self.assertEqual(
+            reconnected["world_heartbeat"][
+                "responses_observed_current_connection"
+            ],
+            0,
         )
 
     async def test_rejects_mutating_methods_and_unknown_routes(self) -> None:

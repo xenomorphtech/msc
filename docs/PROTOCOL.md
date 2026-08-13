@@ -4601,6 +4601,16 @@ listener's `GET /api/v1/status` aggregate reports 3,369 probes and 3,369
 responses across its completed connections, with none pending; the HTTP model
 publishes counters and latency only, never the response values.
 
+Runtime readiness uses this typed transport pair without assigning a meaning
+to the response scalar. `GET /api/v1/world-session-readiness` baselines the
+aggregate response counter whenever a world connection starts. It returns
+HTTP `503` unless exactly one connection is active, the current-connection
+delta meets `--world-readiness-heartbeat-responses`, and the pending probe
+backlog is at most one; otherwise it returns HTTP `200` and `ready=true`.
+Consequently a completed session's heartbeat totals cannot prove that a new
+handoff is alive. The route exposes only counts, requirement booleans, and
+round-trip timing.
+
 ## Attack relays (`server 218` and `219`)
 
 Both server families use this capture-bounded envelope:

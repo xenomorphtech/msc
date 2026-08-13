@@ -785,10 +785,13 @@ class TranscriptTest(unittest.TestCase):
                 "--keep-world-open",
                 "--world-heartbeat-interval-seconds",
                 "10",
+                "--world-readiness-heartbeat-responses",
+                "5",
             ]
         )
 
         self.assertEqual(arguments.world_heartbeat_interval_seconds, 10)
+        self.assertEqual(arguments.world_readiness_heartbeat_responses, 5)
 
     def test_replay_parser_accepts_opt_in_http_packet_injection(self) -> None:
         arguments = build_parser().parse_args(

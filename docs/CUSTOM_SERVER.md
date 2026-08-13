@@ -975,6 +975,18 @@ accepted the transformed handoff, and opened one world connection. The world
 HTTP status reported packet injection ready and five consecutive heartbeat
 round trips with none pending. This is the current end-to-end login proof.
 
+A later fresh run on the same date exercised the stricter runtime readiness
+contract. The world replay required three generated heartbeat responses from
+the current connection. Before launch,
+`GET /api/v1/world-session-readiness` returned HTTP `503`; after the native
+opcode-`6` security exchange, world/channel/character traversal, opcode-`7`
+handoff, and local map entry, it returned HTTP `200` with `ready=true`, one
+active connection, `3/3` current-connection responses, no pending probe, and a
+7.575 ms last round trip. The independently folded login transcript is valid
+at `handoff_ready`; the world transcript is valid at `active` on map
+`101000000`. This endpoint prevents aggregate heartbeat totals from an older
+connection being mistaken for a successful current login.
+
 For subsequent runs, start the listener composition, then launch the client
 without the browser:
 
@@ -1042,7 +1054,20 @@ byte-for-byte equality with the source packet. The loopback status route is:
 ```sh
 sudo ip netns exec mapleproxy curl \
   http://127.0.0.1:12858/api/v1/status
+
+sudo ip netns exec mapleproxy curl \
+  http://127.0.0.1:12858/api/v1/world-session-readiness
 ```
+
+The readiness route returns HTTP `503` until exactly one current world
+connection has answered the configured
+`--world-readiness-heartbeat-responses` threshold and has at most one
+unanswered generated probe. It returns HTTP `200` only while those conditions
+hold. Each connection gets a new response baseline; historical totals in
+`protocol.world_heartbeat` cannot satisfy the threshold. Its safe body exposes
+only the boolean requirements, active-connection count, threshold, current-
+connection response count, pending count, and last round-trip time. The same
+object is included in `/api/v1/status` under `world_session_readiness`.
 
 The 2026-08-08 real-client run planned captured HP `50/222 -> 1/222`, patched
 one frame, entered map `101000000`, and displayed `HP 1 / 222`. Runtime status

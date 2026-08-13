@@ -4046,6 +4046,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--world-readiness-heartbeat-responses",
+        type=int,
+        default=1,
+        help=(
+            "require this many heartbeat responses from the current world "
+            "connection before the runtime readiness API returns HTTP 200 "
+            "(default: 1)"
+        ),
+    )
+    replay.add_argument(
         "--repeat-final-field-npc-state-update",
         action="store_true",
         help=(
@@ -4907,6 +4917,10 @@ async def async_main(arguments: argparse.Namespace) -> None:
             if arguments.world_heartbeat_interval_seconds <= 0:
                 raise ValueError(
                     "--world-heartbeat-interval-seconds must be positive"
+                )
+            if arguments.world_readiness_heartbeat_responses <= 0:
+                raise ValueError(
+                    "--world-readiness-heartbeat-responses must be positive"
                 )
             heartbeat_analysis = analyze_gameplay_transcript(transcript)
             if not heartbeat_analysis.valid:
@@ -6011,6 +6025,9 @@ async def async_main(arguments: argparse.Namespace) -> None:
         if arguments.world_heartbeat_interval_seconds is not None:
             runtime_protocol["world_heartbeat"] = {
                 "interval_seconds": arguments.world_heartbeat_interval_seconds,
+                "readiness_response_count": (
+                    arguments.world_readiness_heartbeat_responses
+                ),
                 "probes_sent": 0,
                 "responses_observed": 0,
                 "pending": 0,

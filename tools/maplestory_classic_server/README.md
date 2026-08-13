@@ -1929,10 +1929,12 @@ python -m maple_server replay \
   --tcp-stream 114 \
   --keep-world-open \
   --world-heartbeat-interval-seconds 10 \
+  --world-readiness-heartbeat-responses 3 \
   --hold-open-seconds 600
 
 curl http://127.0.0.1:8799/healthz
 curl http://127.0.0.1:8799/api/v1/status
+curl http://127.0.0.1:8799/api/v1/world-session-readiness
 ```
 
 `GET /healthz` returns `{"ok":true}`. `GET /api/v1/status` reports the
@@ -1949,6 +1951,14 @@ When periodic world heartbeats are enabled,
 observed, pending probes, and last/maximum round-trip milliseconds. The client
 response value is intentionally absent from this read-only HTTP model because
 its higher-level meaning is unknown and liveness needs only pair/timing state.
+`GET /api/v1/world-session-readiness` is the stricter automation endpoint. It
+returns HTTP `503` until exactly one world connection is active, that current
+connection has answered the configured number of generated heartbeat probes,
+and no more than one probe is in flight. It returns HTTP `200` with
+`ready=true` after all requirements hold. The response counter is baselined on
+each connection, so completed or failed runs cannot make a later connection
+appear ready. The same identifier-free object is embedded in
+`GET /api/v1/status` as `world_session_readiness`.
 When the baseline initial snapshot is generated,
 `protocol.initial_field_snapshot_emitter` reports its frame index, emitter,
 inventory group/item counts, skill count, progression shape/variant,

@@ -27,9 +27,11 @@ files are not all part of this task. Never stage the whole tree.
 
 ## Current repository checkpoint
 
-The pushed sequence immediately preceding this opcode-`189` increment was:
+The current pushed sequence before the world-readiness increment is:
 
 ```text
+e794153 Type native opcode 13 type 8 record
+32c18c7 Promote typed opcode 189 entries
 1191510 Type opcode 189 nested loop records
 33ce71c Realign opcode 189 appearance tail
 4b48e6f Anchor opcode 189 delegated tail at packet end
@@ -333,6 +335,27 @@ entered through the transformed handoff. The client emitted character opcode
 the world HTTP status reported injection ready, five of five heartbeat probes
 matched, `last_round_trip_ms=3.367`, and none pending. This is the current
 end-to-end login proof.
+
+The next fresh run added an explicit current-connection readiness proof. The
+new `GET /api/v1/world-session-readiness` route returned HTTP `503` before the
+client connected. After the native opcode-`6` security response, direct
+nested-Sway world/channel/character selection, opcode-`7` handoff, and local
+map entry, it returned HTTP `200` with `ready=true`, one active connection,
+the configured `3/3` current-connection heartbeat responses, no pending probe,
+and `last_round_trip_ms=7.575`. The login transcript
+`world_readiness_live_20260813/login/1786657416585280064_replay_12082.jsonl`
+folds validly at `handoff_ready`; the world transcript
+`world_readiness_live_20260813/world/1786657494219371791_replay_12857.jsonl`
+folds validly at `active` on map `101000000`. The endpoint resets its heartbeat
+baseline on every connection and returns `503` when more than one probe is
+unanswered, so historical aggregate counters cannot produce a false current
+login proof.
+
+The readiness checkpoint passes all 341 tracked Python tests, 17 Rust unit
+tests, the pinned-build ignored integration test, and the private capture-
+JSONL ignored test. Independent reference coverage remains `35078/129`,
+`73/3`, and `71099/1` full/partial for streams `92`, `114`, and `126`; this API
+increment changes no packet grammar or capture classification.
 
 ### Runtime instrumentation failures and why they matter
 

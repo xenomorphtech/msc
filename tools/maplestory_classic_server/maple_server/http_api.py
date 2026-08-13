@@ -114,17 +114,84 @@ class ServerRuntime:
     completed_connections: int = 0
     failed_connections: int = 0
     last_error: str | None = None
+    _world_heartbeat_response_baseline: int = field(
+        default=0, init=False, repr=False
+    )
 
     def connection_started(self) -> None:
         self.accepted_connections += 1
         self.active_connections += 1
+        heartbeat = self.protocol.get("world_heartbeat")
+        if isinstance(heartbeat, dict):
+            self._world_heartbeat_response_baseline = int(
+                heartbeat.get("responses_observed", 0)
+            )
+        else:
+            self._world_heartbeat_response_baseline = 0
 
     def connection_finished(self, error: BaseException | None = None) -> None:
         self.active_connections -= 1
         self.completed_connections += 1
+        if self.active_connections == 0:
+            heartbeat = self.protocol.get("world_heartbeat")
+            if isinstance(heartbeat, dict):
+                self._world_heartbeat_response_baseline = int(
+                    heartbeat.get("responses_observed", 0)
+                )
         if error is not None:
             self.failed_connections += 1
             self.last_error = f"{type(error).__name__}: {error}"
+
+    def world_session_readiness(self) -> dict[str, object]:
+        heartbeat = self.protocol.get("world_heartbeat")
+        heartbeat_configured = isinstance(heartbeat, dict)
+        response_threshold: int | None = None
+        responses_observed = 0
+        pending = 0
+        last_round_trip_ms: object = None
+        if heartbeat_configured:
+            response_threshold = int(
+                heartbeat.get("readiness_response_count", 1)
+            )
+            responses_observed = int(heartbeat.get("responses_observed", 0))
+            pending = int(heartbeat.get("pending", 0))
+            last_round_trip_ms = heartbeat.get("last_round_trip_ms")
+        current_responses = (
+            max(
+                0,
+                responses_observed - self._world_heartbeat_response_baseline,
+            )
+            if self.active_connections > 0
+            else 0
+        )
+        single_active_connection = self.active_connections == 1
+        response_threshold_met = (
+            response_threshold is not None
+            and current_responses >= response_threshold
+        )
+        heartbeat_backlog_healthy = heartbeat_configured and pending <= 1
+        ready = (
+            single_active_connection
+            and heartbeat_configured
+            and response_threshold_met
+            and heartbeat_backlog_healthy
+        )
+        return {
+            "ready": ready,
+            "requirements": {
+                "single_active_connection": single_active_connection,
+                "heartbeat_configured": heartbeat_configured,
+                "heartbeat_response_threshold_met": response_threshold_met,
+                "heartbeat_backlog_healthy": heartbeat_backlog_healthy,
+            },
+            "connections": {"active": self.active_connections},
+            "world_heartbeat": {
+                "response_threshold": response_threshold,
+                "responses_observed_current_connection": current_responses,
+                "pending": pending,
+                "last_round_trip_ms": last_round_trip_ms,
+            },
+        }
 
     def safe_dict(self) -> dict[str, object]:
         return {
@@ -138,6 +205,7 @@ class ServerRuntime:
             },
             "config": self.config,
             "protocol": self.protocol,
+            "world_session_readiness": self.world_session_readiness(),
             "server_packet_injection": self.server_packet_injection.safe_dict(),
             "connections": {
                 "accepted": self.accepted_connections,
@@ -263,6 +331,12 @@ async def handle_runtime_http_request(
             response = _json_response("200 OK", {"ok": True})
         elif target == "/api/v1/status":
             response = _json_response("200 OK", runtime.safe_dict())
+        elif target == "/api/v1/world-session-readiness":
+            readiness = runtime.world_session_readiness()
+            response = _json_response(
+                "200 OK" if readiness["ready"] else "503 Service Unavailable",
+                readiness,
+            )
         else:
             response = _json_response("404 Not Found", {"error": "not_found"})
     except (asyncio.IncompleteReadError, TimeoutError, UnicodeDecodeError, ValueError):
