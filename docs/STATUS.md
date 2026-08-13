@@ -58,6 +58,13 @@
   zero unknown, and zero invalid; stream `114` reports 58/18/0/0. One
   long-corpus state-correlation warning remains: the aggregate warning for six
   one-HP combat prediction differences.
+- Client opcode `8` now exactly bounds the world-entry request suffix as zero
+  `u8`, declared ticket length `48`, 48 redacted bytes, and three reserved
+  zeros after the neutral entry value and character id. All three 66-byte
+  reference requests round-trip and fold at full structural coverage without
+  exposing ticket or identifier bytes. Current strict totals are
+  `70,076/1,024/0/0`, `34,573/634/0/0`, and `68/8/0/0` for streams `126`,
+  `92`, and `114` respectively.
 - Server opcodes `69`, `93`, `94`, `137`, `148`, `201`, `205`, `276`, and
   `379` are separated into neutral, capture-bounded records. All 181 reference
   packets consume and round-trip exactly; typed branches add 81 full

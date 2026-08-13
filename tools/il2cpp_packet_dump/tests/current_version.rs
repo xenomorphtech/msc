@@ -17,7 +17,7 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 149);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 150);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
     assert_eq!(shapes.len(), 177);
 
@@ -32,6 +32,19 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
         shape
             .name
             .starts_with("observed_server_to_client_opcode_9_")
+    }));
+
+    let world_entry = shapes
+        .iter()
+        .find(|shape| shape.name == "world_entry_request")
+        .unwrap();
+    assert_eq!(world_entry.opcode, 8);
+    assert_eq!(world_entry.length, Some(66));
+    assert_eq!(world_entry.operations.len(), 7);
+    assert!(!shapes.iter().any(|shape| {
+        shape
+            .name
+            .starts_with("observed_client_to_server_opcode_8_")
     }));
 
     let life_submission = shapes

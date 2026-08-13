@@ -6604,11 +6604,7 @@ class GameplayStateFold:
                 self.issues.append("multiple world entry requests observed")
             self.state.entry_character_id = request.character_id
             self.state.phase = GameplayPhase.ENTRY_REQUESTED
-            entry_details = {
-                "character_id_present": True,
-                "entry_value_present": True,
-                "opaque_ticket_bytes": len(request.opaque_ticket),
-            }
+            entry_details = request.safe_dict()
             self._event(
                 frame,
                 "world_entry_requested",
@@ -6618,10 +6614,9 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="world_entry_request",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=ShapeCoverage.FULL,
                 parsed=request,
                 details=entry_details,
-                issues=("world entry value and ticket tail remain opaque",),
             )
         if opcode == 75:
             marker = ClientOpcode75EmptyRecord.parse(payload)

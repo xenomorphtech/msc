@@ -307,6 +307,14 @@ Opcode `232` is likewise no longer opaque: it targets an active remote player
 and carries a native-parsed 128-bit temporary-stat reset mask as four `u32`
 words. Its sole reference record folds fully with object id redacted.
 
+Client opcode `8` now has an exact world-entry suffix rather than one 56-byte
+opaque region. After the neutral `u32` entry value and redacted character id,
+all three reference requests carry zero `u8`, declared length `48`, 48
+redacted ticket bytes, and three reserved zeros. The codec validates that
+framing, round-trips each 66-byte packet, and exposes only ticket length and
+reserved-zero counts. The three observations advance to full structural
+coverage without assigning a cryptographic meaning to the ticket.
+
 Server opcode `43` is likewise structurally complete for the captured
 family: all three reference packets use message type zero and the same fixed
 16-byte signature, while safe events and HTTP-derived analysis expose only the

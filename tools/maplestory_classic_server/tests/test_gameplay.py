@@ -917,7 +917,7 @@ def fixture_gameplay_transcript(
         WorldEntryRequest(
             entry_value=4,
             character_id=CHARACTER_ID,
-            opaque_ticket=b"sanitized-ticket".ljust(56, b"\x00"),
+            ticket=b"sanitized-ticket".ljust(48, b"\x00"),
         ).to_bytes(),
     )
     append(
@@ -4218,7 +4218,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         request = WorldEntryRequest(
             entry_value=4,
             character_id=CHARACTER_ID,
-            opaque_ticket=b"sanitized-ticket".ljust(56, b"\x00"),
+            ticket=b"sanitized-ticket".ljust(48, b"\x00"),
         )
         encoded = request.to_bytes()
 
@@ -4227,7 +4227,29 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             encoded[6:10], CHARACTER_ID.to_bytes(4, "little")
         )
+        self.assertEqual(encoded[10:15], bytes.fromhex("0030000000"))
+        self.assertEqual(encoded[-3:], b"\x00\x00\x00")
+        self.assertEqual(
+            request.safe_dict(),
+            {
+                "entry_value_present": True,
+                "character_id_present": True,
+                "ticket_prefix_zero": True,
+                "ticket_length": 48,
+                "reserved_zero_bytes": 3,
+            },
+        )
         self.assertEqual(len(encoded), 66)
+        with self.assertRaisesRegex(PacketShapeError, "prefix"):
+            WorldEntryRequest.parse(encoded[:10] + b"\x01" + encoded[11:])
+        with self.assertRaisesRegex(PacketShapeError, "length"):
+            WorldEntryRequest.parse(
+                encoded[:11] + (47).to_bytes(4, "little") + encoded[15:]
+            )
+        with self.assertRaisesRegex(PacketShapeError, "reserved suffix"):
+            WorldEntryRequest.parse(encoded[:-1] + b"\x01")
+        with self.assertRaisesRegex(PacketShapeError, "exactly 48"):
+            replace(request, ticket=request.ticket[:-1]).to_bytes()
 
     def test_compact_field_transition_round_trip(self) -> None:
         transition = fixture_compact_field_transition()
@@ -5119,6 +5141,34 @@ class GameplayPacketShapeTest(unittest.TestCase):
 
 
 class GameplayStateFoldTest(unittest.TestCase):
+    def test_folds_world_entry_request_at_full_coverage(self) -> None:
+        analysis = analyze_gameplay_transcript(fixture_gameplay_transcript())
+
+        request = next(
+            observation
+            for observation in analysis.observations
+            if observation.kind == "world_entry_request"
+        )
+        self.assertEqual(request.coverage, ShapeCoverage.FULL)
+        self.assertEqual(request.issues, ())
+        self.assertEqual(
+            request.details,
+            {
+                "entry_value_present": True,
+                "character_id_present": True,
+                "ticket_prefix_zero": True,
+                "ticket_length": 48,
+                "reserved_zero_bytes": 3,
+            },
+        )
+        event = next(
+            event
+            for event in analysis.events
+            if event.kind == "world_entry_requested"
+        )
+        self.assertEqual(event.details, request.details)
+        self.assertNotIn("sanitized-ticket", analysis.to_json())
+
     def test_folds_world_bootstrap_acknowledgement_at_full_coverage(
         self,
     ) -> None:

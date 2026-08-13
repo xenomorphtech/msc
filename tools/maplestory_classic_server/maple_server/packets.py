@@ -1781,12 +1781,16 @@ class WorldHandoff:
 
 @dataclass(frozen=True)
 class WorldEntryRequest:
-    """Observed world-session entry envelope with a typed character id."""
+    """Observed world-session entry envelope with a redacted fixed ticket."""
 
     entry_value: int
     character_id: int
-    opaque_ticket: bytes
+    ticket: bytes = field(repr=False)
     opcode: int = 8
+
+    TICKET_PREFIX = 0
+    TICKET_LENGTH = 48
+    RESERVED_SUFFIX = b"\x00\x00\x00"
 
     @classmethod
     def parse(cls, payload: bytes) -> "WorldEntryRequest":
@@ -1794,28 +1798,58 @@ class WorldEntryRequest:
         _expect_opcode(reader, 8)
         entry_value = reader.u32("entry_value")
         character_id = reader.u32("character_id")
-        opaque_ticket = reader.bytes(56, "opaque_ticket")
+        ticket_prefix = reader.u8("ticket_prefix")
+        ticket_length = reader.u32("ticket_length")
+        if ticket_prefix != cls.TICKET_PREFIX:
+            raise PacketShapeError(
+                "world entry ticket prefix must be zero, "
+                f"got {ticket_prefix}"
+            )
+        if ticket_length != cls.TICKET_LENGTH:
+            raise PacketShapeError(
+                "world entry ticket length must be 48, "
+                f"got {ticket_length}"
+            )
+        ticket = reader.bytes(ticket_length, "ticket")
+        reserved_suffix = reader.bytes(3, "reserved_suffix")
         reader.finish()
         if character_id == 0:
             raise PacketShapeError("world entry character id cannot be zero")
+        if reserved_suffix != cls.RESERVED_SUFFIX:
+            raise PacketShapeError(
+                "world entry reserved suffix must contain three zero bytes"
+            )
         return cls(
             entry_value=entry_value,
             character_id=character_id,
-            opaque_ticket=opaque_ticket,
+            ticket=ticket,
         )
+
+    def safe_dict(self) -> dict[str, object]:
+        return {
+            "entry_value_present": True,
+            "character_id_present": True,
+            "ticket_prefix_zero": True,
+            "ticket_length": len(self.ticket),
+            "reserved_zero_bytes": len(self.RESERVED_SUFFIX),
+        }
 
     def to_bytes(self) -> bytes:
         if not 0 <= self.entry_value <= 0xFFFF_FFFF:
             raise PacketShapeError("world entry value must fit in u32")
         if not 1 <= self.character_id <= 0xFFFF_FFFF:
             raise PacketShapeError("world entry character id must fit in nonzero u32")
-        if len(self.opaque_ticket) != 56:
-            raise PacketShapeError("world entry ticket must contain exactly 56 bytes")
+        if len(self.ticket) != self.TICKET_LENGTH:
+            raise PacketShapeError(
+                "world entry ticket must contain exactly 48 bytes"
+            )
         return (
             struct.pack(
                 "<HII", self.opcode, self.entry_value, self.character_id
             )
-            + self.opaque_ticket
+            + struct.pack("<BI", self.TICKET_PREFIX, self.TICKET_LENGTH)
+            + self.ticket
+            + self.RESERVED_SUFFIX
         )
 
 

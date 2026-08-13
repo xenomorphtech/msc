@@ -859,7 +859,9 @@ zero unknown, and zero invalid observations; short stream `114` reaches 58 full,
 The gameplay fold currently models these capture-backed boundaries:
 
 - client opcode `8`: exact 66-byte world-entry envelope (`entry_value`,
-  character id, and 56-byte opaque ticket),
+  character id, zero ticket prefix, declared 48-byte redacted ticket, and
+  three reserved zeros); all three reference requests have full structural
+  coverage,
 - server opcode `157`: field snapshot/change envelope; the initial 4.4 KB
   variant has a typed 112-byte character/stat prefix plus bounded equipment,
   use, setup, etc, and cash inventory lists, while the repeated 95-byte compact

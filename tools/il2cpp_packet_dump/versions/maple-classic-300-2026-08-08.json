@@ -109,6 +109,19 @@
       ]
     },
     {
+      "name":"world_entry_request","direction":"client_to_server","opcode":8,"length":66,
+      "source":"packets.py:WorldEntryRequest; all three gameplay streams use u32 entry/character values followed by zero u8, declared ticket length 48, 48 redacted bytes, and three reserved zeros",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":8},
+        {"op":"read","name":"entry_value","kind":"u32"},
+        {"op":"read","name":"character_id","kind":"u32"},
+        {"op":"read","name":"ticket_prefix","kind":"u8","equals":0},
+        {"op":"read","name":"ticket_length","kind":"u32","equals":48},
+        {"op":"bytes","name":"ticket","length":48},
+        {"op":"bytes","name":"reserved_zero","length":3,"equals_hex":"000000"}
+      ]
+    },
+    {
       "name":"world_selection","direction":"client_to_server","opcode":4,"length":6,
       "source":"packets.py:WorldSelection; manually checked against capture 111 stream 83",
       "operations":[

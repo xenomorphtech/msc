@@ -669,14 +669,23 @@ All three world references use the same exact 66-byte request boundary:
 uint16 opcode = 8
 uint32 entry_value                     # neutral; non-identity role
 uint32 character_id
-byte[56] opaque_ticket
+uint8  ticket_prefix = 0
+uint32 ticket_length = 48
+byte[48] ticket                         # redacted
+byte[3] reserved_zero = 0
 ```
 
 The first `uint32` after the opcode was previously mislabeled as the character
 id. Cross-checking it against the large opcode-`157` snapshot in `111.pcapng`
 streams `92` and `114`, and against `1-10FS.pcapng` stream `126`, proves that
-the second word is the character id. The fold validates that equality while
-redacting both the identifier and ticket bytes from normal reports.
+the second word is the character id. The 56-byte suffix also has an exact
+capture-bounded frame in every stream: a zero prefix, declared length `48`,
+48 redacted bytes, and three reserved zeros. The fold validates that equality
+and framing while redacting both the identifier and ticket bytes from normal
+reports. All three observations now have full structural coverage; current
+strict totals are `70,076/1,024/0/0`, `34,573/634/0/0`, and `68/8/0/0` for
+streams `126`, `92`, and `114` respectively. The latest saved world transcript
+independently folds its request at full coverage and reaches `766/16/0/0`.
 
 ## Initial field snapshot (`server opcode 157`, large variant)
 
@@ -2176,8 +2185,9 @@ introduced in the same field epoch and opcode `190` removed later. Its mask is
 re-emits the packet exactly; safe folds expose only the player alias and mask
 structure while redacting the raw object id. The observation is full.
 
-The current strict totals are `70,075/1,025/0/0` for stream `126`,
-`34,572/635/0/0` for stream `92`, and `67/9/0/0` for stream `114`.
+After the later opcode-`8` world-entry refinement, the current strict totals
+are `70,076/1,024/0/0` for stream `126`, `34,573/634/0/0` for stream `92`,
+and `68/8/0/0` for stream `114`.
 The active saved transcript contains no opcode-`230` or opcode-`232` record.
 
 At its original introduction, the family moved seven long-stream and five

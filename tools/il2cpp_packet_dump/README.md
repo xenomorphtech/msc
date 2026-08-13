@@ -280,6 +280,11 @@ Opcodes `60`, `94`, and `379` contribute 14 exact reference frames: ten in
 stream `126` and four across `111.pcapng` streams `92`/`114`.
 Targeted native validation also consumes all 23 opcode-`148` frames: 22 through
 the semantic shape and the one legacy body through its exact opaque pin.
+Client opcode `8` now replaces its 66-byte observed-opaque pin with the exact
+world-entry boundary: two `u32` values, zero `u8`, declared ticket length `48`,
+48 redacted bytes, and three reserved zeros. Both private `111` requests and
+the independent `1-10FS` request consume and round-trip exactly; the ticket
+contents remain excluded from safe analysis.
 The client opcode-`43` shape is a field-transfer request, not a stream-`92`
 switch keyed by its leading byte. Two unambiguous candidates describe the
 cross-corpus boundary: a portal form with active `u8` field epoch, signed map
