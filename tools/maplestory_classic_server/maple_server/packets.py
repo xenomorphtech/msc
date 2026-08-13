@@ -858,7 +858,10 @@ class Opcode13Ack:
 
 @dataclass(frozen=True)
 class Opcode13Type1Envelope:
-    opaque_payload: bytes
+    """Outbound-IV security value emitted by the pinned native client."""
+
+    security_value: int = field(repr=False)
+    reserved_zero: int = 0
     message_type: int = 1
     opcode: int = 13
 
@@ -872,9 +875,23 @@ class Opcode13Type1Envelope:
                 f"opcode_13_type_1_envelope.message_type is {message_type}, "
                 "expected 1"
             )
-        opaque_payload = reader.bytes(8, "opaque_payload")
+        security_value = reader.u32("security_value")
+        reserved_zero = reader.u32("reserved_zero")
         reader.finish()
-        return cls(opaque_payload=opaque_payload)
+        if reserved_zero != 0:
+            raise PacketShapeError(
+                "opcode-13 type-1 reserved u32 must be zero"
+            )
+        return cls(
+            security_value=security_value,
+            reserved_zero=reserved_zero,
+        )
+
+    def safe_dict(self) -> dict[str, bool]:
+        return {
+            "security_value_present": True,
+            "reserved_zero": self.reserved_zero == 0,
+        }
 
     def to_bytes(self) -> bytes:
         if self.message_type != 1:
@@ -882,14 +899,22 @@ class Opcode13Type1Envelope:
                 f"opcode-13 fixed envelope type is {self.message_type}, "
                 "expected 1"
             )
-        if len(self.opaque_payload) != 8:
+        if self.reserved_zero != 0:
             raise PacketShapeError(
-                "opcode-13 type-1 envelope needs 8 opaque bytes, got "
-                f"{len(self.opaque_payload)}"
+                "opcode-13 type-1 reserved u32 must be zero"
             )
-        return struct.pack(
-            "<HB", self.opcode, self.message_type
-        ) + self.opaque_payload
+        try:
+            return struct.pack(
+                "<HBII",
+                self.opcode,
+                self.message_type,
+                self.security_value,
+                self.reserved_zero,
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"opcode-13 type-1 field is out of range: {error}"
+            ) from error
 
 
 @dataclass(frozen=True)

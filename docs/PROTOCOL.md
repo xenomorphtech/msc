@@ -236,7 +236,8 @@ uint8  result
 fixed client type-1 envelope (11 bytes)
 uint16 opcode = 13
 uint8  message_type = 1
-byte[8] opaque body
+uint32 security_value = crc32_non_reflected_le16(outbound_iv)
+uint32 reserved = 0
 
 opaque envelope (7 + payload_length bytes)
 uint16 opcode = 13
@@ -577,6 +578,52 @@ The server response is necessary in this position, while a late duplicate is
 not a substitute. The type-`7` envelope still is not independently sufficient;
 it participates after the ordered NGSX completion rather than causing that
 completion itself.
+
+This ordered NGSX exchange is the only security/anti-cheat packet sequence so
+far demonstrated by a clean-client A/B run to gate entry into the game. If the
+opcode-`23` response is absent or sent before the real client opcode `6`, the
+completion is missing or the subtype-`15` status is empty; the client then
+sends no opcode `7` and opens no world connection. That establishes an
+admission boundary for the observed Taiwan build, but it is not proof that the
+production service has no additional server-side policy checks.
+
+### Client opcode 13, subtype 1 (outbound-IV companion)
+
+Subtype `1` is not the server challenge or completion packet in the admission
+sequence above. The native pre-send producer emits it immediately before an
+ordinary outbound client frame whenever the low 16 bits of the current
+outbound Maple cipher IV are divisible by `31`:
+
+```text
+uint16 opcode = 13
+uint8  subtype = 1
+uint32 value = crc32_non_reflected_le16(outbound_iv)
+uint32 reserved = 0
+```
+
+`value` is CRC-32 with polynomial `0x04C11DB7`, initial value `0`, no input or
+output reflection, and final XOR `0`, evaluated over the two little-endian
+bytes of `uint16(outbound_iv)`. It is therefore deterministic cipher-state
+traffic rather than a reply derived from any inbound server packet.
+
+The result is pinned to `GameAssembly.dll` SHA-256
+`6f2a93efc0f16f30685c902134ecc79ad67fe384f345f503fa688658acbddeea`.
+The original producer is VA `0x181CD62A0` / RVA `0x1CD62A0`; the emulated CRC
+helper is VA `0x181C96BF0` / RVA `0x1C96BF0`; and its table-installing static
+constructor is VA `0x181C98C50` / RVA `0x1C98C50`.
+
+Capture verification reproduced all observed subtype-`1` frames with zero
+mismatches: `446/446` in `111.pcapng` stream `92` and `970/970` in
+`1-10FS.pcapng` stream `126` (`1,416/1,416` total). Nothing in those captures
+or the producer data flow indicates that subtype `1` independently grants or
+denies world entry.
+
+The tracked `Opcode13Type1Envelope` now parses and exactly re-emits both
+`uint32` fields. Safe reports expose only that the security value was present
+and that the reserved word was zero; they never expose the value itself.
+Accordingly, all 1,416 subtype-`1` observations now have full structural
+coverage. The length-prefixed subtype-`6` and subtype-`13` bodies remain
+partial and opaque.
 
 The successful 63-byte account packet is fully bounded as follows. Its three
 strings use a `uint16` UTF-16 code-unit count without the extra world-string

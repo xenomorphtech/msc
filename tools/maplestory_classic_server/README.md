@@ -916,8 +916,10 @@ The gameplay fold currently models these capture-backed boundaries:
   LUK, current/max HP and MP, AP, SP, EXP, and 64-bit mesos, preceded by a
   neutral boolean request flag and followed by a neutral boolean plus its
   conditional u8 value,
-- client opcode `13`: neutral fixed type-`1` and length-prefixed type-`6`/`13`
-  envelopes whose bodies remain opaque and are omitted from safe reports,
+- client opcode `13`: fixed type-`1` binds the outbound-IV-derived security
+  value plus its reserved-zero word, exactly round-trips all 1,416 corpus
+  observations, and redacts the value from safe reports; length-prefixed
+  type-`6`/`13` bodies remain opaque and partial,
 - server opcode `13`: the same handler-confirmed discriminator followed by a
   capture-bounded `uint32` body length for types `7`, `12`, and `14`; safe
   state/events expose only type and body-length distributions,

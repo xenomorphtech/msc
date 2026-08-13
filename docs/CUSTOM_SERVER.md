@@ -243,10 +243,13 @@ structural coverage; disputed higher-level roles remain neutral, and a future
 use of opaque tags `18..22` remains partial.
 
 Client opcode `13` is shared with the login protocol but persists in gameplay.
-The analyzer now accepts the exact 11-byte type-`1` shape and the existing
-length-prefixed type-`6`/`13` variants, exposing only type and opaque-byte
-counts. Stream `126` contains 970 type-`1` packets; stream `92` contains 555
-packets across all three observed variants, all with exact round trips.
+The analyzer now types the exact 11-byte type-`1` shape as an IV-derived
+security value plus a reserved-zero word, while retaining the existing
+length-prefixed type-`6`/`13` variants. Safe state exposes only value presence,
+the zero-field check, and aggregate type/body-size counts. Stream `126`
+contains 970 type-`1` packets; stream `92` contains 446 type-`1`, 104 type-`6`,
+and five type-`13` packets. All round-trip exactly; all 1,416 type-`1` records
+now have full structural coverage, while type `6` and `13` remain partial.
 Server opcode `49` is explicitly split by its byte discriminator: variant `0`
 is the existing pickup-gain notice, while variants `1/3/4/6/10/12` use a
 separate neutral envelope and cannot enter pickup correlation. Across streams
@@ -919,6 +922,13 @@ the transformed frame `20` was returned, and the client opened the local world
 replay on port `12857`. Security completion is therefore required, and opcode
 `23` must follow the actual opcode `6`; replaying it by captured event count can
 send it too early when a fresh client emits extra frames.
+
+The result was reproduced again on 2026-08-13 with the login listener and the
+stream-`114` world listener running together. A fresh browser-free client
+traversed world, channel, character selection, emitted opcode `7` after Start,
+accepted the transformed handoff, and opened one world connection. The world
+HTTP status reported packet injection ready and five consecutive heartbeat
+round trips with none pending. This is the current end-to-end login proof.
 
 For subsequent runs, start the listener composition, then launch the client
 without the browser:

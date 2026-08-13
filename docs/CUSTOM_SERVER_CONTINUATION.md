@@ -4,7 +4,7 @@ Last updated: 2026-08-13 UTC
 
 Branch: `agent/maple-login-gamestate`
 
-Pushed HEAD when this note was written: `e3d6993` (`Promote bounded initial field snapshots`)
+Baseline HEAD for this continuation: `02f194c` (`Document custom server continuation plan`)
 
 ## Objective and working rules
 
@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The most recent pushed sequence is:
 
 ```text
+02f194c Document custom server continuation plan
 e3d6993 Promote bounded initial field snapshots
 2567355 Type remote player appearance-adjacent fields
 8716833 Bound world entry tickets
@@ -52,6 +53,26 @@ partial. Reference coverage after that checkpoint was:
 
 All tracked Python tests and all Rust gates passed before `e3d6993` was pushed.
 The tracked Python suite then contained 330 tests.
+
+The next capture-backed checkpoint types client opcode `13`, subtype `1` as a
+`uint32` IV-derived security value followed by a reserved-zero `uint32`.
+Native producer evidence and an independent cipher-IV replay reproduce all
+`446/446` stream-`92` and `970/970` stream-`126` records with zero mismatches.
+The tracked parser exactly re-emits all 1,416 records, redacts the value from
+safe output, and promotes only this subtype to full structural coverage. The
+remaining subtype-`6` and subtype-`13` bodies stay opaque and partial. Resulting
+reference coverage is:
+
+```text
+111.pcapng stream 92:       35020 full /  187 partial / 0 unknown / 0 invalid
+111.pcapng stream 114:         69 full /    7 partial / 0 unknown / 0 invalid
+1-10FS.pcapng stream 126:   71047 full /   53 partial / 0 unknown / 0 invalid
+```
+
+The checkpoint gate reran all 330 tracked Python tests, 17 Rust unit tests, the
+pinned-client ignored test, and the private capture-JSONL ignored test. All
+passed. The three gameplay analyses are valid with zero issues; stream `126`
+retains its one previously known warning.
 
 ## Dirty-worktree boundary
 
@@ -82,10 +103,12 @@ and must not be swept into a protocol checkpoint without reviewing ownership:
 ```
 
 The modified documentation contains unrelated GameTables, quest, navigation,
-NGSX/opcode-`13`, and test-count work. If opcode-`189` documentation must share
-one of those files, stage only the intended hunk (for example with a generated
-patch plus `git apply --cached`) and inspect `git diff --cached` before the
-commit. Do not use `git add docs/PROTOCOL.md docs/STATUS.md` wholesale.
+NGSX, and test-count work. The opcode-`13` native-evidence hunk is intentionally
+relevant to the typed subtype-`1` checkpoint, but the untracked helper, Unicorn
+harness, and tests remain outside this commit. Stage only the intended hunks
+(for example with a generated patch plus `git apply --cached`) and inspect
+`git diff --cached` before the commit. Do not use `git add docs/PROTOCOL.md
+docs/STATUS.md` wholesale.
 
 ## Strongest remaining bounded family: server opcode 189
 
@@ -184,25 +207,14 @@ The top-level status key for injection is `server_packet_injection` (not under
 .server_packet_injection.ready == true
 ```
 
-A fresh browser-free run successfully traversed world/channel/character and
-entered map `101000000`. At the proof sample the server had one active
-connection, heartbeat `last_round_trip_ms=2.431`, and no pending probe. The
-client later exited before the intended non-stop attach. Final server status
-showed five accepted/five completed connections, zero failures, no active
-connection, and 4,808 probes matched by 4,808 responses with none pending.
-The Wine log ended with:
+A fresh 2026-08-13 browser-free run again traversed world/channel/character and
+entered through the transformed handoff. The client emitted character opcode
+`7` after Start and opened one local world connection. Before instrumentation,
+the world HTTP status reported injection ready, five of five heartbeat probes
+matched, `last_round_trip_ms=3.367`, and none pending. This is the current
+end-to-end login proof.
 
-```text
-wine: Call from ... to unimplemented function
-httpapi.dll.HttpCancelHttpRequest, aborting
-```
-
-Do not retain the earlier transient theory that the new connection simply hit
-the replay hold-open timeout; the timing did not prove that. The authoritative
-facts are only that the process disappeared before attach, the server recorded
-a normal completed socket, and Wine logged the unimplemented HTTP API abort.
-
-### All-stop GDB failure and why it matters
+### GDB failures and why they matter
 
 One attempted trace attached GDB first and tried to enable non-stop mode
 afterward. GDB correctly refused to change the setting while the inferior was
@@ -212,31 +224,15 @@ game screen then ignored navigation input. No opcode-`189` trace was captured.
 GDB was detached cleanly, but this experiment is negative operational evidence:
 do not attach this Wine client in all-stop mode.
 
-Enable non-stop before `attach`, ignore Wine's `SIGUSR1/SIGUSR2`, then use
-`continue -a`. Use a command sequence whose ordering is explicit rather than
-`gdb -p PID` followed by `set non-stop on`:
-
-```sh
-sudo -n ip netns exec mapleproxy env \
-  MAPLE_TRACE_OPCODE=189 \
-  MAPLE_TRACE_DUMP_BYTES=0 \
-  gdb -q -nx \
-    -ex 'set pagination off' \
-    -ex 'set non-stop on' \
-    -ex 'handle SIGUSR1 nostop noprint pass' \
-    -ex 'handle SIGUSR2 nostop noprint pass'
-
-# At the GDB prompt, after resolving the fresh live PID:
-attach PID
-source /home/sdancer/ms/tools/maplestory_classic_server/tools/gdb_trace_packet_reads.py
-set logging file /tmp/op189-reader-trace.log
-set logging overwrite on
-set logging enabled on
-continue -a
-```
-
-After the packet is captured, interrupt GDB, disable logging, `detach`, and
-`quit`. Check for a `Fatal error in GC` window before trusting the result.
+The corrected experiment enabled non-stop before `attach`, ignored
+`SIGUSR1/SIGUSR2`, and used `continue -a`. Attach still left worker threads
+stopped until a second `continue -a`; heartbeat traffic then resumed. The HTTP
+endpoint accepted and wrote the 333-byte stream-`114` opcode-`189` record, but
+the tracer logged no primitive reads, heartbeats stopped, and Wine opened the
+same `Fatal error in GC` / `SuspendThread loop failed` window. GDB detached
+cleanly. This proves only the serialized server write, not client parsing or
+acceptance. Do not retry opcode-`189` with GDB on this build; the next attempt
+must use lower-intrusion instrumentation or additional offline/native evidence.
 
 ## Exact browser-free relaunch and navigation
 
@@ -294,22 +290,14 @@ SWAYSOCK=$maple_sway_socket swaymsg 'seat seat0 cursor release button1'
 The focus selector may need to be resolved from `swaymsg -t get_tree` if the
 installed Sway does not accept a PID criterion directly.
 
-## Controlled opcode-189 trace recipe
+## Controlled opcode-189 experiment result
 
-1. Confirm login/world/API listeners without restarting the long-running
-   servers.
-2. Cold-launch only the Wine client and enter the field with nested-Sway input.
-3. Confirm one active world connection, injection ready, and increasing matched
-   heartbeats.
-4. Resolve the fresh `Maplestory_Classic.exe` PID.
-5. Start GDB in non-stop mode before attaching, source
-   `tools/gdb_trace_packet_reads.py`, enable logging, and `continue -a`.
-6. Extract the first stream-`114` opcode-`189` plaintext directly from the PCAP
-   and inject it through the loopback API.
-7. Wait only long enough to see the full reader sequence, then detach GDB.
-8. Verify the client still answers heartbeats. Preserve the trace-derived field
-   table in repository documentation; do not commit raw packet bytes or private
-   runtime artifacts unnecessarily.
+The planned GDB trace was executed with the required live preconditions and
+failed safely enough to detach, but not safely enough to produce a read ledger.
+Do not repeat it. The extraction and injection commands below remain useful for
+a future lower-intrusion probe, but an `accepted=true` HTTP response establishes
+only that the server serialized the write. Require continuing heartbeats and
+independent instrumentation before claiming that the client parsed a packet.
 
 Extraction can be performed without hard-coding the 333-byte payload:
 
@@ -347,7 +335,7 @@ Expected API response properties are `accepted=true`, `opcode=189`, and
 connection. The endpoint is intentionally loopback-only and injection is
 explicitly opt-in.
 
-### How to interpret the read trace
+### How to interpret a future lower-intrusion read trace
 
 `gdb_trace_packet_reads.py` logs the primitive name, reader RVA, caller RVA,
 packet cursor, managed buffer length, cached opcode, and opcode decoded from

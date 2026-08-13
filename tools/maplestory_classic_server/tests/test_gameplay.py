@@ -1526,7 +1526,7 @@ def fixture_gameplay_transcript(
     if opcode_13_messages:
         append(
             "client_to_server",
-            Opcode13Type1Envelope(opaque_payload=b"fixed123").to_bytes(),
+            Opcode13Type1Envelope(security_value=0xE3B72C49).to_bytes(),
         )
         append(
             "client_to_server",
@@ -4976,7 +4976,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 (219, 0x41, 15),
             )
         ]
-        fixed_envelope = Opcode13Type1Envelope(opaque_payload=b"fixed123")
+        fixed_envelope = Opcode13Type1Envelope(security_value=0xE3B72C49)
         variable_envelope = Opcode13Envelope(
             message_type=6,
             opaque_payload=b"variable",
@@ -5156,16 +5156,30 @@ class GameplayPacketShapeTest(unittest.TestCase):
             fixed_envelope,
         )
         self.assertEqual(
+            fixed_envelope.to_bytes(),
+            bytes.fromhex("0d0001492cb7e300000000"),
+        )
+        self.assertEqual(
+            fixed_envelope.safe_dict(),
+            {"security_value_present": True, "reserved_zero": True},
+        )
+        self.assertNotIn("security_value", fixed_envelope.safe_dict())
+        self.assertEqual(
             Opcode13Envelope.parse(variable_envelope.to_bytes()),
             variable_envelope,
         )
-        with self.assertRaisesRegex(PacketShapeError, "needs 8 opaque bytes"):
-            Opcode13Type1Envelope(opaque_payload=b"short").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "needs 4 bytes"):
+            Opcode13Type1Envelope.parse(fixed_envelope.to_bytes()[:-1])
+        with self.assertRaisesRegex(PacketShapeError, "reserved u32"):
+            replace(fixed_envelope, reserved_zero=1).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "reserved u32"):
+            Opcode13Type1Envelope.parse(
+                bytes.fromhex("0d0001492cb7e301000000")
+            )
+        with self.assertRaisesRegex(PacketShapeError, "out of range"):
+            replace(fixed_envelope, security_value=-1).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "expected 1"):
-            Opcode13Type1Envelope(
-                opaque_payload=b"fixed123",
-                message_type=2,
-            ).to_bytes()
+            replace(fixed_envelope, message_type=2).to_bytes()
 
 
 class GameplayStateFoldTest(unittest.TestCase):
@@ -11064,15 +11078,20 @@ class GameplayStateFoldTest(unittest.TestCase):
             analysis.state.client_opcode_13_messages_by_type,
             {1: 1, 6: 1, 13: 1},
         )
-        self.assertEqual(analysis.state.client_opcode_13_opaque_bytes, 37)
+        self.assertEqual(analysis.state.client_opcode_13_security_messages, 1)
+        self.assertEqual(analysis.state.client_opcode_13_opaque_bytes, 29)
         self.assertEqual(
             analysis.state.client_opcode_13_opaque_lengths,
-            {8: 1, 12: 1, 17: 1},
+            {12: 1, 17: 1},
         )
         self.assertIn(
-            'client_opcode_13=messages:3 message_types:{"1": 1, "6": 1, '
-            '"13": 1} opaque_lengths:{"8": 1, "12": 1, "17": 1} '
-            'opaque_bytes:37',
+            'client_opcode_13=messages:3 security:1 '
+            'message_types:{"1": 1, "6": 1, "13": 1} '
+            'opaque_lengths:{"12": 1, "17": 1} opaque_bytes:29',
+            report,
+        )
+        self.assertIn(
+            "opcode=13 kind=client_opcode_13_message coverage=full",
             report,
         )
         self.assertIn(

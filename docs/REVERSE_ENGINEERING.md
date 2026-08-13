@@ -304,6 +304,16 @@ and extended-property collections plus a fixed trailer. The complete initial
 packet is now structurally bounded; semantic identification of neutral fields
 is the next boundary.
 
+A 2026-08-13 opcode-`189` attempt showed that pre-enabling non-stop mode is not
+sufficiently safe for this Wine build. Attach initially left worker threads
+stopped; a second `continue -a` restored heartbeat traffic, but injecting the
+333-byte stream-`114` record produced no primitive-reader log and opened
+Wine's `Fatal error in GC` / `SuspendThread loop failed` window. GDB detached
+cleanly, and the injection endpoint had accepted and written the frame, but
+there is no client-parse or acceptance evidence. Do not repeat the opcode-`189`
+GDB trace on this build; use lower-intrusion instrumentation or additional
+offline/native analysis instead.
+
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then
 89 repetitions of `u8` and `i32`, ending exactly at framed cursor `452` for the

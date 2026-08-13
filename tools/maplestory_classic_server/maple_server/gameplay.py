@@ -985,6 +985,7 @@ class GameplayGameState:
     client_opcode_13_messages_by_type: Counter[int] = field(
         default_factory=Counter
     )
+    client_opcode_13_security_messages: int = 0
     client_opcode_13_opaque_bytes: int = 0
     client_opcode_13_opaque_lengths: Counter[int] = field(
         default_factory=Counter
@@ -5385,6 +5386,9 @@ class GameplayAnalysis:
                 "client_opcode_13_messages_by_type": dict(
                     self.state.client_opcode_13_messages_by_type
                 ),
+                "client_opcode_13_security_messages": (
+                    self.state.client_opcode_13_security_messages
+                ),
                 "client_opcode_13_opaque_bytes": (
                     self.state.client_opcode_13_opaque_bytes
                 ),
@@ -7970,16 +7974,28 @@ class GameplayStateFold:
                     kind=f"client_opcode_{opcode}",
                     coverage=ShapeCoverage.UNKNOWN,
                 )
-            opaque_bytes = len(message.opaque_payload)
             self.state.client_opcode_13_messages += 1
             self.state.client_opcode_13_messages_by_type[message_type] += 1
-            self.state.client_opcode_13_opaque_bytes += opaque_bytes
-            self.state.client_opcode_13_opaque_lengths[opaque_bytes] += 1
-            details = {
-                "message_type": message_type,
-                "opaque_payload_bytes": opaque_bytes,
-                "field_epoch": self.state.field_epoch,
-            }
+            if isinstance(message, Opcode13Type1Envelope):
+                self.state.client_opcode_13_security_messages += 1
+                details = {
+                    "message_type": message_type,
+                    **message.safe_dict(),
+                    "field_epoch": self.state.field_epoch,
+                }
+                coverage = ShapeCoverage.FULL
+                issues: tuple[str, ...] = ()
+            else:
+                opaque_bytes = len(message.opaque_payload)
+                self.state.client_opcode_13_opaque_bytes += opaque_bytes
+                self.state.client_opcode_13_opaque_lengths[opaque_bytes] += 1
+                details = {
+                    "message_type": message_type,
+                    "opaque_payload_bytes": opaque_bytes,
+                    "field_epoch": self.state.field_epoch,
+                }
+                coverage = ShapeCoverage.PARTIAL
+                issues = ("client opcode-13 payload remains opaque",)
             self._event(
                 frame,
                 "client_opcode_13_message_submitted",
@@ -7988,10 +8004,10 @@ class GameplayStateFold:
             return self._observation(
                 frame,
                 kind="client_opcode_13_message",
-                coverage=ShapeCoverage.PARTIAL,
+                coverage=coverage,
                 parsed=message,
                 details=details,
-                issues=("client opcode-13 payload remains opaque",),
+                issues=issues,
             )
         if opcode == 43:
             request = ClientFieldTransferRequest.parse(payload)
@@ -15628,6 +15644,7 @@ def render_gameplay_analysis(
         ),
         (
             f"client_opcode_13=messages:{state.client_opcode_13_messages} "
+            f"security:{state.client_opcode_13_security_messages} "
             f"message_types:{client_opcode_13_message_types} "
             f"opaque_lengths:{client_opcode_13_opaque_lengths} "
             f"opaque_bytes:{state.client_opcode_13_opaque_bytes}"

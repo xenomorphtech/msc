@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The tracked custom-server suite currently passes all 320 tests.
+- The tracked custom-server suite currently passes all 330 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -722,8 +722,10 @@
 - Client opcode `13` is now decoded on world connections using the same neutral
   family as login. Stream `126` has 970 exact 11-byte type-`1` envelopes;
   stream `92` has 446 type-`1`, 104 length-prefixed type-`6`, and five
-  length-prefixed type-`13` envelopes. Every packet round-trips, while the fold
-  exposes only message-type/body-size counts and keeps all bodies opaque.
+  length-prefixed type-`13` envelopes. Every packet round-trips. The type-`1`
+  parser now binds the IV-derived CRC value and reserved-zero word, gives all
+  1,416 observations full structural coverage, and redacts the value from safe
+  output. Only subtype-`6` and subtype-`13` bodies remain opaque and partial.
 - Server opcode `77` now has a redacted structural envelope across all 515
   sustained-corpus samples. Variants `3`, `4`, and `5` fully bound their
   counted UTF-16 fields, optional terminator, fixed controls, and neutral
