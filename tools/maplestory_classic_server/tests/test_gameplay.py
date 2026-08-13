@@ -180,6 +180,7 @@ from maple_server.packets import (  # noqa: E402
     ServerOpcode142TextLedgerEntry,
     ServerOpcode147BoundsLedger,
     ServerOpcode148Envelope,
+    ServerOpcode148Record,
     PetActivation,
     ServerOpcode205Record,
     ServerOpcode239Envelope,
@@ -4182,6 +4183,19 @@ class GameplayPacketShapeTest(unittest.TestCase):
     ) -> None:
         records = (
             ServerOpcode148Envelope(variant=9, record_count=0),
+            ServerOpcode148Envelope(
+                variant=9,
+                record_count=1,
+                records=(
+                    ServerOpcode148Record(
+                        primary_value=1,
+                        secondary_value=2,
+                        start_time=3,
+                        end_time=4,
+                        text="secret",
+                    ),
+                ),
+            ),
             ServerOpcode148Envelope(variant=10),
             ServerOpcode148Envelope(
                 variant=12, primary_value=4, secondary_value=5
@@ -4197,6 +4211,7 @@ class GameplayPacketShapeTest(unittest.TestCase):
         )
         expected_prefixes = (
             "94000900000000",
+            "940009010000000100000002000000",
             "94000a",
             "94000c0400000005000000",
             "94000d0300000018000000",
@@ -4214,16 +4229,26 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 self.assertNotIn("secondary_value", str(record.safe_dict()))
 
         self.assertTrue(records[0].fully_bounded)
+        self.assertTrue(records[1].fully_bounded)
+        self.assertEqual(records[1].safe_dict()["typed_record_count"], 1)
+        self.assertEqual(
+            records[1].safe_dict()["record_text_code_units"], [6]
+        )
+        self.assertNotIn("secret", str(records[1].safe_dict()))
         self.assertFalse(records[-1].fully_bounded)
         self.assertEqual(records[-1].safe_dict()["opaque_tail_length"], 1_632)
         with self.assertRaisesRegex(PacketShapeError, "captured value"):
             ServerOpcode148Envelope.parse(bytes.fromhex("94000b"))
         with self.assertRaisesRegex(PacketShapeError, "zero-record"):
             replace(records[0], records_blob=b"\x00").to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "does not match envelope"):
+            replace(records[1], record_count=2).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "cannot mix"):
+            replace(records[1], records_blob=b"\x00").to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "requires a body"):
             replace(records[-1], records_blob=b"").to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "requires two"):
-            replace(records[2], secondary_value=None).to_bytes()
+            replace(records[3], secondary_value=None).to_bytes()
 
     def test_variable_server_records_round_trip(self) -> None:
         records = fixture_variable_server_records()
@@ -8698,6 +8723,19 @@ class GameplayStateFoldTest(unittest.TestCase):
                 ),
             ),
             ServerOpcode148Envelope(variant=9, record_count=0),
+            ServerOpcode148Envelope(
+                variant=9,
+                record_count=1,
+                records=(
+                    ServerOpcode148Record(
+                        primary_value=11,
+                        secondary_value=12,
+                        start_time=13,
+                        end_time=14,
+                        text="secret",
+                    ),
+                ),
+            ),
             ServerOpcode148Envelope(variant=10),
             ServerOpcode148Envelope(
                 variant=12, primary_value=4, secondary_value=5
@@ -8723,7 +8761,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         analysis = analyze_gameplay_transcript(transcript)
 
         self.assertTrue(analysis.valid, analysis.issues)
-        self.assertEqual(analysis.state.neutral_server_records, 17)
+        self.assertEqual(analysis.state.neutral_server_records, 18)
         self.assertEqual(
             analysis.state.neutral_server_records_by_opcode,
             {
@@ -8731,7 +8769,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 93: 1,
                 94: 1,
                 137: 1,
-                148: 5,
+                148: 6,
                 205: 1,
                 228: 1,
                 231: 1,
@@ -8741,7 +8779,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                 379: 2,
             },
         )
-        self.assertEqual(analysis.state.neutral_server_typed_values, 54)
+        self.assertEqual(analysis.state.neutral_server_typed_values, 61)
         self.assertEqual(analysis.state.neutral_server_opaque_bytes, 1_632)
         self.assertEqual(analysis.state.pet_activations, 1)
         self.assertEqual(analysis.state.pet_activations_for_local_player, 0)
@@ -8756,8 +8794,18 @@ class GameplayStateFoldTest(unittest.TestCase):
         ]
         self.assertEqual(
             [observation.coverage.value for observation in observations],
-            ["full"] * 13 + ["partial"] + ["full"] * 4,
+            ["full"] * 14 + ["partial"] + ["full"] * 4,
         )
+        current_opcode_148 = next(
+            observation
+            for observation in observations
+            if observation.details.get("typed_record_count") == 1
+        )
+        self.assertTrue(current_opcode_148.details["current_il2cpp_layout"])
+        self.assertEqual(
+            current_opcode_148.details["record_text_code_units"], [6]
+        )
+        self.assertNotIn("secret", str(current_opcode_148.details))
         self.assertEqual(
             len(
                 [
@@ -8766,7 +8814,7 @@ class GameplayStateFoldTest(unittest.TestCase):
                     if event.kind == "neutral_server_record_received"
                 ]
             ),
-            17,
+            18,
         )
         pet_event = next(
             event for event in analysis.events if event.kind == "pet_activated"
@@ -8778,7 +8826,7 @@ class GameplayStateFoldTest(unittest.TestCase):
         self.assertNotIn("1386640", str(pet_event.safe_dict()))
         self.assertNotIn("302104", str(analysis.safe_dict()))
         self.assertIn(
-            "neutral_server_records=packets:17 opcodes:",
+            "neutral_server_records=packets:18 opcodes:",
             render_gameplay_analysis(analysis),
         )
         self.assertIn(

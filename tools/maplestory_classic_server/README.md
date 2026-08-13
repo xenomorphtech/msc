@@ -1037,8 +1037,10 @@ The gameplay fold currently models these capture-backed boundaries:
   unknown regions remain explicit, and the opcode-`94`/`137`/`148`/`276`/`379`
   layouts come directly from the generated IL2CPP read dump; opcode `137`
   retains a redacted 72-byte tail, opcode `276` preserves captured boolean byte
-  `0x05` while folding it as true, and opcode `148` retains one legacy nonempty
-  record body as opaque,
+  `0x05` while folding it as true, and opcode `148` parses current-mask `0x9`
+  records as two signed integers, two DateTime/`i64` values, and one
+  trailing-zero UTF-16 value while retaining the incompatible captured legacy
+  nonempty body as opaque,
 - server opcode `27`: a counted integer/control/text ledger with required
   trailing-zero UTF-16 strings; safe state reports only entry and text-length
   distributions,

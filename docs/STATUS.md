@@ -83,8 +83,12 @@
   The automatic IL2CPP dump proves opcode `94` reads `bool + i32 + i32` and
   opcode `379` reads a discriminator plus four datetimes on variant `36`; its
   delegated opcode-`148` handler supplies variants `9`/`10`/`12`/`13`. One
-  legacy nonempty variant-`9` body remains explicitly opaque because it does
-  not consume under the current build's mask `0x9`.
+  current-layout variant-`9` record under mask `0x9` is exactly two signed
+  integers, two DateTime/`i64` values, and one trailing-zero counted UTF-16
+  value; the parser and native manifest now model its repeated form with safe
+  value/text redaction. The capture's one legacy nonempty body remains
+  explicitly opaque because its first record violates the required string
+  terminator.
   A typed opcode-`94` live replay produced exactly one predicted neutral event,
   changed no modeled world/player/inventory/progression state, and left the
   browser-free client active with 244/244 heartbeat probes matched.

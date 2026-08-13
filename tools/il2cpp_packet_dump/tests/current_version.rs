@@ -338,6 +338,48 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_148.opcode, 148);
     assert_eq!(opcode_148.length, None);
     assert_eq!(opcode_148.operations.len(), 3);
+    let opcode_148_records = opcode_148
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            ShapeOp::Switch { cases, .. } => {
+                cases.iter().find(|case| case.equals == 9).and_then(|case| {
+                    case.operations
+                        .iter()
+                        .find_map(|operation| match operation {
+                            ShapeOp::Repeat { operations, .. } => Some(operations),
+                            _ => None,
+                        })
+                })
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        opcode_148_records.as_slice(),
+        [
+            ShapeOp::Read {
+                kind: ReadKind::I32,
+                ..
+            },
+            ShapeOp::Read {
+                kind: ReadKind::I32,
+                ..
+            },
+            ShapeOp::Read {
+                kind: ReadKind::I64,
+                ..
+            },
+            ShapeOp::Read {
+                kind: ReadKind::I64,
+                ..
+            },
+            ShapeOp::Utf16 {
+                trailing_zero: true,
+                ..
+            }
+        ]
+    ));
 
     let legacy_opcode_148 = shapes
         .iter()

@@ -1579,7 +1579,15 @@ opcode 137:
 opcode 148:
     uint16 opcode
     uint8 variant
-    variant 9: int32 record_count; byte[] records_blob when nonzero
+    variant 9:
+        int32 record_count
+        repeat record_count under current IL2CPP mask 0x9:
+            int32 primary_value       # redacted
+            int32 secondary_value     # redacted
+            int64 start_time          # DateTime bits, redacted
+            int64 end_time            # DateTime bits, redacted
+            utf16 text + uint8 zero   # redacted
+        byte[] legacy_records_blob    # lossless fallback on grammar mismatch
     variant 10: no body
     variant 12 or 13: int32 primary_value; int32 secondary_value
 
@@ -1629,8 +1637,10 @@ and its three
 four-datetime packets use variant `36`. Opcode `148` contributes one empty
 variant-`9`, nine empty variant-`10`, nine variant-`12`, three variant-`13`, and
 one nonempty variant-`9` packet. The current delegated IL2CPP record mask is
-`0x9`; the legacy nonempty body does not consume under that current parser and
-therefore retains 1,632 record bytes as one explicit partial observation.
+`0x9`, which reads two `i32` values, two DateTime/`i64` values, and one
+trailing-zero counted UTF-16 value per record. The legacy nonempty body fails
+that grammar at record zero's required string terminator and therefore retains
+1,632 record bytes as one explicit partial observation.
 Together the family provides 131 full and four partial observations with 1,848
 opaque bytes rather than inventing suffix or record semantics. All 50 opcode-
 `69` packets (36/13/1 in streams `126`/`92`/`114`) independently validate and

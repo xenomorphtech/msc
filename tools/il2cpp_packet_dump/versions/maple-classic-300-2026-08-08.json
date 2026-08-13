@@ -1863,12 +1863,21 @@
     },
     {
       "name":"server_opcode_148_envelope","direction":"server_to_client","opcode":148,
-      "source":"IL2CPP opcode-148 handler acda95d7... delegates to manager c5b43350...; variants 9/10/12/13 and exact bounded branches verified across 1-10FS stream 126 and 111 stream 92",
+      "source":"IL2CPP opcode-148 handler acda742a... method c430c9bc... delegates to manager c5b43350...; variant 9 uses current record mask 0x9 (two i32, two datetime/i64, one trailing-zero UTF-16 value), while variants 10/12/13 and exact bounded branches are verified across 1-10FS stream 126 and 111 stream 92",
       "operations":[
         {"op":"read","name":"opcode","kind":"u16","equals":148},
         {"op":"read","name":"variant","kind":"u8"},
         {"op":"switch","field":"variant","cases":[
-          {"equals":9,"operations":[{"op":"read","name":"record_count","kind":"i32","equals":0}]},
+          {"equals":9,"operations":[
+            {"op":"read","name":"record_count","kind":"i32"},
+            {"op":"repeat","count_from":"record_count","operations":[
+              {"op":"read","name":"record_primary_value","kind":"i32"},
+              {"op":"read","name":"record_secondary_value","kind":"i32"},
+              {"op":"read","name":"record_start_time","kind":"i64"},
+              {"op":"read","name":"record_end_time","kind":"i64"},
+              {"op":"utf16","name":"record_text","trailing_zero":true}
+            ]}
+          ]},
           {"equals":10,"operations":[]},
           {"equals":12,"operations":[{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]},
           {"equals":13,"operations":[{"op":"read","name":"primary_value","kind":"i32"},{"op":"read","name":"secondary_value","kind":"i32"}]}

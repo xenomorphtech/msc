@@ -77,6 +77,46 @@ pinned-client ignored test, and the private capture-JSONL ignored test. All
 passed. The three gameplay analyses are valid with zero issues; stream `126`
 retains its one previously known warning.
 
+Checkpoint `c583c23` correlates the remaining opcode-`13` world security
+exchange without exposing its bodies. Server opcode `12` is paired FIFO with
+server opcode `14`, and each server opcode `14` is paired FIFO with the next
+client opcode `13`; safe state reports body-length agreement, pending/unmatched
+counts, and timing only. Streams `92` and `114` contain six opcode-`14`/`13`
+pairs, all with matching 392-byte bodies but no byte-identical pair. Reference
+coverage remains `35020/187`, `69/7`, and `71047/53` full/partial for streams
+`92`, `114`, and `126`. The checkpoint passed 332 tracked Python tests, all 17
+Rust tests, and both ignored pinned/private gates, then was pushed and fetched
+back at the same commit.
+
+## Current bounded family: server opcode 148
+
+The last non-opcode-`13`/`189` partial packet is one server opcode-`148`
+variant-`9` frame in `1-10FS.pcapng` stream `126`. It declares 12 records and
+has a 1,632-byte body. Static native recovery now pins the full current-build
+path: opcode handler `acda742a...::c430c9bc...` resolves the `c5b43350...`
+manager, whose variant-`9` branch reads a signed record count and invokes the
+`f818561e...` deserializer with mask `0x9`. That mask reads, per record:
+
+- two signed `i32` values;
+- two DateTime values, each carried as eight raw bytes;
+- one counted UTF-16 string followed by a required zero byte.
+
+The current grammar does not consume the capture. At record zero, its first
+string has a plausible count but the required following byte is nonzero. A
+full mask sweep confirms no string-bearing mask from `0x0` through `0xf`
+consumes even the first record. Although `1,632 / 12 = 136`, all positions in
+the candidate 136-byte slices vary and there is no cross-record fixed-zero or
+UTF-16-like region, so that quotient is not sufficient evidence for a record
+boundary. Keep this body as the existing lossless legacy opaque fallback and
+exact 1,639-byte native-manifest pin.
+
+The tracked parser and native manifest now model current-layout nonempty
+variant `9` independently: repeated records parse and re-emit exactly, safe
+output exposes only record count, layout status, typed count, and text
+code-unit lengths, and any incompatible body falls back losslessly to opaque
+bytes. The existing captured packet must remain partial until another capture
+or native version identifies its legacy grammar.
+
 ## Dirty-worktree boundary
 
 At the time of this note, these pre-existing paths were modified or untracked

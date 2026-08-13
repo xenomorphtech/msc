@@ -398,16 +398,24 @@ and semantically neutral.
 
 The automatic `tools/il2cpp_packet_dump` output now also drives opcode `148`
 instead of leaving every occurrence as a hex prefix. Its top-level handler
-delegates to a manager parser and exposes variants `9`, `10`, `12`, and `13`.
-The current GameAssembly data value resolves the delegated record mask to
-`0x9`; the same value was confirmed in a short live process read. That evidence
-bounds count-zero variant `9`, empty variant `10`, and the two signed-`i32`
-variants `12`/`13`. One 1,639-byte legacy variant-`9` packet with 12 records
-does not consume under the current parser, so the generated manifest keeps its
-1,632-byte record region as an explicit capture-pinned opaque shape rather than
-claiming a false decode. All other 22 cross-corpus packets use the semantic
-switch shape. A live replay of variant `10` matched the predicted neutral fold,
-left core state unchanged, and kept the client and heartbeats active.
+is `acda742a...::c430c9bc...`; it resolves the `c5b43350...` singleton and
+tail-calls that manager's packet parser, which exposes variants `9`, `10`, `12`,
+and `13`. The current GameAssembly data value resolves the delegated record
+mask to `0x9`; the same value was confirmed in a short live process read. The
+record deserializer proves mask `0x9` means two signed `i32` values, two
+DateTime/`i64` values, and one counted UTF-16 value with a required trailing
+zero byte. The tracked parser and generated manifest now encode that complete
+repeat grammar and redact every record value except text code-unit counts.
+
+The one 1,639-byte capture packet still fails the exact current grammar at its
+first record because the required string terminator is nonzero. Its 12-record,
+1,632-byte body is divisible into 136-byte slices, but all byte positions vary
+across those slices and no fixed zero or UTF-16-like region independently
+supports that boundary. It therefore remains a lossless legacy opaque fallback
+and an exact capture-pinned manifest shape rather than a guessed decode. The
+other 22 cross-corpus packets use the semantic switch shape. A live replay of
+variant `10` matched the predicted neutral fold, left core state unchanged, and
+kept the client and heartbeats active.
 
 Cross-corpus validation first corrected the automatic manifest's manual client
 opcode-`43` switch, then chronological correlation supplied the missing

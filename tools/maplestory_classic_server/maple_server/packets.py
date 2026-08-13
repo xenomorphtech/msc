@@ -12882,13 +12882,60 @@ class ServerOpcode94Record:
 
 
 @dataclass(frozen=True)
+class ServerOpcode148Record:
+    """One opcode-148 variant-9 record under current IL2CPP mask ``0x9``."""
+
+    primary_value: int = field(repr=False)
+    secondary_value: int = field(repr=False)
+    start_time: int = field(repr=False)
+    end_time: int = field(repr=False)
+    text: str = field(repr=False)
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader, *, index: int
+    ) -> "ServerOpcode148Record":
+        prefix = f"records[{index}]"
+        return cls(
+            primary_value=reader.i32(f"{prefix}.primary_value"),
+            secondary_value=reader.i32(f"{prefix}.secondary_value"),
+            start_time=reader.i64(f"{prefix}.start_time"),
+            end_time=reader.i64(f"{prefix}.end_time"),
+            text=reader.utf16_string(f"{prefix}.text", trailing_byte=True),
+        )
+
+    def safe_dict(self) -> dict[str, int]:
+        return {
+            "text_code_units": len(self.text.encode("utf-16-le")) // 2,
+            "typed_value_count": 5,
+        }
+
+    def to_bytes(self) -> bytes:
+        try:
+            return struct.pack(
+                "<iiqq",
+                self.primary_value,
+                self.secondary_value,
+                self.start_time,
+                self.end_time,
+            ) + encode_utf16_string(self.text, trailing_byte=True)
+        except struct.error as error:
+            raise PacketShapeError(
+                f"server opcode-148 record value is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ServerOpcode148Envelope:
-    """Opcode-148 list/control variants with a lossless legacy record body."""
+    """Opcode-148 list/control variants with a lossless legacy fallback."""
 
     variant: int
     record_count: int | None = None
     primary_value: int | None = field(default=None, repr=False)
     secondary_value: int | None = field(default=None, repr=False)
+    records: tuple[ServerOpcode148Record, ...] = field(
+        default=(), repr=False
+    )
     records_blob: bytes = field(default=b"", repr=False)
     opcode: int = 148
 
@@ -12903,10 +12950,32 @@ class ServerOpcode148Envelope:
         _expect_opcode(reader, 148)
         variant = reader.u8("variant")
         if variant == cls.RECORDS_VARIANT:
+            record_count = reader.i32("record_count")
+            records_body = reader.bytes(reader.remaining, "records_body")
+            records: tuple[ServerOpcode148Record, ...] = ()
+            records_blob = records_body
+            if record_count >= 0:
+                records_reader = PacketReader(
+                    records_body,
+                    packet_name="server_opcode_148_current_records",
+                )
+                try:
+                    records = tuple(
+                        ServerOpcode148Record.parse_from(
+                            records_reader, index=index
+                        )
+                        for index in range(record_count)
+                    )
+                    records_reader.finish()
+                except PacketShapeError:
+                    records = ()
+                else:
+                    records_blob = b""
             record = cls(
                 variant=variant,
-                record_count=reader.i32("record_count"),
-                records_blob=reader.bytes(reader.remaining, "records_blob"),
+                record_count=record_count,
+                records=records,
+                records_blob=records_blob,
             )
         elif variant == cls.EMPTY_VARIANT:
             record = cls(variant=variant)
@@ -12941,11 +13010,20 @@ class ServerOpcode148Envelope:
                 raise PacketShapeError(
                     "server opcode-148 records variant cannot include pair values"
                 )
-            if self.record_count == 0 and self.records_blob:
+            if self.records and self.records_blob:
+                raise PacketShapeError(
+                    "server opcode-148 records variant cannot mix typed and "
+                    "opaque records"
+                )
+            if self.record_count == 0 and (self.records or self.records_blob):
                 raise PacketShapeError(
                     "server opcode-148 zero-record variant cannot include a body"
                 )
-            if self.record_count > 0 and not self.records_blob:
+            if self.records and len(self.records) != self.record_count:
+                raise PacketShapeError(
+                    "server opcode-148 typed record count does not match envelope"
+                )
+            if self.record_count > 0 and not (self.records or self.records_blob):
                 raise PacketShapeError(
                     "server opcode-148 non-empty record variant requires a body"
                 )
@@ -12955,6 +13033,7 @@ class ServerOpcode148Envelope:
                 self.record_count is not None
                 or self.primary_value is not None
                 or self.secondary_value is not None
+                or self.records
                 or self.records_blob
             ):
                 raise PacketShapeError(
@@ -12966,7 +13045,7 @@ class ServerOpcode148Envelope:
                 raise PacketShapeError(
                     "server opcode-148 pair variant requires two signed integers"
                 )
-            if self.record_count is not None or self.records_blob:
+            if self.record_count is not None or self.records or self.records_blob:
                 raise PacketShapeError(
                     "server opcode-148 pair variant cannot include records"
                 )
@@ -12984,7 +13063,14 @@ class ServerOpcode148Envelope:
         }
         if self.variant == self.RECORDS_VARIANT:
             details["record_count"] = self.record_count
-            details["typed_value_count"] = 2
+            details["current_il2cpp_layout"] = not self.records_blob
+            details["typed_record_count"] = len(self.records)
+            details["typed_value_count"] = 2 + 5 * len(self.records)
+            if self.records:
+                details["record_text_code_units"] = [
+                    record.safe_dict()["text_code_units"]
+                    for record in self.records
+                ]
         elif self.variant in self.PAIR_VARIANTS:
             details["pair_values_redacted"] = True
             details["typed_value_count"] = 3
@@ -12999,6 +13085,7 @@ class ServerOpcode148Envelope:
                 return (
                     encoded
                     + struct.pack("<i", self.record_count)
+                    + b"".join(record.to_bytes() for record in self.records)
                     + bytes(self.records_blob)
                 )
             if self.variant in self.PAIR_VARIANTS:

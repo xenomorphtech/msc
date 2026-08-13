@@ -287,9 +287,12 @@ The generated IL2CPP dump supplies exact direct reads for
 opcodes `94`, `137`, `276`, and `379` plus the delegated opcode-`148` variant
 switch. That switch bounds
 empty variant `10`,
-count-zero variant `9`, and two-i32 variants `12`/`13`; the one legacy nonempty
-variant-`9` body remains explicit opaque data because it does not consume under
-the current build's record mask `0x9`. Opcode `69` is now the exact capture-
+current-layout variant `9`, and two-i32 variants `12`/`13`. The current `0x9`
+record grammar is two signed integers, two DateTime/`i64` values, and one
+trailing-zero counted UTF-16 value. Parsed records remain neutral and redact
+all values and text except text code-unit counts. The one legacy nonempty
+variant-`9` body remains explicit opaque data because its first record violates
+that required string terminator. Opcode `69` is now the exact capture-
 bounded `u8 count=7` followed by seven 38-byte all-zero records. The pinned
 handler independently proves the count read, and native validation exactly
 consumes all 50 packets across the three streams. The family therefore
