@@ -160,6 +160,8 @@ from maple_server.packets import (  # noqa: E402
     RemotePlayerEntryBridgeRecord20,
     RemotePlayerEntryConditionalTailPrefix,
     RemotePlayerEntryDelegatedTail,
+    RemotePlayerEntryLoopNestedRecord,
+    RemotePlayerEntryLoopRecord,
     RemotePlayerEntryTailPrefix,
     RemotePlayerEntryTypedBridge,
     RemotePlayerEntryVariantTailGroup,
@@ -377,7 +379,7 @@ def fixture_remote_player_entry_body(
         post_appearance_u8=0,
         post_appearance_u16=0,
         tail_prefix=RemotePlayerEntryTailPrefix(
-            repeated_i32_values=(),
+            loop_records=(),
             continuation_flag_bytes=(0,),
             post_loop_i32_values=(0, 0, 0),
             variant_u8=0,
@@ -3648,6 +3650,72 @@ class GameplayPacketShapeTest(unittest.TestCase):
                 ),
             ).to_bytes()
 
+    def test_remote_player_entry_types_nested_loop_record(self) -> None:
+        extended = RemotePlayerEntryLoopNestedRecord(
+            nested_i32=5_000_054,
+            text="NestedSecret",
+            text_trailing_u8=0xA5,
+            extended_i64=-123_456,
+            extended_vector_i16=(-300, 200),
+            extended_u8=7,
+            extended_i16=-42,
+        )
+        encoded = extended.to_bytes()
+        reader = PacketReader(
+            encoded, packet_name="test_remote_player_loop_nested"
+        )
+        self.assertEqual(
+            RemotePlayerEntryLoopNestedRecord.parse_from(reader), extended
+        )
+        reader.finish()
+        self.assertEqual(len(encoded), 22 + 12 * 2)
+        self.assertEqual(
+            extended.safe_dict(),
+            {
+                "tail_loop_nested_text_code_units": 12,
+                "tail_loop_nested_text_trailing_u8_nonzero": True,
+                "tail_loop_nested_extended_fields_present": True,
+                "typed_tail_loop_nested_bytes": len(encoded),
+            },
+        )
+        safe = str(extended.safe_dict())
+        self.assertNotIn("NestedSecret", safe)
+        self.assertNotIn(str(-123_456), safe)
+
+        for truncated_length in range(len(encoded)):
+            with self.subTest(truncated_length=truncated_length):
+                truncated_reader = PacketReader(
+                    encoded[:truncated_length],
+                    packet_name="truncated_remote_player_loop_nested",
+                )
+                with self.assertRaises(PacketShapeError):
+                    RemotePlayerEntryLoopNestedRecord.parse_from(
+                        truncated_reader
+                    )
+
+        base = RemotePlayerEntryLoopNestedRecord(
+            nested_i32=123,
+            text="BaseSecret",
+            text_trailing_u8=0,
+            extended_i64=None,
+            extended_vector_i16=None,
+            extended_u8=None,
+            extended_i16=None,
+        )
+        base_reader = PacketReader(
+            base.to_bytes(), packet_name="test_remote_player_loop_nested_base"
+        )
+        self.assertEqual(
+            RemotePlayerEntryLoopNestedRecord.parse_from(base_reader), base
+        )
+        base_reader.finish()
+        with self.assertRaisesRegex(PacketShapeError, "must match"):
+            replace(extended, extended_i16=None).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "two i16"):
+            replace(extended, extended_vector_i16=(1,)).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "u8 is out of range"):
+            replace(extended, extended_u8=0x100).to_bytes()
+
     def test_remote_player_entry_types_variant_tail_group(self) -> None:
         variant_tail_group = RemotePlayerEntryVariantTailGroup(
             leading_u32=0x1234_5678,
@@ -3889,7 +3957,10 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             entered.body.tail_prefix.safe_dict(),
             {
-                "tail_repeated_i32_values": 0,
+                "tail_loop_records": 0,
+                "tail_loop_extended_records": 0,
+                "tail_loop_nested_text_code_units": 0,
+                "tail_loop_nested_nonzero_text_trailing_u8s": 0,
                 "tail_post_loop_nonzero_i32_values": 0,
                 "tail_variant_u8_nonzero": False,
                 "typed_tail_prefix_bytes": 14,
@@ -3935,7 +4006,32 @@ class GameplayPacketShapeTest(unittest.TestCase):
             body=replace(
                 entered.body,
                 tail_prefix=RemotePlayerEntryTailPrefix(
-                    repeated_i32_values=(11, -22),
+                    loop_records=(
+                        RemotePlayerEntryLoopRecord(
+                            selector_i32=11,
+                            nested=RemotePlayerEntryLoopNestedRecord(
+                                nested_i32=123,
+                                text="BaseSecret",
+                                text_trailing_u8=0xA5,
+                                extended_i64=None,
+                                extended_vector_i16=None,
+                                extended_u8=None,
+                                extended_i16=None,
+                            ),
+                        ),
+                        RemotePlayerEntryLoopRecord(
+                            selector_i32=-22,
+                            nested=RemotePlayerEntryLoopNestedRecord(
+                                nested_i32=5_000_005,
+                                text="",
+                                text_trailing_u8=0,
+                                extended_i64=-123,
+                                extended_vector_i16=(-10, 20),
+                                extended_u8=7,
+                                extended_i16=-30,
+                            ),
+                        ),
+                    ),
                     continuation_flag_bytes=(1, 0xFF, 0),
                     post_loop_i32_values=(1, 0, -3),
                     variant_u8=4,
@@ -3957,11 +4053,17 @@ class GameplayPacketShapeTest(unittest.TestCase):
         self.assertEqual(
             populated_tail.body.tail_prefix.safe_dict(),
             {
-                "tail_repeated_i32_values": 2,
+                "tail_loop_records": 2,
+                "tail_loop_extended_records": 1,
+                "tail_loop_nested_text_code_units": 10,
+                "tail_loop_nested_nonzero_text_trailing_u8s": 1,
                 "tail_post_loop_nonzero_i32_values": 2,
                 "tail_variant_u8_nonzero": True,
-                "typed_tail_prefix_bytes": 24,
+                "typed_tail_prefix_bytes": 73,
             },
+        )
+        self.assertNotIn(
+            "BaseSecret", str(populated_tail.body.tail_prefix.safe_dict())
         )
         populated_conditional_tail = replace(
             entered,

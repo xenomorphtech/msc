@@ -1045,8 +1045,8 @@ forms to logical mask slots `82..88` in the order shown above. Field roles
 beyond those native type boundaries remain deliberately neutral.
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
-packets round-trip exactly. Across all 114 entries, the body grammar types
-36,013 bytes and leaves 323 bytes explicit. The full bridge is 128 bytes in
+packets round-trip exactly. Across all 114 entries, the body grammar types all
+36,336 bytes and leaves zero bytes opaque. The full bridge is 128 bytes in
 112 records and 129 bytes in two stream-`92` records; after its typed 16-byte
 mask, all 112/113 bytes are typed before the appearance.
 The masks contain one nonzero word and seven enabled bits in 112 entries, or
@@ -1075,15 +1075,19 @@ therefore retains the seven-word character-list default while opcode `189`
 explicitly selects the three-word native shape.
 
 With that boundary corrected, the tail prefix parses in all 114 entries. The
-loop has zero repetitions in 44 entries and two repetitions in 70. The variant
+loop calls the nested reader at `0x1182d3e` after each selector `i32` and before
+the continuation bool. The nested method at `0xf96e00` reads an `i32` and
+packet string, then its captured extended path reads an `i64`, the two-short
+wire form of a `Vector2`, a `u8`, and an `i16`. All 77 captured nested records
+take that extended path with an empty string and zero trailing byte. The loop
+has no records in 44 entries, one in 63, and two in seven. The variant
 comparison uses static byte `0x15 + 0xeb`, wrapping to zero. The 51 nonzero
 variants take the unequal branch at RVA `0x1182eba`, which reads one `u32`, one
 packet UTF-16 string, a bool, three `u8`s, and another bool before reconverging
 with the zero-variant path. All captured variant strings contain one UTF-16
 code unit; six have a nonzero packet-string trailing byte, which is preserved
 without assigning semantics. The conditional prefix beginning at
-`0x1183144` parses in 113 entries; one stream-`126` entry retains the remaining
-35 bytes opaquely after its typed tail prefix.
+`0x1183144` parses in all 114 entries.
 
 The downstream grammar has a 28-byte all-empty minimum. Searching only for a
 record that consumes exactly to packet end yields one and only one candidate in
@@ -1097,11 +1101,11 @@ times, and 72 bytes seven times.
 The corrected preterminal layouts, measured from the tail prefix through the
 byte before the delegated terminal record, are 20 bytes 40 times, 32 bytes four
 times, 47 bytes 60 times, 59 bytes three times, and 74 bytes seven times. The
-exact residual gap before the terminal record is zero bytes 44 times, one byte
-17 times, three bytes 43 times, 14 bytes six times, 15 bytes twice, 28 bytes
-once, and 35 bytes once. There are no bytes after the terminal record.
-Per-stream typed/opaque body accounting is `19,592/138`, `1,320/6`, and
-`15,101/179`.
+former `1/3/14/15/28/35`-byte residual families came from treating the low byte
+of the nested `i32` as a continuation flag and its remaining bytes as another
+selector. Reading the nested call in place aligns every later field. There are
+no residual bytes before or after the terminal record. Per-stream typed/opaque
+body accounting is `19,730/0`, `1,326/0`, and `15,280/0`.
 The
 appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
@@ -1116,8 +1120,9 @@ remain redacted from safe output.
 The appearance boundary is capture-bounded rather than inferred from byte
 frequency: parsing after the native-delegate-relative 128/129-byte bridge and
 two-byte prefix, then requiring the appearance's leading hair slot, yields
-exactly one valid record in every entry across all three streams. The residual
-regions keep entries at partial coverage; the 39 exact removals are full. Every
+exactly one valid record in every entry across all three streams. Neutral field
+roles keep entries at partial semantic coverage despite exact byte coverage;
+the 39 exact removals are full. Every
 removal references a player introduced in the same field epoch. More
 importantly, all 563 opcode-
 `202` player-movement broadcasts and all 652 server opcode-`217` life-movement
@@ -1135,9 +1140,8 @@ conditional-prefix presence/count summaries, terminal delegated-reader
 length/nonzero summaries, and position when known. It never
 emits a captured object id, string, or appearance identifier. The saved active
 custom-server transcript remains valid with six terminal delegated records,
-2,014 typed body bytes, and 12 opaque body bytes. Four entries carry the
-nonzero-variant group and retain a three-byte gap; the other two use the
-zero-variant path and have no residual gap.
+2,026 typed body bytes, and zero opaque body bytes. Four entries carry the
+nonzero-variant group and the other two use the zero-variant path.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

@@ -975,15 +975,18 @@ The gameplay fold currently models these capture-backed boundaries:
   exact widths `15/15/15/13/20/17/15`, followed by a typed appearance island
   whose opcode-specific native shape has three trailing style words instead of
   the character-list shape's seven, and the appearance-adjacent native
-  `u16/i32/u32/4*i32/2*i16/u8/u16` reads, followed by a bool-terminated
-  repeated-`i32` loop, three `i32`s, and a variant `u8` in
-  all 114 entries. Fifty-one nonzero variants type an additional `u32`, packet
+  `u16/i32/u32/4*i32/2*i16/u8/u16` reads, followed by a bool-terminated loop
+  whose executed records contain a selector `i32`, nested `i32`, packet
+  string, `i64`, two-coordinate short vector, `u8`, and `i16`; three `i32`s
+  and a variant `u8` follow the loop in all 114 entries. Fifty-one nonzero
+  variants type an additional `u32`, packet
   string, bool, three `u8`s, and bool; the following conditional prefix is
-  typed in 113. The required downstream reader consumes five packet strings,
+  typed in all 114. The required downstream reader consumes five packet strings,
   one `u8`, one `i32`, and one DateTime. Exactly one instance consumes to
-  packet end in all 114 entries, leaving 323 pre-delegated gap bytes. All 114
-  reference entries round-trip losslessly; 44 have zero tail-loop repetitions
-  and 70 have two, while the completely typed pre-appearance bridge retains
+  packet end in all 114 entries. All 114 reference entries round-trip
+  losslessly with zero opaque body bytes; 44 have no tail-loop records, 63
+  have one, and seven have two. All 77 executed nested records take the
+  extended native path. The completely typed pre-appearance bridge retains
   redacted raw mask words. Server opcode `190` is the exact
   object-id removal and the fold requires movement broadcasts to reference a
   current-field entry,

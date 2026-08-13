@@ -176,29 +176,31 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
   virtual records with exact widths `15/15/15/13/20/17/15`;
 - a `u16` immediately before the opcode-specific three-style-word appearance;
 - after appearance: `i32`, `u32`, four `i32`s, two `i16`s, `u8`, and `u16`;
-- in every entry: a bool-terminated repeated-`i32` loop, three `i32`s, and one
-  variant `u8`;
+- in every entry: a bool-terminated loop; each executed record contains a
+  selector `i32`, nested `i32`, packet string, `i64`, a two-short vector,
+  `u8`, and `i16`, followed after the loop by three `i32`s and one variant
+  `u8`;
 - for each nonzero variant: one `u32`, a packet string, bool, three `u8`s, and
   bool, followed by the conditional prefix shared with the zero variant;
 - at packet end in every entry: five packet UTF-16 values, one further `u8`,
   one `i32`, and one eight-byte DateTime wire value;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
-The remaining opaque portion is the gap before the terminal delegated record.
-Across all entries, current accounting measures 36,013 typed body bytes and
-323 opaque body bytes. Per stream, the typed/opaque counts are
-`19,592/138`, `1,320/6`, and `15,101/179` for
+There is no remaining opaque portion in the supported opcode-`189` bodies.
+Across all entries, current accounting measures 36,336 typed body bytes and
+zero opaque body bytes. Per stream, the typed/opaque counts are `19,730/0`,
+`1,326/0`, and `15,280/0` for
 streams `92`, `114`, and `126`. The full bridge is 128 bytes in 112 entries and
 129 bytes in two entries. Its 16-byte mask is followed by 112 typed bytes, or
 113 typed bytes when the direct `u8` is present.
 The masks have one nonzero word and seven enabled bits in 112 entries, and two
 nonzero words and eight enabled bits in two entries. Raw words are retained
 only for re-emission and never reported. The corrected appearance boundary
-types the tail prefix in all 114 entries: 44 have zero loop repetitions and 70
-have two. Fifty-one nonzero variants type the unequal-branch group, and the
-following conditional prefix is typed in 113 entries. The exact opaque gaps
-are `0 x 44`, `1 x 17`, `3 x 43`, `14 x 6`, `15 x 2`, `28 x 1`, and
-`35 x 1` bytes. Both runtime-state arms converge at
+types the tail prefix in all 114 entries: 44 have no loop records, 63 have one,
+and seven have two. All 77 executed nested records take the extended reader
+path. Fifty-one nonzero variants type the unequal-branch group, and the
+following conditional prefix is typed in all 114 entries. Both runtime-state
+arms converge at
 RVA `0x1183720` before the follow-up read. At RVA
 `0x118381e`, a null runtime parser field leads to a throw, while the successful
 non-null path calls the downstream parser at `0x1183857`. Constructor and
@@ -209,10 +211,11 @@ unique record in every entry. Streams `92/114` use code-unit shapes
 `(0,1,1,9|15|16|20,0)` and stream `126` uses `(0,0,0,0,0)`. These are checked
 corpus results; text and scalar roles remain redacted and neutral.
 
-This appearance-boundary increment keeps structural coverage at
+This nested-loop-reader increment keeps semantic coverage at
 `35020/187`, `69/7`, and `71047/53` full/partial for streams `92`, `114`, and
-`126`; opcode `189` remains partial. All 335 tracked Python tests, 17 Rust
-tests, the pinned-build ignored test, and the private capture-JSONL ignored
+`126`; opcode `189` remains partial despite exact byte coverage. All 336
+tracked Python tests, 17 Rust tests, the pinned-build ignored test, and the
+private capture-JSONL ignored
 test pass. All three gameplay analyses remain valid; stream `126` retains only
 its known one-HP warning. Focused native-manifest validation consumes all 52
 stream-`126` opcode-`189` packets with zero unsupported or failed shapes.
@@ -362,12 +365,14 @@ seven-word default.
 
 With that alignment, the pinned delegate's RVA
 `0x1182ba8` reads a bool; true enters the repeated `i32` read at `0x1182be7`
-and loops through the next bool at `0x1182d48`. The false exit reaches three
-`i32` reads at `0x1182e42/0x1182e52/0x1182e62`, then a `u8` read at
-`0x1182e89`. The implemented codec preserves generic nonzero loop flag bytes
-and values, round-trips all 114 reference entries, and publishes only safe
-counts/nonzero summaries. The executed loop has zero repetitions in 44 entries
-and two in 70.
+and calls the selected record's nested parser at `0x1182d3e` before the next
+bool at `0x1182d48`. The nested method at `0xf96e00` reads `i32` and packet
+string, then the captured extended variants read `i64`, a `Vector2` encoded as
+two protected shorts, `u8`, and `i16`. The false loop exit reaches three `i32`
+reads at `0x1182e42/0x1182e52/0x1182e62`, then a `u8` read at `0x1182e89`.
+The implemented codec round-trips all 114 reference entries and publishes only
+safe counts/length/presence summaries. The executed loop has no records in 44
+entries, one in 63, and two in seven.
 
 Static byte `0x15 + 0xeb` wraps to zero, so variant zero selects the equality
 path at RVA `0x118313f`. The 51 nonzero variants take the unequal branch at
@@ -392,8 +397,9 @@ creates both nested records, although Unity prefab serialization can replace
 constructor defaults. After the parser call, the handler invokes one player
 virtual method without the packet reader and returns at `0x1183892`. The unique
 packet-terminal parse types this reader in all 114 entries. The conditional
-prefix is typed in 113 entries; one stream-`126` record retains 35 bytes after
-its typed tail prefix. Across the corpus the remaining gap total is 323 bytes.
+prefix is typed in all 114 entries. Parsing the per-loop nested reader at its
+actual call site removes the former gap families, so every supported body now
+has zero opaque bytes.
 
 ## Exact browser-free relaunch and navigation
 
@@ -525,29 +531,29 @@ utf16    0x1cd0ca0     string   0x1cd0ce0
 
 ## Next implementation plan
 
-### 1. Inventory the remaining pre-delegated gaps
+### 1. Preserve the closed opcode-189 boundary
 
-The only opaque opcode-`189` bytes are now the `1/3/14/15/28/35`-byte gaps
-before the unique terminal delegated record; 44 entries have no gap. Correlate
-the nonzero families with the runtime-state branches after the conditional
-prefix and before RVA `0x118381e`. Treat the single stream-`126` record whose
-conditional prefix does not parse as a separate 35-byte case until native
-control flow proves its boundary.
+All supported opcode-`189` bodies now exact-consume with zero opaque bytes.
+Keep the six observed nested-`i32` variants capture-bounded until offline
+metadata or an independent capture proves how an unobserved value selects the
+base versus extended nested-reader path. Do not retry GDB or Frida on this Wine
+build.
 
-### 2. Resolve version/runtime selection offline
+### 2. Inventory the next material opaque family
 
-Continue with native code, metadata, prefab/serialized-field evidence, or an
-independent capture. Do not retry GDB or Frida on this Wine build. Determine
-which runtime fields select the gap family and whether prefab serialization
-can replace state used before `+0x380`. The terminal downstream reader is now
-resolved; the remaining question is the reader path before it.
+The two long server opcode-`77` variant-`8` wrappers still retain 75-byte
+metadata regions around an otherwise typed opcode-`39` equipment-item record.
+Use native code, metadata, and the two independent item observations to locate
+another executed reader boundary without assigning gameplay meaning from byte
+frequency.
 
 ### 3. Promote only another executed boundary
 
 Use neutral structural names, preserve arbitrary packet-string trailing bytes,
-redact all strings and scalar values from `safe_dict()`, and retain the current
-opaque gaps. Do not promote opcode `189` to full coverage until every byte of a
-supported variant is consumed by an exact round-tripping codec.
+redact all strings and scalar values from `safe_dict()`, and retain opaque
+fallbacks for unproven opcode-`77` layouts. Opcode `189` has exact byte coverage
+but remains partial semantic coverage because the neutral field roles are not
+claimed.
 
 ### 4. Re-run all independent checks
 

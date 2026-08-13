@@ -433,29 +433,33 @@
   virtual records with exact widths `15/15/15/13/20/17/15`. Both runtime-state
   arms reconverge before the follow-up read at RVA `0x1183720`. The runtime
   parser check at RVA `0x118381e` throws on null and reaches the delegated
-  parser at `0x1183857` on the successful path. The corrected tail has zero
-  loop repetitions in 44 entries and two in 70. Fifty-one nonzero variants
-  take the unequal branch and type its `u32`, packet string, bool, three `u8`s,
-  and bool; the following conditional prefix is typed in 113 entries.
+  parser at `0x1183857` on the successful path. The loop calls a nested reader
+  at `0x1182d3e`; that method reads `i32`, packet string, and—on every captured
+  extended variant—`i64`, a two-short vector, `u8`, and `i16`. The corrected
+  tail has no loop records in 44 entries, one in 63, and two in seven, for 77
+  nested records total. Fifty-one nonzero variants take the unequal branch and
+  type its `u32`, packet string, bool, three `u8`s, and bool; the following
+  conditional prefix is typed in all 114 entries.
   Constructor and callee recovery
   prove a required outer packet string, a required nested record with four
   more packet strings and one `u8`, then a required `i32` plus DateTime record.
   The handler performs no packet read after that call. Exactly one instance of
   the grammar consumes to packet end in every entry; this terminal invariant
   rejects the earlier zero-run front alignment. All 114 delegated records are
-  typed and safe output reports only lengths and nonzero summaries. Residual
-  gap sizes are `0/1/3/14/15/28/35` bytes, including 44 zero-gap entries; one
-  stream-`126` entry retains the 35-byte maximum after its typed tail prefix.
+  typed and safe output reports only lengths and presence/nonzero summaries.
+  The former `1/3/14/15/28/35`-byte gaps were bytes from the nested loop reader
+  misread as continuation/selectors and later fields. Correcting that call
+  boundary leaves zero opaque bytes in every entry.
   The masks have `1/2` nonzero words and
   `7/8` enabled bits
-  in `112/2` entries, with raw words redacted. Exact replay types 36,013 body
-  bytes while retaining 323 runtime-selected gap bytes. Every
+  in `112/2` entries, with raw words redacted. Exact replay types all 36,336
+  body bytes. Every
   leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
   `4 -> 3 -> 4`; the active saved transcript still validates with six terminal
-  delegated records, 2,014 typed body bytes, and 12 opaque body bytes.
+  delegated records, 2,026 typed body bytes, and zero opaque body bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template

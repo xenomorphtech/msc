@@ -9887,10 +9887,173 @@ class MobMovementAcknowledgement:
 
 
 @dataclass(frozen=True)
-class RemotePlayerEntryTailPrefix:
-    """Native-reader-bounded bool/i32 loop and suffix in opcode 189."""
+class RemotePlayerEntryLoopNestedRecord:
+    """Native nested reader invoked by an opcode-189 loop record."""
 
-    repeated_i32_values: tuple[int, ...]
+    nested_i32: int = field(repr=False)
+    text: str = field(repr=False)
+    text_trailing_u8: int
+    extended_i64: int | None = field(repr=False)
+    extended_vector_i16: tuple[int, int] | None = field(repr=False)
+    extended_u8: int | None = field(repr=False)
+    extended_i16: int | None = field(repr=False)
+
+    _EXTENDED_NESTED_I32_VALUES = frozenset(
+        {5_000_005, 5_000_012, 5_000_020, 5_000_024, 5_000_046, 5_000_054}
+    )
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader
+    ) -> "RemotePlayerEntryLoopNestedRecord":
+        nested_i32 = reader.i32("tail_loop_nested_i32")
+        text = reader.utf16_string(
+            "tail_loop_nested_text", trailing_byte=False
+        )
+        text_trailing_u8 = reader.u8("tail_loop_nested_text_trailing_u8")
+        extended_i64 = None
+        extended_vector_i16 = None
+        extended_u8 = None
+        extended_i16 = None
+        if nested_i32 in cls._EXTENDED_NESTED_I32_VALUES:
+            extended_i64 = reader.i64("tail_loop_nested_extended_i64")
+            extended_vector_i16 = (
+                reader.i16("tail_loop_nested_extended_vector_i16[0]"),
+                reader.i16("tail_loop_nested_extended_vector_i16[1]"),
+            )
+            extended_u8 = reader.u8("tail_loop_nested_extended_u8")
+            extended_i16 = reader.i16("tail_loop_nested_extended_i16")
+        record = cls(
+            nested_i32=nested_i32,
+            text=text,
+            text_trailing_u8=text_trailing_u8,
+            extended_i64=extended_i64,
+            extended_vector_i16=extended_vector_i16,
+            extended_u8=extended_u8,
+            extended_i16=extended_i16,
+        )
+        record._validate()
+        return record
+
+    @property
+    def text_code_units(self) -> int:
+        try:
+            return len(self.text.encode("utf-16-le")) // 2
+        except UnicodeEncodeError as error:
+            raise PacketShapeError(
+                "remote-player loop nested text is not valid UTF-16"
+            ) from error
+
+    @property
+    def has_extended_fields(self) -> bool:
+        return self.extended_i64 is not None
+
+    @property
+    def encoded_bytes(self) -> int:
+        return 7 + self.text_code_units * 2 + (
+            15 if self.has_extended_fields else 0
+        )
+
+    def _validate(self) -> None:
+        extended_fields_present = (
+            self.extended_i64 is not None,
+            self.extended_vector_i16 is not None,
+            self.extended_u8 is not None,
+            self.extended_i16 is not None,
+        )
+        expected_extended = (
+            self.nested_i32 in self._EXTENDED_NESTED_I32_VALUES
+        )
+        if len(set(extended_fields_present)) != 1 or (
+            extended_fields_present[0] != expected_extended
+        ):
+            raise PacketShapeError(
+                "remote-player loop nested extended fields must match its "
+                "capture-bounded i32 variant"
+            )
+        if self.extended_vector_i16 is not None and len(
+            self.extended_vector_i16
+        ) != 2:
+            raise PacketShapeError(
+                "remote-player loop nested vector must contain two i16 values"
+            )
+        for value in (self.text_trailing_u8, self.extended_u8):
+            if value is not None and not 0 <= value <= 0xFF:
+                raise PacketShapeError(
+                    "remote-player loop nested u8 is out of range"
+                )
+        _ = self.text_code_units
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return {
+            "tail_loop_nested_text_code_units": self.text_code_units,
+            "tail_loop_nested_text_trailing_u8_nonzero": bool(
+                self.text_trailing_u8
+            ),
+            "tail_loop_nested_extended_fields_present": (
+                self.has_extended_fields
+            ),
+            "typed_tail_loop_nested_bytes": self.encoded_bytes,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            encoded = bytearray(struct.pack("<i", self.nested_i32))
+            encoded.extend(
+                encode_utf16_string(self.text, trailing_byte=False)
+            )
+            encoded.append(self.text_trailing_u8)
+            if self.has_extended_fields:
+                encoded.extend(struct.pack("<q", self.extended_i64))
+                encoded.extend(
+                    struct.pack("<2h", *self.extended_vector_i16)
+                )
+                encoded.extend(
+                    struct.pack(
+                        "<Bh", self.extended_u8, self.extended_i16
+                    )
+                )
+        except (OverflowError, struct.error, ValueError) as error:
+            raise PacketShapeError(
+                "remote-player loop nested field is out of range: "
+                f"{error}"
+            ) from error
+        return bytes(encoded)
+
+
+@dataclass(frozen=True)
+class RemotePlayerEntryLoopRecord:
+    """One selector and its executed nested reader in opcode 189."""
+
+    selector_i32: int = field(repr=False)
+    nested: RemotePlayerEntryLoopNestedRecord = field(repr=False)
+
+    @property
+    def encoded_bytes(self) -> int:
+        return 4 + self.nested.encoded_bytes
+
+    def _validate(self) -> None:
+        self.nested._validate()
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        return self.nested.safe_dict()
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        try:
+            return struct.pack("<i", self.selector_i32) + self.nested.to_bytes()
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player loop selector is out of range: {error}"
+            ) from error
+
+
+@dataclass(frozen=True)
+class RemotePlayerEntryTailPrefix:
+    """Native-reader-bounded nested loop and suffix in opcode 189."""
+
+    loop_records: tuple[RemotePlayerEntryLoopRecord, ...]
     continuation_flag_bytes: tuple[int, ...]
     post_loop_i32_values: tuple[int, int, int]
     variant_u8: int
@@ -9899,7 +10062,7 @@ class RemotePlayerEntryTailPrefix:
     def parse_from(
         cls, reader: PacketReader
     ) -> "RemotePlayerEntryTailPrefix":
-        repeated_i32_values: list[int] = []
+        loop_records: list[RemotePlayerEntryLoopRecord] = []
         continuation_flag_bytes: list[int] = []
         while True:
             flag = reader.u8(
@@ -9908,13 +10071,19 @@ class RemotePlayerEntryTailPrefix:
             continuation_flag_bytes.append(flag)
             if flag == 0:
                 break
-            repeated_i32_values.append(
-                reader.i32(
-                    f"tail_repeated_i32_values[{len(repeated_i32_values)}]"
+            index = len(loop_records)
+            loop_records.append(
+                RemotePlayerEntryLoopRecord(
+                    selector_i32=reader.i32(
+                        f"tail_loop_records[{index}].selector_i32"
+                    ),
+                    nested=RemotePlayerEntryLoopNestedRecord.parse_from(
+                        reader
+                    ),
                 )
             )
         record = cls(
-            repeated_i32_values=tuple(repeated_i32_values),
+            loop_records=tuple(loop_records),
             continuation_flag_bytes=tuple(continuation_flag_bytes),
             post_loop_i32_values=tuple(
                 reader.i32(f"tail_post_loop_i32_values[{index}]")
@@ -9931,15 +10100,20 @@ class RemotePlayerEntryTailPrefix:
 
     @property
     def encoded_bytes(self) -> int:
-        return 1 + len(self.repeated_i32_values) * 5 + 13
+        return (
+            1
+            + len(self.loop_records)
+            + sum(record.encoded_bytes for record in self.loop_records)
+            + 13
+        )
 
     def _validate(self) -> None:
         if len(self.continuation_flag_bytes) != (
-            len(self.repeated_i32_values) + 1
+            len(self.loop_records) + 1
         ):
             raise PacketShapeError(
                 "remote-player tail continuation flags must contain one "
-                "terminator after the repeated i32 values"
+                "terminator after the loop records"
             )
         if any(
             not 0 < flag <= 0xFF
@@ -9954,6 +10128,8 @@ class RemotePlayerEntryTailPrefix:
                 "remote-player tail post-loop group must contain three i32 "
                 "values"
             )
+        for record in self.loop_records:
+            record._validate()
         if not 0 <= self.variant_u8 <= 0xFF:
             raise PacketShapeError(
                 "remote-player tail variant u8 is out of range"
@@ -9961,7 +10137,18 @@ class RemotePlayerEntryTailPrefix:
 
     def safe_dict(self) -> dict[str, int | bool]:
         return {
-            "tail_repeated_i32_values": len(self.repeated_i32_values),
+            "tail_loop_records": len(self.loop_records),
+            "tail_loop_extended_records": sum(
+                record.nested.has_extended_fields
+                for record in self.loop_records
+            ),
+            "tail_loop_nested_text_code_units": sum(
+                record.nested.text_code_units for record in self.loop_records
+            ),
+            "tail_loop_nested_nonzero_text_trailing_u8s": sum(
+                bool(record.nested.text_trailing_u8)
+                for record in self.loop_records
+            ),
             "tail_post_loop_nonzero_i32_values": (
                 self.nonzero_post_loop_i32_values
             ),
@@ -9973,12 +10160,13 @@ class RemotePlayerEntryTailPrefix:
         self._validate()
         encoded = bytearray()
         try:
-            for flag, value in zip(
+            for flag, record in zip(
                 self.continuation_flag_bytes[:-1],
-                self.repeated_i32_values,
+                self.loop_records,
                 strict=True,
             ):
-                encoded.extend(struct.pack("<Bi", flag, value))
+                encoded.append(flag)
+                encoded.extend(record.to_bytes())
             encoded.extend(
                 struct.pack(
                     "<B3iB",
@@ -11247,7 +11435,10 @@ class RemotePlayerEntryBody:
             if self.tail_prefix is not None
             else {
                 "tail_prefix_typed_layout": False,
-                "tail_repeated_i32_values": 0,
+                "tail_loop_records": 0,
+                "tail_loop_extended_records": 0,
+                "tail_loop_nested_text_code_units": 0,
+                "tail_loop_nested_nonzero_text_trailing_u8s": 0,
                 "tail_post_loop_nonzero_i32_values": 0,
                 "tail_variant_u8_nonzero": False,
                 "typed_tail_prefix_bytes": 0,

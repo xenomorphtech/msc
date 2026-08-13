@@ -371,13 +371,18 @@ shape, while character lists keep their seven-word default.
 Static control-flow recovery closed the first residual opcode-`189` tail
 boundary without runtime attachment. The outer delegate calls the bool reader
 at RVA `0x1182ba8`; a true result enters an `i32` read at `0x1182be7` and the
-loop repeats through the bool read at `0x1182d48`. The false exit reaches three
-consecutive `i32` reads at `0x1182e42`, `0x1182e52`, and `0x1182e62`, then a
-`u8` at `0x1182e89`. With the corrected appearance boundary, offline decoding
-and exact re-emission validate that grammar across all 114 opcode-`189`
-records. Forty-four have zero loop repetitions and 70 have two. The codec
-preserves arbitrary loop flags and values but exposes only counts/nonzero
-summaries in safe output.
+selected runtime record calls its nested reader at `0x1182d3e` before the loop
+repeats through the bool read at `0x1182d48`. The nested method at RVA
+`0xf96e00` unconditionally reads an `i32` at `0xf97783` and a packet string at
+`0xf977cc`. Its extended path then reads `i64` at `0xf9796d`, the two-short
+wire form of a `Vector2` at `0xf979d0`, `u8` at `0xf979ef`, and `i16` at
+`0xf97a49`. All 77 executed nested records in the captures take that extended
+path and carry an empty string with zero trailing byte. The false loop exit
+reaches three consecutive `i32` reads at `0x1182e42`, `0x1182e52`, and
+`0x1182e62`, then a `u8` at `0x1182e89`. Offline decoding and exact re-emission
+validate the full grammar across all 114 opcode-`189` records: 44 have no loop
+records, 63 have one, and seven have two. The codec exposes only record counts,
+text lengths, and presence/nonzero summaries in safe output.
 
 The delegate computes its comparison constant from static byte `0x15 + 0xeb`,
 which wraps to zero. Equality jumps through RVA `0x118313f` to the bool at
@@ -396,10 +401,8 @@ at `0x11833a8` selects the next branch. Its false path jumps directly to RVA
 every arm reconverges at `0x1183720` and reads another bool at `0x1183725`.
 
 The corrected boundary removes the apparent overlap with the required
-downstream reader. The tail prefix is typed in all 114 entries, the unequal-
-variant group is typed in 51, and the conditional prefix is typed in 113. One
-stream-`126` record preserves 35 bytes after its typed tail prefix because the
-conditional parser cannot safely consume that branch. The native arms still
+downstream reader. The tail prefix and conditional prefix are typed in all 114
+entries, and the unequal-variant group is typed in 51. The native arms still
 reconverge at `0x1183720` before the follow-up read. The call site loads the
 player object's parser field at RVA
 `0x118381e`; its null path throws, while the successful non-null path calls
@@ -425,10 +428,14 @@ later reader call. Requiring the delegated grammar to consume exactly to packet
 end produces one unique candidate in every one of the 114 entries. Streams
 `92/114` use text-code-unit shapes `(0,1,1,9|15|16|20,0)`, while all stream-
 `126` records use `(0,0,0,0,0)`. This terminal constraint rejects the earlier
-front-of-suffix zero-run false positives. The residual gap distribution is
-`0 x 44`, `1 x 17`, `3 x 43`, `14 x 6`, `15 x 2`, `28 x 1`, and `35 x 1`,
-for 323 bytes total. Safe output exposes only lengths and nonzero summaries;
-values and text remain redacted and semantically neutral.
+front-of-suffix zero-run false positives. The later `1/3/14/15/28/35` gap
+families were the same kind of misalignment: the earlier codec treated the
+low byte of the nested `i32` as the loop continuation flag and its remaining
+bytes as another selector. Parsing the nested call at its real position makes
+the conditional reader align in all 114 entries and leaves zero bytes before
+or after the terminal delegated record. Safe output exposes only lengths and
+presence/nonzero summaries; values and text remain redacted and semantically
+neutral.
 
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then

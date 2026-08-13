@@ -110,10 +110,12 @@ reader. A unique instance of that grammar terminates every one of the 114
 entries; the earlier front-of-suffix alignment was a zero-run false positive.
 The opcode-specific appearance reader consumes three trailing style words,
 not the character-list shape's seven; correcting that four-word overread types
-the tail prefix in all 114 entries. Its loop has zero repetitions in 44 entries
-and two in 70, 51 nonzero variants include their unequal-branch group, and the
-following conditional prefix parses in 113. Across the corpus the model types
-36,013 body bytes and leaves `323` opaque body bytes. Opcode `190` is
+the tail prefix in all 114 entries. Its loop has no records in 44 entries, one
+in 63, and two in seven; all 77 executed nested readers consume `i32`, packet
+string, `i64`, a two-short vector, `u8`, and `i16`. Fifty-one nonzero variants
+include their unequal-branch group, and the following conditional prefix
+parses in all 114. Across the corpus the model types all 36,336 body bytes and
+leaves zero opaque body bytes. Opcode `190` is
 its exact u32-id removal, not a neutral fixed
 record. Across streams `92/114/126`, all 114 entries and 39 leaves round-trip
 exactly, all leaves match current-epoch entries, and every one of 563 opcode-
@@ -1358,9 +1360,10 @@ exact widths `15/15/15/13/20/17/15`. The later conditional envelope contains
 optional text, two conditional `i64` pairs, a conditional `u32/u32/i32` group,
 a continuation bool, and the follow-up bool reached after both continuation
 arms reconverge. The terminal delegated reader types all six bodies in the
-saved transcript. Four take the nonzero-variant group and retain a three-byte
-gap; two take the zero-variant path with no gap. That transcript remains valid
-and exact with 2,014 typed body bytes and 12 opaque body bytes. This is a
+saved transcript. Four take the nonzero-variant group and two take the
+zero-variant path. The nested loop-reader correction removes all four former
+three-byte gaps, so that transcript remains valid and exact with 2,026 typed
+body bytes and zero opaque body bytes. This is a
 structural accounting
 refinement only; it does not
 change the already proven live enter/move/leave behavior or assign meanings to
