@@ -145,6 +145,7 @@ from maple_server.packets import (  # noqa: E402
     NpcStateUpdate,
     Opcode13Envelope,
     Opcode13Type1Envelope,
+    PacketReader,
     PacketShapeError,
     PlayerMovementBroadcast,
     PlayerMovementCommand,
@@ -158,6 +159,7 @@ from maple_server.packets import (  # noqa: E402
     RemotePlayerEntryBridgeRecord17,
     RemotePlayerEntryBridgeRecord20,
     RemotePlayerEntryConditionalTailPrefix,
+    RemotePlayerEntryDelegatedTail,
     RemotePlayerEntryTailPrefix,
     RemotePlayerEntryTypedBridge,
     RemotePlayerInstruction,
@@ -392,7 +394,10 @@ def fixture_remote_player_entry_body(
             continuation_flag_byte=0,
             followup_flag_byte=0,
         ),
-        opaque_tail=b"\x00" * opaque_tail_length,
+        delegated_tail=None,
+        opaque_tail=(
+            b"\xff\xff" + b"\x00" * (opaque_tail_length - 2)
+        ),
     )
 
 
@@ -3641,6 +3646,93 @@ class GameplayPacketShapeTest(unittest.TestCase):
                     ),
                 ),
             ).to_bytes()
+
+    def test_remote_player_entry_types_delegated_tail_reader(self) -> None:
+        delegated_tail = RemotePlayerEntryDelegatedTail(
+            primary_text="PrimarySecret",
+            primary_text_trailing_u8=1,
+            nested_texts=("", "NestedSecret", "xy", ""),
+            nested_text_trailing_u8s=(0, 2, 0xFF, 0),
+            nested_u8=7,
+            comparison_i32=-123,
+            datetime_u64=0x0123_4567_89AB_CDEF,
+        )
+        encoded_tail = delegated_tail.to_bytes()
+        reader = PacketReader(
+            encoded_tail, packet_name="test_remote_player_delegated_tail"
+        )
+        self.assertEqual(
+            RemotePlayerEntryDelegatedTail.parse_from(reader), delegated_tail
+        )
+        reader.finish()
+        self.assertEqual(
+            len(encoded_tail),
+            28 + (13 + 12 + 2) * 2,
+        )
+        self.assertEqual(
+            delegated_tail.safe_dict(),
+            {
+                "delegated_tail_typed_layout": True,
+                "delegated_tail_text_fields": 5,
+                "delegated_tail_nonempty_text_fields": 3,
+                "delegated_tail_text_code_units": 27,
+                "delegated_tail_nonzero_text_trailing_u8s": 3,
+                "delegated_tail_nested_u8_nonzero": True,
+                "delegated_tail_comparison_i32_nonzero": True,
+                "delegated_tail_datetime_nonzero": True,
+                "typed_delegated_tail_bytes": len(encoded_tail),
+            },
+        )
+        safe = str(delegated_tail.safe_dict())
+        self.assertNotIn("PrimarySecret", safe)
+        self.assertNotIn("NestedSecret", safe)
+
+        for truncated_length in range(len(encoded_tail)):
+            with self.subTest(truncated_length=truncated_length):
+                truncated_reader = PacketReader(
+                    encoded_tail[:truncated_length],
+                    packet_name="truncated_remote_player_delegated_tail",
+                )
+                with self.assertRaises(PacketShapeError):
+                    RemotePlayerEntryDelegatedTail.parse_from(truncated_reader)
+
+        entered = RemotePlayerEnterField(
+            object_id=302_104,
+            level=12,
+            name="RedactedPlayer",
+            body=replace(
+                fixture_remote_player_entry_body(),
+                opaque_tail=encoded_tail + b"\xaa",
+            ),
+        )
+        parsed = RemotePlayerEnterField.parse(entered.to_bytes())
+        self.assertEqual(parsed.to_bytes(), entered.to_bytes())
+        self.assertEqual(parsed.body.delegated_tail, delegated_tail)
+        self.assertEqual(parsed.body.opaque_tail, b"\xaa")
+        self.assertEqual(
+            parsed.body.safe_dict()["typed_delegated_tail_bytes"],
+            len(encoded_tail),
+        )
+        self.assertEqual(parsed.body.safe_dict()["opaque_tail_bytes"], 1)
+
+        fully_consumed = replace(
+            entered,
+            body=replace(
+                entered.body,
+                delegated_tail=delegated_tail,
+                opaque_tail=b"",
+            ),
+        )
+        self.assertEqual(
+            RemotePlayerEnterField.parse(fully_consumed.to_bytes()),
+            fully_consumed,
+        )
+        with self.assertRaisesRegex(PacketShapeError, "four nested strings"):
+            replace(delegated_tail, nested_texts=("",)).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "u8 is out of range"):
+            replace(delegated_tail, nested_u8=0x100).to_bytes()
+        with self.assertRaisesRegex(PacketShapeError, "scalar is out of range"):
+            replace(delegated_tail, comparison_i32=1 << 40).to_bytes()
 
     def test_remote_player_lifecycle_round_trip_and_redacts_identity(
         self,

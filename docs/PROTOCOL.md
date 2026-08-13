@@ -1001,7 +1001,13 @@ opcode 189:
     bool conditional_continuation
     # Both continuation arms reconverge before this read.
     bool conditional_followup
-    byte[] opaque_tail                 # non-empty runtime-selected suffix
+    if delegated_tail_reader_compatible:
+        PacketUtf16 delegated_primary_text       # redacted
+        PacketUtf16[4] delegated_nested_texts    # redacted
+        uint8 delegated_nested_value
+        int32 delegated_comparison_value
+        uint64 delegated_datetime_wire_value
+    byte[] opaque_tail                 # incompatible or remaining suffix
 
 opcode 190:
     uint16 opcode
@@ -1036,7 +1042,7 @@ beyond those native type boundaries remain deliberately neutral.
 
 Streams `92/114/126` contain `58/4/52` entries and `29/0/10` leaves. All 153
 packets round-trip exactly. Across all 114 entries, the body grammar types
-31,189 bytes and leaves 5,147 bytes explicit. The full bridge is 128 bytes in
+32,981 bytes and leaves 3,355 bytes explicit. The full bridge is 128 bytes in
 112 records and 129 bytes in two stream-`92` records; after its typed 16-byte
 mask, all 112/113 bytes are typed before the appearance.
 The masks contain one nonzero word and seven enabled bits in 112 entries, or
@@ -1060,14 +1066,31 @@ all 24 true-continuation records have a zero follow-up. The codec preserves
 every raw flag and scalar for exact replay while safe output exposes only
 presence/count summaries. At RVA `0x118381e`, the call site loads the player
 object's parser field. The null path throws; the successful non-null path calls
-RVA `0x16ca1d0` at `0x1183857`. That callee starts with a packet-string helper
-at `0x16ca271`, then conditionally dispatches four more packet strings plus
-`u8` and/or an `i32` plus DateTime read from two runtime subobjects. Every
-captured suffix ends in the same 12-byte `i32`-plus-DateTime-shaped sequence,
-but no instruction-resolved nested path yet explains it together with the
-preceding string read. The entire suffix therefore remains opaque.
-Per-stream typed/opaque body accounting is `16,404/3,326`, `1,118/208`, and
-`13,667/1,613`. The
+RVA `0x16ca1d0` at `0x1183857`. The player base constructor allocates this
+outer object, and its constructor allocates both nested records. The callee
+unconditionally reads one packet UTF-16 string, dispatches a required nested
+reader for four more packet strings and one `u8`, then requires the second
+nested record and reads one `i32` plus an eight-byte DateTime wire value. Each
+packet-string helper is `u16 code units + UTF-16LE + u8`; the helper preserves
+the final byte but does not require it to be zero. Null at the outer field or
+either nested record reaches a generated null-reference throw.
+
+That exact downstream grammar has a 28-byte all-empty minimum. It can execute
+without underflow on `30/2/32` entries in streams `92/114/126`, respectively,
+so 64 entries expose a typed delegated record and the other 50 retain their
+entire suffix as an opaque fallback. All five text fields are empty in those
+64 compatible records. The 32 stream-`126` records have zero trailing bytes
+and zero scalar values; the 32 compatible stream-`92`/`114` records each have
+one nonzero string-trailing byte plus nonzero comparison and DateTime wire
+values. Safe output reports only counts and nonzero summaries. It never emits
+the text or scalar values. Because Unity prefab cloning can replace constructor
+defaults and because 50 captured suffixes do not fit the pinned reader, reader
+compatibility is modeled explicitly rather than inferred for every entry.
+Every remaining opaque suffix still ends in the shared 12-byte sequence, but
+that byte shape alone is not promoted. Remaining opaque suffixes are 10..72
+bytes.
+Per-stream typed/opaque body accounting is `17,244/2,486`, `1,174/152`, and
+`14,563/717`. The
 appearance-prefix value is nonzero in 78 entries, and
 the ten post-appearance fields are nonzero 545 times in aggregate. Exactly
 three records exercise a five-code-unit secondary text,
@@ -1096,10 +1119,11 @@ exposes only an alias, level, both string-code-unit counts, appearance entry
 counts, typed/opaque byte counts, mask nonzero-word/enabled-bit counts,
 header/prefix-presence counts,
 post-appearance nonzero-field counts, tail-prefix counts/nonzero summaries,
-conditional-branch presence/count summaries, and position when known. It never
+conditional-branch presence/count summaries, delegated-reader compatibility
+and redacted length/nonzero summaries, and position when known. It never
 emits a captured object id, string, or appearance identifier. The saved active
-custom-server transcript remains valid with four entries, 1,118 typed body
-bytes, and 208 opaque body bytes.
+custom-server transcript remains valid with six entries, 1,780 typed body
+bytes, and 246 opaque body bytes; four entries use the delegated typed layout.
 
 A browser-free live A/B/A then composed the restored player's captured
 entry/control values with the local player's validated movement path. Opcode

@@ -10534,6 +10534,167 @@ def _remote_player_entry_logical_mask_bits(
 
 
 @dataclass(frozen=True)
+class RemotePlayerEntryDelegatedTail:
+    """Native downstream reader reached at the end of opcode 189."""
+
+    primary_text: str = field(repr=False)
+    primary_text_trailing_u8: int
+    nested_texts: tuple[str, str, str, str] = field(repr=False)
+    nested_text_trailing_u8s: tuple[int, int, int, int]
+    nested_u8: int
+    comparison_i32: int = field(repr=False)
+    datetime_u64: int = field(repr=False)
+
+    @classmethod
+    def parse_from(
+        cls, reader: PacketReader
+    ) -> "RemotePlayerEntryDelegatedTail":
+        primary_text = reader.utf16_string(
+            "delegated_tail.primary_text", trailing_byte=False
+        )
+        primary_text_trailing_u8 = reader.u8(
+            "delegated_tail.primary_text.trailing_u8"
+        )
+        nested_texts: list[str] = []
+        nested_text_trailing_u8s: list[int] = []
+        for index in range(4):
+            nested_texts.append(
+                reader.utf16_string(
+                    f"delegated_tail.nested_texts[{index}]",
+                    trailing_byte=False,
+                )
+            )
+            nested_text_trailing_u8s.append(
+                reader.u8(
+                    f"delegated_tail.nested_texts[{index}].trailing_u8"
+                )
+            )
+        record = cls(
+            primary_text=primary_text,
+            primary_text_trailing_u8=primary_text_trailing_u8,
+            nested_texts=tuple(nested_texts),
+            nested_text_trailing_u8s=tuple(nested_text_trailing_u8s),
+            nested_u8=reader.u8("delegated_tail.nested_u8"),
+            comparison_i32=reader.i32("delegated_tail.comparison_i32"),
+            datetime_u64=reader.u64("delegated_tail.datetime_u64"),
+        )
+        record._validate()
+        return record
+
+    @staticmethod
+    def _encoded_packet_string(text: str, trailing_u8: int) -> bytes:
+        try:
+            encoded = text.encode("utf-16-le")
+        except UnicodeEncodeError as error:
+            raise PacketShapeError(
+                "remote-player delegated-tail text is not valid UTF-16"
+            ) from error
+        code_units = len(encoded) // 2
+        if code_units > 0xFFFF:
+            raise PacketShapeError(
+                "remote-player delegated-tail text exceeds u16 length"
+            )
+        try:
+            return (
+                struct.pack("<H", code_units)
+                + encoded
+                + bytes((trailing_u8,))
+            )
+        except ValueError as error:
+            raise PacketShapeError(
+                "remote-player delegated-tail string trailing u8 is out of range"
+            ) from error
+
+    @property
+    def text_code_units(self) -> tuple[int, int, int, int, int]:
+        try:
+            return tuple(
+                len(text.encode("utf-16-le")) // 2
+                for text in (self.primary_text, *self.nested_texts)
+            )
+        except UnicodeEncodeError as error:
+            raise PacketShapeError(
+                "remote-player delegated-tail text is not valid UTF-16"
+            ) from error
+
+    @property
+    def encoded_bytes(self) -> int:
+        return 28 + sum(length * 2 for length in self.text_code_units)
+
+    def _validate(self) -> None:
+        if len(self.nested_texts) != 4:
+            raise PacketShapeError(
+                "remote-player delegated tail must contain four nested strings"
+            )
+        if len(self.nested_text_trailing_u8s) != 4:
+            raise PacketShapeError(
+                "remote-player delegated tail must contain four nested "
+                "string trailing bytes"
+            )
+        for value in (
+            self.primary_text_trailing_u8,
+            *self.nested_text_trailing_u8s,
+            self.nested_u8,
+        ):
+            if not 0 <= value <= 0xFF:
+                raise PacketShapeError(
+                    "remote-player delegated-tail u8 is out of range"
+                )
+
+    def safe_dict(self) -> dict[str, int | bool]:
+        code_units = self.text_code_units
+        return {
+            "delegated_tail_typed_layout": True,
+            "delegated_tail_text_fields": 5,
+            "delegated_tail_nonempty_text_fields": sum(
+                length != 0 for length in code_units
+            ),
+            "delegated_tail_text_code_units": sum(code_units),
+            "delegated_tail_nonzero_text_trailing_u8s": sum(
+                value != 0
+                for value in (
+                    self.primary_text_trailing_u8,
+                    *self.nested_text_trailing_u8s,
+                )
+            ),
+            "delegated_tail_nested_u8_nonzero": bool(self.nested_u8),
+            "delegated_tail_comparison_i32_nonzero": bool(
+                self.comparison_i32
+            ),
+            "delegated_tail_datetime_nonzero": bool(self.datetime_u64),
+            "typed_delegated_tail_bytes": self.encoded_bytes,
+        }
+
+    def to_bytes(self) -> bytes:
+        self._validate()
+        encoded = bytearray(
+            self._encoded_packet_string(
+                self.primary_text, self.primary_text_trailing_u8
+            )
+        )
+        for text, trailing_u8 in zip(
+            self.nested_texts,
+            self.nested_text_trailing_u8s,
+            strict=True,
+        ):
+            encoded.extend(self._encoded_packet_string(text, trailing_u8))
+        try:
+            encoded.extend(
+                struct.pack(
+                    "<BiQ",
+                    self.nested_u8,
+                    self.comparison_i32,
+                    self.datetime_u64,
+                )
+            )
+        except struct.error as error:
+            raise PacketShapeError(
+                f"remote-player delegated-tail scalar is out of range: {error}"
+            ) from error
+        return bytes(encoded)
+
+
+@dataclass(frozen=True)
 class RemotePlayerEntryBody:
     """Capture-bounded typed islands in an opcode-189 player body."""
 
@@ -10557,6 +10718,7 @@ class RemotePlayerEntryBody:
     post_appearance_u16: int
     tail_prefix: RemotePlayerEntryTailPrefix
     conditional_tail_prefix: RemotePlayerEntryConditionalTailPrefix
+    delegated_tail: RemotePlayerEntryDelegatedTail | None
     opaque_tail: bytes = field(repr=False)
 
     @classmethod
@@ -10652,6 +10814,19 @@ class RemotePlayerEntryBody:
         conditional_tail_prefix = (
             RemotePlayerEntryConditionalTailPrefix.parse_from(tail_reader)
         )
+        delegated_tail = None
+        delegated_reader = PacketReader(
+            tail_reader.payload[tail_reader.offset :],
+            packet_name="remote_player_entry_delegated_tail",
+        )
+        try:
+            delegated_tail = RemotePlayerEntryDelegatedTail.parse_from(
+                delegated_reader
+            )
+        except PacketShapeError:
+            pass
+        else:
+            tail_reader.bytes(delegated_reader.offset, "delegated_tail")
         record = cls(
             secondary_text=secondary_text,
             header_u16_1=header_u16_1,
@@ -10673,6 +10848,7 @@ class RemotePlayerEntryBody:
             post_appearance_u16=post_appearance_u16,
             tail_prefix=tail_prefix,
             conditional_tail_prefix=conditional_tail_prefix,
+            delegated_tail=delegated_tail,
             opaque_tail=tail_reader.bytes(
                 tail_reader.remaining, "opaque_tail"
             ),
@@ -10773,10 +10949,12 @@ class RemotePlayerEntryBody:
                 "remote-player entry post-appearance vector must contain "
                 "two i16 values"
             )
-        if not self.opaque_tail:
+        if self.delegated_tail is None and not self.opaque_tail:
             raise PacketShapeError(
                 "remote-player entry post-appearance region cannot be empty"
             )
+        if self.delegated_tail is not None:
+            self.delegated_tail._validate()
         if (
             not self.appearance.visible_entries
             or self.appearance.visible_entries[0].slot != 0
@@ -10799,6 +10977,21 @@ class RemotePlayerEntryBody:
                 "opaque_pre_appearance_bytes": len(
                     self.opaque_pre_appearance
                 ),
+            }
+        )
+        delegated_tail_details = (
+            self.delegated_tail.safe_dict()
+            if self.delegated_tail is not None
+            else {
+                "delegated_tail_typed_layout": False,
+                "delegated_tail_text_fields": 0,
+                "delegated_tail_nonempty_text_fields": 0,
+                "delegated_tail_text_code_units": 0,
+                "delegated_tail_nonzero_text_trailing_u8s": 0,
+                "delegated_tail_nested_u8_nonzero": False,
+                "delegated_tail_comparison_i32_nonzero": False,
+                "delegated_tail_datetime_nonzero": False,
+                "typed_delegated_tail_bytes": 0,
             }
         )
         return {
@@ -10833,6 +11026,7 @@ class RemotePlayerEntryBody:
             ),
             **self.tail_prefix.safe_dict(),
             **self.conditional_tail_prefix.safe_dict(),
+            **delegated_tail_details,
             "typed_body_bytes": self.typed_bytes,
             "opaque_tail_bytes": len(self.opaque_tail),
             "opaque_body_bytes": self.opaque_bytes,
@@ -10896,6 +11090,11 @@ class RemotePlayerEntryBody:
                 post_appearance,
                 self.tail_prefix.to_bytes(),
                 self.conditional_tail_prefix.to_bytes(),
+                (
+                    self.delegated_tail.to_bytes()
+                    if self.delegated_tail is not None
+                    else b""
+                ),
                 bytes(self.opaque_tail),
             )
         )

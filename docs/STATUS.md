@@ -437,20 +437,25 @@
   so all 114 records execute the follow-up read: 111 values are zero and three
   are one; all true-continuation records have a zero follow-up. The runtime
   parser check at RVA `0x118381e` throws on null and reaches the delegated
-  parser at `0x1183857` on the successful path. Every captured suffix ends in
-  the same 12-byte `i32`-plus-DateTime-shaped sequence, but its exact nested
-  read path remains unresolved alongside the delegated parser's preceding
-  packet-string read, so the entire suffix stays opaque.
+  parser at `0x1183857` on the successful path. Constructor and callee recovery
+  prove a required outer packet string, a required nested record with four
+  more packet strings and one `u8`, then a required `i32` plus DateTime record.
+  The 28-byte minimum reader executes without underflow for `30/2/32` entries
+  in streams `92/114/126`; those 64 records are typed and the other 50 remain
+  lossless opaque fallbacks. All five compatible text fields are empty and
+  safe output reports only lengths and nonzero summaries. Every remaining
+  suffix still ends in the shared 12-byte sequence, which remains neutral.
   The masks have `1/2` nonzero words and
   `7/8` enabled bits
-  in `112/2` entries, with raw words redacted. Exact replay types 31,189 body
-  bytes while retaining 5,147 runtime-selected tail bytes. Every
+  in `112/2` entries, with raw words redacted. Exact replay types 32,981 body
+  bytes while retaining 3,355 runtime-selected tail bytes. Every
   leave matches the current
   field epoch, and all opcode-`202`/`217` movement broadcasts reference a prior
   entry. A browser-free direct-Wayland A/B/A live test moved, removed, and
   restored the expected sprite while the folded active count followed
-  `4 -> 3 -> 4`; the active saved transcript still validates with four typed
-  entries, 1,120 typed body bytes, and 206 opaque body bytes.
+  `4 -> 3 -> 4`; the active saved transcript still validates with six entries,
+  four delegated typed layouts, 1,780 typed body bytes, and 246 opaque body
+  bytes.
 - Server opcode `224` is now an exact 22-byte remote-player/mob-template value
   record. All 20 stream-`126` and nine stream-`92` packets round-trip at full
   coverage; every primary id names an active remote player and every template

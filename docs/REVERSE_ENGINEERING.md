@@ -391,13 +391,28 @@ zero and three stream-`92` values are one; every true-continuation record has a
 zero follow-up. The call site loads the player object's parser field at RVA
 `0x118381e`; its null path throws, while the successful non-null path calls
 `e3ad4d05...::ef3213da...` at `0x1183857`. That callee begins with a
-packet-string helper at `0x16ca271`, then checks two runtime subobjects before
-optionally reading four more strings plus a `u8` and an `i32` plus DateTime.
-Every captured suffix ends in the same 12-byte `i32`-plus-DateTime-shaped
-sequence, but the exact nested read path has not been reconciled with the
-preceding string read. The codec therefore stops after the follow-up bool and
-keeps the whole runtime-selected suffix explicitly opaque. Values and text
-remain redacted and semantically neutral.
+packet-string helper at `0x16ca271`. Both later subobject checks are generated
+null guards, not optional wire branches: null reaches
+`il2cpp_codegen_raise_null_reference_exception`. The first required subrecord
+at `+0x18` calls its parser at `0x16c9ea0`, which invokes the same packet-string
+helper four times and then reads one `u8`. The required `+0x20` subrecord then
+reads one `i32` at `0x1cd0760` and one DateTime at `0x1cd09d0`. The player base
+constructor creates the outer `+0x380` object, and that object's constructor
+creates both nested records. The opcode factory clones a Unity prefab, however,
+so serialized state can still replace constructor defaults.
+
+The helper at `0x1cd0ca0` calls the base packet-string reader at `0x1ccffc0`
+and then the `u8` reader at `0x1cca780`. The base reader consumes `u16` code
+units followed by twice that many UTF-16LE bytes; the trailing `u8` is consumed
+without a zero check. The whole delegated record is therefore five packet
+strings, one further `u8`, one `i32`, and one eight-byte DateTime, with a
+28-byte all-empty minimum. Offline execution succeeds without underflow for
+`30/2/32` records in streams `92/114/126`. Those 64 records re-emit exactly;
+the other 50 keep the entire suffix opaque. All five compatible strings are
+empty. Safe output exposes only lengths and nonzero summaries. The remaining
+opaque suffixes still end in the shared 12-byte sequence, but that shape does
+not establish another reader boundary. Values and text remain redacted and
+semantically neutral.
 
 The same short-lived method closed both expanded variable-server records. For
 opcode `385`, the trace read the discriminator bool at framed cursor `6`, then

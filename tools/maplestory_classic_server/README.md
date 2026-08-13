@@ -978,9 +978,10 @@ The gameplay fold currently models these capture-backed boundaries:
   bool-terminated repeated-`i32` loop, three `i32`s, a `u8`, optional text,
   two conditional `i64` pairs, a conditional `u32/u32/i32` group, a
   continuation bool and the follow-up bool read after both arms reconverge,
-  before the remaining runtime-selected opaque region; the later parser's
-  successful path starts with a packet-string helper, and its exact relationship
-  to the common final 12-byte `i32`-plus-DateTime-shaped sequence is unresolved.
+  before a required downstream reader of five packet strings, one `u8`, one
+  `i32`, and one DateTime. Its 28-byte-minimum grammar types 64 compatible
+  records and preserves the complete suffix as opaque for the other 50; any
+  remaining bytes, including the common final 12-byte shape, stay neutral.
   All 114 reference entries round-trip
   losslessly with zero captured loop iterations or nonzero tail variants and a
   completely typed pre-appearance bridge (raw mask words stay redacted), while

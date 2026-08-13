@@ -30,6 +30,7 @@ files are not all part of this task. Never stage the whole tree.
 The pushed sequence immediately preceding this opcode-`189` increment was:
 
 ```text
+1ae38d5 Read opcode 189 follow-up on both branches
 c5dfb17 Restore opcode 189 runtime tail boundary
 3251036 Type opcode 189 direct residual text
 3492af3 Fully type opcode 189 bridge
@@ -178,19 +179,22 @@ object-id removal. Across streams `92`, `114`, and `126`, the corpus contains
 - after variant zero: optional packet UTF-16, two conditional `i64` pairs, a
   conditional `u32/u32/i32` group, a continuation bool, and the follow-up bool
   reached after both continuation arms reconverge;
+- on native-compatible suffixes: five packet UTF-16 values, one further `u8`,
+  one `i32`, and one eight-byte DateTime wire value;
 - the exact opcode-`190` leave record and remote-player lifecycle fold.
 
-The remaining opaque portion is the residual tail after the typed prefixes.
-Across all entries, current accounting measures 31,189 typed body bytes and
-5,147 opaque body bytes. Per stream, the typed/opaque counts are
-`16,404/3,326`, `1,118/208`, and `13,667/1,613` for
+The remaining opaque portion is the incompatible or residual tail after the
+typed prefixes. Across all entries, current accounting measures 32,981 typed
+body bytes and 3,355 opaque body bytes. Per stream, the typed/opaque counts are
+`17,244/2,486`, `1,174/152`, and `14,563/717` for
 streams `92`, `114`, and `126`. The full bridge is 128 bytes in 112 entries and
 129 bytes in two entries. Its 16-byte mask is followed by 112 typed bytes, or
 113 typed bytes when the direct `u8` is present.
 The masks have one nonzero word and seven enabled bits in 112 entries, and two
 nonzero words and eight enabled bits in two entries. Raw words are retained
-only for re-emission and never reported. Residual tail lengths now range from
-12 through 83 bytes. All 114
+only for re-emission and never reported. The pre-delegation suffix lengths are
+12 through 83 bytes; after compatible delegated records are typed, remaining
+opaque suffixes are 10 through 72 bytes. All 114
 terminating bools and final `u8`
 values are zero; none of the captured records enters the repeated-value loop.
 The three-`i32` zero masks are `000 x 74`, `011 x 24`, and `111 x 16`, with `1`
@@ -199,18 +203,19 @@ meaning zero. The next conditional prefix is 6/25/34 bytes in 83/24/7 entries:
 appears 31 times, the numeric group seven times, and continuation is true 24
 times. Both continuation arms converge at RVA `0x1183720` and read a follow-up
 bool at `0x1183725`: all 114 records execute it, with 111 zero values and three
-one values. The 24 true-continuation records all have a zero follow-up. The
-remaining suffix stays opaque. At RVA `0x118381e`, a null runtime parser field
-leads to a throw, while the successful non-null path calls the downstream
-parser at `0x1183857`. Every suffix ends in the same 12 bytes, whose shape
-matches an `i32` plus DateTime, but the exact nested reader path that consumes
-them has not been established alongside the delegated parser's preceding
-packet-string read. These are checked corpus results; their roles remain
-neutral.
+one values. The 24 true-continuation records all have a zero follow-up. At RVA
+`0x118381e`, a null runtime parser field leads to a throw, while the successful
+non-null path calls the downstream parser at `0x1183857`. Constructor and
+callee recovery establish five required packet strings, one `u8`, one `i32`,
+and one DateTime. Its 28-byte minimum executes without underflow on `30/2/32`
+entries in streams `92/114/126`; those 64 records are typed and the other 50
+retain their whole suffix as an opaque fallback. Every remaining suffix ends
+in the same 12 bytes, but the byte shape alone does not establish another
+reader boundary. These are checked corpus results; their roles remain neutral.
 
-This follow-up convergence increment keeps structural coverage at
+This delegated-reader increment keeps structural coverage at
 `35020/187`, `69/7`, and `71047/53` full/partial for streams `92`, `114`, and
-`126`; opcode `189` remains partial. All 333 tracked Python tests, 17 Rust
+`126`; opcode `189` remains partial. All 334 tracked Python tests, 17 Rust
 tests, the pinned-build ignored test, and the private capture-JSONL ignored
 test pass. All three gameplay analyses remain valid; stream `126` retains only
 its known one-HP warning. Focused native-manifest validation consumes all 52
@@ -370,12 +375,13 @@ reads the follow-up bool at `0x1183725`. Deeper control flow consults runtime
 object state before a delegated parser at `0x16ca1d0`. RVA `0x118381e` loads
 the player object's parser field; the null path throws, while the non-null path
 calls the parser at `0x1183857`. The callee begins with a packet-string helper
-at `0x16ca271`, and its two later subrecords are runtime-selected. Every
-captured suffix shares a final 12-byte `i32`-plus-DateTime-shaped sequence, but
-the exact native path consuming it remains unresolved because it must also be
-reconciled with that preceding string read. The implementation therefore
-preserves the entire suffix as opaque bytes and reports only the proven
-structural summaries.
+at `0x16ca271`. Its two later subrecords are required: the first reads four
+more packet strings and one `u8`, and the second reads `i32` plus DateTime.
+The outer player constructor creates the delegated record and its constructor
+creates both nested records, although Unity prefab serialization can replace
+constructor defaults. The implementation types the 64 suffixes that can run
+this exact reader without underflow and preserves all incompatible or remaining
+bytes opaquely. The shared final 12-byte shape is not promoted further.
 
 ## Exact browser-free relaunch and navigation
 
@@ -505,71 +511,47 @@ datetime 0x1cd09d0     u32      0x1cd0b00
 utf16    0x1cd0ca0     string   0x1cd0ce0
 ```
 
-## Implementation plan after the trace
+## Next implementation plan
 
-### 1. Derive the executed grammar
+### 1. Inventory the remaining suffix families
 
-Create a table for every reader call in the exact injected packet:
+The 64 downstream-reader-compatible entries still leave 10/11/33/47/55-byte
+opaque suffixes. The 50 incompatible entries retain complete
+12/24/29/37/51/60/72-byte suffixes. Keep these two categories separate:
+successful execution of the pinned 28-byte reader does not imply that its
+remaining bytes share a grammar with a record that underflows that reader.
 
-```text
-sequence | cursor | plaintext offset | primitive | caller RVA | consumed bytes
-```
+### 2. Resolve version/runtime selection offline
 
-Partition it into existing prefix, bridge parser, appearance parser, known
-post-appearance fields, and remaining tail. Repeat with at least one independent
-variant if a conditional field controls the 128/129-byte bridge or the major
-tail-length families. One 128-byte/68-byte sample is enough to type that exact
-variant, not all 114 packets.
+Continue with native code, metadata, prefab/serialized-field evidence, or an
+independent capture. Do not retry GDB or Frida on this Wine build. Determine
+whether the 50 incompatible records belong to a different protocol writer,
+whether prefab serialization can null or replace `+0x380`, and whether another
+native reader owns the common final 12 bytes. A shared suffix shape is not by
+itself a read boundary.
 
-### 2. Add neutral typed packet structures
+### 3. Promote only another executed boundary
 
-Implement the proven bridge/tail records in
-`tools/maplestory_classic_server/maple_server/packets.py`. Use neutral names for
-unknown-purpose scalars and redact values in `safe_dict()`. Name only structural
-roles established by the reader grammar (flag, count, timestamp wire type,
-counted string, repeated record, etc.). Keep an explicit opaque fallback for
-unproven variants.
+Use neutral structural names, preserve arbitrary packet-string trailing bytes,
+redact all strings and scalar values from `safe_dict()`, and retain the current
+opaque fallback. Do not promote opcode `189` to full coverage until every byte
+of a supported variant is consumed by an exact round-tripping codec.
 
-Do not promote opcode `189` to full coverage merely because a fixed number of
-bytes can be sliced. Full coverage requires that every byte in a supported
-variant be consumed by a structural codec and exactly round-trip.
+### 4. Re-run all independent checks
 
-### 3. Fold only evidence-backed state
+For the next boundary, add exact round trips, truncation checks at every
+variable-width read, redaction assertions, compatible/fallback accounting, and
+any justified fold assertions. Run streams `92`, `114`, and `126`, plus the
+saved active transcript; the short stream alone is not an independent variant
+check.
 
-Update `gameplay.py` only where typed fields establish safe aggregates or real
-remote-player state. Identity-bearing strings and capture-specific scalar
-values must remain absent or redacted from safe JSON. Preserve the current
-remote-player lifecycle semantics unless the new native/capture evidence proves
-an additional state transition.
+### 5. Keep all user-facing protocol surfaces synchronized
 
-### 4. Test every supported boundary
-
-Extend `tests/test_gameplay.py` with:
-
-- exact parse/serialize round trips for the captured bridge/tail variant;
-- conditional/count and truncation failures at every new variable boundary;
-- safe-dictionary redaction checks;
-- full coverage and zero unparsed bytes only for proven variants;
-- partial coverage and correct unparsed accounting for opaque fallbacks;
-- fold assertions for any newly exposed safe aggregate.
-
-Run both reference analyses and the latest local transcript. The long corpus is
-the independent variant check; do not validate only stream `114`.
-
-### 5. Update documentation selectively
-
-Update the opcode-`189` sections in:
-
-- `docs/PROTOCOL.md`;
-- `docs/STATUS.md`;
-- `docs/CUSTOM_SERVER.md`;
-- `docs/REVERSE_ENGINEERING.md` when the live trace changes the method;
-- `tools/maplestory_classic_server/README.md`.
-
-Document the live API preconditions and response without exposing raw packet
-contents. Include exact capture counts, supported variants, fallback behavior,
-coverage totals, native RVAs, and live proof. Clearly separate observed facts,
-native evidence, and inference.
+Update `docs/PROTOCOL.md`, `docs/STATUS.md`, `docs/CUSTOM_SERVER.md`, this file,
+`docs/REVERSE_ENGINEERING.md`, and the custom-server README with exact counts,
+fallback behavior, native RVAs, and the distinction between observed bytes,
+native evidence, and inference. Preserve the HTTP injection preconditions and
+do not expose raw identity-bearing payloads.
 
 ### 6. Run gates, stage narrowly, commit, push, continue
 
