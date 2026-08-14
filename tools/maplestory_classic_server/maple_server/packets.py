@@ -278,9 +278,9 @@ class ServerOpcode0AccountBootstrapProbe:
             raise PacketShapeError(
                 "local account bootstrap probe flags must all be zero"
             )
-        if self.account_name_code_units != 4:
+        if self.account_name_code_units > 0xFFFF:
             raise PacketShapeError(
-                "local account bootstrap probe name must contain four code units"
+                "local account bootstrap probe name must fit the u16 length"
             )
         if self.reserved_suffix != b"\x00" * 16:
             raise PacketShapeError(
@@ -1224,9 +1224,9 @@ class ClientOpcode6RecordSet:
             raise PacketShapeError(
                 "client opcode-6 neutral header values must fit in u32"
             )
-        if self.neutral_header[1] != 0 or self.neutral_header[5] != 0:
+        if self.neutral_header[1] != 0:
             raise PacketShapeError(
-                "client opcode-6 reserved header fields 1 and 5 must be zero"
+                "client opcode-6 reserved header field 1 must be zero"
             )
         record_count = len(self.opaque_entries)
         if record_count > 0x1_0000:
@@ -1249,7 +1249,7 @@ class ClientOpcode6RecordSet:
     def safe_dict(self) -> dict[str, object]:
         return {
             "neutral_header_fields": len(self.neutral_header),
-            "reserved_zero_field_indices": [1, 5],
+            "reserved_zero_field_indices": [1],
             "record_count": len(self.opaque_entries),
             "complete_index_set": True,
             "header_values_redacted": True,

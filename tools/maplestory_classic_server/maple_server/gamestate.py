@@ -997,7 +997,17 @@ class LoginStateFold:
                 details=details,
                 issues=issues,
             )
-        if opcode == 0 and len(payload) == 36:
+        local_probe_shape_candidate = (
+            opcode == 0
+            and len(payload) >= 28
+            and len(payload) % 2 == 0
+            and payload[2] == 0
+            and payload[7:10] == b"\x00" * 3
+            and payload[-16:] == b"\x00" * 16
+            and int.from_bytes(payload[10:12], "little") * 2
+            == len(payload) - 28
+        )
+        if local_probe_shape_candidate:
             probe = ServerOpcode0AccountBootstrapProbe.parse(payload)
             self.state.local_account_bootstrap_probes += 1
             return self._observation(

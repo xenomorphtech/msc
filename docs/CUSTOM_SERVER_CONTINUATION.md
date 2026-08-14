@@ -611,12 +611,17 @@ is valid and warning-free at `active` on map `101000000`, with `310/2`
 full/partial observations, two complete pickup chains across both trials, no
 retries or pending pickup, and `74/74` matched heartbeats. The browser-free
 client completed one matching login handoff and both readiness routes reached
-HTTP `200`; the fresh login transcript reached `handoff_ready` but remains a
-non-gating artifact because one client opcode-`6` shape is invalid and one
-server opcode `0` is unknown. The tracked Python suite is now 355 tests. All 17
-Rust unit tests, both ignored pinned/private gates, and all three capture gates
-pass. The client and exact replay services were stopped, all four proof ports
-are offline, and the host Wine DLL is not mounted.
+HTTP `200`. The fresh login transcript is now a valid, warning-free
+`handoff_ready` gate with `34/6` full/partial observations. Its opcode-`6`
+record proves neutral header field `5` can be `1`, matching an independent
+official login while retaining the same 152-entry complete index set. Its
+42-byte opcode-`0` packet is the documented local diagnostic probe with a
+seven-code-unit redacted name; Python accepts the counted probe grammar and the
+native manifest separately pins the earlier 36-byte and current 42-byte widths.
+The tracked Python suite remains 355 tests. All 17 Rust unit tests, both ignored
+pinned/private gates, and all three capture gates pass. The client and exact
+replay services were stopped, all four proof ports are offline, and the host
+Wine DLL is not mounted.
 
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container

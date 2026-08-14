@@ -216,8 +216,10 @@ count, and repeated `(u16 index, u32 opaque value)` pairs. Stream `83` carries
 299 records while stream `116` and the current live login each carry 152; all
 three lengths satisfy `42 + 6*count`, and every Python-decoded sample has the
 complete unique `0..count-1` index set. Isolated native validation exactly
-consumes both capture records. Header and record values remain redacted and no
-higher-level role is assigned.
+consumes both capture records. Header field `5` is neutral rather than fixed:
+an additional official transcript and the fresh 2026-08-14 login use `1`, while
+the earlier samples use `0`. Header field `1` remains the sole fixed zero. All
+header and record values stay redacted and no higher-level role is assigned.
 Login client opcode `31` replaces its 183-byte observed-opaque pin with one
 variable redacted shape shared by stream `83`, stream `116`, and the current
 live login transcript. All three records have a 20-byte zero prefix, variant
@@ -231,11 +233,11 @@ sole captured fixed variant: redacted 768/74-code-unit text regions around
 captured constants `u32 2, u8 1, u8 1`, with both counted-text trailing bytes
 fixed to zero. The isolated stream-`83` record exact-consumes natively; its text
 contents and higher-level role remain neutral.
-The live-only 36-byte server opcode-`0` shape records the documented local
-account-bootstrap frame patch: result zero, one redacted `u32` id, three zero
-flags, a redacted four-code-unit UTF-16 region, and a 16-byte zero suffix. It is
-kept distinct from a complete account result and exact-consumes in isolated
-native validation.
+The live-only 36- and 42-byte server opcode-`0` shapes record the documented
+local account-bootstrap frame patches: result zero, one redacted `u32` id,
+three zero flags, a redacted four- or seven-code-unit UTF-16 region, and a
+16-byte zero suffix. They stay distinct from a complete account result and are
+pinned as separate exact native widths.
 Legacy login server opcodes `3`, `390`, and `6` add generated-read-backed
 layouts of `u8 + i32 + bool`, `u8`, and trailing-zero counted UTF-16 plus `u8`.
 Client opcodes `255` and `9` add capture-bounded redacted `u32` and

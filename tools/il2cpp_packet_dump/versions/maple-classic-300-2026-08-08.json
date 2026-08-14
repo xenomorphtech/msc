@@ -285,7 +285,7 @@
         {"op":"read","name":"neutral_header_2","kind":"u32"},
         {"op":"read","name":"neutral_header_3","kind":"u32"},
         {"op":"read","name":"neutral_header_4","kind":"u32"},
-        {"op":"read","name":"reserved_header_5","kind":"u32","equals":0},
+        {"op":"read","name":"neutral_header_5","kind":"u32"},
         {"op":"read","name":"neutral_header_6","kind":"u32"},
         {"op":"read","name":"neutral_header_7","kind":"u32"},
         {"op":"read","name":"neutral_header_8","kind":"u32"},
@@ -320,6 +320,21 @@
         {"op":"read","name":"restricted","kind":"u8","equals":0},
         {"op":"read","name":"account_name_code_units","kind":"u16","equals":4},
         {"op":"bytes","name":"account_name_utf16le","length":8},
+        {"op":"bytes","name":"reserved_suffix","length":16,"equals_hex":"00000000000000000000000000000000"}
+      ]
+    },
+    {
+      "name":"server_opcode_0_local_account_bootstrap_probe_7","direction":"server_to_client","opcode":0,"length":42,
+      "source":"packets.py:ServerOpcode0AccountBootstrapProbe; documented local --server-frame-patch and live login transcript 1786666336791880302",
+      "operations":[
+        {"op":"read","name":"opcode","kind":"u16","equals":0},
+        {"op":"read","name":"result","kind":"u8","equals":0},
+        {"op":"read","name":"account_id","kind":"u32"},
+        {"op":"read","name":"gender","kind":"u8","equals":0},
+        {"op":"read","name":"administrator","kind":"u8","equals":0},
+        {"op":"read","name":"restricted","kind":"u8","equals":0},
+        {"op":"read","name":"account_name_code_units","kind":"u16","equals":7},
+        {"op":"bytes","name":"account_name_utf16le","length":14},
         {"op":"bytes","name":"reserved_suffix","length":16,"equals_hex":"00000000000000000000000000000000"}
       ]
     },

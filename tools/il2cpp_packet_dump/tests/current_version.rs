@@ -17,9 +17,9 @@ fn manifest() -> LoadedManifest {
 fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     let loaded = manifest();
     let shapes = loaded.packet_shapes().unwrap();
-    assert_eq!(loaded.manifest.manual_shapes.len(), 150);
+    assert_eq!(loaded.manifest.manual_shapes.len(), 151);
     assert_eq!(loaded.manifest.observed_opaque_shapes.len(), 88);
-    assert_eq!(shapes.len(), 177);
+    assert_eq!(shapes.len(), 178);
 
     let world_session_handoff = shapes
         .iter()
@@ -495,6 +495,14 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_6.opcode, 6);
     assert_eq!(opcode_6.length, None);
     assert_eq!(opcode_6.operations.len(), 12);
+    assert!(matches!(
+        &opcode_6.operations[6],
+        ShapeOp::Read {
+            name,
+            kind: ReadKind::U32,
+            equals: None,
+        } if name == "neutral_header_5"
+    ));
 
     let opcode_22 = shapes
         .iter()
@@ -511,6 +519,15 @@ fn manifest_prefers_semantic_shapes_over_exact_opaque_pins() {
     assert_eq!(opcode_0_probe.opcode, 0);
     assert_eq!(opcode_0_probe.length, Some(36));
     assert_eq!(opcode_0_probe.operations.len(), 9);
+    let opcode_0_probe_7 = shapes
+        .iter()
+        .find(|shape| {
+            shape.name == "server_opcode_0_local_account_bootstrap_probe_7"
+        })
+        .unwrap();
+    assert_eq!(opcode_0_probe_7.opcode, 0);
+    assert_eq!(opcode_0_probe_7.length, Some(42));
+    assert_eq!(opcode_0_probe_7.operations.len(), 9);
 
     for (name, opcode, length, operation_count) in [
         ("login_server_opcode_3_generated_record", 3, Some(8), 4),
@@ -792,7 +809,7 @@ fn pinned_build_has_expected_opcodes_handlers_and_login_reads() {
     assert_eq!(dump.protocol_version, 300);
     assert_eq!(dump.opcode_count, 433);
     assert_eq!(dump.handler_count, 289);
-    assert_eq!(dump.packet_shapes.len(), 177);
+    assert_eq!(dump.packet_shapes.len(), 178);
     assert_eq!(
         dump.handlers
             .iter()

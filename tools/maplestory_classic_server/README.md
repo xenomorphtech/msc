@@ -829,10 +829,11 @@ round-trip timing without exposing response values.
 Client opcode `6` is a shared variable indexed-record grammar across successful
 stream `83`, stream `116`, and the current live login: nine redacted `uint32`
 header fields, a `uint32` count, then that many `(uint16 index, uint32 opaque
-value)` entries. Zero-based header fields `1` and `5` are zero, and every
-sample contains the complete unique index set `0..count-1` in non-sequential
-wire order. Stream `83` has 299 entries/1,836 bytes; the other two each have
-152 entries/954 bytes.
+value)` entries. Zero-based header field `1` is zero, while independently
+observed field `5` values are `0` and `1`; the latter now appears in both an
+official transcript and the fresh 2026-08-14 local login. Every sample contains
+the complete unique index set `0..count-1` in non-sequential wire order. Stream
+`83` has 299 entries/1,836 bytes; the other samples have 152 entries/954 bytes.
 The codec and manifest consume/re-emit the records exactly while safe output
 retains only structural checks and counts. The header/entry values and packet
 role remain neutral.
@@ -872,13 +873,13 @@ constants, and boundaries; safe analysis redacts both text values and keeps the
 higher-level role neutral. Live still has one unknown: its shortened server
 opcode-`0` account record.
 
-That live 36-byte opcode-`0` record is the exact documented local
-`--server-frame-patch` account-bootstrap probe, not a full account result. It
-contains the result/account prefix, three zero flags, a redacted four-code-unit
-name, and a 16-byte zero suffix. The fold reports it as partial and leaves
-authentication to the later complete opcode-`1` response. Python and isolated
-native validation exact-consume the probe, reducing the active live login to
-zero unknown observations.
+That live opcode-`0` record is the documented local `--server-frame-patch`
+account-bootstrap probe, not a full account result. Its result/account prefix,
+three zero flags, counted redacted name, and 16-byte zero suffix are now proven
+at both 36-byte/four-code-unit and 42-byte/seven-code-unit widths. The fold
+reports either as partial and leaves authentication to the later complete
+opcode-`1` response. Python consumes the counted grammar, and the native
+manifest pins both observed local widths without publishing the id or name.
 
 Five legacy stream-`116` residuals now have neutral exact codecs. Server opcode
 `3` consumes generated `uint8 + int32 + bool` reads, opcode `390` consumes one
@@ -2746,3 +2747,9 @@ preserve distinct Unity scan codes in this setup.
     retain manual serving only when no responder exists. Prove the default path
     with an official client, one base opcode-`185` request, one
     `[39,49,312]` response, and Etc slot `7` `75 -> 76`.
+123. Validate the paired fresh login by removing two over-strong local grammar
+    constraints: accept capture-proven opcode-`6` neutral header field `5` at
+    both `0` and `1`, and parse the documented local opcode-`0` diagnostic with
+    its counted four- or seven-code-unit redacted name. Preserve field `1` as
+    the sole fixed-zero opcode-`6` header and keep both diagnostic widths
+    distinct from account authentication.

@@ -2026,11 +2026,15 @@ or pending pickup, and stack quantity `76`. It is valid and warning-free at
 matched heartbeats:
 `downloads/maple_custom_server_observed/item_pickup_reactive_live_20260814/world/1786666529067390236_replay_12857.jsonl`.
 The browser-free client completed a matching login handoff and both readiness
-routes reached HTTP `200` before the pickup proof. Its new login payload also
-contained an unsupported opcode-`6` shape and an unknown opcode `0`, so the
-paired login transcript is retained as `handoff_ready` evidence rather than a
-new valid grammar gate; the already-pinned valid `34/6` login proof remains the
-login regression reference.
+routes reached HTTP `200` before the pickup proof. The paired login transcript
+is now itself a valid, warning-free `handoff_ready` gate at `34/6` full/partial
+observations. Its 954-byte opcode-`6` record preserves the shared nine-header/
+152-entry grammar and complete index set, while independently confirming that
+neutral header field `5` can be `1`; only field `1` remains fixed zero. Its
+42-byte opcode-`0` packet is the same documented local diagnostic probe with a
+seven-code-unit redacted name instead of the earlier four-code-unit width.
+Neither the probe nor safe opcode-`6` output exposes retained values, and the
+probe still does not authenticate the account.
 
 The decisive fresh proof is recorded in
 `downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786477769036931470_replay_12857.jsonl`;
@@ -2962,11 +2966,12 @@ project's own `README.md` for all options.
   around constants `2/1/1`. Python and the native manifest exact-consume it,
   while safe state reports only widths/constants. Successful stream `83` now
   has zero unknown packets; live retains only its shortened account opcode `0`.
-- The live-only 36-byte opcode-`0` record is now explicitly modeled as the
-  documented local account-bootstrap probe, not a complete account result. Its
-  id/name remain redacted, its 16-byte suffix is fixed to zero, and it does not
-  authenticate state before the later full opcode-`1` response. The active live
-  login now also has zero unknown observations.
+- The live-only 36- and 42-byte opcode-`0` records are explicitly modeled as
+  documented local account-bootstrap probes, not complete account results.
+  Their ids/names remain redacted, their 16-byte suffixes are fixed to zero,
+  and neither authenticates state before the later full opcode-`1` response.
+  Python keeps the counted four-/seven-code-unit grammar, and the native
+  manifest pins both observed local widths.
 - Five of legacy stream `116`'s nine residuals now have exact neutral layouts:
   generated reads bound server opcodes `3`, `390`, and `6`, while capture bounds
   client opcodes `255` and `9`. The server opcode-`6` text exactly echoes the

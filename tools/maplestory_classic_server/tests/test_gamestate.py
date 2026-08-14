@@ -420,24 +420,37 @@ class PacketShapeTest(unittest.TestCase):
         self.assertNotIn("private", str(safe))
 
     def test_local_account_bootstrap_probe_round_trip_and_redact(self) -> None:
-        probe = ServerOpcode0AccountBootstrapProbe(
-            account_id=0xDEAD_BEEF,
-            account_name="test",
-        )
+        for account_name in ("test", "seventh"):
+            with self.subTest(account_name_code_units=len(account_name)):
+                probe = ServerOpcode0AccountBootstrapProbe(
+                    account_id=0xDEAD_BEEF,
+                    account_name=account_name,
+                )
 
-        parsed = ServerOpcode0AccountBootstrapProbe.parse(probe.to_bytes())
+                parsed = ServerOpcode0AccountBootstrapProbe.parse(
+                    probe.to_bytes()
+                )
 
-        self.assertEqual(parsed, probe)
-        self.assertEqual(len(parsed.to_bytes()), 36)
-        self.assertEqual(parsed.safe_dict()["account_name_code_units"], 4)
-        self.assertFalse(parsed.safe_dict()["account_authenticated"])
-        self.assertNotIn(str(0xDEAD_BEEF), str(parsed.safe_dict()))
-        self.assertNotIn("test", str(parsed.safe_dict()))
+                self.assertEqual(parsed, probe)
+                self.assertEqual(
+                    len(parsed.to_bytes()), 28 + len(account_name) * 2
+                )
+                self.assertEqual(
+                    parsed.safe_dict()["account_name_code_units"],
+                    len(account_name),
+                )
+                self.assertFalse(
+                    parsed.safe_dict()["account_authenticated"]
+                )
+                self.assertNotIn(
+                    str(0xDEAD_BEEF), str(parsed.safe_dict())
+                )
+                self.assertNotIn(account_name, str(parsed.safe_dict()))
 
-        with self.assertRaisesRegex(PacketShapeError, "four code units"):
+        with self.assertRaisesRegex(PacketShapeError, "u16 length"):
             ServerOpcode0AccountBootstrapProbe(
                 account_id=1,
-                account_name="short",
+                account_name="x" * 0x1_0000,
             ).to_bytes()
         with self.assertRaisesRegex(PacketShapeError, "16 zero bytes"):
             ServerOpcode0AccountBootstrapProbe(
@@ -532,7 +545,7 @@ class PacketShapeTest(unittest.TestCase):
         self,
     ) -> None:
         record_set = ClientOpcode6RecordSet(
-            neutral_header=(2, 0, 1, 3, 42, 0, 7, 9, 11),
+            neutral_header=(2, 0, 1, 3, 42, 1, 7, 9, 11),
             opaque_entries=(
                 (2, 0xDEAD_BEEF),
                 (0, 0x1234_5678),
@@ -546,13 +559,13 @@ class PacketShapeTest(unittest.TestCase):
         self.assertEqual(parsed, record_set)
         self.assertEqual(parsed.safe_dict()["record_count"], 3)
         self.assertEqual(
-            parsed.safe_dict()["reserved_zero_field_indices"], [1, 5]
+            parsed.safe_dict()["reserved_zero_field_indices"], [1]
         )
         self.assertNotIn(str(0xDEAD_BEEF), str(parsed.safe_dict()))
         self.assertNotIn(str(0x1234_5678), str(parsed.safe_dict()))
         with self.assertRaisesRegex(PacketShapeError, "complete unique range"):
             ClientOpcode6RecordSet(
-                neutral_header=(2, 0, 1, 3, 42, 0, 7, 9, 11),
+                neutral_header=(2, 0, 1, 3, 42, 1, 7, 9, 11),
                 opaque_entries=((0, 1), (0, 2)),
             ).to_bytes()
 
@@ -747,7 +760,7 @@ class GameStateFoldTest(unittest.TestCase):
     def test_folds_local_account_bootstrap_probe_without_authentication(self) -> None:
         probe = ServerOpcode0AccountBootstrapProbe(
             account_id=0xDEAD_BEEF,
-            account_name="test",
+            account_name="seventh",
         )
         analysis = analyze_login_transcript(
             fixture_login_transcript(local_account_bootstrap_probe=probe)
@@ -983,7 +996,7 @@ class GameStateFoldTest(unittest.TestCase):
             )
         )
         record_set = ClientOpcode6RecordSet(
-            neutral_header=(2, 0, 1, 3, 42, 0, 7, 9, 11),
+            neutral_header=(2, 0, 1, 3, 42, 1, 7, 9, 11),
             opaque_entries=(
                 (2, 0xDEAD_BEEF),
                 (0, 0x1234_5678),

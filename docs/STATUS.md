@@ -1577,13 +1577,14 @@ client inventory was then only its opcode-`6` record.
 
 Login opcode `6` is now structurally bounded as nine redacted `uint32` header
 fields, a `uint32` record count, and repeated `(uint16 index, uint32 opaque
-value)` entries. Zero-based fields `1` and `5` of the header are zero in all
-three samples. Stream `83` has 299 entries/1,836 bytes; stream `116` and the
-current live login each have 152 entries/954 bytes. Every sample contains the
-complete unique index set `0..count-1`, in non-sequential wire order, and
-round-trips exactly. Safe analysis retains only structural counts/checks, so
-the current live login now has zero unknown client packets without exposing header or
-record values or assigning a higher-level role.
+value)` entries. Zero-based field `1` is zero in every sample. Field `5` is
+neutral: the original references/local log use `0`, while an independent
+official transcript and the fresh 2026-08-14 local login use `1`. Stream `83`
+has 299 entries/1,836 bytes; the other samples have 152 entries/954 bytes. Every
+sample contains the complete unique index set `0..count-1`, in non-sequential
+wire order, and round-trips exactly. Safe analysis retains only structural
+counts/checks without exposing header or record values or assigning a
+higher-level role.
 
 The login fold now also reuses the existing exact server opcode-`27` integer/
 text-ledger and opcode-`28` paired-text-ledger codecs. Stream `83` contributes
@@ -1619,14 +1620,14 @@ validation consumes it exactly. Successful reference stream `83` therefore
 has zero unknown login packets; the live login's shortened server opcode `0`
 account record is the only remaining unknown in the active transcript.
 
-The active live transcript's final unknown is now classified as the exact
-documented local opcode-`0` account-bootstrap probe, not as a production account
-result. Its 36 bytes contain a result/account prefix, a redacted four-code-unit
-name, and a 16-byte zero suffix. The fold keeps it partial and explicitly does
-not authenticate from it; the later full opcode-`1` record still does. Python
-round-trips the probe and isolated native validation exact-consumes it. The
-successful stream-`83` reference and active live login now both have zero
-unknown packet observations.
+The active live transcript's final unknown is classified as the documented
+local opcode-`0` account-bootstrap probe, not as a production account result.
+Its counted grammar is now exercised at 36 bytes/four name code units and 42
+bytes/seven name code units: result/account prefix, three zero flags, redacted
+name, and a 16-byte zero suffix. The fold keeps both partial and explicitly does
+not authenticate from either; the later full opcode-`1` record still does.
+Python round-trips the variable counted form, and isolated native shapes pin
+both observed widths.
 
 Legacy stream `116` now exact-decodes five of its nine residuals without naming
 their higher-level roles. Generated reads bound server opcode `3` to
@@ -1703,10 +1704,12 @@ the responder.
 The finalized world artifact is valid and warning-free at `active` on map
 `101000000`: `310/2` full/partial observations, two independent complete item
 pickup chains, no retries or pending pickup, final stack quantity `76`, and
-`74/74` matched heartbeats. The fresh login artifact reached `handoff_ready`
-but is non-gating because one new client opcode-`6` shape is invalid and one
-server opcode `0` is unknown; the previously pinned valid `34/6` login remains
-the regression gate. The fresh client and exact replay services were stopped,
+`74/74` matched heartbeats. The fresh login artifact is now also valid and
+warning-free at `handoff_ready`, with `34/6` full/partial observations. Its
+opcode-`6` record independently proves neutral header field `5 = 1` while
+retaining the complete 152-entry index set, and its 42-byte opcode-`0` local
+probe proves the seven-code-unit variant without authenticating from that
+diagnostic prefix. The fresh client and exact replay services were stopped,
 their four ports are offline, and the host Wine DLL is not mounted.
 
 ## Immediate next steps

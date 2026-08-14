@@ -65,7 +65,7 @@ the main blocker is obsolete.
 
 ```text
 server 0   bootstrap/login prelude
-server 0   local 36-byte diagnostic account-prefix probe
+server 0   local 36/42-byte diagnostic account-prefix probes
 server 3   redacted u8/i32/bool record
 server 6   redacted trailing-zero UTF-16 plus uint8 record
 server 7   successful character-creation snapshot and compact appearance
@@ -104,13 +104,16 @@ plaintext `0d0000`. That is enough for the client to continue into the login
 controller. It is a local-server behavior, not a claim that the official NGS
 proof has been reproduced.
 
-The current local replay also begins with an explicitly patched 36-byte server
-opcode-`0` diagnostic. It is not a complete `AccountLoginResponse`: it contains
-result `0`, a redacted `uint32` account id, three zero account flags, one
-redacted four-code-unit UTF-16 name, and a 16-byte zero suffix. The fold records
-it as a partial local bootstrap probe and does not authenticate the account from
-it; the later full opcode-`1` account result performs that transition. This
-exact live-only shape consumes natively without publishing the id or name.
+The current local replay begins with an explicitly patched server opcode-`0`
+diagnostic. It is not a complete `AccountLoginResponse`: it contains result `0`,
+a redacted `uint32` account id, three zero account flags, a counted redacted
+UTF-16 name, and a 16-byte zero suffix. Two local runs exercise four- and
+seven-code-unit names, producing exact widths `36` and `42`. The Python codec
+retains the counted boundary, while the native manifest pins both observed
+widths. The fold records either as a partial local bootstrap probe and does not
+authenticate the account from it; the later full opcode-`1` account result
+performs that transition. These are documented custom-server frame patches,
+not claims about an official opcode-`0` account result.
 
 Five legacy stream-`116` records now have neutral, exact boundaries. Generated
 server handlers read opcode `3` as `uint8 + int32 + bool`, opcode `390` as one
@@ -151,7 +154,7 @@ boundary across stream `83`, stream `116`, and the current live login:
 
 ```text
 uint16 opcode = 6
-uint32 neutral_header[9]            # redacted; zero-based fields 1 and 5 = 0
+uint32 neutral_header[9]            # redacted; zero-based field 1 = 0
 uint32 record_count
 repeat record_count:
     uint16 record_index             # complete unique set 0..count-1
@@ -159,12 +162,14 @@ repeat record_count:
 ```
 
 The total width is therefore `42 + 6 * record_count`. Stream `83` carries 299
-records in 1,836 bytes; stream `116` and the current live login each carry 152
-records in 954 bytes. All three contain every index exactly once, although
-their wire order is not sequential. Safe output exposes only the fixed header
-width, common zero-field indices, record count, complete-index check, and
-aggregate counts. Header and record values—and the higher-level role of the
-set—remain neutral.
+records in 1,836 bytes; stream `116` and the local logins carry 152 records in
+954 bytes. All contain every index exactly once, although their wire order is
+not sequential. An additional independent official transcript and the fresh
+2026-08-14 login both set zero-based header field `5` to `1`, disproving the
+earlier all-zero constraint; field `1` remains zero in every observed sample.
+Safe output exposes only the fixed header width, common zero-field indices,
+record count, complete-index check, and aggregate counts. Header and record
+values—and the higher-level role of the set—remain neutral.
 
 The sole captured client opcode-`274` packet is a fixed 1,698-byte redacted
 variant at the start of stream `83`: a 768-code-unit trailing-zero UTF-16
