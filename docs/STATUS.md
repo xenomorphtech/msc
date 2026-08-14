@@ -1564,6 +1564,13 @@ is false. `1-10FS.pcapng` port `12324` has 40,828 payload-bearing rows across
 607 streams; only decoded login stream `116` carries opcode `4`, the known
 18-byte empty list. Counts greater than one and `ranking_present = true` remain
 unobserved and require a new successful-account capture before promotion.
+The new identifier-free `audit-login-pcap` command reproduces this in one
+`tshark` pass per port and exposes only stream/frame indices, packet length,
+result/count, ranking booleans, and round-trip status. Its positive
+`--require-character-list` gate passes both captures; the
+`--require-ranked-or-multi-character` gate exits `2` as intended. Incomplete
+one-direction streams are now counted as bounded reconstruction failures rather
+than raising an internal `IndexError`. The tracked suite passes all 360 tests.
 
 Login opcode `23` is no longer an unknown packet boundary. The existing exact
 codec consumes its fixed eight-byte opaque token, while the login fold now

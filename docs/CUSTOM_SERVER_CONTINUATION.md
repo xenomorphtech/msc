@@ -637,6 +637,34 @@ synthesize or promote those branches from the existing corpus; the next login
 variant gate requires a fresh successful account with at least two characters
 or one character whose ranking flag is true.
 
+That audit is now a reusable, identifier-free CLI surface rather than an ad hoc
+script:
+
+```sh
+cd /home/sdancer/ms/tools/maplestory_classic_server
+python -m maple_server audit-login-pcap \
+  --pcap /home/sdancer/ms/111.pcapng \
+  --server-port 10282 \
+  --require-character-list \
+  --json
+python -m maple_server audit-login-pcap \
+  --pcap /home/sdancer/ms/1-10FS.pcapng \
+  --server-port 12324 \
+  --require-character-list \
+  --json
+```
+
+The command extracts every payload-bearing stream in one `tshark` pass,
+reconstructs bounded Maple greetings, attempts the current encrypted-frame
+decode, and parses only server opcode `4`. Its output contains stream/frame
+indices, plaintext length, result, record count, ranking booleans, and exact
+round-trip status, never character names, ids, or packet bytes.
+`--require-character-list` exits `2` when no typed list is found;
+`--require-ranked-or-multi-character` exits `2` until the missing branch is
+actually observed. Empty one-direction streams now produce a counted
+`PcapError` instead of an internal `IndexError` during endpoint probing.
+The tracked custom-server suite now passes all 360 tests.
+
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container
 whose PID matches the new `Maplestory_Classic.exe`; do not use hard-coded

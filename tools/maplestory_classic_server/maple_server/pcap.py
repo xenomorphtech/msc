@@ -74,6 +74,40 @@ def parse_tshark_tcp_segments(output: str) -> tuple[TcpSegment, ...]:
     return tuple(segments)
 
 
+def parse_tshark_tcp_stream_groups(
+    output: str,
+) -> tuple[tuple[int, tuple[TcpSegment, ...]], ...]:
+    grouped_rows: dict[int, list[str]] = {}
+    for line_number, line in enumerate(output.splitlines(), start=1):
+        if not line:
+            continue
+        fields = line.split("\t")
+        if len(fields) != 8:
+            raise PcapError(
+                f"tshark row {line_number} has {len(fields)} fields, expected 8"
+            )
+        try:
+            tcp_stream = int(fields[0])
+        except ValueError as error:
+            raise PcapError(
+                f"invalid TCP stream index on tshark row {line_number}: {fields[0]}"
+            ) from error
+        if tcp_stream < 0:
+            raise PcapError(
+                f"negative TCP stream index on tshark row {line_number}: {tcp_stream}"
+            )
+        grouped_rows.setdefault(tcp_stream, []).append("\t".join(fields[1:]))
+    if not grouped_rows:
+        raise PcapError("tshark returned no TCP payload streams")
+    return tuple(
+        (
+            tcp_stream,
+            parse_tshark_tcp_segments("\n".join(rows)),
+        )
+        for tcp_stream, rows in sorted(grouped_rows.items())
+    )
+
+
 def read_pcap_tcp_segments(
     path: str | Path, tcp_stream: int, *, tshark: str = "tshark"
 ) -> tuple[TcpSegment, ...]:
@@ -131,7 +165,73 @@ def read_pcap_tcp_segments(
     return parse_tshark_tcp_segments(completed.stdout)
 
 
+def read_pcap_tcp_stream_groups(
+    path: str | Path,
+    server_port: int,
+    *,
+    tshark: str = "tshark",
+) -> tuple[tuple[int, tuple[TcpSegment, ...]], ...]:
+    capture_path = Path(path)
+    if not capture_path.is_file():
+        raise PcapError(f"pcap does not exist: {capture_path}")
+    if not 1 <= server_port <= 0xFFFF:
+        raise PcapError(f"server port is out of range: {server_port}")
+    command = [
+        tshark,
+        "-n",
+        "-r",
+        str(capture_path),
+        "-Y",
+        f"tcp.port == {server_port} && tcp.len > 0",
+        "-T",
+        "fields",
+        "-E",
+        "separator=/t",
+        "-E",
+        "quote=n",
+        "-E",
+        "occurrence=f",
+        "-e",
+        "tcp.stream",
+        "-e",
+        "frame.time_epoch",
+        "-e",
+        "ip.src",
+        "-e",
+        "tcp.srcport",
+        "-e",
+        "ip.dst",
+        "-e",
+        "tcp.dstport",
+        "-e",
+        "tcp.seq",
+        "-e",
+        "tcp.payload",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except FileNotFoundError as error:
+        raise PcapError(f"tshark executable was not found: {tshark}") from error
+    except subprocess.TimeoutExpired as error:
+        raise PcapError("tshark timed out after 180 seconds") from error
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip().splitlines()
+        suffix = f": {detail[-1]}" if detail else ""
+        raise PcapError(
+            f"tshark failed with exit code {error.returncode}{suffix}"
+        ) from error
+    return parse_tshark_tcp_stream_groups(completed.stdout)
+
+
 def _assemble_source_stream(segments: tuple[TcpSegment, ...]) -> bytes:
+    if not segments:
+        raise PcapError("cannot assemble an empty TCP source stream")
     ordered = sorted(segments, key=lambda item: (item.sequence, -len(item.payload)))
     cursor = ordered[0].sequence
     assembled = bytearray()

@@ -545,6 +545,15 @@ record count is zero. The observed record counts are therefore only `0` and
 branch executed by either capture; a ranked or multi-character successful
 login is still required to validate it independently.
 
+The exhaustive check is reproducible with the identifier-free
+`audit-login-pcap --pcap PATH --server-port PORT` command. It runs one `tshark`
+extraction for the port, groups every payload-bearing `tcp.stream`, counts
+bounded greeting and complete-decode outcomes, and reports only opcode-`4`
+stream/frame indices, lengths, result/count values, ranking booleans, and exact
+round-trip status. `--require-character-list` gates a usable reference;
+`--require-ranked-or-multi-character` deliberately exits `2` for both current
+captures.
+
 The stat snapshot reuses the typed world-entry prefix: character id, data
 flags, UTF-16 name, gender/skin/face/hair, companion id, level/job, four base
 stats, HP/MP, AP/SP, EXP, fame, map/portal, and two neutral state fields. The

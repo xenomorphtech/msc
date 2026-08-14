@@ -83,6 +83,7 @@ from .live_replay import (
     render_mob_temporary_stat_live_replay,
     render_skill_record_live_replay,
 )
+from .login_audit import audit_login_pcap, render_login_pcap_audit
 from .packets import (
     ChannelTransitionResponse,
     CharacterListEnvelope,
@@ -4800,6 +4801,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="exit with status 2 if a shape or state invariant is invalid",
     )
 
+    login_audit_parser = subparsers.add_parser(
+        "audit-login-pcap",
+        help=(
+            "scan every TCP stream on one port and report identifier-free "
+            "character-list variants"
+        ),
+    )
+    login_audit_parser.add_argument("--pcap", required=True, type=Path)
+    login_audit_parser.add_argument(
+        "--server-port",
+        required=True,
+        type=int,
+        help="TCP port whose payload-bearing streams should be audited",
+    )
+    login_audit_parser.add_argument(
+        "--tshark", default="tshark", help="tshark executable used for pcap input"
+    )
+    login_audit_parser.add_argument("--json", action="store_true")
+    login_audit_parser.add_argument(
+        "--require-character-list",
+        action="store_true",
+        help="exit with status 2 unless at least one typed opcode-4 list is found",
+    )
+    login_audit_parser.add_argument(
+        "--require-ranked-or-multi-character",
+        action="store_true",
+        help=(
+            "exit with status 2 unless a typed list has ranking_present=true "
+            "or more than one character"
+        ),
+    )
+
     gameplay_parser = subparsers.add_parser(
         "analyze-gameplay",
         help=(
@@ -6353,6 +6386,31 @@ def main() -> None:
             )
         else:
             print(render_mob_temporary_stat_live_replay(result))
+        return
+    if arguments.command == "audit-login-pcap":
+        audit = audit_login_pcap(
+            arguments.pcap,
+            arguments.server_port,
+            tshark=arguments.tshark,
+        )
+        if arguments.json:
+            print(
+                json.dumps(
+                    audit.safe_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(render_login_pcap_audit(audit))
+        if arguments.require_character_list and not audit.character_lists:
+            raise SystemExit(2)
+        if (
+            arguments.require_ranked_or_multi_character
+            and not audit.has_ranked_or_multi_character_variant
+        ):
+            raise SystemExit(2)
         return
     if arguments.command in {"analyze-login", "analyze-gameplay"}:
         if arguments.pcap is not None:

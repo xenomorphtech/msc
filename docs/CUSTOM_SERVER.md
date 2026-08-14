@@ -2931,6 +2931,10 @@ project's own `README.md` for all options.
   `ranking_present = false`. A fresh ranked or multi-character successful
   login is required before treating the optional four-`int32` body or repeated
   record loop as independently capture-validated.
+- `audit-login-pcap --pcap PATH --server-port PORT` now reproduces that
+  all-stream audit in one `tshark` pass without identifiers or payload bytes.
+  `--require-character-list` gates a usable login reference, while
+  `--require-ranked-or-multi-character` exits `2` for the current corpus.
 - Login heartbeat traffic now shares the exact world codecs and is folded as
   empty server opcode-`10` probes plus ten-byte client opcode-`23` responses.
   Stream `83` has one match, stream `116` has four probes/three matches/one

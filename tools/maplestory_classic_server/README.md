@@ -819,6 +819,22 @@ The supplied captures execute only record counts `0` and `1`; the one record's
 ranking flag is false. The optional ranking body and a multi-record list still
 require a fresh successful-login capture before independent validation.
 
+Audit every payload-bearing stream on a known login port in one `tshark` pass:
+
+```sh
+python -m maple_server audit-login-pcap \
+  --pcap /path/to/reference.pcapng \
+  --server-port 10282 \
+  --require-character-list \
+  --json
+```
+
+The report is identifier-free and includes only extraction/reconstruction
+counts plus typed opcode-`4` stream/frame indices, lengths, result/count,
+ranking booleans, and exact round-trip status. Add
+`--require-ranked-or-multi-character` to exit with status `2` until a list with
+more than one record or a true ranking flag is observed.
+
 Opcode-`13`
 acknowledgments and client status messages are fully decoded; other
 length-prefixed type-`6`/type-`7` envelopes are structurally bounded and
