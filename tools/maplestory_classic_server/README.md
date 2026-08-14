@@ -625,9 +625,17 @@ movement command's `final_x/final_y`. It retains the folded trailer endpoint
 in the report and uses it only as a fallback when no same-epoch movement
 observation is available. The command preserves the animated-source offset and
 capture timing, allocates collision-free runtime ids, sends physical pickup
-input, and waits for an authentic opcode `185` or `222`. Only then does it emit
-`[39,49,312]` and verify the inventory, effect, result, removal, field, player,
-and progression invariants. A timeout sends a reason-`1` cleanup.
+input, and waits for an authentic opcode `185` or `222`. Its default
+`--response-mode auto` reads identifier-free `GET /api/v1/status` before
+admission. When the replay's reactive responder is enabled, the command posts
+only `[311,311,281]`; the held-open server emits the single `[39,49,312]`
+response chain and the command requires exact served-request/response-packet
+deltas of `1/3`. Without a responder, `auto` retains the manual post-request
+fallback. `--response-mode reactive` requires the responder, while
+`--response-mode manual` is rejected when the responder is present so the two
+paths cannot race. The result reports the selected response source and verifies
+the inventory, effect, result, removal, field, player, and progression
+invariants. A timeout sends a reason-`1` cleanup.
 
 ```sh
 sudo ip netns exec mapleproxy sudo -u sdancer env \
@@ -653,6 +661,17 @@ received authentic opcode `185` after 1,572.761 ms at request position
 `(633,-2694)`, and completed Etc slot `7` `74 -> 75`. The earlier suspected
 pickup-readiness transition was therefore a coordinate-source bug, not hidden
 client state.
+
+A fresh browser-free 2026-08-14 run exercised the default `auto` path against
+an enabled reactive responder. The clean command injected only
+`[311,311,281]`, observed the official client's base opcode `185`, reported
+`response_source=reactive_item_pickup_policy`, and verified one served request,
+three response packets, and Etc slot `7` `75 -> 76`. Across the two independent
+trials in the saved world transcript, the stack advanced `74 -> 76` through two
+complete request/effect/result/removal chains with no retries or pending pickup.
+The final fold is valid and warning-free at `active` on map `101000000`, with
+`310/2` full/partial observations and `74/74` matched heartbeats:
+`downloads/maple_custom_server_observed/item_pickup_reactive_live_20260814/world/1786666529067390236_replay_12857.jsonl`.
 
 PCAP references support `?character-stat=FIELD:VALUE` for a packet's sole
 captured stat and
@@ -2721,3 +2740,9 @@ preserve distinct Unity scan codes in this setup.
     deterministic trailing/notice shapes, and prove base/compact codecs, fold
     completion, encrypted hold-open serving, identifier-free telemetry, and
     both reference-capture evidence sets.
+122. Remove the live item injector's manual/reactive response race. Default to
+    runtime auto-detection, post only `[311,311,281]` when the reactive policy
+    is enabled, require exact `1/3` served-request/response-packet deltas, and
+    retain manual serving only when no responder exists. Prove the default path
+    with an official client, one base opcode-`185` request, one
+    `[39,49,312]` response, and Etc slot `7` `75 -> 76`.

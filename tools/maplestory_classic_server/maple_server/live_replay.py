@@ -188,6 +188,9 @@ class ItemPickupLiveReplayResult:
     api_responses: tuple[dict[str, object], ...]
     observed_packets: tuple[dict[str, object], ...]
     request_attempts: int
+    response_source: str
+    requests_served_delta: int | None
+    response_packets_sent_delta: int | None
     polls: int
     pickup_key: str
     pickup_input_delay_seconds: float
@@ -206,12 +209,18 @@ class ItemPickupLiveReplayResult:
                     self.pickup_input_delay_seconds * 1000.0, 3
                 ),
                 "request_attempts": self.request_attempts,
+                "response_source": self.response_source,
+                "requests_served_delta": self.requests_served_delta,
+                "response_packets_sent_delta": (
+                    self.response_packets_sent_delta
+                ),
                 "observed_packets": list(self.observed_packets),
                 "checks": {
                     "latest_player_position_used": True,
                     "animated_pair_observed": True,
                     "controller_release_observed": True,
                     "authentic_client_request_observed": True,
+                    "single_response_chain": True,
                     "inventory_effect_matched": True,
                     "gain_result_matched": True,
                     "drop_removal_matched": True,
@@ -2291,6 +2300,7 @@ def inject_item_pickup_live(
     api_url: str = DEFAULT_PACKET_API_URL,
     api_timeout_seconds: float = 5.0,
     verify_timeout_seconds: float = 10.0,
+    response_mode: str = "auto",
 ) -> ItemPickupLiveReplayResult:
     """Inject, admit, serve, and verify one proximity-correct item pickup."""
     for name, value in (
@@ -2304,10 +2314,47 @@ def inject_item_pickup_live(
         or pickup_input_delay_seconds < 0
     ):
         raise ValueError("pickup input delay must be non-negative")
+    if response_mode not in {"auto", "reactive", "manual"}:
+        raise ValueError(
+            "item-pickup response mode must be auto, reactive, or manual"
+        )
     validate_packet_api_url(api_url)
     runtime_directory = wayland_runtime_directory or Path(
         f"/run/user/{os.getuid()}"
     )
+    baseline_status = _get_runtime_status(
+        api_url,
+        timeout_seconds=api_timeout_seconds,
+    )
+    protocol = baseline_status.get("protocol")
+    runtime_metrics = (
+        protocol.get("item_pickup_responses")
+        if isinstance(protocol, dict)
+        else None
+    )
+    baseline_metrics: dict[str, object] | None = None
+    baseline_requests_served: int | None = None
+    baseline_response_packets: int | None = None
+    if isinstance(runtime_metrics, dict):
+        if response_mode == "manual":
+            raise RuntimeError(
+                "manual item-pickup responses are unavailable while the "
+                "reactive responder is enabled"
+            )
+        baseline_metrics, _ = _item_pickup_runtime_metrics(baseline_status)
+        baseline_requests_served = baseline_metrics.get("requests_served", 0)
+        baseline_response_packets = baseline_metrics.get(
+            "response_packets_sent", 0
+        )
+        if type(baseline_requests_served) is not int or type(
+            baseline_response_packets
+        ) is not int:
+            raise RuntimeError("item-pickup runtime counters are not integers")
+        response_source = "reactive_item_pickup_policy"
+    else:
+        if response_mode == "reactive":
+            _item_pickup_runtime_metrics(baseline_status)
+        response_source = "manual_packet_injection"
     baseline = analyze_gameplay_transcript(Transcript.load(transcript_path))
     evidence = load_pcap_tcp_stream(
         evidence_pcap_path,
@@ -2390,60 +2437,6 @@ def inject_item_pickup_live(
             wayland_display=wayland_display,
             runtime_directory=runtime_directory,
         )
-        request_deadline = time.monotonic() + verify_timeout_seconds
-        while time.monotonic() < request_deadline:
-            polls += 1
-            time.sleep(0.05)
-            candidate = analyze_gameplay_transcript(
-                Transcript.load(transcript_path)
-            )
-            if not candidate.valid:
-                raise RuntimeError(
-                    "item-pickup admission transcript failed validation"
-                )
-            observations = candidate.observations[baseline_observation_count:]
-            for observation in observations:
-                if (
-                    observation.direction == "server_to_client"
-                    and observation.opcode == 311
-                    and observation.kind == "field_drop_spawn"
-                    and observation.details.get("new_drop") is True
-                    and observation.details.get("item_id") == plan.item_id
-                    and observation.details.get("position_x") == plan.player_x
-                    and observation.details.get("position_y") == plan.player_y
-                ):
-                    runtime_drop_alias = observation.details.get("drop")
-                    break
-            if not isinstance(runtime_drop_alias, str):
-                continue
-            request_observation = next(
-                (
-                    observation
-                    for observation in observations
-                    if observation.direction == "client_to_server"
-                    and observation.opcode in {185, 222}
-                    and observation.kind == "item_pickup_request"
-                    and observation.details.get("drop") == runtime_drop_alias
-                    and observation.details.get("known_drop") is True
-                ),
-                None,
-            )
-            if request_observation is not None:
-                break
-        if request_observation is None:
-            raise TimeoutError(
-                "the latest-position drop was injected, but no authentic "
-                "item-pickup request arrived before the verification timeout"
-            )
-        for plaintext in plan.response_packets(request_observation.opcode):
-            api_responses.append(
-                _post_plaintext_packet(
-                    api_url,
-                    plaintext,
-                    timeout_seconds=api_timeout_seconds,
-                )
-            )
-        removed = True
         completion_deadline = time.monotonic() + verify_timeout_seconds
         while time.monotonic() < completion_deadline:
             polls += 1
@@ -2451,10 +2444,43 @@ def inject_item_pickup_live(
             final = analyze_gameplay_transcript(Transcript.load(transcript_path))
             if not final.valid:
                 raise RuntimeError(
-                    "completed item-pickup transcript failed validation"
+                    "item-pickup admission transcript failed validation"
+                )
+            observations = final.observations[baseline_observation_count:]
+            if not isinstance(runtime_drop_alias, str):
+                for observation in observations:
+                    if (
+                        observation.direction == "server_to_client"
+                        and observation.opcode == 311
+                        and observation.kind == "field_drop_spawn"
+                        and observation.details.get("new_drop") is True
+                        and observation.details.get("item_id") == plan.item_id
+                        and observation.details.get("position_x") == plan.player_x
+                        and observation.details.get("position_y") == plan.player_y
+                    ):
+                        runtime_drop_alias = observation.details.get("drop")
+                        break
+            if isinstance(runtime_drop_alias, str):
+                request_observation = next(
+                    (
+                        observation
+                        for observation in observations
+                        if observation.direction == "client_to_server"
+                        and observation.opcode in {185, 222}
+                        and observation.kind == "item_pickup_request"
+                        and observation.details.get("drop") == runtime_drop_alias
+                        and observation.details.get("known_drop") is True
+                    ),
+                    None,
+                )
+                removed = any(
+                    observation.direction == "server_to_client"
+                    and observation.opcode == 312
+                    and observation.details.get("drop") == runtime_drop_alias
+                    for observation in observations
                 )
             state = final.state
-            if (
+            completed = (
                 state.pending_item_pickups == 0
                 and state.item_pickup_effect_matches
                 == baseline.state.item_pickup_effect_matches + 1
@@ -2462,13 +2488,58 @@ def inject_item_pickup_live(
                 == baseline.state.item_pickup_spawn_result_matches + 1
                 and state.item_pickup_removal_matches
                 == baseline.state.item_pickup_removal_matches + 1
+            )
+            if request_observation is not None and (
+                response_source == "manual_packet_injection" or completed
             ):
                 break
         else:
+            if request_observation is None:
+                raise TimeoutError(
+                    "the latest-position drop was injected, but no authentic "
+                    "item-pickup request arrived before the verification timeout"
+                )
             raise TimeoutError(
-                "item-pickup response packets were accepted, but the completed "
-                "chain did not fold before the verification timeout"
+                "the reactive item-pickup response was requested, but its "
+                "completed chain did not fold before the verification timeout"
             )
+        if response_source == "manual_packet_injection":
+            for plaintext in plan.response_packets(request_observation.opcode):
+                api_responses.append(
+                    _post_plaintext_packet(
+                        api_url,
+                        plaintext,
+                        timeout_seconds=api_timeout_seconds,
+                    )
+                )
+            removed = True
+            completion_deadline = time.monotonic() + verify_timeout_seconds
+            while time.monotonic() < completion_deadline:
+                polls += 1
+                time.sleep(0.05)
+                final = analyze_gameplay_transcript(
+                    Transcript.load(transcript_path)
+                )
+                if not final.valid:
+                    raise RuntimeError(
+                        "completed item-pickup transcript failed validation"
+                    )
+                state = final.state
+                if (
+                    state.pending_item_pickups == 0
+                    and state.item_pickup_effect_matches
+                    == baseline.state.item_pickup_effect_matches + 1
+                    and state.item_pickup_spawn_result_matches
+                    == baseline.state.item_pickup_spawn_result_matches + 1
+                    and state.item_pickup_removal_matches
+                    == baseline.state.item_pickup_removal_matches + 1
+                ):
+                    break
+            else:
+                raise TimeoutError(
+                    "item-pickup response packets were accepted, but the "
+                    "completed chain did not fold before the verification timeout"
+                )
     except BaseException:
         if drop_sent and not removed:
             try:
@@ -2480,6 +2551,65 @@ def inject_item_pickup_live(
             except Exception:
                 pass
         raise
+
+    requests_served_delta: int | None = None
+    response_packets_sent_delta: int | None = None
+    runtime_checks: dict[str, bool] = {}
+    if response_source == "reactive_item_pickup_policy":
+        final_status = _get_runtime_status(
+            api_url,
+            timeout_seconds=api_timeout_seconds,
+        )
+        final_metrics, final_policy_state = _item_pickup_runtime_metrics(
+            final_status
+        )
+        final_requests_served = final_metrics.get("requests_served")
+        final_response_packets = final_metrics.get("response_packets_sent")
+        last_response = final_metrics.get("last_response")
+        if (
+            type(final_requests_served) is not int
+            or type(final_response_packets) is not int
+            or not isinstance(last_response, dict)
+            or baseline_requests_served is None
+            or baseline_response_packets is None
+        ):
+            raise RuntimeError(
+                "reactive item-pickup completion telemetry is incomplete"
+            )
+        requests_served_delta = (
+            final_requests_served - baseline_requests_served
+        )
+        response_packets_sent_delta = (
+            final_response_packets - baseline_response_packets
+        )
+        modeled_drops = final_policy_state.get("modeled_drops")
+        if not isinstance(modeled_drops, list):
+            raise RuntimeError(
+                "reactive item-pickup state has no modeled drop list"
+            )
+        response_drop_alias = last_response.get("drop")
+        runtime_checks = {
+            "runtime_requests_served": requests_served_delta == 1,
+            "runtime_response_packets": response_packets_sent_delta == 3,
+            "runtime_response_opcodes": (
+                last_response.get("server_opcodes") == [39, 49, 312]
+            ),
+            "runtime_response_item": last_response.get("item_id") == plan.item_id,
+            "runtime_response_inventory": (
+                last_response.get("inventory") == plan.inventory
+                and last_response.get("slot") == plan.slot
+            ),
+            "runtime_response_quantity": (
+                last_response.get("quantity_before") == plan.quantity_before
+                and last_response.get("quantity_delta") == plan.quantity_delta
+                and last_response.get("quantity_after") == plan.quantity_after
+            ),
+            "runtime_drop_removed": all(
+                not isinstance(drop, dict)
+                or drop.get("drop") != response_drop_alias
+                for drop in modeled_drops
+            ),
+        }
 
     state = final.state
     request_attempts = (
@@ -2510,6 +2640,7 @@ def inject_item_pickup_live(
             == baseline.state.item_pickup_removal_matches + 1
         ),
         "pending": state.pending_item_pickups == 0,
+        **runtime_checks,
     }
     invariant_checks = {
         "field_drops": set(state.field_drops) == baseline_drop_ids,
@@ -2546,6 +2677,9 @@ def inject_item_pickup_live(
         api_responses=tuple(api_responses),
         observed_packets=observed_packets,
         request_attempts=request_attempts,
+        response_source=response_source,
+        requests_served_delta=requests_served_delta,
+        response_packets_sent_delta=response_packets_sent_delta,
         polls=polls,
         pickup_key=pickup_key,
         pickup_input_delay_seconds=input_delay,
@@ -3031,6 +3165,7 @@ def render_item_pickup_live_replay(result: ItemPickupLiveReplayResult) -> str:
                 f"{plan['inventory']} slot {plan['slot']} "
                 f"{plan['quantity_before']} -> {plan['quantity_after']}"
             ),
+            f"  response source: {result.response_source}",
             (
                 "  unchanged: phase, field epoch, map, player, other inventory, "
                 "progression"

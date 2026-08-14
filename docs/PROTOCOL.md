@@ -3235,6 +3235,19 @@ packets emitted after the captured transcript, including the opt-in loopback
 injection endpoint; replaying historical capture frames does not reapply the
 whole drop history to an already-derived final policy.
 
+The live item injector now chooses its response path from loopback-only
+`GET /api/v1/status`. Default `auto` mode treats a top-level
+`protocol.item_pickup_responses` object as proof that the reactive policy owns
+the response: the injector posts only `[311,311,281]` and requires telemetry
+deltas of one served request and three sent packets after the authentic client
+request. If the object is absent, `auto` retains the older manual
+post-request response. Explicit `reactive` mode fails when the policy is absent,
+and explicit `manual` mode fails when it is present, so the injector and replay
+cannot both send `[39,49,312]`. The safe result names the response source and
+counter deltas. Runtime-policy and transcript-fold aliases are deliberately
+separate identifier-redaction domains; completion correlates typed effects and
+removal state rather than comparing the alias strings.
+
 The official client live proof used the admitted stream-`92` frames
 `1453/1454/1539/1630`: a four-mesos animated pair, its matching release, and
 the reference request timing. Retargeted to the live movement-command endpoint,
@@ -3245,6 +3258,17 @@ pickup. A prior independent trial advanced `4567` to `4571`, so the finalized
 warning-free transcript contains two complete mesos chains. No client request,
 drop identifier, validation token, or actor identifier is supplied by the
 injector or exposed by its report.
+
+The official-client item proof used the same default `auto` boundary with an
+enabled reactive responder. The clean trial posted only `[311,311,281]`,
+received one base opcode-`185` request, and observed one reason-`5`
+`[39,49,312]` response. Runtime counters advanced by `1/3`, and the folded Etc
+slot `7` quantity advanced `75 -> 76`. Across two trials the saved world
+transcript contains exactly two request/effect/result/removal chains, no retries
+or pending pickup, and quantity `76`; its final fold is valid and warning-free
+at `310/2` full/partial observations with `74/74` heartbeats. This changes
+response ownership and verification only; the packet grammars and evidence-
+derived item effect remain unchanged.
 
 Stream `114` ends with one active mode-`2` item drop: template `4000004` at
 `(-863,-1742)`. The final folded local-player position is `(633,-2677)`, and

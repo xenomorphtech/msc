@@ -22,7 +22,7 @@
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The tracked custom-server suite currently passes all 335 tests.
+- The tracked custom-server suite currently passes all 355 tests.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection
@@ -1205,8 +1205,12 @@
   `(633,-2693)`. `inject-item-pickup` now derives the admitted pair and timing
   from stream `92`, allocates safe runtime ids, prefers the latest same-field
   opcode-`182` command-final position, exposes the folded trailer separately,
-  sends physical input, withholds `[39,49,312]` until a matching authentic
-  request, verifies all state invariants, and cleans up on timeout. The primed
+  sends physical input, and withholds service until a matching authentic
+  request. Default `auto` mode delegates the single `[39,49,312]` response to
+  an enabled reactive policy, requires exact `1/3` served-request/packet
+  deltas, and falls back to manual post-request serving only when no responder
+  exists. Explicit manual mode rejects an enabled responder. The command
+  verifies all state invariants and cleans up on timeout. The primed
   session's actual `(675,-2693)` placement produced opcode `185` in 1,607.298
   ms and completed Etc slot `7` `75 -> 76`. The decisive untouched client had
   only one movement record—command-final `(633,-2693)`, trailer
@@ -1685,19 +1689,35 @@ update the reactive policy's identifier-free runtime-drop set, and HTTP pickup
 state refreshes its established top-level fields in place rather than creating
 a stale nested duplicate.
 
+The item injector's reactive handoff is now official-client validated. A fresh
+browser-free client completed one matching login handoff, both readiness routes
+reached HTTP `200`, and default `inject-item-pickup --response-mode auto`
+selected `reactive_item_pickup_policy`. The clean command posted only the
+capture-derived `[311,311,281]` admission packets. The client emitted one base
+opcode `185`, the replay emitted exactly one reason-`5` `[39,49,312]` chain,
+and the command verified served-request/response-packet deltas of `1/3` plus Etc
+slot `7` `75 -> 76`. Explicit `reactive` now requires the policy; explicit
+`manual` rejects it; and `auto` retains manual serving only for a replay without
+the responder.
+
+The finalized world artifact is valid and warning-free at `active` on map
+`101000000`: `310/2` full/partial observations, two independent complete item
+pickup chains, no retries or pending pickup, final stack quantity `76`, and
+`74/74` matched heartbeats. The fresh login artifact reached `handoff_ready`
+but is non-gating because one new client opcode-`6` shape is invalid and one
+server opcode `0` is unknown; the previously pinned valid `34/6` login remains
+the regression gate. The fresh client and exact replay services were stopped,
+their four ports are offline, and the host Wine DLL is not mounted.
+
 ## Immediate next steps
 
 1. Preserve the pickup-specific command-final coordinate selector and folded-
    trailer fallback as a regression boundary. Extend drop admission or response
    shapes only from independently admitted evidence, and continue responding
    only after an authentic opcode-`185` or compact opcode-`222` request.
-2. Remove the manual response race from `inject-item-pickup` by giving its
-   capture-backed item admission the same reactive-policy verification mode as
-   the mesos command; retain manual serving only for a replay without the
-   responder enabled.
-3. Capture a ranked or multi-character login to exercise the typed
+2. Capture a ranked or multi-character login to exercise the typed
    character-list count loop and optional four-ranking-value branch.
-4. Keep packet injection an explicit loopback-only opt-in while expanding
+3. Keep packet injection an explicit loopback-only opt-in while expanding
    stateful handlers only from independently validated evidence.
 
 ## Useful proof artifacts
@@ -1710,6 +1730,8 @@ a stale nested duplicate.
 /home/sdancer/ms/downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786477769036931470_replay_12857.jsonl
 /home/sdancer/ms/downloads/maple_custom_server_observed/mesos_pickup_live_20260813/login/1786664131727715445_replay_12082.jsonl
 /home/sdancer/ms/downloads/maple_custom_server_observed/mesos_pickup_live_20260813/world/1786664294399109003_replay_12857.jsonl
+/home/sdancer/ms/downloads/maple_custom_server_observed/item_pickup_reactive_live_20260814/login/1786666336791880302_replay_12082.jsonl
+/home/sdancer/ms/downloads/maple_custom_server_observed/item_pickup_reactive_live_20260814/world/1786666529067390236_replay_12857.jsonl
 /home/sdancer/ms/downloads/maple_protocol_captures/
 /home/sdancer/ms/downloads/maple_protocol_captures/hk_official_reference_20260808/
 /home/sdancer/ms/downloads/maple_custom_server_observed/

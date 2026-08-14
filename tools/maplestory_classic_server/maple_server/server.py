@@ -4651,6 +4651,15 @@ def build_parser() -> argparse.ArgumentParser:
     live_item_pickup_parser.add_argument(
         "--verify-timeout-seconds", type=float, default=10.0
     )
+    live_item_pickup_parser.add_argument(
+        "--response-mode",
+        choices=("auto", "reactive", "manual"),
+        default="auto",
+        help=(
+            "auto-select the reactive responder when enabled; manual packet "
+            "serving is allowed only when no responder is present"
+        ),
+    )
     live_item_pickup_parser.add_argument("--json", action="store_true")
 
     live_mesos_pickup_parser = subparsers.add_parser(
@@ -6275,6 +6284,7 @@ def main() -> None:
             api_url=arguments.http_api_url,
             api_timeout_seconds=arguments.api_timeout_seconds,
             verify_timeout_seconds=arguments.verify_timeout_seconds,
+            response_mode=arguments.response_mode,
         )
         if arguments.json:
             print(

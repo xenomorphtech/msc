@@ -589,6 +589,35 @@ full/partial; only stream `126` retains its one aggregate warning for the six
 known one-HP correlations. The fresh client and ports `12082/12084/12857/12858`
 were stopped, and the host Wine DLL path remains unmounted.
 
+The item injector now uses the same reactive-policy boundary by default.
+`inject-item-pickup --response-mode auto` reads loopback-only
+`GET /api/v1/status` before admission. If
+`protocol.item_pickup_responses` is present, it posts only
+the capture-derived `[311,311,281]` setup, waits for an authentic opcode `185`
+or `222`, and requires the server's telemetry to advance by one served request
+and exactly three response packets. Manual `[39,49,312]` serving remains an
+automatic fallback only when no responder exists. Explicit `reactive` requires
+the responder, and explicit `manual` rejects an enabled responder, eliminating
+the duplicate-response race. The result reports `response_source` plus both
+counter deltas without exposing an object id.
+
+The fresh browser-free 2026-08-14 proof used the default `auto` mode. The clean
+trial injected only `[311,311,281]`; the official client emitted base opcode
+`185`; the held-open server emitted one reason-`5` `[39,49,312]` chain; and the
+command verified Etc slot `7` `75 -> 76`, served-request delta `1`, and packet
+delta `3`. The final world transcript
+`item_pickup_reactive_live_20260814/world/1786666529067390236_replay_12857.jsonl`
+is valid and warning-free at `active` on map `101000000`, with `310/2`
+full/partial observations, two complete pickup chains across both trials, no
+retries or pending pickup, and `74/74` matched heartbeats. The browser-free
+client completed one matching login handoff and both readiness routes reached
+HTTP `200`; the fresh login transcript reached `handoff_ready` but remains a
+non-gating artifact because one client opcode-`6` shape is invalid and one
+server opcode `0` is unknown. The tracked Python suite is now 355 tests. All 17
+Rust unit tests, both ignored pinned/private gates, and all three capture gates
+pass. The client and exact replay services were stopped, all four proof ports
+are offline, and the host Wine DLL is not mounted.
+
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container
 whose PID matches the new `Maplestory_Classic.exe`; do not use hard-coded

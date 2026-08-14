@@ -483,6 +483,216 @@ class LiveReplayTest(unittest.TestCase):
             plan.controller_release.object_id,
         )
 
+    def test_item_pickup_auto_uses_one_reactive_response_chain(self) -> None:
+        def packet(opcode: int) -> SimpleNamespace:
+            return SimpleNamespace(
+                to_bytes=lambda: opcode.to_bytes(2, "little")
+            )
+
+        plan = SimpleNamespace(
+            drop_spawn=packet(311),
+            drop_refresh=packet(311),
+            controller_release=packet(281),
+            cleanup=packet(312),
+            response_packets=lambda opcode: self.fail(
+                f"manual response packets requested for opcode {opcode}"
+            ),
+            inventory="etc",
+            slot=7,
+            item_id=4_000_004,
+            quantity_before=74,
+            quantity_delta=1,
+            quantity_after=75,
+            player_x=633,
+            player_y=-2677,
+            release_delay_seconds=0.0,
+            admission_delay_seconds=0.0,
+            safe_dict=lambda: {},
+        )
+        baseline_state = SimpleNamespace(
+            player_x=633,
+            player_y=-2677,
+            field_drops={},
+            phase="active",
+            field_epoch=1,
+            map_id=101000000,
+            pending_item_pickups=0,
+            item_pickup_requests=0,
+            item_pickup_request_chains=0,
+            item_pickup_request_retries=0,
+            item_pickup_effect_matches=0,
+            item_pickup_spawn_result_matches=0,
+            item_pickup_removal_matches=0,
+        )
+        final_state = SimpleNamespace(
+            **{
+                **vars(baseline_state),
+                "item_pickup_requests": 1,
+                "item_pickup_request_chains": 1,
+                "item_pickup_effect_matches": 1,
+                "item_pickup_spawn_result_matches": 1,
+                "item_pickup_removal_matches": 1,
+            }
+        )
+        spawn = SimpleNamespace(
+            direction="server_to_client",
+            opcode=311,
+            kind="field_drop_spawn",
+            details={
+                "new_drop": True,
+                "item_id": 4_000_004,
+                "position_x": 633,
+                "position_y": -2677,
+                "drop": "drop:runtime:1",
+            },
+        )
+        request = SimpleNamespace(
+            direction="client_to_server",
+            opcode=185,
+            kind="item_pickup_request",
+            details={
+                "drop": "drop:runtime:1",
+                "known_drop": True,
+            },
+        )
+        removal = SimpleNamespace(
+            direction="server_to_client",
+            opcode=312,
+            kind="field_drop_removal",
+            details={"drop": "drop:runtime:1"},
+        )
+        baseline = SimpleNamespace(
+            valid=True,
+            observations=(),
+            state=baseline_state,
+        )
+        final = SimpleNamespace(
+            valid=True,
+            observations=(spawn, request, removal),
+            state=final_state,
+        )
+        baseline_status = {
+            "protocol": {
+                "item_pickup_responses": {
+                    "requests_served": 4,
+                    "response_packets_sent": 12,
+                }
+            }
+        }
+        final_status = {
+            "protocol": {
+                "item_pickup_responses": {
+                    "requests_served": 5,
+                    "response_packets_sent": 15,
+                    "last_response": {
+                        "drop": "drop:policy:1",
+                        "server_opcodes": [39, 49, 312],
+                        "item_id": 4_000_004,
+                        "inventory": "etc",
+                        "slot": 7,
+                        "quantity_before": 74,
+                        "quantity_delta": 1,
+                        "quantity_after": 75,
+                    },
+                    "modeled_drops": [],
+                }
+            }
+        }
+        inventory_before = (
+            ("etc", 7, 2, 4_000_004, False, 150842304000000000, 74),
+        )
+        inventory_after = (
+            ("etc", 7, 2, 4_000_004, False, 150842304000000000, 75),
+        )
+
+        with (
+            patch("maple_server.live_replay.Transcript.load", return_value=object()),
+            patch(
+                "maple_server.live_replay.analyze_gameplay_transcript",
+                side_effect=(baseline, final),
+            ),
+            patch(
+                "maple_server.live_replay.load_pcap_tcp_stream",
+                return_value=object(),
+            ),
+            patch(
+                "maple_server.live_replay.plan_item_pickup_live_replay",
+                return_value=plan,
+            ),
+            patch(
+                "maple_server.live_replay._get_runtime_status",
+                side_effect=(baseline_status, final_status),
+            ),
+            patch(
+                "maple_server.live_replay._inventory_item_snapshot",
+                side_effect=(inventory_before, inventory_after),
+            ),
+            patch(
+                "maple_server.live_replay._progression_snapshot",
+                side_effect=(("progression",), ("progression",)),
+            ),
+            patch(
+                "maple_server.live_replay._player_state_snapshot",
+                side_effect=(("player",), ("player",)),
+            ),
+            patch(
+                "maple_server.live_replay._safe_item_pickup_observation",
+                return_value={"observed": True},
+            ),
+            patch(
+                "maple_server.live_replay._post_plaintext_packet",
+                return_value={"accepted": True},
+            ) as post,
+            patch("maple_server.live_replay._send_wayland_evdev_key"),
+            patch("maple_server.live_replay.time.sleep"),
+        ):
+            result = inject_item_pickup_live(
+                Path("live.jsonl"),
+                Path("111.pcapng"),
+                wayland_display="wayland-3",
+            )
+
+        self.assertEqual(result.response_source, "reactive_item_pickup_policy")
+        self.assertEqual(result.requests_served_delta, 1)
+        self.assertEqual(result.response_packets_sent_delta, 3)
+        self.assertEqual(
+            [call.args[1][:2] for call in post.call_args_list],
+            [
+                (311).to_bytes(2, "little"),
+                (311).to_bytes(2, "little"),
+                (281).to_bytes(2, "little"),
+            ],
+        )
+        self.assertTrue(
+            result.safe_dict()["verification"]["checks"][
+                "single_response_chain"
+            ]
+        )
+
+    def test_item_pickup_manual_rejects_an_enabled_responder(self) -> None:
+        status = {
+            "protocol": {
+                "item_pickup_responses": {
+                    "requests_served": 0,
+                    "response_packets_sent": 0,
+                }
+            }
+        }
+        with patch(
+            "maple_server.live_replay._get_runtime_status",
+            return_value=status,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "manual item-pickup responses are unavailable",
+            ):
+                inject_item_pickup_live(
+                    Path("live.jsonl"),
+                    Path("111.pcapng"),
+                    wayland_display="wayland-3",
+                    response_mode="manual",
+                )
+
     def test_item_pickup_timeout_removes_the_injected_drop(self) -> None:
         def packet(opcode: int) -> SimpleNamespace:
             return SimpleNamespace(
@@ -510,6 +720,10 @@ class LiveReplayTest(unittest.TestCase):
                 player_x=633,
                 player_y=-2677,
                 field_drops={},
+                pending_item_pickups=0,
+                item_pickup_effect_matches=0,
+                item_pickup_spawn_result_matches=0,
+                item_pickup_removal_matches=0,
             ),
         )
         observed_spawn = SimpleNamespace(
@@ -527,6 +741,7 @@ class LiveReplayTest(unittest.TestCase):
         candidate = SimpleNamespace(
             valid=True,
             observations=(observed_spawn,),
+            state=baseline.state,
         )
         inventory_snapshot = (
             ("etc", 7, 2, 4_000_004, False, 150842304000000000, 74),
@@ -545,6 +760,10 @@ class LiveReplayTest(unittest.TestCase):
             patch(
                 "maple_server.live_replay.plan_item_pickup_live_replay",
                 return_value=plan,
+            ),
+            patch(
+                "maple_server.live_replay._get_runtime_status",
+                return_value={"protocol": {}},
             ),
             patch(
                 "maple_server.live_replay._inventory_item_snapshot",

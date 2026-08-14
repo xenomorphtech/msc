@@ -1979,11 +1979,18 @@ the live fold instead of a hand-copied position. It derives the selected
 admitted chain from an evidence PCAP, places the pair at the latest same-field
 client movement command's `final_x/final_y`, preserves its source offset and
 release/input timing, sends a physical key through the nested Wayland seat,
-and refuses to serve `[39,49,312]` until the transcript contains a matching
-authentic opcode `185` or `222`. Success verifies the exact stack delta and
-unchanged field/player/progression state; failure removes the injected drop.
-The safe plan also reports the folded trailer coordinate and uses it as
-fallback only when no same-epoch movement observation exists.
+and refuses to serve until the transcript contains a matching authentic opcode
+`185` or `222`. The default `--response-mode auto` reads identifier-free
+`GET /api/v1/status` first. With the reactive responder enabled, the injector posts
+only `[311,311,281]`; the held-open server sends the single `[39,49,312]`
+response chain, and completion requires exact served-request/response-packet
+deltas of `1/3`. Without a responder, `auto` keeps the manual post-request
+fallback. Explicit `reactive` mode requires the responder, while explicit
+`manual` mode is rejected when it is enabled, preventing duplicate responses.
+Success verifies the exact stack delta and unchanged field/player/progression
+state; failure removes the injected drop. The safe plan also reports the folded
+trailer coordinate and uses it as fallback only when no same-epoch movement
+observation exists.
 
 ```sh
 sudo ip netns exec mapleproxy sudo -u sdancer env \
@@ -2007,6 +2014,23 @@ untouched client, the sole opcode-`182` movement record contained final command
 preflight, the corrected command used command-final, observed authentic opcode
 `185` after 1,572.761 ms at `(633,-2694)`, and completed `74 -> 75`. The
 suspected readiness boundary was therefore a placement bug.
+
+The 2026-08-14 browser-free proof exercised the default `auto` selection with
+the reactive policy enabled. The clean invocation posted only
+`[311,311,281]`, observed the official client's base opcode `185`, reported
+`reactive_item_pickup_policy` as the response source, and verified exactly one
+served request, three response packets, and Etc slot `7` `75 -> 76`. The final
+world artifact contains two independent complete item-pickup chains, no retries
+or pending pickup, and stack quantity `76`. It is valid and warning-free at
+`active` on map `101000000`, with `310/2` full/partial observations and `74/74`
+matched heartbeats:
+`downloads/maple_custom_server_observed/item_pickup_reactive_live_20260814/world/1786666529067390236_replay_12857.jsonl`.
+The browser-free client completed a matching login handoff and both readiness
+routes reached HTTP `200` before the pickup proof. Its new login payload also
+contained an unsupported opcode-`6` shape and an unknown opcode `0`, so the
+paired login transcript is retained as `handoff_ready` evidence rather than a
+new valid grammar gate; the already-pinned valid `34/6` login proof remains the
+login regression reference.
 
 The decisive fresh proof is recorded in
 `downloads/maple_custom_server_observed/positioned_effect_actions_live_20260811/world/1786477769036931470_replay_12857.jsonl`;
@@ -2964,11 +2988,9 @@ project's own `README.md` for all options.
 
 Replace the remaining opaque replay portions with stateful handling:
 
-1. Isolate the client-side state transition that initializes pickup admission;
-   the fresh exact-pair and calibrated full-family controls now exclude
-   pair/release timing and near-reference attack-response timing alone. Continue
-   to gate `[39,49,312]` on an authentic opcode `185` or compact opcode `222`
-   request.
+1. Preserve the command-final pickup coordinate and single reactive response
+   chain as regression boundaries. Continue to gate item and mesos responses on
+   an authentic opcode `185` or compact opcode `222` request.
 2. Deepen the remaining capture-bounded gameplay bodies only where generated
    handlers, independent captures, or controlled effects support exact fields;
    retain neutral roles for the opcode-`394`/`279` correlation and unobserved
