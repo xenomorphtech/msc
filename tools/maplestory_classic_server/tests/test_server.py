@@ -77,6 +77,7 @@ from maple_server.packets import (  # noqa: E402
     CharacterSelection,
     CharacterStatUpdate,
     ClientAbilityPointAllocationRequest,
+    ClientOpcode16CreatedCharacterSelection,
     ClientOpcode298ItemAcquisitionRequest,
     ClientNpcStateSubmission,
     ClientRecoveryRequest,
@@ -162,6 +163,22 @@ def fixture_mob_movement_broadcast_plan(
 
 
 class TranscriptTest(unittest.TestCase):
+    def test_replay_parser_accepts_client_opcode_sequence_validation(self) -> None:
+        arguments = build_parser().parse_args(
+            [
+                "replay",
+                "--listen-port",
+                "8484",
+                "--transcript",
+                "fixture.jsonl",
+                "--no-strict",
+                "--validate-client-opcode-sequence",
+            ]
+        )
+
+        self.assertTrue(arguments.no_strict)
+        self.assertTrue(arguments.validate_client_opcode_sequence)
+
     def test_rewrites_captured_channel_transition_to_live_world(self) -> None:
         replies = (
             ChannelTransitionResponse(
@@ -1543,6 +1560,98 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks)
             server.close()
             await server.wait_closed()
+
+    async def test_non_strict_replay_can_require_matching_client_opcodes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            expected_plaintext = struct.pack("<H", 47) + b"captured"
+            expected_frame = (
+                encode_frame_header(len(expected_plaintext), client_iv, 300)
+                + crypt_payload(expected_plaintext, client_iv)
+            )
+            response_plaintext = struct.pack("<H", 24)
+            response_frame = (
+                encode_frame_header(len(response_plaintext), server_iv, ~300)
+                + crypt_payload(response_plaintext, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="opcode-sequence", metadata={}
+            )
+            source_writer.data("server_to_client", greeting)
+            source_writer.data("client_to_server", expected_frame)
+            source_writer.data("server_to_client", response_frame)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            runtime_protocol = {
+                "client_opcode_sequence": {
+                    "expected_frames": 1,
+                    "frames_observed": 0,
+                    "frames_matched": 0,
+                    "mismatches": 0,
+                    "complete": False,
+                    "last_comparison": None,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            validate_client_opcode_sequence=True,
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(await reader.readexactly(len(greeting)), greeting)
+            live_plaintext = struct.pack("<H", 47) + b"live"
+            live_frame = (
+                encode_frame_header(len(live_plaintext), client_iv, 300)
+                + crypt_payload(live_plaintext, client_iv)
+            )
+            writer.write(live_frame)
+            await writer.drain()
+            self.assertEqual(
+                await reader.readexactly(len(response_frame)), response_frame
+            )
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            self.assertEqual(
+                runtime_protocol["client_opcode_sequence"],
+                {
+                    "expected_frames": 1,
+                    "frames_observed": 1,
+                    "frames_matched": 1,
+                    "mismatches": 0,
+                    "complete": True,
+                    "last_comparison": {
+                        "expected_opcode": 47,
+                        "observed_opcode": 47,
+                        "matches": True,
+                    },
+                },
+            )
 
     async def test_replay_can_hold_connection_open_after_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -3806,6 +3915,114 @@ class ServerTest(unittest.IsolatedAsyncioTestCase):
                     "invalid_requests": 0,
                     "last_transaction": {
                         "request_opcode": 7,
+                        "response_opcode": 5,
+                        "character_id_matches": True,
+                    },
+                },
+            )
+
+    async def test_replay_records_created_character_handoff_transaction(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client_iv = bytes.fromhex("6e3c795a")
+            server_iv = bytes.fromhex("885db958")
+            greeting = (
+                struct.pack("<HHH", 13, 300, 0)
+                + client_iv
+                + server_iv
+                + b"\x08"
+            )
+            character_id = 12_345
+            selection = ClientOpcode16CreatedCharacterSelection(
+                character_id=character_id
+            ).to_bytes()
+            captured_selection = (
+                encode_frame_header(len(selection), client_iv, 300)
+                + crypt_payload(selection, client_iv)
+            )
+            handoff_record = WorldHandoff(
+                result=0,
+                address=IPv4Address("127.0.0.1"),
+                port=12857,
+                character_id=character_id,
+            )
+            handoff = handoff_record.to_bytes()
+            captured_handoff = (
+                encode_frame_header(len(handoff), server_iv, ~300)
+                + crypt_payload(handoff, server_iv)
+            )
+            source_writer = TranscriptWriter(
+                directory, label="created-handoff-runtime", metadata={}
+            )
+            source_writer.data("server_to_client", greeting)
+            source_writer.data("client_to_server", captured_selection)
+            source_writer.data("server_to_client", captured_handoff)
+            source_writer.close()
+            source = Transcript.load(source_writer.path)
+            runtime_protocol = {
+                "login_handoff": {
+                    "request_opcode": 16,
+                    "response_opcode": 5,
+                    "expected_transactions": 1,
+                    "requests_observed": 0,
+                    "responses_sent": 0,
+                    "matching_transactions": 0,
+                    "invalid_requests": 0,
+                    "last_transaction": None,
+                }
+            }
+            tasks: set[asyncio.Task[None]] = set()
+
+            def accept(reader, writer) -> None:
+                tasks.add(
+                    asyncio.create_task(
+                        replay_connection(
+                            reader,
+                            writer,
+                            source,
+                            strict=False,
+                            captured_login_handoffs=(handoff_record,),
+                            runtime_protocol=runtime_protocol,
+                        )
+                    )
+                )
+
+            server = await asyncio.start_server(accept, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            self.assertEqual(await reader.readexactly(len(greeting)), greeting)
+            writer.write(
+                encode_frame_header(len(selection), client_iv, 300)
+                + crypt_payload(selection, client_iv)
+            )
+            await writer.drain()
+            encrypted_handoff = await reader.readexactly(len(captured_handoff))
+            observed_handoff = WorldHandoff.parse(
+                crypt_payload(
+                    encrypted_handoff[4:],
+                    server_iv,
+                )
+            )
+            self.assertEqual(observed_handoff.character_id, character_id)
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.gather(*tasks)
+            server.close()
+            await server.wait_closed()
+
+            self.assertEqual(
+                runtime_protocol["login_handoff"],
+                {
+                    "request_opcode": 16,
+                    "response_opcode": 5,
+                    "expected_transactions": 1,
+                    "requests_observed": 1,
+                    "responses_sent": 1,
+                    "matching_transactions": 1,
+                    "invalid_requests": 0,
+                    "last_transaction": {
+                        "request_opcode": 16,
                         "response_opcode": 5,
                         "character_id_matches": True,
                     },

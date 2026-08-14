@@ -89,6 +89,8 @@ from .packets import (
     CharacterListEnvelope,
     CharacterSelection,
     CharacterStatUpdate,
+    ClientOpcode10CharacterCreationRequest,
+    ClientOpcode16CreatedCharacterSelection,
     ClientAbilityPointAllocationRequest,
     ClientOpcode298ItemAcquisitionRequest,
     ClientNpcStateSubmission,
@@ -96,6 +98,7 @@ from .packets import (
     ClientAttackAction,
     FieldDropSpawn,
     HeartbeatProbe,
+    InitialFieldSnapshot,
     InventoryMoveRequest,
     ItemPickupRequest,
     ItemUseRequest,
@@ -104,6 +107,7 @@ from .packets import (
     MobMovementSubmission,
     PlayerMovementSubmission,
     PacketShapeError,
+    ServerOpcode7CharacterCreationResponse,
     SkillLevelChangeRequest,
     VariableServerRecord,
     WorldHandoff,
@@ -408,6 +412,110 @@ def rewrite_channel_transition_world_from_selection(
     return tuple(rewritten)
 
 
+def rewrite_character_creation_response_from_request(
+    replies: tuple[bytes, ...], client_plaintext: bytes
+) -> tuple[bytes, ...]:
+    """Bind a captured successful creation response to the live request."""
+
+    request = ClientOpcode10CharacterCreationRequest.parse(client_plaintext)
+    request_appearance = request.appearance_fingerprint()
+    gender, face_id, hair_id, *equipment_ids = request_appearance
+    rewritten: list[bytes] = []
+    found_response = False
+    for reply in replies:
+        opcode = int.from_bytes(reply[:2], "little") if len(reply) >= 2 else None
+        if opcode != 7:
+            rewritten.append(reply)
+            continue
+        response = ServerOpcode7CharacterCreationResponse.parse(reply)
+        if (
+            response.result != 0
+            or response.snapshot is None
+            or response.appearance is None
+        ):
+            raise PacketShapeError(
+                "reactive character creation requires a successful opcode-7 response"
+            )
+        visible_entries = response.appearance.visible_entries
+        hair_entries = tuple(entry for entry in visible_entries if entry.slot == 0)
+        equipment_entries = tuple(entry for entry in visible_entries if entry.slot != 0)
+        if len(hair_entries) != 1 or len(equipment_entries) != len(equipment_ids):
+            raise PacketShapeError(
+                "captured character creation appearance does not match the "
+                "request layout"
+            )
+        equipment_by_slot = {
+            entry.slot: item_id
+            for entry, item_id in zip(
+                equipment_entries, equipment_ids, strict=True
+            )
+        }
+        rewritten_entries = tuple(
+            replace(
+                entry,
+                item_id=(
+                    hair_id if entry.slot == 0 else equipment_by_slot[entry.slot]
+                ),
+            )
+            for entry in visible_entries
+        )
+        rewritten_response = replace(
+            response,
+            snapshot=replace(
+                response.snapshot,
+                name=request.name,
+                gender=gender,
+                face_id=face_id,
+                hair_id=hair_id,
+            ),
+            appearance=replace(
+                response.appearance,
+                gender=gender,
+                face_id=face_id,
+                visible_entries=rewritten_entries,
+            ),
+        )
+        if (
+            rewritten_response.appearance is None
+            or rewritten_response.appearance.request_fingerprint()
+            != request_appearance
+        ):
+            raise PacketShapeError(
+                "rewritten character creation appearance does not match the "
+                "live request"
+            )
+        rewritten.append(rewritten_response.to_bytes())
+        found_response = True
+    if not found_response:
+        raise PacketShapeError(
+            "reactive character creation replies contain no opcode-7 response"
+        )
+    return tuple(rewritten)
+
+
+def transcript_direction_plaintexts(
+    transcript: Transcript, direction: str
+) -> tuple[bytes, ...]:
+    """Decrypt one transcript direction without reconstructing frame timing."""
+
+    handshake = parse_handshake(transcript.server_bytes)
+    if direction == "client_to_server":
+        stream = transcript.client_bytes
+        offset = 0
+        iv = handshake.first_iv
+    elif direction == "server_to_client":
+        stream = transcript.server_bytes
+        offset = handshake.wire_length
+        iv = handshake.second_iv
+    else:
+        raise ValueError(f"unknown transcript direction: {direction}")
+    plaintexts: list[bytes] = []
+    for frame in parse_encrypted_frames(stream, offset=offset):
+        plaintexts.append(crypt_payload(frame.payload, iv))
+        iv = shuffle_iv(iv)
+    return tuple(plaintexts)
+
+
 async def replay_connection(
     client_reader: asyncio.StreamReader,
     client_writer: asyncio.StreamWriter,
@@ -429,6 +537,9 @@ async def replay_connection(
     client_opcode_replies: dict[int, bytes | tuple[bytes, ...]] | None = None,
     client_opcode_reply_delays: dict[int, tuple[float, ...]] | None = None,
     rewrite_channel_transition_world: bool = False,
+    rewrite_character_creation_response: bool = False,
+    validate_client_opcode_sequence: bool = False,
+    captured_login_handoffs: tuple[WorldHandoff, ...] = (),
     keep_world_open: bool = False,
     world_heartbeat_interval_seconds: float | None = None,
     npc_state_replay_plaintext: bytes | None = None,
@@ -541,6 +652,35 @@ async def replay_connection(
         )
     if initial_delay_seconds < 0:
         raise ValueError("initial_delay_seconds cannot be negative")
+    expected_client_opcodes: deque[int | None] = deque()
+    client_opcode_sequence_metrics = None
+    if validate_client_opcode_sequence:
+        expected_client_opcodes.extend(
+            int.from_bytes(plaintext[:2], "little")
+            if len(plaintext) >= 2
+            else None
+            for plaintext in transcript_direction_plaintexts(
+                transcript, "client_to_server"
+            )
+        )
+        client_event_count = sum(
+            event.direction == "client_to_server"
+            for event in data_events(transcript.events)
+        )
+        if client_event_count != len(expected_client_opcodes):
+            raise ValueError(
+                "client opcode sequence validation requires one normalized "
+                "transcript event per encrypted client frame"
+            )
+        client_opcode_sequence_metrics = (
+            runtime_protocol.get("client_opcode_sequence")
+            if runtime_protocol is not None
+            else None
+        )
+        if not isinstance(client_opcode_sequence_metrics, dict):
+            raise TypeError(
+                "runtime client_opcode_sequence telemetry must be a dictionary"
+            )
     if post_transcript_start_delay_seconds < 0:
         raise ValueError(
             "post_transcript_start_delay_seconds cannot be negative"
@@ -1043,6 +1183,7 @@ async def replay_connection(
         if (
             client_opcode_replies
             or login_handoff_metrics is not None
+            or validate_client_opcode_sequence
             or world_heartbeat_interval_seconds is not None
             or item_pickup_response_policy is not None
             or item_use_response_policy is not None
@@ -1094,6 +1235,12 @@ async def replay_connection(
                 },
                 "rewrite_channel_transition_world": (
                     rewrite_channel_transition_world
+                ),
+                "rewrite_character_creation_response": (
+                    rewrite_character_creation_response
+                ),
+                "validate_client_opcode_sequence": (
+                    validate_client_opcode_sequence
                 ),
                 "keep_world_open": keep_world_open,
                 "world_heartbeat_interval_seconds": (
@@ -1179,6 +1326,31 @@ async def replay_connection(
     server_packet_injection_token: int | None = None
     pending_login_character_ids: deque[int] = deque()
 
+    def record_login_handoff_transaction(handoff: WorldHandoff) -> None:
+        if login_handoff_metrics is None:
+            return
+        selected_character_id = (
+            pending_login_character_ids.popleft()
+            if pending_login_character_ids
+            else None
+        )
+        character_id_matches = (
+            selected_character_id is not None
+            and handoff.character_id == selected_character_id
+        )
+        login_handoff_metrics["responses_sent"] = int(
+            login_handoff_metrics.get("responses_sent", 0)
+        ) + 1
+        if character_id_matches:
+            login_handoff_metrics["matching_transactions"] = int(
+                login_handoff_metrics.get("matching_transactions", 0)
+            ) + 1
+        login_handoff_metrics["last_transaction"] = {
+            "request_opcode": int(login_handoff_metrics["request_opcode"]),
+            "response_opcode": handoff.opcode,
+            "character_id_matches": character_id_matches,
+        }
+
     async def read_live_frame() -> tuple[bytes, int | None, bytes]:
         nonlocal client_iv
         if client_iv is None:
@@ -1196,7 +1368,16 @@ async def replay_connection(
             and opcode == int(login_handoff_metrics["request_opcode"])
         ):
             try:
-                selection = CharacterSelection.parse(plaintext)
+                if opcode == 7:
+                    selection = CharacterSelection.parse(plaintext)
+                elif opcode == 16:
+                    selection = ClientOpcode16CreatedCharacterSelection.parse(
+                        plaintext
+                    )
+                else:
+                    raise PacketShapeError(
+                        "unsupported login handoff request opcode"
+                    )
             except PacketShapeError:
                 login_handoff_metrics["invalid_requests"] = int(
                     login_handoff_metrics.get("invalid_requests", 0)
@@ -1223,6 +1404,10 @@ async def replay_connection(
             plaintexts = rewrite_channel_transition_world_from_selection(
                 plaintexts, client_plaintext
             )
+        if rewrite_character_creation_response and opcode == 10:
+            plaintexts = rewrite_character_creation_response_from_request(
+                plaintexts, client_plaintext
+            )
         delays = (client_opcode_reply_delays or {}).get(
             opcode, (0.0,) * len(plaintexts)
         )
@@ -1246,10 +1431,17 @@ async def replay_connection(
             previous_timestamp_ns = event.timestamp_ns
 
             if event.direction == "client_to_server":
+                expected_opcode = (
+                    expected_client_opcodes.popleft()
+                    if validate_client_opcode_sequence
+                    else None
+                )
+                observed_opcode = None
                 if remaining_opcode_replies:
                     while True:
                         received, opcode, client_plaintext = await read_live_frame()
                         if opcode not in remaining_opcode_replies:
+                            observed_opcode = opcode
                             break
                         plaintexts = remaining_opcode_replies.pop(opcode)
                         if rewrite_channel_transition_world and opcode == 4:
@@ -1258,9 +1450,15 @@ async def replay_connection(
                                     plaintexts, client_plaintext
                                 )
                             )
+                        if rewrite_character_creation_response and opcode == 10:
+                            plaintexts = (
+                                rewrite_character_creation_response_from_request(
+                                    plaintexts, client_plaintext
+                                )
+                            )
                         pending_opcode_replies.extend(plaintexts)
                 elif client_iv is not None:
-                    received, _, _ = await read_live_frame()
+                    received, observed_opcode, _ = await read_live_frame()
                 elif strict:
                     received = await read_and_record_exactly(
                         client_reader, len(event.data), observed
@@ -1269,6 +1467,30 @@ async def replay_connection(
                     received = await read_and_record_encrypted_frame(
                         client_reader, observed
                     )
+                if validate_client_opcode_sequence:
+                    assert client_opcode_sequence_metrics is not None
+                    matches = observed_opcode == expected_opcode
+                    client_opcode_sequence_metrics["frames_observed"] = int(
+                        client_opcode_sequence_metrics.get("frames_observed", 0)
+                    ) + 1
+                    if matches:
+                        client_opcode_sequence_metrics["frames_matched"] = int(
+                            client_opcode_sequence_metrics.get("frames_matched", 0)
+                        ) + 1
+                    else:
+                        client_opcode_sequence_metrics["mismatches"] = int(
+                            client_opcode_sequence_metrics.get("mismatches", 0)
+                        ) + 1
+                    client_opcode_sequence_metrics["last_comparison"] = {
+                        "expected_opcode": expected_opcode,
+                        "observed_opcode": observed_opcode,
+                        "matches": matches,
+                    }
+                    if not matches:
+                        raise ValueError(
+                            "Live client opcode sequence mismatch: expected "
+                            f"{expected_opcode}, observed {observed_opcode}"
+                        )
                 if strict and received != event.data:
                     mismatch = next(
                         (
@@ -1286,6 +1508,28 @@ async def replay_connection(
             elif event.direction == "server_to_client":
                 outgoing = next(patched_server_events)
                 await send_encrypted_frame(outgoing)
+
+        if validate_client_opcode_sequence:
+            assert client_opcode_sequence_metrics is not None
+            client_opcode_sequence_metrics["complete"] = (
+                not expected_client_opcodes
+                and int(client_opcode_sequence_metrics.get("mismatches", 0)) == 0
+            )
+            captured_progression = (
+                runtime_protocol.get("captured_progression")
+                if runtime_protocol is not None
+                else None
+            )
+            if isinstance(captured_progression, dict):
+                complete = bool(client_opcode_sequence_metrics["complete"])
+                captured_progression["complete"] = complete
+                captured_progression["delivered_final_level"] = (
+                    captured_progression.get("source_final_level")
+                    if complete
+                    else None
+                )
+        for captured_handoff in captured_login_handoffs:
+            record_login_handoff_transaction(captured_handoff)
 
         needs_server_cipher = bool(
             post_transcript_server_frames
@@ -1448,32 +1692,9 @@ async def replay_connection(
                     and int.from_bytes(plaintext[:2], "little")
                     == int(login_handoff_metrics["response_opcode"])
                 ):
-                    handoff = WorldHandoff.parse(plaintext)
-                    selected_character_id = (
-                        pending_login_character_ids.popleft()
-                        if pending_login_character_ids
-                        else None
+                    record_login_handoff_transaction(
+                        WorldHandoff.parse(plaintext)
                     )
-                    character_id_matches = (
-                        selected_character_id is not None
-                        and handoff.character_id == selected_character_id
-                    )
-                    login_handoff_metrics["responses_sent"] = int(
-                        login_handoff_metrics.get("responses_sent", 0)
-                    ) + 1
-                    if character_id_matches:
-                        login_handoff_metrics["matching_transactions"] = int(
-                            login_handoff_metrics.get(
-                                "matching_transactions", 0
-                            )
-                        ) + 1
-                    login_handoff_metrics["last_transaction"] = {
-                        "request_opcode": int(
-                            login_handoff_metrics["request_opcode"]
-                        ),
-                        "response_opcode": handoff.opcode,
-                        "character_id_matches": character_id_matches,
-                    }
 
         async def send_movement_follow_up_decisions(
             *,
@@ -3971,6 +4192,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="optionally record the live client/replay exchange",
     )
     replay.add_argument("--no-strict", action="store_true")
+    replay.add_argument(
+        "--validate-client-opcode-sequence",
+        action="store_true",
+        help=(
+            "in non-strict replay, require each live client frame to use the "
+            "opcode at the corresponding capture position before advancing"
+        ),
+    )
     replay.add_argument("--timing-scale", type=float, default=0.0)
     replay.add_argument(
         "--hold-open-seconds",
@@ -4488,6 +4717,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "rewrite opcode-402 stage-1 reactive replies with the world id "
             "from the triggering client opcode-4 selection"
+        ),
+    )
+    replay.add_argument(
+        "--rewrite-character-creation-response",
+        action="store_true",
+        help=(
+            "rewrite a captured successful opcode-7 reactive reply with the "
+            "name and appearance from the triggering client opcode-10 request"
         ),
     )
     replay.add_argument(
@@ -5043,6 +5280,13 @@ async def async_main(arguments: argparse.Namespace) -> None:
             "capture_enabled": True,
         }
     elif arguments.command == "replay":
+        if (
+            arguments.validate_client_opcode_sequence
+            and not arguments.no_strict
+        ):
+            raise ValueError(
+                "--validate-client-opcode-sequence requires --no-strict"
+            )
         if arguments.pcap is not None:
             if arguments.tcp_stream is None:
                 raise ValueError("--tcp-stream is required with --pcap")
@@ -5423,6 +5667,48 @@ async def async_main(arguments: argparse.Namespace) -> None:
             transcript = drop_normalized_client_frames(
                 transcript, set(arguments.drop_client_frame)
             )
+        if arguments.validate_client_opcode_sequence:
+            replay_client_plaintexts = transcript_direction_plaintexts(
+                transcript, "client_to_server"
+            )
+            replay_server_plaintexts = transcript_direction_plaintexts(
+                transcript, "server_to_client"
+            )
+            expected_client_frames = len(replay_client_plaintexts)
+            runtime_protocol["client_opcode_sequence"] = {
+                "expected_frames": expected_client_frames,
+                "frames_observed": 0,
+                "frames_matched": 0,
+                "mismatches": 0,
+                "complete": False,
+                "last_comparison": None,
+            }
+            initial_level = None
+            final_level = None
+            level_transitions = 0
+            for plaintext in replay_server_plaintexts:
+                opcode = (
+                    int.from_bytes(plaintext[:2], "little")
+                    if len(plaintext) >= 2
+                    else None
+                )
+                if opcode == 157 and initial_level is None:
+                    snapshot = InitialFieldSnapshot.parse(plaintext)
+                    initial_level = snapshot.character.level
+                    final_level = initial_level
+                elif opcode == 41:
+                    update = CharacterStatUpdate.parse(plaintext)
+                    if update.character_level is not None:
+                        final_level = update.character_level
+                        level_transitions += 1
+            if initial_level is not None and final_level is not None:
+                runtime_protocol["captured_progression"] = {
+                    "source_initial_level": initial_level,
+                    "source_final_level": final_level,
+                    "source_level_transitions": level_transitions,
+                    "delivered_final_level": None,
+                    "complete": False,
+                }
         field_drop_position_replay_plan = None
         if arguments.rewrite_final_field_drop_position is not None:
             position_x, position_y = (
@@ -5584,24 +5870,97 @@ async def async_main(arguments: argparse.Namespace) -> None:
             opcode: tuple(payloads)
             for opcode, payloads in grouped_client_opcode_replies.items()
         }
-        opcode_7_replies = client_opcode_replies.get(7, ())
-        if opcode_7_replies:
+        captured_login_handoffs: tuple[WorldHandoff, ...] = ()
+        login_handoff_candidates: list[tuple[int, tuple[WorldHandoff, ...]]] = []
+        for request_opcode in (7, 16):
+            replies = client_opcode_replies.get(request_opcode, ())
+            if not replies:
+                continue
             handoff_replies = tuple(
                 WorldHandoff.parse(payload)
-                for payload in opcode_7_replies
+                for payload in replies
                 if len(payload) >= 2
                 and int.from_bytes(payload[:2], "little") == 5
             )
-            if handoff_replies:
-                if len(handoff_replies) != len(opcode_7_replies):
-                    raise ValueError(
-                        "client opcode 7 readiness requires every reply to be "
-                        "a validated world handoff"
+            if not handoff_replies:
+                continue
+            if len(handoff_replies) != len(replies):
+                raise ValueError(
+                    f"client opcode {request_opcode} readiness requires every "
+                    "reply to be a validated world handoff"
+                )
+            login_handoff_candidates.append(
+                (request_opcode, handoff_replies)
+            )
+        if len(login_handoff_candidates) > 1:
+            raise ValueError(
+                "login readiness cannot track both opcode-7 and opcode-16 "
+                "handoff replies in one replay"
+            )
+        if login_handoff_candidates:
+            request_opcode, handoff_replies = login_handoff_candidates[0]
+            runtime_protocol["login_handoff"] = {
+                "request_opcode": request_opcode,
+                "response_opcode": 5,
+                "expected_transactions": len(handoff_replies),
+                "requests_observed": 0,
+                "responses_sent": 0,
+                "matching_transactions": 0,
+                "invalid_requests": 0,
+                "last_transaction": None,
+            }
+        elif arguments.validate_login_state:
+            patched_server_bytes = patch_server_frames(
+                transcript, server_frame_patches, dropped_server_frames
+            )
+            handshake = parse_handshake(patched_server_bytes)
+            server_iv = handshake.second_iv
+            captured_handoffs: list[WorldHandoff] = []
+            for frame in parse_encrypted_frames(
+                patched_server_bytes, offset=handshake.wire_length
+            ):
+                plaintext = crypt_payload(frame.payload, server_iv)
+                server_iv = shuffle_iv(server_iv)
+                if (
+                    len(plaintext) >= 2
+                    and int.from_bytes(plaintext[:2], "little") == 5
+                ):
+                    captured_handoffs.append(WorldHandoff.parse(plaintext))
+            selection_opcodes: list[int] = []
+            for plaintext in transcript_direction_plaintexts(
+                transcript, "client_to_server"
+            ):
+                opcode = (
+                    int.from_bytes(plaintext[:2], "little")
+                    if len(plaintext) >= 2
+                    else None
+                )
+                if opcode == 7:
+                    CharacterSelection.parse(plaintext)
+                    selection_opcodes.append(opcode)
+                elif opcode == 16:
+                    ClientOpcode16CreatedCharacterSelection.parse(
+                        plaintext
                     )
+                    selection_opcodes.append(opcode)
+            if captured_handoffs:
+                if len(captured_handoffs) != len(selection_opcodes):
+                    raise ValueError(
+                        "captured login readiness requires one character "
+                        "selection per world handoff"
+                    )
+                request_opcodes = set(selection_opcodes)
+                if len(request_opcodes) != 1:
+                    raise ValueError(
+                        "captured login readiness cannot mix opcode-7 and "
+                        "opcode-16 selections"
+                    )
+                request_opcode = request_opcodes.pop()
+                captured_login_handoffs = tuple(captured_handoffs)
                 runtime_protocol["login_handoff"] = {
-                    "request_opcode": 7,
+                    "request_opcode": request_opcode,
                     "response_opcode": 5,
-                    "expected_transactions": len(handoff_replies),
+                    "expected_transactions": len(captured_login_handoffs),
                     "requests_observed": 0,
                     "responses_sent": 0,
                     "matching_transactions": 0,
@@ -5654,6 +6013,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
             raise ValueError(
                 "--rewrite-channel-transition-world requires reactive "
                 "client opcode 4 replies"
+            )
+        if (
+            arguments.rewrite_character_creation_response
+            and 10 not in client_opcode_replies
+        ):
+            raise ValueError(
+                "--rewrite-character-creation-response requires reactive "
+                "client opcode 10 replies"
             )
         patch_server_frames(
             transcript, server_frame_patches, dropped_server_frames
@@ -6041,6 +6408,13 @@ async def async_main(arguments: argparse.Namespace) -> None:
             rewrite_channel_transition_world=(
                 arguments.rewrite_channel_transition_world
             ),
+            rewrite_character_creation_response=(
+                arguments.rewrite_character_creation_response
+            ),
+            validate_client_opcode_sequence=(
+                arguments.validate_client_opcode_sequence
+            ),
+            captured_login_handoffs=captured_login_handoffs,
             keep_world_open=arguments.keep_world_open,
             world_heartbeat_interval_seconds=(
                 arguments.world_heartbeat_interval_seconds

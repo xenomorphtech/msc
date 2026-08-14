@@ -988,8 +988,10 @@ at `handoff_ready`; the world transcript is valid at `active` on map
 connection being mistaken for a successful current login.
 
 The login listener now exposes the complementary
-`GET /api/v1/login-session-readiness` contract whenever a reactive client
-opcode-`7` rule contains a validated server opcode-`5` handoff. It baselines
+`GET /api/v1/login-session-readiness` contract for either a validated captured
+or reactive server opcode-`5` handoff. It accepts the observed opcode-`7`
+existing-character selection and opcode-`16` created-character selection,
+then baselines
 the handoff counters for each accepted connection and returns HTTP `200` only
 when the current, or most recently completed, connection has exactly the
 configured number of exact character-selection requests, sent handoffs, and
@@ -1037,6 +1039,26 @@ sudo ip netns exec mapleproxy sudo -u sdancer python -m maple_server replay \
 PCAP replay normalizes TCP segments to handshake/frame-aligned transcript
 events before serving them. The login handoff builder validates that the
 selected and handed-off character IDs match before rewriting the endpoint.
+
+For the `1-10FS.pcapng` level route, add
+`--validate-client-opcode-sequence` to a non-strict stream-`126` replay. The
+server then refuses to advance past a capture position unless the live client
+frame has the corresponding opcode. `/api/v1/status` publishes the
+identifier-free `protocol.client_opcode_sequence` counts and the
+`protocol.captured_progression` level bounds. The complete gate is:
+
+```text
+protocol.client_opcode_sequence.complete = true
+protocol.client_opcode_sequence.mismatches = 0
+protocol.captured_progression.delivered_final_level = 10
+```
+
+An exact TCP replay through the real server loop matched all `31,345` client
+opcode positions, emitted all `1,193,392` captured server bytes exactly, and
+delivered nine level changes from level `1` through level `10`. This establishes
+the action-gated authority path for a real client executing the same route; it
+does not replace a fresh UI run of the capture's roughly hour-long quest,
+movement, NPC, combat, pickup, and transition sequence.
 
 ## Typed initial-field generation and HP effect validation
 
@@ -1096,8 +1118,8 @@ connection response count, pending count, and last round-trip time. The same
 object is included in `/api/v1/status` under `world_session_readiness`.
 The login listener's `/api/v1/login-session-readiness` route likewise returns
 HTTP `503` until its current connection has completed the configured exact
-opcode-`7` request/opcode-`5` handoff transaction count with matching private
-character IDs and no malformed request or failure. It retains the successful
+opcode-`7` or opcode-`16` request/opcode-`5` handoff transaction count with
+matching private character IDs and no malformed request or failure. It retains the successful
 last-completed connection result after the handoff closes, then resets to the
 new connection baseline when another login begins. The identifier-free result
 is also included in `/api/v1/status` under `login_session_readiness`.

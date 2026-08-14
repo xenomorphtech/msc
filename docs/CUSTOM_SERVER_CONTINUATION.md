@@ -665,6 +665,74 @@ actually observed. Empty one-direction streams now produce a counted
 `PcapError` instead of an internal `IndexError` during endpoint probing.
 The tracked custom-server suite now passes all 360 tests.
 
+## Empty-list creation and level-1-to-10 replay gate
+
+Stream `116` in `1-10FS.pcapng` is now covered as one ordered login path,
+not just as an isolated empty opcode-`4` packet. Its warning-free fold is:
+
+```text
+server opcode 4:  count 0
+client opcode 10: character-creation request
+server opcode 7:  successful creation response
+client opcode 16: select the created character
+server opcode 5:  world handoff for the same private character id
+```
+
+The live replay runtime now recognizes both opcode-`7` existing-character
+selection and opcode-`16` created-character selection. Direct captured
+handoffs participate in the same identifier-free login readiness transaction
+as reactive handoffs. A direct stream-`116` replay, with its handoff endpoint
+rewritten locally, completed one opcode-`16`/opcode-`5` transaction with one
+matching private id, no invalid request, and HTTP readiness `true` after the
+connection completed. A separate opt-in
+`--rewrite-character-creation-response` mode can bind a captured successful
+opcode-`7` reply to the live opcode-`10` request's name and appearance while
+retaining the capture-backed character id and redacting the live values from
+telemetry.
+
+The world replay adds `--validate-client-opcode-sequence`. In non-strict mode,
+this requires every live client frame to carry the opcode at the corresponding
+capture position before the server advances. Its loopback status reports only
+counts, the last opcode comparison, and capture-backed progression bounds. The
+stream-`126` command is:
+
+```sh
+cd /home/sdancer/ms/tools/maplestory_classic_server
+PYTHONPATH=. python -m maple_server replay \
+  --listen-host 127.0.0.1 \
+  --listen-port 12857 \
+  --http-api-host 127.0.0.1 \
+  --http-api-port 12858 \
+  --pcap /home/sdancer/ms/1-10FS.pcapng \
+  --tcp-stream 126 \
+  --no-strict \
+  --validate-client-opcode-sequence
+```
+
+The full server-loop proof sent the capture's client frames over a fresh TCP
+connection to that command. All `31,345/31,345` opcode positions matched, no
+mismatch occurred, and the server emitted `1,193,392` bytes exactly equal to
+the captured server stream. Runtime progression moved from source level `1`
+through nine level updates and marked delivered level `10`. Independently
+folding the transcript recorded from the server was valid with zero issues,
+level `10`, and experience `980`; it retained only the documented six one-HP
+combat-correlation warning.
+
+This proves that server advancement is action-gated and that the pinned real
+client can receive the complete level-1-to-10 authority stream when it executes
+the captured opcode route. It is not a claim that a new human/UI run has
+already repeated the capture's roughly hour-long movement, quest, NPC, combat,
+pickup, and transition route. A future UI proof should require both runtime
+blocks below to become complete rather than inferring completion from elapsed
+time:
+
+```text
+protocol.client_opcode_sequence.complete = true
+protocol.captured_progression.delivered_final_level = 10
+```
+
+The tracked custom-server suite is now 365 tests and passes.
+
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container
 whose PID matches the new `Maplestory_Classic.exe`; do not use hard-coded

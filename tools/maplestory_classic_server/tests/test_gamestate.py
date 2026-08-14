@@ -70,6 +70,9 @@ from maple_server.protocol import (  # noqa: E402
     encode_frame_header,
     shuffle_iv,
 )
+from maple_server.server import (  # noqa: E402
+    rewrite_character_creation_response_from_request,
+)
 from maple_server.transcript import Transcript, TranscriptEvent  # noqa: E402
 
 
@@ -235,6 +238,12 @@ def fixture_login_transcript(
     legacy_login_records: tuple[tuple[str, bytes], ...] = (),
     opcode_6_record_set: ClientOpcode6RecordSet | None = None,
     opcode_31_record: ClientOpcode31Record | None = None,
+    character_creation_records: tuple[
+        ClientOpcode10CharacterCreationRequest,
+        ServerOpcode7CharacterCreationResponse,
+        ClientOpcode16CreatedCharacterSelection,
+    ]
+    | None = None,
 ) -> Transcript:
     events = [
         TranscriptEvent(event="connect", timestamp_ns=1),
@@ -324,21 +333,33 @@ def fixture_login_transcript(
             client_address=IPv4Address("192.0.2.10"),
         ).to_bytes(),
     )
-    append(
-        "server_to_client",
-        fixture_character_list().to_bytes(),
-    )
-    append(
-        "client_to_server",
-        CharacterSelection(character_id=selected_character).to_bytes(),
-    )
+    if character_creation_records is None:
+        append(
+            "server_to_client",
+            fixture_character_list().to_bytes(),
+        )
+        append(
+            "client_to_server",
+            CharacterSelection(character_id=selected_character).to_bytes(),
+        )
+        handoff_character_id = 300_001
+    else:
+        request, response, selection = character_creation_records
+        append(
+            "server_to_client",
+            bytes.fromhex("040000000000000000000000000103000000"),
+        )
+        append("client_to_server", request.to_bytes())
+        append("server_to_client", response.to_bytes())
+        append("client_to_server", selection.to_bytes())
+        handoff_character_id = selection.character_id
     append(
         "server_to_client",
         WorldHandoff(
             result=0,
             address=IPv4Address("127.0.0.1"),
             port=8587,
-            character_id=300_001,
+            character_id=handoff_character_id,
         ).to_bytes(),
     )
     events.append(TranscriptEvent(event="close", timestamp_ns=timestamp_ns))
@@ -379,6 +400,35 @@ class PacketShapeTest(unittest.TestCase):
         self.assertNotIn("private", str(safe))
         self.assertNotIn(request.name, str(safe))
         self.assertNotIn(str(selection.character_id), str(safe))
+
+    def test_rewrites_creation_response_to_live_request(self) -> None:
+        request, response, _ = fixture_character_creation_records()
+        live_request = ClientOpcode10CharacterCreationRequest(
+            name="LiveFixture",
+            neutral_values=(
+                request.neutral_values[0],
+                1,
+                request.neutral_values[2] + 1,
+                request.neutral_values[3] + 1,
+                *(value + 1 for value in request.neutral_values[4:]),
+            ),
+        )
+
+        rewritten = rewrite_character_creation_response_from_request(
+            (response.to_bytes(),), live_request.to_bytes()
+        )
+        parsed = ServerOpcode7CharacterCreationResponse.parse(rewritten[0])
+
+        self.assertIsNotNone(parsed.snapshot)
+        self.assertIsNotNone(parsed.appearance)
+        assert parsed.snapshot is not None
+        assert parsed.appearance is not None
+        self.assertEqual(parsed.snapshot.name, live_request.name)
+        self.assertEqual(
+            parsed.appearance.request_fingerprint(),
+            live_request.appearance_fingerprint(),
+        )
+        self.assertNotIn(live_request.name, str(parsed.safe_dict()))
 
     def test_legacy_login_record_cluster_round_trip_and_redact(self) -> None:
         server_3 = LoginServerOpcode3Record(
@@ -830,6 +880,30 @@ class GameStateFoldTest(unittest.TestCase):
             "selection_matches:1",
             render_login_analysis(analysis),
         )
+
+    def test_folds_empty_list_creation_selection_and_handoff(self) -> None:
+        records = fixture_character_creation_records()
+
+        analysis = analyze_login_transcript(
+            fixture_login_transcript(character_creation_records=records)
+        )
+
+        self.assertTrue(analysis.valid, analysis.issues)
+        self.assertFalse(analysis.warnings)
+        self.assertIsNotNone(analysis.state.character_list)
+        assert analysis.state.character_list is not None
+        self.assertEqual(analysis.state.character_list.records, ())
+        self.assertEqual(analysis.state.character_creation_requests, 1)
+        self.assertEqual(analysis.state.character_creation_responses, 1)
+        self.assertEqual(analysis.state.character_creation_name_matches, 1)
+        self.assertEqual(
+            analysis.state.character_creation_appearance_matches, 1
+        )
+        self.assertEqual(analysis.state.created_character_selections, 1)
+        self.assertEqual(
+            analysis.state.created_character_selection_matches, 1
+        )
+        self.assertEqual(analysis.state.phase, LoginPhase.HANDOFF_READY)
 
     def test_folds_legacy_login_record_cluster(self) -> None:
         analysis = analyze_login_transcript(
