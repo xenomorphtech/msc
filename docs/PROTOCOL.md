@@ -535,6 +535,16 @@ uint8  trailer_2
 uint32 trailer_3
 ```
 
+An exhaustive login-port audit found no additional executed variant in either
+supplied PCAP. `111.pcapng` port `10282` has one payload-bearing stream and one
+opcode-`4` response; its only record has `ranking_present = false`.
+`1-10FS.pcapng` port `12324` has 40,828 payload-bearing rows across 607 TCP
+streams, but only the fully decoded stream `116` carries opcode `4`, and its
+record count is zero. The observed record counts are therefore only `0` and
+`1`. The four-`int32` ranking body is a bounded optional codec branch, not a
+branch executed by either capture; a ranked or multi-character successful
+login is still required to validate it independently.
+
 The stat snapshot reuses the typed world-entry prefix: character id, data
 flags, UTF-16 name, gender/skin/face/hair, companion id, level/job, four base
 stats, HP/MP, AP/SP, EXP, fame, map/portal, and two neutral state fields. The

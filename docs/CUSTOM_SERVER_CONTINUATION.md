@@ -623,6 +623,20 @@ pinned/private gates, and all three capture gates pass. The client and exact
 replay services were stopped, all four proof ports are offline, and the host
 Wine DLL is not mounted.
 
+The 2026-08-14 character-list variant audit exhausted both supplied login
+surfaces without finding another executable branch. `111.pcapng` port `10282`
+contains 53 payload-bearing TCP rows in one stream: stream `83` has the sole
+server opcode-`4` response, a 170-byte one-record list whose
+`ranking_present` value is false. `1-10FS.pcapng` port `12324` contains 40,828
+payload-bearing rows across 607 streams. Fifty-seven streams passed bounded
+Maple-greeting reconstruction, two completed the current encrypted-frame
+decode, and only stream `116` contains server opcode `4`: the known 18-byte
+empty list. Thus the supplied captures independently exercise counts `0` and
+`1`, but neither the multi-record loop nor the ranking-present body. Do not
+synthesize or promote those branches from the existing corpus; the next login
+variant gate requires a fresh successful account with at least two characters
+or one character whose ranking flag is true.
+
 There is a stale zombie client/window (`PID 902196`, historically Sway
 container `451`) which can overlap the fresh window. Select the Sway container
 whose PID matches the new `Maplestory_Classic.exe`; do not use hard-coded

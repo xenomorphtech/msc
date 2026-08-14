@@ -2926,6 +2926,11 @@ project's own `README.md` for all options.
   level/job/stats, reached character selection without a stall, handed off on
   opcode `7`, and entered the local gameplay replay; its strict login fold has
   full character-list coverage and no issues or warnings.
+- An exhaustive login-port audit found no third opcode-`4` variant: the only
+  supplied records have counts `0` and `1`, and the one real record has
+  `ranking_present = false`. A fresh ranked or multi-character successful
+  login is required before treating the optional four-`int32` body or repeated
+  record loop as independently capture-validated.
 - Login heartbeat traffic now shares the exact world codecs and is folded as
   empty server opcode-`10` probes plus ten-byte client opcode-`23` responses.
   Stream `83` has one match, stream `116` has four probes/three matches/one

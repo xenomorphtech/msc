@@ -1557,6 +1557,14 @@ and entered gameplay. Its closed login transcript is
 the strict fold is `handoff_ready`, character count `1`, full opcode-`4`
 coverage, and zero issues/warnings.
 
+The follow-up all-stream audit found no further character-list branch in the
+two supplied captures. `111.pcapng` port `10282` has 53 payload-bearing rows in
+its sole stream; stream `83` contains one 170-byte record and its ranking flag
+is false. `1-10FS.pcapng` port `12324` has 40,828 payload-bearing rows across
+607 streams; only decoded login stream `116` carries opcode `4`, the known
+18-byte empty list. Counts greater than one and `ranking_present = true` remain
+unobserved and require a new successful-account capture before promotion.
+
 Login opcode `23` is no longer an unknown packet boundary. The existing exact
 codec consumes its fixed eight-byte opaque token, while the login fold now
 queues empty server opcode-`10` probes and reports matched/unmatched/pending

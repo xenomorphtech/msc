@@ -813,7 +813,13 @@ the two-stage opcode-`402` transition, and handoff are fully validated. The
 successful character-list shape is also fully decoded: two reserved `uint32`
 values, a byte record count, typed character-stat/appearance records with an
 optional four-value ranking block, and a six-byte trailer. Unknown appearance
-and trailer roles retain neutral names and round-trip losslessly. Opcode-`13`
+and trailer roles retain neutral names and round-trip losslessly.
+
+The supplied captures execute only record counts `0` and `1`; the one record's
+ranking flag is false. The optional ranking body and a multi-record list still
+require a fresh successful-login capture before independent validation.
+
+Opcode-`13`
 acknowledgments and client status messages are fully decoded; other
 length-prefixed type-`6`/type-`7` envelopes are structurally bounded and
 intentionally reported as opaque. They use neutral opcode-envelope names
