@@ -111,6 +111,50 @@ arguments are sufficient for local custom-server iterations, but they are not
 a substitute for an official authenticated launch ticket. The browser/CDP
 procedure below is retained only for official-server capture work.
 
+## Native Windows direct launch for local-server testing
+
+The dedicated Windows development host at `192.168.2.6` has a demand-start
+Scheduled Task named `MapleStory Classic - Local Server`. It launches the game
+normally (not minimized) with the following action:
+
+```text
+executable:        C:\msc\maplestory_classic\Maplestory_Classic.exe
+working directory: C:\msc\maplestory_classic
+arguments:         1 dummy 1 1
+principal:         USER (Interactive, Highest)
+```
+
+Start it over SSH without placing the GUI process in the non-interactive SSH
+session:
+
+```sh
+ssh user@192.168.2.6 \
+  "powershell -NoProfile -Command \"Start-ScheduledTask -TaskName 'MapleStory Classic - Local Server'\""
+```
+
+For a cold development relaunch, stop the existing client first and then start
+the task:
+
+```sh
+ssh user@192.168.2.6 \
+  "powershell -NoProfile -Command \"Get-Process -Name Maplestory_Classic -ErrorAction SilentlyContinue | Stop-Process -Force; Start-ScheduledTask -TaskName 'MapleStory Classic - Local Server'\""
+```
+
+On 2026-08-11 the active `USER` desktop, Explorer, Chromium, and the launched
+client were all in Windows session `2`. The task is intentionally bound to the
+interactive user rather than to a numeric session id, so it will follow that
+user's active desktop if Windows assigns a different id after a reboot or
+re-logon. Do not replace it with a direct process created by SSH: that process
+would belong to the service/non-interactive session and its window would not
+appear on the development desktop.
+
+This task is the Windows equivalent of the local Wine placeholder launch. The
+host currently maps
+`tw-login.maplestoryclassic.games.gamania.com` to `192.168.2.5`, so it is a
+custom-server workflow, not an official Taiwan login. The four placeholder
+arguments do not replace a fresh Beanfun/NGM ticket for an official-server
+session.
+
 ## Official authenticated NGM launch
 
 For an official session:

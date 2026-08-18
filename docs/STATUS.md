@@ -19,10 +19,42 @@
   timing are implemented.
 - Protocol-300 greeting parsing, encrypted-frame framing, Maple AES payload
   encryption/decryption, and IV shuffling are implemented and tested.
+- All seven table-named JSON TextAssets in the installed client's Addressables
+  bundles are reproducibly extracted by
+  `tools/maplestory_classic_server/tools/dump_gametables.py`. The dump preserves
+  the two distinct PetTable asset paths and emits a manifest with source bundle
+  names, record counts, byte lengths, and SHA-256 hashes. The payloads are valid
+  UTF-8 JSON after standard UnityFS/LZ4 decompression; no additional GameTable
+  encryption layer is present.
+- All seven direct `Quest/*.wzjson` ScriptableObjects are now reproducibly
+  extracted and decoded by
+  `tools/maplestory_classic_server/tools/dump_quests.py`. Their compact WZJS v5
+  layout is fully parsed from node, typed-scalar, key, path, and string pools;
+  parent/child and stored-path invariants validate across every node. The live
+  dump correlates 509 distinct IDs: 485 occur in `Act`, `Check`, `QuestInfo`,
+  `Say`, and Traditional Chinese `QuestData`; five occur only in `Check`; nine
+  occur only in `QuestData`; two of the complete quests also carry `PQuest`
+  definitions; and `Exclusive` groups 12 IDs, two complete and ten otherwise
+  absent. The two `PQuestSearch` roots are retained as non-quest-ID auxiliary
+  configuration. All 3,394 `Say` text references and 2,125 of 2,129
+  `QuestInfo` references resolve, with the four unresolved symbolic values
+  preserved in the correlated output. WZJS is a binary container, not an
+  additional encryption layer.
+- The installed client contains 11,956 WZJS assets, including 705 concrete map
+  IDs. Their navigation data is explicit: `foothold` records carry segment
+  endpoints and `prev`/`next` links, while `ladderRope` records carry a fixed
+  x-coordinate, y endpoints, and a ladder/rope discriminator. Of the map IDs,
+  391 store geometry directly and 314 use `info/link`; every link resolves to
+  an installed geometry source. Direct geometry contains 84,317 foothold
+  segments, 732 ladders, 1,889 ropes, and 3,249 portals. The new
+  `tools/maplestory_classic_server/tools/draw_map_navigation.py` extractor
+  resolves those links and writes normalized JSON plus an SVG navigation view.
 - Login logs now fold into typed game state with full/partial/unknown/invalid
   shape confidence. The successful reference ends at validated
   `handoff_ready` state.
-- The tracked custom-server suite currently passes all 355 tests.
+- The tracked custom-server suite currently passes all 355 tests, with one
+  native Unicorn integration test skipped unless its external assembly path is
+  supplied.
 - The client accepts the custom NGS challenge, returns native opcode `13`, and
   accepts the synthetic opcode-`13` acknowledgment.
 - GDB transition probes reached real world-selection and character-selection

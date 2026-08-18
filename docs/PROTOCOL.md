@@ -663,7 +663,10 @@ The result is pinned to `GameAssembly.dll` SHA-256
 `6f2a93efc0f16f30685c902134ecc79ad67fe384f345f503fa688658acbddeea`.
 The original producer is VA `0x181CD62A0` / RVA `0x1CD62A0`; the emulated CRC
 helper is VA `0x181C96BF0` / RVA `0x1C96BF0`; and its table-installing static
-constructor is VA `0x181C98C50` / RVA `0x1C98C50`.
+constructor is VA `0x181C98C50` / RVA `0x1C98C50`. The reference implementation
+and native Unicorn harness are in
+`tools/maplestory_classic_server/maple_server/security_type1.py` and
+`tools/maplestory_classic_server/tools/security_type1_unicorn.py`.
 
 Capture verification reproduced all observed subtype-`1` frames with zero
 mismatches: `446/446` in `111.pcapng` stream `92` and `970/970` in

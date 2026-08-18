@@ -26,6 +26,57 @@ version `300`, subversion `300`, and locale `4`.
 
 Run commands from this directory:
 
+Dump every table-named JSON TextAsset from the installed client's Addressables
+bundles:
+
+```sh
+python tools/dump_gametables.py
+```
+
+The default output is
+`../../downloads/maplestory_classic_gametables/`. It preserves the WZ category
+path, so the distinct `Item/PetTable.json` and `Sound/PetTable.json` assets do
+not overwrite one another. `manifest.json` records the source bundle, original
+asset path, entry count, byte length, and SHA-256 digest for every dump. The
+current bundles use standard UnityFS/LZ4 compression and contain valid UTF-8
+JSON after decompression; no additional GameTable cipher is present.
+
+Install `requirements.txt` before running the dumper. To process another client
+copy or write elsewhere, pass `--addressables-root` and `--output-directory`.
+
+Extract and correlate every direct `Quest/*.wzjson` asset:
+
+```sh
+python tools/dump_quests.py
+```
+
+The default output is `../../downloads/maplestory_classic_quests/`. The
+`raw/Quest/` directory contains the exact WZJS v5 byte arrays and their
+serialized layout sidecars, `decoded/Quest/` contains ordinary readable JSON,
+and `correlated/quests.json` joins `Act`, `Check`, `QuestInfo`, `Say`, `PQuest`,
+and `Exclusive` membership to `String/TW/QuestData.json` by quest ID. The
+non-quest-ID `PQuestSearch` roots are retained as auxiliary configuration. The
+correlation also resolves symbolic `QuestInfo` and `Say` leaves to localized
+text while retaining raw references and every unmatched ID. The quest payloads
+use a compact WZJS v5 node/string-table container; they are not protected by an
+additional cipher. Use `--locale` to select another installed localization if
+one is present.
+
+Draw the installed navigation geometry for one map ID:
+
+```sh
+python tools/draw_map_navigation.py 100000000
+```
+
+The default output is `../../downloads/maplestory_classic_navigation/` and
+contains the exact map WZJS payload, normalized navigation JSON, and an SVG.
+The SVG draws foothold/platform segments in white, non-walkable vertical
+foothold edges in gray, ladders in orange, ropes in cyan, and portals as purple
+points. Map records whose `info/link` reuses another map's geometry are resolved
+automatically. Pass `--width` to change the SVG viewport size.
+
+The custom server itself can then be started with:
+
 ```sh
 python -m maple_server stub \
   --listen-host 0.0.0.0 \
