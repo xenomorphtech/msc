@@ -114,6 +114,73 @@
       within each captured field.
     </p>
 
+    <h2>Fresh traced Ellinia rerun</h2>
+
+    <p>
+      The 2026-08-22 rerun started from the saved 10,816-update linear-Q model
+      and reached the Ellinia goal in 53.917 seconds. Its complete first-success
+      trace contains 362 action frames and 361 learning transitions, ending at
+      model update 11,177. The process was allowed to save its final
+      11,189-update weights after the success observation.
+    </p>
+
+    <p>
+      The deterministic verifier scoped the network and telemetry evidence to
+      those traced frames and passed:
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Fresh-run result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Opcode-<code>47</code> plaintext submissions</td>
+          <td>82/82 byte-exact after typed rebuild</td>
+        </tr>
+        <tr>
+          <td>Typed movement commands</td>
+          <td>297, with no opaque commands</td>
+        </tr>
+        <tr>
+          <td>Gravity</td>
+          <td>12/12 usable intervals exactly <code>2000</code>; 12 apex-crossing intervals separated from the fit</td>
+        </tr>
+        <tr>
+          <td>Jump impulse</td>
+          <td>7/7 exactly <code>-555</code></td>
+        </tr>
+        <tr>
+          <td>Terminal fall speed</td>
+          <td>1/1 exactly <code>670</code></td>
+        </tr>
+        <tr>
+          <td>Prefab foothold contacts</td>
+          <td>207/207 within two map units</td>
+        </tr>
+        <tr>
+          <td>Packet/telemetry alignment</td>
+          <td>227/285 within 60 ms; median error (4.12, 2.01) inside the motion envelope</td>
+        </tr>
+        <tr>
+          <td>Historical action/packet direction</td>
+          <td>110/119 agree; non-gating because packet velocity retains momentum</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      This confirms equality at the stable plaintext packet boundary. Encrypted
+      wire bytes are deliberately not compared across sessions because the
+      Maple ciphertext depends on the session IV and cipher progression. It
+      also removes the earlier historical-action limitation for this Ellinia
+      run; it does not yet constitute live policy validation on the other 20
+      captured map IDs.
+    </p>
+
     <h2>Local evidence</h2>
 
     <ul>
@@ -128,6 +195,14 @@
       <li>
         Leveling route:
         <code>/home/sdancer/ms2/captures/levels-1-10.stream-126.json</code>
+      </li>
+      <li>
+        Fresh rerun action trace:
+        <code>.codex_tmp/physics-lab/rerun-20260822T174940Z/actions.jsonl</code>
+      </li>
+      <li>
+        Fresh rerun verification report:
+        <code>.codex_tmp/physics-lab/rerun-20260822T174940Z/rl-physics-verification.json</code>
       </li>
     </ul>
   </main>

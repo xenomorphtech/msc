@@ -5,7 +5,13 @@ import tempfile
 import unittest
 
 
-from maple_server.movement_verification import rebuild_movement_submission
+from maple_server.movement_verification import (
+    TimedMovementSample,
+    load_action_trace_evidence,
+    physics_rule_evidence,
+    rebuild_movement_submission,
+    telemetry_alignment_evidence,
+)
 from maple_server.navigation import (
     Foothold,
     LadderRope,
@@ -24,7 +30,7 @@ from maple_server.physics_rules import (
     PrefabPhysicsModel,
     ballistic_position,
 )
-from maple_server.rl_navigation import append_agent_trace
+from maple_server.rl_navigation import Observation, append_agent_trace
 
 
 def fixture_geometry(*, forbid_fall_down: bool = False) -> MapGeometry:
@@ -165,6 +171,63 @@ class MovementEmissionTest(unittest.TestCase):
                     '{"action":"jump","frame":2}',
                 ],
             )
+
+    def test_action_trace_evidence_covers_first_success(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "actions.jsonl"
+            for frame, action, reached in (
+                (10, "left", False),
+                (11, "jump", False),
+                (12, "idle", True),
+                (13, "idle", True),
+            ):
+                append_agent_trace(
+                    path,
+                    {
+                        "frame": frame,
+                        "timestamp_ns": frame * 100,
+                        "model_updates": 90 + frame,
+                        "action": action,
+                        "goal": {"reached": reached},
+                    },
+                )
+            records, report = load_action_trace_evidence(
+                path,
+                start_timestamp_ns=1_000,
+                end_timestamp_ns=1_200,
+            )
+            self.assertEqual(len(records), 3)
+            self.assertEqual(report["learning_transitions"], 2)
+            self.assertEqual(
+                report["action_counts"], {"idle": 1, "jump": 1, "left": 1}
+            )
+            self.assertTrue(report["complete_to_first_success"])
+            self.assertTrue(report["pass"])
+
+    def test_physics_evidence_excludes_quantized_apex_split(self) -> None:
+        samples = (
+            TimedMovementSample(0, 0, 0, 0, 0, 0, 10, 0),
+            TimedMovementSample(30, 0, 0, -1, 0, -495, 0, 30),
+            TimedMovementSample(270, 0, 0, -2, 0, -15, 0, 240),
+            TimedMovementSample(280, 0, 0, -2, 0, 0, 0, 10),
+            TimedMovementSample(310, 0, 0, -1, 0, 60, 0, 30),
+            TimedMovementSample(615, 0, 0, 0, 0, 670, 0, 305),
+        )
+        report = physics_rule_evidence(samples, fixture_geometry())
+        self.assertEqual(report["gravity"]["apex_transitions_excluded"], 1)
+        self.assertEqual(report["gravity"]["exact"], 2)
+        self.assertTrue(report["pass"])
+
+    def test_telemetry_alignment_uses_motion_envelope(self) -> None:
+        sample = TimedMovementSample(1_000, 0, 0, 0, 125, 0, 10, 30)
+        telemetry = (Observation(1, 51_000_000, 6.0, 0.0, 125.0, 0.0),)
+        report = telemetry_alignment_evidence(
+            (sample,),
+            telemetry,
+            fixture_geometry().physics,
+        )
+        self.assertEqual(report["median_absolute_position_error"]["x"], 6.0)
+        self.assertTrue(report["pass"])
 
 
 if __name__ == "__main__":

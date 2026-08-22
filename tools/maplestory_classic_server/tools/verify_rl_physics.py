@@ -43,6 +43,11 @@ def parse_args() -> argparse.Namespace:
             "1787369081842491203_replay_12857.jsonl"
         ),
     )
+    parser.add_argument(
+        "--action-trace",
+        type=Path,
+        help="optional per-frame JSONL emitted by run_rl_navigation.py --trace",
+    )
     parser.add_argument("--window-seconds", type=float, default=140.0)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
@@ -63,6 +68,7 @@ def main() -> int:
         status_path=arguments.status,
         telemetry_path=arguments.telemetry,
         transcript_path=arguments.transcript,
+        action_trace_path=arguments.action_trace,
         window_seconds=arguments.window_seconds,
     )
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"

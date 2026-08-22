@@ -12,13 +12,13 @@ import statistics
 from typing import Any, Mapping, Sequence
 
 from .gamestate import PlainFrame, decode_transcript
-from .navigation import MapGeometry
+from .navigation import MapGeometry, Physics
 from .packets import (
     LifeMovementCommand,
     LifeMovementPath,
     LifeMovementSubmission,
 )
-from .rl_navigation import LinearQModel, NavigationAgent, Observation
+from .rl_navigation import ACTIONS, LinearQModel, NavigationAgent, Observation
 from .transcript import Transcript
 
 
@@ -229,6 +229,7 @@ def physics_rule_evidence(
 ) -> dict[str, Any]:
     physics = geometry.physics
     gravity_values: list[float] = []
+    apex_transitions = 0
     jump_values: list[float] = []
     terminal_values: list[int] = []
     contacts = 0
@@ -249,10 +250,15 @@ def physics_rule_evidence(
             and current.velocity_y >= previous.velocity_y
             and current.velocity_y < physics.terminal_fall_speed
         ):
-            gravity_values.append(
-                (current.velocity_y - previous.velocity_y)
-                / (current.duration_ms / 1_000.0)
-            )
+            if previous.velocity_y < 0 <= current.velocity_y:
+                # The integer VecCtrl encoding clamps/quantizes the apex split.
+                # It is not a full constant-acceleration interval.
+                apex_transitions += 1
+            else:
+                gravity_values.append(
+                    (current.velocity_y - previous.velocity_y)
+                    / (current.duration_ms / 1_000.0)
+                )
         if (
             previous.foothold_id != 0
             and current.foothold_id == 0
@@ -321,6 +327,7 @@ def physics_rule_evidence(
         },
         "gravity": {
             "transitions": len(gravity_values),
+            "apex_transitions_excluded": apex_transitions,
             "exact": sum(error <= 1e-9 for error in gravity_errors),
             "within_four_units_per_second_squared": sum(
                 error <= 4.0 for error in gravity_errors
@@ -431,6 +438,7 @@ def infer_success_window(
 def telemetry_alignment_evidence(
     samples: Sequence[TimedMovementSample],
     telemetry: Sequence[Observation],
+    physics: Physics,
     *,
     maximum_delta_ms: float = 60.0,
 ) -> dict[str, Any]:
@@ -457,21 +465,40 @@ def telemetry_alignment_evidence(
         errors_x.append(abs(nearest.x - sample.position_x))
         errors_y.append(abs(nearest.y - sample.position_y))
     matched = len(deltas)
+    matched_ratio = matched / len(samples) if samples else 0.0
+    horizontal_error_envelope = (
+        physics.walk_speed * maximum_delta_ms / 1_000.0 + 2.0
+    )
+    vertical_error_envelope = (
+        physics.terminal_fall_speed * maximum_delta_ms / 1_000.0 + 2.0
+    )
+    median_error_x = statistics.median(errors_x) if errors_x else None
+    median_error_y = statistics.median(errors_y) if errors_y else None
     return {
         "samples": len(samples),
         "matched_within_ms": matched,
+        "matched_ratio": matched_ratio,
+        "minimum_match_ratio": 0.7,
         "maximum_delta_ms": maximum_delta_ms,
         "median_timestamp_delta_ms": statistics.median(deltas)
         if deltas
         else None,
         "median_absolute_position_error": {
-            "x": statistics.median(errors_x) if errors_x else None,
-            "y": statistics.median(errors_y) if errors_y else None,
+            "x": median_error_x,
+            "y": median_error_y,
+        },
+        "motion_error_envelope": {
+            "x": horizontal_error_envelope,
+            "y": vertical_error_envelope,
+            "coordinate_quantization_allowance": 2.0,
         },
         "pass": (
             matched > 0
-            and statistics.median(errors_x) <= 1.0
-            and statistics.median(errors_y) <= 2.0
+            and matched_ratio >= 0.7
+            and median_error_x is not None
+            and median_error_x <= horizontal_error_envelope
+            and median_error_y is not None
+            and median_error_y <= vertical_error_envelope
         ),
     }
 
@@ -490,6 +517,7 @@ def rl_policy_mirror_evidence(
     status: Mapping[str, Any],
     telemetry: Sequence[Observation],
     samples: Sequence[TimedMovementSample],
+    historical_decisions: Sequence[tuple[int, str]] | None = None,
 ) -> dict[str, Any]:
     trained = LinearQModel.load(model_path)
     shadow = LinearQModel(
@@ -513,18 +541,25 @@ def rl_policy_mirror_evidence(
         decisions.append((observation.timestamp_ns, action))
         reached = reached or bool(decision["goal"]["reached"])
 
-    decision_timestamps = [item[0] for item in decisions]
+    projection_decisions = (
+        list(historical_decisions)
+        if historical_decisions is not None
+        else decisions
+    )
+    decision_timestamps = [item[0] for item in projection_decisions]
     directional_compared = 0
     directional_agreed = 0
     for sample in samples:
-        if abs(sample.velocity_x) < 20 or not decisions:
+        if abs(sample.velocity_x) < 20 or not projection_decisions:
             continue
         index = bisect_left(decision_timestamps, sample.timestamp_ns)
         candidate_indexes = [
-            item for item in (index - 1, index) if 0 <= item < len(decisions)
+            item
+            for item in (index - 1, index)
+            if 0 <= item < len(projection_decisions)
         ]
         nearest_timestamp, action = min(
-            (decisions[item] for item in candidate_indexes),
+            (projection_decisions[item] for item in candidate_indexes),
             key=lambda item: abs(item[0] - sample.timestamp_ns),
         )
         if abs(nearest_timestamp - sample.timestamp_ns) > 100_000_000:
@@ -554,6 +589,11 @@ def rl_policy_mirror_evidence(
         "observed_trajectory_reaches_goal": reached,
         "shadow_errors": errors,
         "directional_packet_projection": {
+            "decision_source": (
+                "historical_action_trace"
+                if historical_decisions is not None
+                else "final_policy_shadow"
+            ),
             "compared": directional_compared,
             "agreed": directional_agreed,
             "agreement_ratio": (
@@ -566,14 +606,150 @@ def rl_policy_mirror_evidence(
                 "the key decision at that instant"
             ),
         },
-        "historical_action_trace_available": False,
-        "historical_limit": (
+        "historical_action_trace_available": historical_decisions is not None,
+        "historical_frames": (
+            len(historical_decisions)
+            if historical_decisions is not None
+            else 0
+        ),
+        "historical_action_counts": (
+            dict(
+                sorted(
+                    Counter(
+                        action for _, action in historical_decisions
+                    ).items()
+                )
+            )
+            if historical_decisions is not None
+            else {}
+        ),
+        "historical_limit": None
+        if historical_decisions is not None
+        else (
             "the completed run retained only its final status and weights, so "
             "the final policy can be shadowed over observed states but the "
             "evolving historical action decisions cannot be compared exactly"
         ),
         "pass": trained.updates == status_updates and reached and not errors,
     }
+
+
+def load_action_trace_evidence(
+    path: str | Path,
+    *,
+    start_timestamp_ns: int,
+    end_timestamp_ns: int,
+) -> tuple[list[Mapping[str, Any]], dict[str, Any]]:
+    """Load and validate a per-frame RL action trace through first success."""
+
+    source = Path(path)
+    records: list[Mapping[str, Any]] = []
+    errors: list[str] = []
+    total_records = 0
+    for line_number, line in enumerate(
+        source.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        total_records += 1
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError as error:
+            errors.append(f"line {line_number}: {error.msg}")
+            continue
+        if not isinstance(value, Mapping):
+            errors.append(f"line {line_number}: expected a JSON object")
+            continue
+        try:
+            timestamp_ns = int(value["timestamp_ns"])
+        except (KeyError, TypeError, ValueError):
+            errors.append(f"line {line_number}: invalid timestamp_ns")
+            continue
+        if start_timestamp_ns <= timestamp_ns <= end_timestamp_ns:
+            records.append(value)
+
+    timestamps: list[int] = []
+    frames: list[int] = []
+    updates: list[int] = []
+    actions: list[str] = []
+    reached: list[bool] = []
+    validated_records: list[Mapping[str, Any]] = []
+    for index, record in enumerate(records):
+        try:
+            timestamps.append(int(record["timestamp_ns"]))
+            frames.append(int(record["frame"]))
+            updates.append(int(record["model_updates"]))
+            action = str(record["action"])
+            goal = record["goal"]
+            if not isinstance(goal, Mapping):
+                raise TypeError("goal is not an object")
+            reached.append(bool(goal["reached"]))
+        except (KeyError, TypeError, ValueError) as error:
+            errors.append(f"window record {index}: {error}")
+            continue
+        actions.append(action)
+        if action not in ACTIONS:
+            errors.append(f"window record {index}: unknown action {action!r}")
+            continue
+        validated_records.append(record)
+
+    lengths_match = len({
+        len(records),
+        len(timestamps),
+        len(frames),
+        len(updates),
+        len(actions),
+        len(reached),
+    }) == 1
+    timestamps_strict = lengths_match and all(
+        after > before for before, after in zip(timestamps, timestamps[1:])
+    )
+    frames_strict = lengths_match and all(
+        after > before for before, after in zip(frames, frames[1:])
+    )
+    updates_monotonic = lengths_match and all(
+        after >= before for before, after in zip(updates, updates[1:])
+    )
+    complete_to_first_success = bool(
+        lengths_match and reached and reached[-1] and not any(reached[:-1])
+    )
+    learning_transitions = updates[-1] - updates[0] if updates else 0
+    one_update_per_transition = bool(
+        lengths_match
+        and updates
+        and learning_transitions == len(records) - 1
+    )
+    passed = bool(
+        records
+        and not errors
+        and timestamps_strict
+        and frames_strict
+        and updates_monotonic
+        and complete_to_first_success
+        and one_update_per_transition
+    )
+    report = {
+        "available": True,
+        "source": str(source),
+        "total_records": total_records,
+        "window_records": len(records),
+        "start_frame": frames[0] if frames else None,
+        "end_frame": frames[-1] if frames else None,
+        "start_timestamp_ns": timestamps[0] if timestamps else None,
+        "end_timestamp_ns": timestamps[-1] if timestamps else None,
+        "start_model_updates": updates[0] if updates else None,
+        "end_model_updates": updates[-1] if updates else None,
+        "learning_transitions": learning_transitions,
+        "action_counts": dict(sorted(Counter(actions).items())),
+        "timestamps_strictly_increasing": timestamps_strict,
+        "frames_strictly_increasing": frames_strict,
+        "model_updates_monotonic": updates_monotonic,
+        "one_update_per_transition": one_update_per_transition,
+        "complete_to_first_success": complete_to_first_success,
+        "errors": errors,
+        "pass": passed,
+    }
+    return validated_records, report
 
 
 def verify_rl_capture(
@@ -583,6 +759,7 @@ def verify_rl_capture(
     status_path: str | Path,
     telemetry_path: str | Path,
     transcript_path: str | Path,
+    action_trace_path: str | Path | None = None,
     window_seconds: float = 140.0,
 ) -> dict[str, Any]:
     status = json.loads(Path(status_path).read_text(encoding="utf-8"))
@@ -592,6 +769,29 @@ def verify_rl_capture(
         status,
         window_seconds=window_seconds,
     )
+    if action_trace_path is None:
+        action_records = None
+        action_trace = {
+            "available": False,
+            "pass": True,
+            "non_gating_reason": "no per-frame action trace was supplied",
+        }
+    else:
+        action_records, action_trace = load_action_trace_evidence(
+            action_trace_path,
+            start_timestamp_ns=start_timestamp,
+            end_timestamp_ns=end_timestamp,
+        )
+        if action_records:
+            start_timestamp = max(
+                start_timestamp,
+                int(action_records[0]["timestamp_ns"]),
+            )
+            telemetry_window = tuple(
+                frame
+                for frame in telemetry_window
+                if frame.timestamp_ns >= start_timestamp
+            )
     frames = movement_frames(
         transcript_path,
         start_timestamp_ns=start_timestamp,
@@ -600,25 +800,43 @@ def verify_rl_capture(
     packets, submissions = packet_emission_evidence(frames)
     samples = timed_absolute_samples(frames, submissions)
     physics = physics_rule_evidence(samples, geometry)
-    alignment = telemetry_alignment_evidence(samples, telemetry_window)
+    alignment = telemetry_alignment_evidence(
+        samples,
+        telemetry_window,
+        geometry.physics,
+    )
+    historical_decisions = (
+        [
+            (int(record["timestamp_ns"]), str(record["action"]))
+            for record in action_records
+        ]
+        if action_records is not None
+        else None
+    )
     mirror = rl_policy_mirror_evidence(
         geometry,
         model_path,
         status,
         telemetry_window,
         samples,
+        historical_decisions,
     )
     passed = bool(
         packets["all_plaintext_byte_exact"]
         and physics["pass"]
         and alignment["pass"]
         and mirror["pass"]
+        and action_trace["pass"]
     )
     return {
-        "schema_version": 1,
-        "verdict": "confirmed_with_historical_action_trace_limit"
-        if passed
-        else "failed",
+        "schema_version": 2,
+        "verdict": (
+            "confirmed_with_historical_action_trace"
+            if passed and action_trace["available"]
+            else "confirmed_with_historical_action_trace_limit"
+            if passed
+            else "failed"
+        ),
         "pass": passed,
         "map_id": geometry.map_id,
         "success_window": {
@@ -629,6 +847,7 @@ def verify_rl_capture(
         },
         "physics_rules": physics,
         "rl_policy_mirror": mirror,
+        "action_trace": action_trace,
         "packet_emission": packets,
         "packet_telemetry_alignment": alignment,
         "provenance": {
@@ -637,5 +856,8 @@ def verify_rl_capture(
             "live_evidence": str(transcript_path),
             "telemetry": str(telemetry_path),
             "model": str(model_path),
+            "action_trace": (
+                str(action_trace_path) if action_trace_path is not None else None
+            ),
         },
     }

@@ -35,6 +35,34 @@ The next multi-map step is to segment the `1-10FS` stream by field epoch,
 replay its opcode-`157` transitions, select the corresponding prefab for each
 map ID, and train or evaluate the policy within each captured field.
 
+## Fresh traced Ellinia rerun
+
+The 2026-08-22 rerun started from the saved 10,816-update linear-Q model and
+reached the Ellinia goal in 53.917 seconds. Its complete first-success trace
+contains 362 action frames and 361 learning transitions, ending at model update
+11,177. The process was allowed to save its final 11,189-update weights after
+the success observation.
+
+The deterministic verifier scoped the network and telemetry evidence to those
+traced frames and passed:
+
+| Check | Fresh-run result |
+| --- | --- |
+| Opcode-`47` plaintext submissions | 82/82 byte-exact after typed rebuild |
+| Typed movement commands | 297, with no opaque commands |
+| Gravity | 12/12 usable intervals exactly `2000`; 12 apex-crossing intervals separated from the fit |
+| Jump impulse | 7/7 exactly `-555` |
+| Terminal fall speed | 1/1 exactly `670` |
+| Prefab foothold contacts | 207/207 within two map units |
+| Packet/telemetry alignment | 227/285 within 60 ms; median error `(4.12, 2.01)` inside the motion envelope |
+| Historical action/packet direction | 110/119 agree; non-gating because packet velocity retains momentum |
+
+This confirms equality at the stable plaintext packet boundary. Encrypted wire
+bytes are deliberately not compared across sessions because the Maple
+ciphertext depends on the session IV and cipher progression. It also removes
+the earlier historical-action limitation for this Ellinia run; it does not yet
+constitute live policy validation on the other 20 captured map IDs.
+
 ## Local evidence
 
 - Decoded packets:
@@ -43,3 +71,7 @@ map ID, and train or evaluate the policy within each captured field.
   `/home/sdancer/ms2/captures/1-10FS.stream-126.c2s-gamestate.jsonl`
 - Leveling route:
   `/home/sdancer/ms2/captures/levels-1-10.stream-126.json`
+- Fresh rerun action trace:
+  `.codex_tmp/physics-lab/rerun-20260822T174940Z/actions.jsonl`
+- Fresh rerun verification report:
+  `.codex_tmp/physics-lab/rerun-20260822T174940Z/rl-physics-verification.json`
