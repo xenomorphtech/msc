@@ -19,6 +19,7 @@ from maple_server.rl_navigation import (
     NavigationAgent,
     Observation,
     XdotoolController,
+    append_agent_trace,
     write_agent_status,
 )
 
@@ -30,6 +31,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--map-id", type=int, default=101_000_000)
     parser.add_argument("--model", type=Path, default=Path(".codex_tmp/physics-lab/rl-model.json"))
     parser.add_argument("--status", type=Path, default=Path("/tmp/maple-rl-agent.json"))
+    parser.add_argument(
+        "--trace",
+        type=Path,
+        help="append every observation/action decision as owner-only JSONL",
+    )
     parser.add_argument("--display", required=True)
     parser.add_argument("--xauthority")
     parser.add_argument("--epsilon", type=float, default=0.08)
@@ -86,6 +92,8 @@ def main() -> int:
             last_frame = observation.frame
             status = agent.step(observation)
             write_agent_status(arguments.status, status)
+            if arguments.trace is not None:
+                append_agent_trace(arguments.trace, status)
             if not arguments.quiet:
                 print(
                     json.dumps(status, separators=(",", ":"), sort_keys=True),

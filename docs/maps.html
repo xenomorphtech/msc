@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Map Capture and Replay Coverage</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, sans-serif;
+      line-height: 1.5;
+    }
+
+    body {
+      max-width: 56rem;
+      margin: 3rem auto;
+      padding: 0 1.25rem;
+    }
+
+    code {
+      padding: 0.1rem 0.3rem;
+      border-radius: 0.25rem;
+      background: color-mix(in srgb, CanvasText 10%, Canvas);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border: 1px solid color-mix(in srgb, CanvasText 25%, Canvas);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Map Capture and Replay Coverage</h1>
+
+    <p>
+      The <code>1-10FS</code> level-1-through-10 capture spans many maps. The
+      project is not limited to the single Ellinia snapshot used by the current
+      physics-lab launcher.
+    </p>
+
+    <h2>Captured coverage</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Measurement</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>World TCP stream</td>
+          <td><code>126</code></td>
+        </tr>
+        <tr>
+          <td>Field epochs</td>
+          <td>36</td>
+        </tr>
+        <tr>
+          <td>Server opcode-<code>157</code> snapshots/transitions</td>
+          <td>36</td>
+        </tr>
+        <tr>
+          <td>Distinct map IDs</td>
+          <td>21</td>
+        </tr>
+        <tr>
+          <td>Captured progression</td>
+          <td>Level 1 through level 10</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>The distinct captured map IDs are:</p>
+
+    <p>
+      <code>0</code>, <code>10000</code>, <code>20000</code>,
+      <code>20001</code>, <code>30000</code>, <code>40000</code>,
+      <code>40001</code>, <code>40002</code>, <code>50000</code>,
+      <code>50001</code>, <code>60000</code>, <code>1000000</code>,
+      <code>1000004</code>, <code>1010000</code>, <code>1010002</code>,
+      <code>1020000</code>, <code>100050000</code>,
+      <code>101000000</code>, <code>101000003</code>,
+      <code>101000004</code>, and <code>104000000</code>.
+    </p>
+
+    <p>
+      This route includes Lith Harbor (<code>104000000</code>) and Ellinia
+      (<code>101000000</code>), along with the tutorial and beginner-island
+      fields traversed during leveling.
+    </p>
+
+    <h2>Current live-lab status</h2>
+
+    <p>
+      The Wine + Frida RL run completed so far used the stream-<code>114</code> replay
+      and map <code>101000000</code> (Ellinia). Consequently, the saved policy
+      weights have only been trained and validated live on Ellinia. This is a
+      launcher/configuration limitation, not a capture-data limitation.
+    </p>
+
+    <p>
+      The next multi-map step is to segment the <code>1-10FS</code> stream by
+      field epoch, replay its opcode-<code>157</code> transitions, select the
+      corresponding prefab for each map ID, and train or evaluate the policy
+      within each captured field.
+    </p>
+
+    <h2>Local evidence</h2>
+
+    <ul>
+      <li>
+        Decoded packets:
+        <code>tools/il2cpp_packet_dump/target/private/1-10FS.stream-126.jsonl</code>
+      </li>
+      <li>
+        Field boundaries and map IDs:
+        <code>/home/sdancer/ms2/captures/1-10FS.stream-126.c2s-gamestate.jsonl</code>
+      </li>
+      <li>
+        Leveling route:
+        <code>/home/sdancer/ms2/captures/levels-1-10.stream-126.json</code>
+      </li>
+    </ul>
+  </main>
+</body>
+</html>

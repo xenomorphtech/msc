@@ -620,3 +620,18 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 def write_agent_status(path: str | Path, payload: Mapping[str, Any]) -> None:
     _atomic_json(Path(path), payload)
+
+
+def append_agent_trace(path: str | Path, payload: Mapping[str, Any]) -> None:
+    """Append one complete decision record for later action-exact replay."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        json.dump(payload, output, separators=(",", ":"), sort_keys=True)
+        output.write("\n")

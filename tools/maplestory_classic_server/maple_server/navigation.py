@@ -35,17 +35,23 @@ class Point:
 
 @dataclass(frozen=True)
 class Physics:
-    """Ballistic bounds taken from the official VecCtrl defaults.
+    """Deterministic beginner movement envelope in Maple map units.
 
-    ``jump_speed`` and ``gravity`` are in Maple pixel/s units. The apex
-    ``v^2 / 2g`` is about 77 px at jump 555 / gravity 2000, matching a
-    beginner jump. ``max_jump_gap`` and ``max_drop`` are capture-backed
-    horizontal/downward allowances, not extra impulse.
+    The force constants come from the WZ/prefab model documented by the
+    earlier movement laboratory and are independently checked against typed
+    VecCtrl movement commands.  Coordinates use +x right and +y down.
+    ``max_jump_gap`` and ``max_drop`` remain route-search allowances rather
+    than additional impulses.
     """
 
     walk_speed: float = 125.0
     jump_speed: float = 555.0
     gravity: float = 2_000.0
+    run_acceleration: float = 1_400.0
+    ground_release_deceleration: float = 800.0
+    terminal_fall_speed: float = 670.0
+    climb_speed: float = 60.0
+    timestep_ms: int = 30
     max_jump_gap: int = 180
     max_jump_rise: int = 120
     max_drop: int = 460
@@ -204,6 +210,17 @@ class MapGeometry:
                 walk_speed=float(raw_physics.get("walk_speed", 125.0)),
                 jump_speed=float(raw_physics.get("jump_speed", 555.0)),
                 gravity=float(raw_physics.get("gravity", 2_000.0)),
+                run_acceleration=float(
+                    raw_physics.get("run_acceleration", 1_400.0)
+                ),
+                ground_release_deceleration=float(
+                    raw_physics.get("ground_release_deceleration", 800.0)
+                ),
+                terminal_fall_speed=float(
+                    raw_physics.get("terminal_fall_speed", 670.0)
+                ),
+                climb_speed=float(raw_physics.get("climb_speed", 60.0)),
+                timestep_ms=int(raw_physics.get("timestep_ms", 30)),
                 max_jump_gap=int(raw_physics.get("max_jump_gap", 180)),
                 max_jump_rise=int(raw_physics.get("max_jump_rise", 120)),
                 max_drop=int(raw_physics.get("max_drop", 460)),
