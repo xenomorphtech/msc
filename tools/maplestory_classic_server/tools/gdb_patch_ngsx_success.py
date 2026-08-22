@@ -1,10 +1,10 @@
-"""Inject an ephemeral synthetic NGSX init-success callback into a live client.
+"""Inject ephemeral synthetic NGSX init/run-success callbacks into a live client.
 
 This build-specific custom-server debugging patch preserves the application's
-normal managed NGSX run and callback setup.  It redirects ``NgsxWindows.Init``
-to the existing static managed callback with null callback arguments, then
+managed NGSX callback setup.  It redirects ``NgsxWindows.Init`` and ``Run`` to
+their existing static managed callbacks with null callback arguments, then
 redirects ``ReadResult`` to construct an
-``NgsxResult(IsOK=true, Code=0, Message=null)`` without loading native NGS.  The
+``NgsxResult(IsOK=true, Code=0, Message="")`` without loading native NGS.  The
 executable on disk is not modified.
 """
 
@@ -16,15 +16,19 @@ import struct
 import gdb
 
 
-WINDOWS_INIT_RVA = 0x3FEACF0
-ON_INIT_CALLBACK_RVA = 0x3FE9840
-READ_RESULT_RVA = 0x3FEA7E0
+WINDOWS_INIT_RVA = 0x4023270
+ON_INIT_CALLBACK_RVA = 0x4021DC0
+WINDOWS_RUN_RVA = 0x4023490
+ON_RUN_CALLBACK_RVA = 0x4021EC0
+READ_RESULT_RVA = 0x4022D60
 
-CODEGEN_INIT_METADATA_RVA = 0x38E3F0
-CODEGEN_OBJECT_NEW_RVA = 0x38E830
-NGSX_RESULT_TYPE_SLOT_RVA = 0x6961AF0
+CODEGEN_INIT_METADATA_RVA = 0x38F0A0
+CODEGEN_OBJECT_NEW_RVA = 0x38F4E0
+IL2CPP_STRING_NEW_RVA = 0x428460
+NGSX_RESULT_TYPE_SLOT_RVA = 0x69AA778
 
 EXPECTED_INIT_PREFIX = bytes.fromhex("56 57 53 48 83 ec 50")
+EXPECTED_RUN_PREFIX = bytes.fromhex("41 56 56 57 53 48 83 ec 58")
 EXPECTED_READ_PREFIX = bytes.fromhex("41 56 56 57 55 53 48 83 ec 20")
 
 
@@ -69,9 +73,12 @@ def emit_mov_rcx_indirect(code: bytearray, address: int, target: int) -> None:
 base = game_assembly_base()
 windows_init = base + WINDOWS_INIT_RVA
 on_init_callback = base + ON_INIT_CALLBACK_RVA
+windows_run = base + WINDOWS_RUN_RVA
+on_run_callback = base + ON_RUN_CALLBACK_RVA
 read_result = base + READ_RESULT_RVA
 metadata_init = base + CODEGEN_INIT_METADATA_RVA
 object_new = base + CODEGEN_OBJECT_NEW_RVA
+string_new = base + IL2CPP_STRING_NEW_RVA
 result_type_slot = base + NGSX_RESULT_TYPE_SLOT_RVA
 
 actual_init = bytes(inferior.read_memory(windows_init, len(EXPECTED_INIT_PREFIX)))
@@ -88,11 +95,25 @@ if actual_read != EXPECTED_READ_PREFIX:
         f"expected={EXPECTED_READ_PREFIX.hex()} actual={actual_read.hex()}"
     )
 
+actual_run = bytes(inferior.read_memory(windows_run, len(EXPECTED_RUN_PREFIX)))
+if actual_run != EXPECTED_RUN_PREFIX:
+    raise gdb.GdbError(
+        "NgsxWindows.Run prefix mismatch: "
+        f"expected={EXPECTED_RUN_PREFIX.hex()} actual={actual_run.hex()}"
+    )
+
 # OnInitCallback is static and does not consume its ``self`` argument.  Clear
 # both explicit native callback arguments plus the hidden MethodInfo pointer.
 init_code = bytearray(b"\x48\x83\xec\x28\x31\xc9\x31\xd2\x45\x31\xc0")
 emit_call(init_code, windows_init, on_init_callback)
 init_code.extend(b"\x48\x83\xc4\x28\xc3")
+
+# Run has the same static two-argument callback shape as Init.  Completing it
+# is required after bypassing the native initializer; otherwise the login
+# scene waits forever for a native callback that can never arrive.
+run_code = bytearray(b"\x48\x83\xec\x28\x31\xc9\x31\xd2\x45\x31\xc0")
+emit_call(run_code, windows_run, on_run_callback)
+run_code.extend(b"\x48\x83\xc4\x28\xc3")
 
 result_code = bytearray(b"\x56\x48\x83\xec\x20")
 emit_lea_rcx(result_code, read_result, result_type_slot)
@@ -104,16 +125,34 @@ result_code.extend(
         "48 89 c6 "
         "c6 46 10 01 "
         "c7 46 14 00 00 00 00 "
-        "48 c7 46 18 00 00 00 00 "
+    )
+)
+empty_string_fixup = len(result_code)
+result_code.extend(b"\x48\x8d\x0d\x00\x00\x00\x00")
+emit_call(result_code, read_result, string_new)
+result_code.extend(
+    bytes.fromhex(
+        "48 89 46 18 "
         "48 89 f0 "
         "48 83 c4 20 "
         "5e c3"
     )
 )
+result_code.append(0)
+empty_string = read_result + len(result_code) - 1
+empty_string_next_instruction = read_result + empty_string_fixup + 7
+struct.pack_into(
+    "<i",
+    result_code,
+    empty_string_fixup + 3,
+    empty_string - empty_string_next_instruction,
+)
 
 inferior.write_memory(read_result, result_code)
+inferior.write_memory(windows_run, run_code)
 inferior.write_memory(windows_init, init_code)
 gdb.write(
     "ngsx_success patched=true "
-    f"init={windows_init:#x} read_result={read_result:#x}\n"
+    f"init={windows_init:#x} run={windows_run:#x} "
+    f"read_result={read_result:#x}\n"
 )

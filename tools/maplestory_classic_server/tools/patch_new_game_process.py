@@ -54,12 +54,23 @@ def game_assembly_is_ready(pid: int) -> bool:
     # Wine first exposes the PE header mapping while its executable sections
     # are still zero-filled.  Attaching in that interval makes an otherwise
     # successful GDB source command report a misleading prologue mismatch.
-    return any(
-        "/GameAssembly.dll" in mapping
-        and len(fields := mapping.split()) >= 2
-        and "x" in fields[1]
-        for mapping in mappings
-    )
+    for index, mapping in enumerate(mappings):
+        fields = mapping.split()
+        if "/GameAssembly.dll" not in mapping or len(fields) < 2:
+            continue
+        if "x" in fields[1]:
+            return True
+        if index + 1 >= len(mappings):
+            continue
+        next_fields = mappings[index + 1].split()
+        try:
+            mapping_end = int(fields[0].split("-", 1)[1], 16)
+            next_start = int(next_fields[0].split("-", 1)[0], 16)
+        except (IndexError, ValueError):
+            continue
+        if mapping_end == next_start and len(next_fields) >= 2 and "x" in next_fields[1]:
+            return True
+    return False
 
 
 def parse_args() -> argparse.Namespace:

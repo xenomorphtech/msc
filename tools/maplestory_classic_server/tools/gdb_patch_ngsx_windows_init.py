@@ -13,7 +13,7 @@ from pathlib import Path
 import gdb
 
 
-METHOD_RVA = 0x3FEACF0
+METHOD_RVA = 0x4023270
 EXPECTED_PREFIX = bytes.fromhex("56 57 53 48 83 ec 50")
 REPLACEMENT = bytes.fromhex("c3")
 

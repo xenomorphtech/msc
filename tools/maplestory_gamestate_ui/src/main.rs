@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,9 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stro
 use serde::Deserialize;
 
 const DEFAULT_STATE_FILE: &str = "/tmp/maple-live-gamestate.json";
+const DEFAULT_PHYSICS_FILE: &str = "/tmp/maple-physics-latest.json";
+const DEFAULT_AGENT_FILE: &str = "/tmp/maple-rl-agent.json";
+const DEFAULT_WORLD_FILE: &str = "/home/sdancer/ms4/knowledge/world-v300.json";
 const REFRESH_INTERVAL: Duration = Duration::from_millis(75);
 
 #[derive(Clone, Default, Deserialize)]
@@ -146,19 +150,165 @@ struct LastPacket {
     coverage: String,
 }
 
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct PhysicsTelemetry {
+    #[serde(rename = "type")]
+    kind: String,
+    frame: u64,
+    timestamp_ns: u64,
+    x: Option<f64>,
+    y: Option<f64>,
+    velocity_x: Option<f64>,
+    velocity_y: Option<f64>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct AgentStatus {
+    algorithm: String,
+    frame: u64,
+    episode: u64,
+    model_updates: u64,
+    action: String,
+    reward: f64,
+    td_error: f64,
+    target: AgentTarget,
+    goal: AgentGoal,
+    route_steps: usize,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct AgentTarget {
+    x: f64,
+    y: f64,
+    mode: String,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct AgentGoal {
+    x: f64,
+    y: f64,
+    reached: bool,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct WorldKnowledge {
+    maps: Vec<MapPrefab>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct MapPrefab {
+    map_id: i64,
+    footholds: Vec<PrefabFoothold>,
+    ladder_ropes: Vec<PrefabLadder>,
+    portals: Vec<PrefabPortal>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct PrefabFoothold {
+    id: i64,
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct PrefabLadder {
+    id: i64,
+    x: i32,
+    y1: i32,
+    y2: i32,
+    #[serde(rename = "l")]
+    is_ladder: i64,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct PrefabPortal {
+    id: i64,
+    #[serde(rename = "pn")]
+    name: String,
+    #[serde(rename = "pt")]
+    portal_type: i64,
+    #[serde(rename = "tm")]
+    target_map: i64,
+    x: i32,
+    y: i32,
+}
+
+struct UiPaths {
+    state_file: PathBuf,
+    physics_file: PathBuf,
+    agent_file: PathBuf,
+    world_file: PathBuf,
+    map_id: Option<i64>,
+}
+
 struct MapleApp {
     state_file: PathBuf,
+    physics_file: PathBuf,
+    agent_file: PathBuf,
+    map_id: Option<i64>,
     snapshot: Snapshot,
+    physics: PhysicsTelemetry,
+    agent: AgentStatus,
+    maps: HashMap<i64, MapPrefab>,
     load_error: Option<String>,
+    physics_error: Option<String>,
+    agent_error: Option<String>,
+    map_error: Option<String>,
     last_refresh: Instant,
 }
 
 impl MapleApp {
-    fn new(state_file: PathBuf) -> Self {
+    fn new(paths: UiPaths) -> Self {
+        let (maps, map_error) = match fs::read_to_string(&paths.world_file) {
+            Ok(contents) => match serde_json::from_str::<WorldKnowledge>(&contents) {
+                Ok(world) => (
+                    world
+                        .maps
+                        .into_iter()
+                        .map(|map| (map.map_id, map))
+                        .collect(),
+                    None,
+                ),
+                Err(error) => (
+                    HashMap::new(),
+                    Some(format!(
+                        "invalid prefab world {}: {error}",
+                        paths.world_file.display()
+                    )),
+                ),
+            },
+            Err(error) => (
+                HashMap::new(),
+                Some(format!(
+                    "waiting for prefab world {}: {error}",
+                    paths.world_file.display()
+                )),
+            ),
+        };
         let mut app = Self {
-            state_file,
+            state_file: paths.state_file,
+            physics_file: paths.physics_file,
+            agent_file: paths.agent_file,
+            map_id: paths.map_id,
             snapshot: Snapshot::default(),
+            physics: PhysicsTelemetry::default(),
+            agent: AgentStatus::default(),
+            maps,
             load_error: None,
+            physics_error: None,
+            agent_error: None,
+            map_error,
             last_refresh: Instant::now()
                 .checked_sub(REFRESH_INTERVAL)
                 .unwrap_or_else(Instant::now),
@@ -189,6 +339,45 @@ impl MapleApp {
                 ));
             }
         }
+        match fs::read_to_string(&self.physics_file) {
+            Ok(contents) => match serde_json::from_str::<PhysicsTelemetry>(&contents) {
+                Ok(physics) => {
+                    self.physics = physics;
+                    self.physics_error = None;
+                }
+                Err(error) => self.physics_error = Some(format!("invalid Frida frame: {error}")),
+            },
+            Err(error) => {
+                self.physics_error = Some(format!(
+                    "waiting for {}: {error}",
+                    self.physics_file.display()
+                ));
+            }
+        }
+        match fs::read_to_string(&self.agent_file) {
+            Ok(contents) => match serde_json::from_str::<AgentStatus>(&contents) {
+                Ok(agent) => {
+                    self.agent = agent;
+                    self.agent_error = None;
+                }
+                Err(error) => self.agent_error = Some(format!("invalid RL status: {error}")),
+            },
+            Err(error) => {
+                self.agent_error = Some(format!(
+                    "waiting for {}: {error}",
+                    self.agent_file.display()
+                ));
+            }
+        }
+    }
+
+    fn active_map_id(&self) -> Option<i64> {
+        self.map_id.or(self.snapshot.state.map_id)
+    }
+
+    fn active_map(&self) -> Option<&MapPrefab> {
+        self.active_map_id()
+            .and_then(|map_id| self.maps.get(&map_id))
     }
 
     fn top_bar(&self, root: &mut egui::Ui) {
@@ -210,11 +399,23 @@ impl MapleApp {
                 ui.label(format!("phase {}", self.snapshot.state.phase));
                 ui.label(format!("field #{}", self.snapshot.state.field_epoch));
                 ui.label(
-                    self.snapshot
-                        .state
-                        .map_id
+                    self.active_map_id()
                         .map_or_else(|| "map ?".to_owned(), |map| format!("map {map}")),
                 );
+                if self.physics.kind == "frame" {
+                    ui.separator();
+                    ui.colored_label(
+                        Color32::from_rgb(120, 205, 244),
+                        format!("Frida frame {}", self.physics.frame),
+                    );
+                }
+                if !self.agent.action.is_empty() {
+                    ui.separator();
+                    ui.colored_label(
+                        Color32::from_rgb(218, 151, 244),
+                        format!("RL {}", self.agent.action),
+                    );
+                }
                 if let Some(age) = snapshot_age_seconds(self.snapshot.connection.updated_at_ns) {
                     ui.label(format!("{age:.1}s old"));
                 }
@@ -253,11 +454,23 @@ impl MapleApp {
                 value_row(
                     ui,
                     "position",
-                    match (self.snapshot.state.player.x, self.snapshot.state.player.y) {
-                        (Some(x), Some(y)) => format!("{x}, {y}"),
+                    match (self.physics.x, self.physics.y) {
+                        (Some(x), Some(y)) => format!("{x:.2}, {y:.2} (Frida)"),
+                        _ => match (self.snapshot.state.player.x, self.snapshot.state.player.y) {
+                            (Some(x), Some(y)) => format!("{x}, {y} (server)"),
+                            _ => "unknown".to_owned(),
+                        },
+                    },
+                );
+                value_row(
+                    ui,
+                    "velocity",
+                    match (self.physics.velocity_x, self.physics.velocity_y) {
+                        (Some(x), Some(y)) => format!("{x:.2}, {y:.2} px/s"),
                         _ => "unknown".to_owned(),
                     },
                 );
+                value_row(ui, "frame", self.physics.frame.to_string());
                 value_row(
                     ui,
                     "platform",
@@ -283,6 +496,43 @@ impl MapleApp {
                     "mesos",
                     optional_number(self.snapshot.state.player.mesos),
                 );
+
+                ui.add_space(12.0);
+                ui.heading("RL ascent");
+                if self.agent.action.is_empty() {
+                    ui.weak("Waiting for the navigation policy");
+                } else {
+                    value_row(ui, "model", self.agent.algorithm.as_str());
+                    value_row(ui, "action", self.agent.action.as_str());
+                    value_row(ui, "episode", self.agent.episode.to_string());
+                    value_row(ui, "updates", self.agent.model_updates.to_string());
+                    value_row(
+                        ui,
+                        "target",
+                        format!(
+                            "{:.0}, {:.0} · {}",
+                            self.agent.target.x, self.agent.target.y, self.agent.target.mode
+                        ),
+                    );
+                    value_row(
+                        ui,
+                        "goal",
+                        format!(
+                            "{:.0}, {:.0}{}",
+                            self.agent.goal.x,
+                            self.agent.goal.y,
+                            if self.agent.goal.reached {
+                                " reached"
+                            } else {
+                                ""
+                            }
+                        ),
+                    );
+                    ui.small(format!(
+                        "route {} steps · reward {:.3} · TD {:.3}",
+                        self.agent.route_steps, self.agent.reward, self.agent.td_error
+                    ));
+                }
 
                 ui.add_space(12.0);
                 ui.heading("Enemies");
@@ -382,18 +632,59 @@ impl MapleApp {
     fn world_view(&self, root: &mut egui::Ui) {
         egui::CentralPanel::default().show(root, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("Observed field");
-                ui.weak("foothold spans are inferred from NPC ranges and entity positions");
+                ui.heading("Prefab field + live VecCtrl");
+                ui.weak("WZ footholds, ladders, portals, Frida position/velocity, and RL target");
             });
             let available = ui.available_size().max(Vec2::new(100.0, 100.0));
             let (response, painter) = ui.allocate_painter(available, Sense::hover());
             let rect = response.rect.shrink(12.0);
             painter.rect_filled(rect, 8.0, Color32::from_rgb(15, 20, 29));
 
-            let bounds = WorldBounds::from_state(&self.snapshot.state);
+            let prefab = self.active_map();
+            let bounds = WorldBounds::from_view(&self.snapshot.state, prefab, &self.physics);
             let project = |x: i32, y: i32| bounds.project(rect, x, y);
+            let project_f64 = |x: f64, y: f64| bounds.project_f64(rect, x, y);
 
             draw_grid(&painter, rect);
+            if let Some(map) = prefab {
+                for foothold in &map.footholds {
+                    let color = if foothold.x1 == foothold.x2 {
+                        Color32::from_rgb(59, 67, 78)
+                    } else {
+                        Color32::from_rgb(91, 111, 137)
+                    };
+                    painter.line_segment(
+                        [
+                            project(foothold.x1, foothold.y1),
+                            project(foothold.x2, foothold.y2),
+                        ],
+                        Stroke::new(if foothold.x1 == foothold.x2 { 1.0 } else { 2.0 }, color),
+                    );
+                }
+                for ladder in &map.ladder_ropes {
+                    let color = if ladder.is_ladder != 0 {
+                        Color32::from_rgb(215, 158, 76)
+                    } else {
+                        Color32::from_rgb(183, 119, 73)
+                    };
+                    painter.line_segment(
+                        [project(ladder.x, ladder.y1), project(ladder.x, ladder.y2)],
+                        Stroke::new(2.0, color),
+                    );
+                }
+                for portal in &map.portals {
+                    if !matches!(portal.portal_type, 1 | 2) {
+                        continue;
+                    }
+                    let center = project(portal.x, portal.y);
+                    painter.rect_stroke(
+                        Rect::from_center_size(center, Vec2::new(9.0, 14.0)),
+                        2.0,
+                        Stroke::new(1.5, Color32::from_rgb(117, 210, 238)),
+                        egui::StrokeKind::Middle,
+                    );
+                }
+            }
             for platform in &self.snapshot.state.platforms {
                 let left = project(platform.x_min, platform.y);
                 let right = project(platform.x_max, platform.y);
@@ -487,7 +778,7 @@ impl MapleApp {
                     FontId::monospace(11.0),
                     Color32::WHITE,
                 );
-            } else {
+            } else if self.physics.x.is_none() || self.physics.y.is_none() {
                 painter.text(
                     rect.center(),
                     Align2::CENTER_CENTER,
@@ -497,10 +788,49 @@ impl MapleApp {
                 );
             }
 
+            if let (Some(x), Some(y)) = (self.physics.x, self.physics.y) {
+                let center = project_f64(x, y);
+                painter.circle_filled(center, 7.0, Color32::from_rgb(116, 220, 255));
+                painter.circle_stroke(center, 10.0, Stroke::new(2.0, Color32::WHITE));
+                if let (Some(vx), Some(vy)) = (self.physics.velocity_x, self.physics.velocity_y) {
+                    let velocity_end = project_f64(x + vx * 0.20, y + vy * 0.20);
+                    painter.arrow(
+                        center,
+                        velocity_end - center,
+                        Stroke::new(2.0, Color32::from_rgb(108, 213, 255)),
+                    );
+                }
+                painter.text(
+                    center + Vec2::new(0.0, -14.0),
+                    Align2::CENTER_BOTTOM,
+                    format!("F{} ({x:.1}, {y:.1})", self.physics.frame),
+                    FontId::monospace(11.0),
+                    Color32::WHITE,
+                );
+            }
+
+            if !self.agent.action.is_empty() {
+                let target = project_f64(self.agent.target.x, self.agent.target.y);
+                painter.circle_stroke(
+                    target,
+                    8.0,
+                    Stroke::new(2.0, Color32::from_rgb(226, 129, 250)),
+                );
+                let goal = project_f64(self.agent.goal.x, self.agent.goal.y);
+                painter.line_segment(
+                    [goal + Vec2::new(-7.0, 0.0), goal + Vec2::new(7.0, 0.0)],
+                    Stroke::new(2.0, Color32::from_rgb(255, 214, 91)),
+                );
+                painter.line_segment(
+                    [goal + Vec2::new(0.0, -7.0), goal + Vec2::new(0.0, 7.0)],
+                    Stroke::new(2.0, Color32::from_rgb(255, 214, 91)),
+                );
+            }
+
             painter.text(
                 rect.left_bottom() + Vec2::new(10.0, -10.0),
                 Align2::LEFT_BOTTOM,
-                "● you    ● enemy    ● remote player    ◆ drop",
+                "● Frida player + velocity    ○ RL target    + top goal    blue portals",
                 FontId::monospace(11.0),
                 Color32::from_gray(170),
             );
@@ -513,6 +843,15 @@ impl MapleApp {
             messages.push(error.as_str());
         }
         if let Some(error) = &self.snapshot.connection.error {
+            messages.push(error.as_str());
+        }
+        if let Some(error) = &self.physics_error {
+            messages.push(error.as_str());
+        }
+        if let Some(error) = &self.agent_error {
+            messages.push(error.as_str());
+        }
+        if let Some(error) = &self.map_error {
             messages.push(error.as_str());
         }
         messages.extend(self.snapshot.fold.decode_errors.iter().map(String::as_str));
@@ -555,8 +894,12 @@ struct WorldBounds {
 }
 
 impl WorldBounds {
-    #[allow(clippy::cast_precision_loss)]
-    fn from_state(state: &GameState) -> Self {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    fn from_view(
+        state: &GameState,
+        prefab: Option<&MapPrefab>,
+        physics: &PhysicsTelemetry,
+    ) -> Self {
         let mut points = Vec::new();
         if let (Some(x), Some(y)) = (state.player.x, state.player.y) {
             points.push((x, y));
@@ -572,6 +915,20 @@ impl WorldBounds {
         for platform in &state.platforms {
             points.push((platform.x_min, platform.y));
             points.push((platform.x_max, platform.y));
+        }
+        if let Some(prefab) = prefab {
+            for foothold in &prefab.footholds {
+                points.push((foothold.x1, foothold.y1));
+                points.push((foothold.x2, foothold.y2));
+            }
+            for ladder in &prefab.ladder_ropes {
+                points.push((ladder.x, ladder.y1));
+                points.push((ladder.x, ladder.y2));
+            }
+            points.extend(prefab.portals.iter().map(|portal| (portal.x, portal.y)));
+        }
+        if let (Some(x), Some(y)) = (physics.x, physics.y) {
+            points.push((x.round() as i32, y.round() as i32));
         }
         if points.is_empty() {
             return Self {
@@ -605,6 +962,11 @@ impl WorldBounds {
 
     #[allow(clippy::cast_precision_loss)]
     fn project(self, rect: Rect, x: i32, y: i32) -> Pos2 {
+        self.project_f64(rect, f64::from(x), f64::from(y))
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn project_f64(self, rect: Rect, x: f64, y: f64) -> Pos2 {
         let width = (self.max_x - self.min_x).max(1.0);
         let height = (self.max_y - self.min_y).max(1.0);
         let scale = (rect.width() / width).min(rect.height() / height);
@@ -725,20 +1087,52 @@ fn snapshot_age_seconds(updated_at_ns: u64) -> Option<f64> {
     )
 }
 
-fn state_file_from_args() -> Result<PathBuf, String> {
+fn paths_from_args() -> Result<UiPaths, String> {
     let mut args = env::args_os().skip(1);
     let mut state_file = PathBuf::from(DEFAULT_STATE_FILE);
+    let mut physics_file = PathBuf::from(DEFAULT_PHYSICS_FILE);
+    let mut agent_file = PathBuf::from(DEFAULT_AGENT_FILE);
+    let mut world_file = PathBuf::from(DEFAULT_WORLD_FILE);
+    let mut map_id = None;
     while let Some(argument) = args.next() {
         if argument == "--state-file" {
             state_file = args
                 .next()
                 .map(PathBuf::from)
                 .ok_or_else(|| "--state-file requires a path".to_owned())?;
+        } else if argument == "--physics-file" {
+            physics_file = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "--physics-file requires a path".to_owned())?;
+        } else if argument == "--agent-file" {
+            agent_file = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "--agent-file requires a path".to_owned())?;
+        } else if argument == "--world-file" {
+            world_file = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or_else(|| "--world-file requires a path".to_owned())?;
+        } else if argument == "--map-id" {
+            let raw = args
+                .next()
+                .ok_or_else(|| "--map-id requires an integer".to_owned())?;
+            map_id = Some(
+                raw.to_string_lossy()
+                    .parse::<i64>()
+                    .map_err(|error| format!("invalid --map-id: {error}"))?,
+            );
         } else if argument == "--help" || argument == "-h" {
             println!(
                 "MapleStory Classic live game-state dashboard\n\n\
-                 Usage: maple-gamestate-ui [--state-file PATH]\n\n\
-                 Default state file: {DEFAULT_STATE_FILE}"
+                 Usage: maple-gamestate-ui [OPTIONS]\n\n\
+                 --state-file PATH    server game state ({DEFAULT_STATE_FILE})\n\
+                 --physics-file PATH  latest normalized Frida frame ({DEFAULT_PHYSICS_FILE})\n\
+                 --agent-file PATH    latest RL decision ({DEFAULT_AGENT_FILE})\n\
+                 --world-file PATH    prefab world JSON ({DEFAULT_WORLD_FILE})\n\
+                 --map-id ID          override map when server state is unavailable"
             );
             std::process::exit(0);
         } else {
@@ -748,12 +1142,18 @@ fn state_file_from_args() -> Result<PathBuf, String> {
             ));
         }
     }
-    Ok(state_file)
+    Ok(UiPaths {
+        state_file,
+        physics_file,
+        agent_file,
+        world_file,
+        map_id,
+    })
 }
 
 fn main() -> eframe::Result {
-    let state_file = match state_file_from_args() {
-        Ok(path) => path,
+    let paths = match paths_from_args() {
+        Ok(paths) => paths,
         Err(error) => {
             eprintln!("{error}");
             std::process::exit(2);
@@ -766,7 +1166,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "MapleStory Classic · Live Game State",
         options,
-        Box::new(move |_creation_context| Ok(Box::new(MapleApp::new(state_file)))),
+        Box::new(move |_creation_context| Ok(Box::new(MapleApp::new(paths)))),
     )
 }
 

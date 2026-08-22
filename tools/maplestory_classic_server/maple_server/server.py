@@ -20,6 +20,7 @@ from .gamestate import (
     normalize_maple_transcript,
     render_login_analysis,
 )
+from .navigation import MOB_LIFECYCLE_SERVER_OPCODES
 from .gameplay import (
     MAX_MOB_MOVEMENT_FOLLOW_UP_DECISIONS,
     MAX_PLAYER_MOB_PROXIMITY_RADIUS,
@@ -4030,6 +4031,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     replay.add_argument(
+        "--omit-mob-spawns",
+        action="store_true",
+        help=(
+            "drop server mob lifecycle frames (enter/leave/controller/movement/"
+            "temp-stat/health and attack relays) with corrected IV progression"
+        ),
+    )
+    replay.add_argument(
         "--keep-world-open",
         action="store_true",
         help=(
@@ -4887,6 +4896,14 @@ async def async_main(arguments: argparse.Namespace) -> None:
         dropped_server_frames = set(arguments.drop_server_frame)
         if len(dropped_server_frames) != len(arguments.drop_server_frame):
             raise ValueError("Each dropped server frame index may be specified once")
+        if arguments.omit_mob_spawns:
+            decoded_source = decode_transcript(transcript)
+            for frame in decoded_source.frames:
+                if (
+                    frame.direction == "server_to_client"
+                    and frame.opcode in MOB_LIFECYCLE_SERVER_OPCODES
+                ):
+                    dropped_server_frames.add(frame.direction_index)
         if arguments.keep_world_open:
             if arguments.hold_open_seconds <= 0:
                 raise ValueError(

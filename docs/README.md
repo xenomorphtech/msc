@@ -18,6 +18,8 @@ custom-server experiment as of 2026-08-11.
   the cipher investigation.
 - [STATUS.md](STATUS.md) — what works, what was proven, and the next tasks.
 - [SECURITY.md](SECURITY.md) — handling the local credentials and captures.
+- [movement/README.md](movement/README.md) — client-side VecCtrl physics and
+  map reachability (walk/jump/climb/drop, mobs omitted).
 
 ## Directory layout
 
