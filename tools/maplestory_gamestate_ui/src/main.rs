@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Vec2};
 use serde::Deserialize;
 
-const DEFAULT_STATE_FILE: &str = "/tmp/maple-live-gamestate.json";
+const DEFAULT_STATE_URL: &str = "http://127.0.0.1:8765/api/gamestate";
 const DEFAULT_PHYSICS_FILE: &str = "/tmp/maple-physics-latest.json";
 const DEFAULT_AGENT_FILE: &str = "/tmp/maple-rl-agent.json";
 const DEFAULT_WORLD_FILE: &str = "/home/sdancer/ms4/knowledge/world-v300.json";
@@ -263,7 +265,7 @@ struct PrefabPortal {
 }
 
 struct UiPaths {
-    state_file: PathBuf,
+    state_url: String,
     physics_file: PathBuf,
     agent_file: PathBuf,
     world_file: PathBuf,
@@ -321,7 +323,7 @@ impl EnemyMotion {
 }
 
 struct MapleApp {
-    state_file: PathBuf,
+    state_url: String,
     physics_file: PathBuf,
     agent_file: PathBuf,
     map_id: Option<i64>,
@@ -366,7 +368,7 @@ impl MapleApp {
             ),
         };
         let mut app = Self {
-            state_file: paths.state_file,
+            state_url: paths.state_url,
             physics_file: paths.physics_file,
             agent_file: paths.agent_file,
             map_id: paths.map_id,
@@ -392,7 +394,7 @@ impl MapleApp {
             return;
         }
         self.last_refresh = Instant::now();
-        match fs::read_to_string(&self.state_file) {
+        match read_http_body(&self.state_url) {
             Ok(contents) => match serde_json::from_str::<Snapshot>(&contents) {
                 Ok(snapshot) => {
                     self.update_enemy_motion(&snapshot);
@@ -404,10 +406,7 @@ impl MapleApp {
                 }
             },
             Err(error) => {
-                self.load_error = Some(format!(
-                    "waiting for {}: {error}",
-                    self.state_file.display()
-                ));
+                self.load_error = Some(format!("waiting for {}: {error}", self.state_url));
             }
         }
         match fs::read_to_string(&self.physics_file) {
@@ -1268,19 +1267,100 @@ fn snapshot_age_seconds(updated_at_ns: u64) -> Option<f64> {
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct HttpEndpoint {
+    host: String,
+    port: u16,
+    path: String,
+}
+
+fn parse_http_endpoint(url: &str) -> Result<HttpEndpoint, String> {
+    let remainder = url
+        .strip_prefix("http://")
+        .ok_or_else(|| "only http:// game-state URLs are supported".to_owned())?;
+    let (authority, path) = if let Some((authority, path)) = remainder.split_once('/') {
+        (authority, format!("/{path}"))
+    } else {
+        (remainder, "/".to_owned())
+    };
+    if authority.is_empty() {
+        return Err("game-state URL has no host".to_owned());
+    }
+    let (host, port) = if let Some((host, raw_port)) = authority.rsplit_once(':') {
+        let port = raw_port
+            .parse::<u16>()
+            .map_err(|error| format!("invalid game-state URL port: {error}"))?;
+        (host, port)
+    } else {
+        (authority, 80)
+    };
+    if host.is_empty() {
+        return Err("game-state URL has no host".to_owned());
+    }
+    Ok(HttpEndpoint {
+        host: host.to_owned(),
+        port,
+        path,
+    })
+}
+
+fn read_http_body(url: &str) -> Result<String, String> {
+    const HTTP_TIMEOUT: Duration = Duration::from_millis(150);
+
+    let endpoint = parse_http_endpoint(url)?;
+    let address = (endpoint.host.as_str(), endpoint.port)
+        .to_socket_addrs()
+        .map_err(|error| format!("cannot resolve endpoint: {error}"))?
+        .next()
+        .ok_or_else(|| "endpoint resolved to no addresses".to_owned())?;
+    let mut stream = TcpStream::connect_timeout(&address, HTTP_TIMEOUT)
+        .map_err(|error| format!("cannot connect: {error}"))?;
+    stream
+        .set_read_timeout(Some(HTTP_TIMEOUT))
+        .map_err(|error| format!("cannot set read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(HTTP_TIMEOUT))
+        .map_err(|error| format!("cannot set write timeout: {error}"))?;
+    write!(
+        stream,
+        "GET {} HTTP/1.0\r\nHost: {}:{}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
+        endpoint.path, endpoint.host, endpoint.port
+    )
+    .map_err(|error| format!("cannot send request: {error}"))?;
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .map_err(|error| format!("cannot read response: {error}"))?;
+    let response =
+        String::from_utf8(response).map_err(|error| format!("response is not UTF-8: {error}"))?;
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "HTTP response has no header terminator".to_owned())?;
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| "HTTP response has no status code".to_owned())?;
+    if status != 200 {
+        return Err(format!("endpoint returned HTTP {status}"));
+    }
+    Ok(body.to_owned())
+}
+
 fn paths_from_args() -> Result<UiPaths, String> {
     let mut args = env::args_os().skip(1);
-    let mut state_file = PathBuf::from(DEFAULT_STATE_FILE);
+    let mut state_url = DEFAULT_STATE_URL.to_owned();
     let mut physics_file = PathBuf::from(DEFAULT_PHYSICS_FILE);
     let mut agent_file = PathBuf::from(DEFAULT_AGENT_FILE);
     let mut world_file = PathBuf::from(DEFAULT_WORLD_FILE);
     let mut map_id = None;
     while let Some(argument) = args.next() {
-        if argument == "--state-file" {
-            state_file = args
+        if argument == "--state-url" {
+            state_url = args
                 .next()
-                .map(PathBuf::from)
-                .ok_or_else(|| "--state-file requires a path".to_owned())?;
+                .map(|value| value.to_string_lossy().into_owned())
+                .ok_or_else(|| "--state-url requires a URL".to_owned())?;
         } else if argument == "--physics-file" {
             physics_file = args
                 .next()
@@ -1309,7 +1389,7 @@ fn paths_from_args() -> Result<UiPaths, String> {
             println!(
                 "MapleStory Classic live game-state dashboard\n\n\
                  Usage: maple-gamestate-ui [OPTIONS]\n\n\
-                 --state-file PATH    server game state ({DEFAULT_STATE_FILE})\n\
+                 --state-url URL      live game state ({DEFAULT_STATE_URL})\n\
                  --physics-file PATH  latest normalized Frida frame ({DEFAULT_PHYSICS_FILE})\n\
                  --agent-file PATH    latest RL decision ({DEFAULT_AGENT_FILE})\n\
                  --world-file PATH    prefab world JSON ({DEFAULT_WORLD_FILE})\n\
@@ -1324,7 +1404,7 @@ fn paths_from_args() -> Result<UiPaths, String> {
         }
     }
     Ok(UiPaths {
-        state_file,
+        state_url,
         physics_file,
         agent_file,
         world_file,
@@ -1354,6 +1434,49 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_game_state_http_endpoint() {
+        assert_eq!(
+            parse_http_endpoint("http://127.0.0.1:8765/api/gamestate"),
+            Ok(HttpEndpoint {
+                host: "127.0.0.1".to_owned(),
+                port: 8765,
+                path: "/api/gamestate".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn reads_game_state_from_http() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind test HTTP");
+        let address = listener.local_addr().expect("test HTTP address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test HTTP");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).expect("read test request");
+            let body = r#"{"schema_version":1}"#;
+            write!(
+                stream,
+                "HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .expect("write test response");
+            stream.flush().expect("flush test response");
+            stream
+                .shutdown(std::net::Shutdown::Write)
+                .expect("finish test response");
+        });
+
+        let body = read_http_body(&format!(
+            "http://127.0.0.1:{}/api/gamestate",
+            address.port()
+        ))
+        .expect("read test HTTP body");
+
+        server.join().expect("join test HTTP");
+        assert_eq!(body, r#"{"schema_version":1}"#);
+    }
 
     #[test]
     fn projects_maple_coordinates_inside_the_canvas() {
