@@ -12,6 +12,9 @@ const DEFAULT_PHYSICS_FILE: &str = "/tmp/maple-physics-latest.json";
 const DEFAULT_AGENT_FILE: &str = "/tmp/maple-rl-agent.json";
 const DEFAULT_WORLD_FILE: &str = "/home/sdancer/ms4/knowledge/world-v300.json";
 const REFRESH_INTERVAL: Duration = Duration::from_millis(75);
+const DEFAULT_ENEMY_INTERPOLATION_MS: u64 = 150;
+const MIN_ENEMY_INTERPOLATION_MS: u64 = 60;
+const MAX_ENEMY_INTERPOLATION_MS: u64 = 800;
 
 #[derive(Clone, Default, Deserialize)]
 #[serde(default)]
@@ -90,6 +93,9 @@ struct Enemy {
     x: i32,
     y: i32,
     foothold_id: Option<i64>,
+    velocity_x: Option<i32>,
+    velocity_y: Option<i32>,
+    movement_duration_ms: Option<u64>,
     health_percentage: Option<i64>,
     max_hp: Option<i64>,
     health_hp_min: Option<i64>,
@@ -264,6 +270,56 @@ struct UiPaths {
     map_id: Option<i64>,
 }
 
+#[derive(Clone)]
+struct EnemyMotion {
+    from_x: f64,
+    from_y: f64,
+    target_x: i32,
+    target_y: i32,
+    started_at: Instant,
+    duration: Duration,
+}
+
+impl EnemyMotion {
+    fn stationary(x: i32, y: i32, now: Instant) -> Self {
+        Self {
+            from_x: f64::from(x),
+            from_y: f64::from(y),
+            target_x: x,
+            target_y: y,
+            started_at: now,
+            duration: Duration::ZERO,
+        }
+    }
+
+    fn retarget(&mut self, x: i32, y: i32, duration: Duration, now: Instant) {
+        let (current_x, current_y) = self.position_at(now);
+        self.from_x = current_x;
+        self.from_y = current_y;
+        self.target_x = x;
+        self.target_y = y;
+        self.started_at = now;
+        self.duration = duration;
+    }
+
+    fn position_at(&self, now: Instant) -> (f64, f64) {
+        if self.duration.is_zero() {
+            return (f64::from(self.target_x), f64::from(self.target_y));
+        }
+        let progress = now.saturating_duration_since(self.started_at).as_secs_f64()
+            / self.duration.as_secs_f64();
+        let progress = progress.clamp(0.0, 1.0);
+        (
+            self.from_x + (f64::from(self.target_x) - self.from_x) * progress,
+            self.from_y + (f64::from(self.target_y) - self.from_y) * progress,
+        )
+    }
+
+    fn is_active(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.started_at) < self.duration
+    }
+}
+
 struct MapleApp {
     state_file: PathBuf,
     physics_file: PathBuf,
@@ -273,6 +329,7 @@ struct MapleApp {
     physics: PhysicsTelemetry,
     agent: AgentStatus,
     maps: HashMap<i64, MapPrefab>,
+    enemy_motion: HashMap<String, EnemyMotion>,
     load_error: Option<String>,
     physics_error: Option<String>,
     agent_error: Option<String>,
@@ -317,6 +374,7 @@ impl MapleApp {
             physics: PhysicsTelemetry::default(),
             agent: AgentStatus::default(),
             maps,
+            enemy_motion: HashMap::new(),
             load_error: None,
             physics_error: None,
             agent_error: None,
@@ -337,6 +395,7 @@ impl MapleApp {
         match fs::read_to_string(&self.state_file) {
             Ok(contents) => match serde_json::from_str::<Snapshot>(&contents) {
                 Ok(snapshot) => {
+                    self.update_enemy_motion(&snapshot);
                     self.snapshot = snapshot;
                     self.load_error = None;
                 }
@@ -379,6 +438,31 @@ impl MapleApp {
                     "waiting for {}: {error}",
                     self.agent_file.display()
                 ));
+            }
+        }
+    }
+
+    fn update_enemy_motion(&mut self, snapshot: &Snapshot) {
+        let now = Instant::now();
+        self.enemy_motion.retain(|entity, _| {
+            snapshot
+                .state
+                .enemies
+                .iter()
+                .any(|enemy| enemy.entity.as_str() == entity.as_str())
+        });
+        for enemy in &snapshot.state.enemies {
+            let duration_ms = enemy
+                .movement_duration_ms
+                .filter(|duration| *duration > 0)
+                .unwrap_or(DEFAULT_ENEMY_INTERPOLATION_MS)
+                .clamp(MIN_ENEMY_INTERPOLATION_MS, MAX_ENEMY_INTERPOLATION_MS);
+            let motion = self
+                .enemy_motion
+                .entry(enemy.entity.clone())
+                .or_insert_with(|| EnemyMotion::stationary(enemy.x, enemy.y, now));
+            if motion.target_x != enemy.x || motion.target_y != enemy.y {
+                motion.retarget(enemy.x, enemy.y, Duration::from_millis(duration_ms), now);
             }
         }
     }
@@ -576,6 +660,14 @@ impl MapleApp {
                                         .foothold_id
                                         .map_or_else(|| "?".to_owned(), |id| id.to_string())
                                 ));
+                                if let (Some(velocity_x), Some(velocity_y)) =
+                                    (enemy.velocity_x, enemy.velocity_y)
+                                {
+                                    ui.small(format!(
+                                        "velocity ({velocity_x}, {velocity_y}) · {} ms path",
+                                        enemy.movement_duration_ms.unwrap_or(0)
+                                    ));
+                                }
                                 enemy_health(ui, enemy);
                             });
                         }
@@ -822,7 +914,13 @@ impl MapleApp {
             }
 
             for enemy in &self.snapshot.state.enemies {
-                let center = project(enemy.x, enemy.y);
+                let (enemy_x, enemy_y) = self
+                    .enemy_motion
+                    .get(&enemy.entity)
+                    .map_or((f64::from(enemy.x), f64::from(enemy.y)), |motion| {
+                        motion.position_at(Instant::now())
+                    });
+                let center = project_f64(enemy_x, enemy_y);
                 painter.circle_filled(center, 7.0, Color32::from_rgb(221, 78, 83));
                 painter.circle_stroke(center, 8.5, Stroke::new(1.5, Color32::LIGHT_RED));
                 painter.text(
@@ -955,7 +1053,16 @@ impl eframe::App for MapleApp {
         self.player_panel(ui);
         self.inventory_panel(ui);
         self.world_view(ui);
-        ui.ctx().request_repaint_after(REFRESH_INTERVAL);
+        let repaint_after = if self
+            .enemy_motion
+            .values()
+            .any(|motion| motion.is_active(Instant::now()))
+        {
+            Duration::from_millis(16)
+        } else {
+            REFRESH_INTERVAL
+        };
+        ui.ctx().request_repaint_after(repaint_after);
     }
 }
 
@@ -1271,5 +1378,41 @@ mod tests {
         .expect("snapshot should parse");
         assert_eq!(snapshot.state.player.x, Some(7));
         assert!(snapshot.state.enemies.is_empty());
+    }
+
+    #[test]
+    fn accepts_clientless_mob_motion_metadata() {
+        let snapshot: Snapshot = serde_json::from_str(
+            r#"{"schema_version":1,"connection":{"status":"connected"},"state":{"enemies":[{"entity":"mob:42","template_id":100100,"x":80,"y":-10,"foothold_id":9,"velocity_x":30,"velocity_y":-4,"movement_duration_ms":240}]}}"#,
+        )
+        .expect("clientless motion snapshot should parse");
+        let enemy = &snapshot.state.enemies[0];
+        assert_eq!(enemy.entity, "mob:42");
+        assert_eq!(enemy.velocity_x, Some(30));
+        assert_eq!(enemy.movement_duration_ms, Some(240));
+    }
+
+    #[test]
+    fn enemy_motion_interpolates_and_retargets_without_snapping() {
+        let started_at = Instant::now();
+        let mut motion = EnemyMotion::stationary(0, 10, started_at);
+        motion.retarget(100, 30, Duration::from_millis(200), started_at);
+
+        assert_eq!(
+            motion.position_at(started_at + Duration::from_millis(100)),
+            (50.0, 20.0)
+        );
+
+        let retargeted_at = started_at + Duration::from_millis(100);
+        motion.retarget(70, 40, Duration::from_millis(100), retargeted_at);
+        assert_eq!(motion.position_at(retargeted_at), (50.0, 20.0));
+        assert_eq!(
+            motion.position_at(retargeted_at + Duration::from_millis(50)),
+            (60.0, 30.0)
+        );
+        assert_eq!(
+            motion.position_at(retargeted_at + Duration::from_millis(100)),
+            (70.0, 40.0)
+        );
     }
 }
