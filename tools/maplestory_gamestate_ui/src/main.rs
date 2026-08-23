@@ -207,6 +207,18 @@ struct MapPrefab {
     footholds: Vec<PrefabFoothold>,
     ladder_ropes: Vec<PrefabLadder>,
     portals: Vec<PrefabPortal>,
+    life: Vec<PrefabLife>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+struct PrefabLife {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    x: i32,
+    y: i32,
+    fh: Option<i64>,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -536,12 +548,19 @@ impl MapleApp {
 
                 ui.add_space(12.0);
                 ui.heading("Enemies");
+                if let Some(map) = self.active_map() {
+                    let mob_count = map.life.iter().filter(|life| life.kind == "m").count();
+                    let npc_count = map.life.iter().filter(|life| life.kind == "n").count();
+                    ui.small(format!(
+                        "field life: {mob_count} mob spawns · {npc_count} NPCs"
+                    ));
+                }
                 egui::ScrollArea::vertical()
                     .id_salt("enemy-list")
                     .max_height(260.0)
                     .show(ui, |ui| {
                         if self.snapshot.state.enemies.is_empty() {
-                            ui.weak("No modeled enemies in the active field");
+                            ui.weak("Showing map spawn positions; no live enemy fold is attached");
                         }
                         for enemy in &self.snapshot.state.enemies {
                             ui.group(|ui| {
@@ -561,6 +580,25 @@ impl MapleApp {
                             });
                         }
                     });
+
+                if let Some(map) = self.active_map() {
+                    ui.add_space(10.0);
+                    ui.heading("NPCs");
+                    for npc in map.life.iter().filter(|life| life.kind == "n") {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(
+                                Color32::from_rgb(245, 178, 77),
+                                format!("NPC {}", npc.id),
+                            );
+                            ui.small(format!(
+                                "({}, {}) · foothold {}",
+                                npc.x,
+                                npc.y,
+                                npc.fh.map_or_else(|| "?".to_owned(), |id| id.to_string())
+                            ));
+                        });
+                    }
+                }
 
                 ui.add_space(10.0);
                 ui.heading("Decoder");
@@ -683,6 +721,42 @@ impl MapleApp {
                         Stroke::new(1.5, Color32::from_rgb(117, 210, 238)),
                         egui::StrokeKind::Middle,
                     );
+                }
+                for life in &map.life {
+                    let center = project(life.x, life.y);
+                    match life.kind.as_str() {
+                        "n" => {
+                            let color = Color32::from_rgb(245, 178, 77);
+                            painter.rect_filled(
+                                Rect::from_center_size(center, Vec2::new(10.0, 10.0)),
+                                2.0,
+                                color,
+                            );
+                            painter.rect_stroke(
+                                Rect::from_center_size(center, Vec2::new(13.0, 13.0)),
+                                2.0,
+                                Stroke::new(1.5, Color32::from_rgb(255, 226, 157)),
+                                egui::StrokeKind::Middle,
+                            );
+                            painter.text(
+                                center + Vec2::new(0.0, -10.0),
+                                Align2::CENTER_BOTTOM,
+                                format!("NPC {}", life.id),
+                                FontId::monospace(10.0),
+                                Color32::from_rgb(255, 219, 142),
+                            );
+                        }
+                        "m" if self.snapshot.state.enemies.is_empty() => {
+                            let color = Color32::from_rgb(177, 73, 79);
+                            painter.circle_filled(center, 5.0, color);
+                            painter.circle_stroke(
+                                center,
+                                6.5,
+                                Stroke::new(1.0, Color32::from_rgb(228, 123, 126)),
+                            );
+                        }
+                        _ => {}
+                    }
                 }
             }
             for platform in &self.snapshot.state.platforms {
@@ -830,7 +904,7 @@ impl MapleApp {
             painter.text(
                 rect.left_bottom() + Vec2::new(10.0, -10.0),
                 Align2::LEFT_BOTTOM,
-                "● Frida player + velocity    ○ RL target    + top goal    blue portals",
+                "green YOU    red mob    orange NPC    blue portal    cyan Frida    ○ RL target",
                 FontId::monospace(11.0),
                 Color32::from_gray(170),
             );
