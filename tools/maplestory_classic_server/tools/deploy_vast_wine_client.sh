@@ -17,6 +17,7 @@ readonly MAPLE_DOWNLOADER="${MAPLE_DOWNLOADER:-${SCRIPT_DIR}/manual_ngm_extract.
 readonly MAPLE_MANIFEST="${MAPLE_MANIFEST:-${SCRIPT_DIR}/manifest.json}"
 readonly MAPLE_LOGIN_TRANSCRIPT="${MAPLE_LOGIN_TRANSCRIPT:-${SCRIPT_DIR}/login.jsonl}"
 readonly MAPLE_PCAP="${MAPLE_PCAP:-${SCRIPT_DIR}/111.pcapng}"
+readonly MAPLE_INPUT_CLICK_SOURCE="${MAPLE_INPUT_CLICK_SOURCE:-${MAPLE_SERVER_ROOT}/tools/maple_xinput_click.c}"
 readonly MAPLE_CDN_BASE="${MAPLE_CDN_BASE:-https://tw-ngm.maplestoryclassic.games.gamania.com}"
 readonly MAPLE_USER="${MAPLE_USER:-maple}"
 readonly MAPLE_DISPLAY="${MAPLE_DISPLAY:-:99}"
@@ -27,6 +28,9 @@ readonly MAPLE_LOG_DIR="${MAPLE_LOG_DIR:-${MAPLE_RUNTIME_ROOT}/logs}"
 readonly MAPLE_RUN_DIR="${MAPLE_RUN_DIR:-${MAPLE_RUNTIME_ROOT}/run}"
 readonly MAPLE_VENV="${MAPLE_VENV:-${MAPLE_RUNTIME_ROOT}/venv}"
 readonly MAPLE_EXE="${MAPLE_GAME_DIR}/Maplestory_Classic.exe"
+readonly MAPLE_INPUT_CLICK="${MAPLE_RUNTIME_ROOT}/bin/maple-xinput-click"
+readonly MAPLE_INPUT_SOCKET="${MAPLE_RUN_DIR}/inputtest.sock"
+readonly MAPLE_INPUT_PORT="${MAPLE_INPUT_PORT:-19099}"
 
 log() {
   printf '[maple-vast] %s\n' "$*"
@@ -53,6 +57,7 @@ as_maple() {
     WINEPREFIX="$MAPLE_WINEPREFIX" \
     WINEARCH=win64 \
     WINEDEBUG=-all \
+    WINEDLLOVERRIDES='mscoree,mshtml=' \
     "$@"
 }
 
@@ -63,7 +68,8 @@ prepare_directories() {
   fi
   install -d -o "$MAPLE_USER" -g "$MAPLE_USER" -m 0755 \
     "$MAPLE_RUNTIME_ROOT" "$MAPLE_GAME_DIR" "$MAPLE_WINEPREFIX" \
-    "$MAPLE_LOG_DIR" "$MAPLE_RUN_DIR" "${MAPLE_RUNTIME_ROOT}/home"
+    "$MAPLE_LOG_DIR" "$MAPLE_RUN_DIR" "${MAPLE_RUNTIME_ROOT}/bin" \
+    "${MAPLE_RUNTIME_ROOT}/home"
   install -d -o "$MAPLE_USER" -g "$MAPLE_USER" -m 0700 \
     "${MAPLE_RUNTIME_ROOT}/runtime"
 }
@@ -71,11 +77,33 @@ prepare_directories() {
 install_dependencies() {
   require_root
   export DEBIAN_FRONTEND=noninteractive
+  # Ubuntu 24.04's Wine 9 predates the Unity WM_POINTER fixes needed by this
+  # client. Install the current WineHQ staging build for Noble instead.
+  . /etc/os-release
+  [[ "${ID:-}" == ubuntu && "${VERSION_CODENAME:-}" == noble ]] || \
+    fail "the automated Wine setup currently requires Ubuntu 24.04 (Noble)"
+  dpkg --add-architecture i386
   apt-get update
+  apt-get install -y --no-install-recommends ca-certificates curl
+  install -d -m 0755 /etc/apt/keyrings
+  curl --fail --silent --show-error --location \
+    https://dl.winehq.org/wine-builds/winehq.key \
+    --output /etc/apt/keyrings/winehq-archive.key
+  curl --fail --silent --show-error --location \
+    https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+    --output /etc/apt/sources.list.d/winehq-noble.sources
+  apt-get update
+  apt-get install -y --install-recommends winehq-staging
   apt-get install -y --no-install-recommends \
-    ca-certificates curl jq mesa-utils nodejs openbox procps python3 python3-pip \
-    python3-venv scrot tshark wine wine64 x11-utils xdotool xserver-xorg-core xvfb
+    gcc jq mesa-utils nodejs openbox procps python3 python3-pip python3-venv \
+    scrot tshark x11-utils xdotool xinput \
+    xserver-xorg-core xserver-xorg-dev xvfb
   prepare_directories
+  require_file "$MAPLE_INPUT_CLICK_SOURCE"
+  gcc -O2 -Wall -Wextra -Werror \
+    -o "$MAPLE_INPUT_CLICK" "$MAPLE_INPUT_CLICK_SOURCE"
+  chown root:root "$MAPLE_INPUT_CLICK"
+  chmod 0755 "$MAPLE_INPUT_CLICK"
   if [[ ! -x "${MAPLE_VENV}/bin/python" ]]; then
     python3 -m venv "$MAPLE_VENV"
   fi
@@ -101,9 +129,12 @@ download_game() {
 pid_is_running() {
   local pid_file="$1"
   [[ -f "$pid_file" ]] || return 1
-  local pid
+  local pid process_state
   read -r pid < "$pid_file"
-  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  process_state="$(awk '{ print $3 }' "/proc/${pid}/stat" 2>/dev/null || true)"
+  [[ -n "$process_state" && "$process_state" != Z ]]
 }
 
 stop_managed_process() {
@@ -113,6 +144,12 @@ stop_managed_process() {
   local pid
   read -r pid < "$pid_file"
   if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    local process_state
+    process_state="$(awk '{ print $3 }' "/proc/${pid}/stat" 2>/dev/null || true)"
+    if [[ -z "$process_state" || "$process_state" == Z ]]; then
+      rm -f -- "$pid_file"
+      return 0
+    fi
     local command_line
     command_line="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
     [[ "$command_line" == *"$expected"* ]] || \
@@ -166,6 +203,18 @@ start_display() {
         '  ModulePath "/usr/lib/x86_64-linux-gnu/nvidia/xorg"' \
         '  ModulePath "/usr/lib/xorg/modules"' \
         'EndSection' \
+        'Section "InputDevice"' \
+        '  Identifier "MaplePointer"' \
+        '  Driver "inputtest"' \
+        "  Option \"SocketPath\" \"${MAPLE_INPUT_SOCKET}\"" \
+        '  Option "DeviceType" "Pointer"' \
+        '  Option "CorePointer"' \
+        'EndSection' \
+        'Section "ServerLayout"' \
+        '  Identifier "MapleLayout"' \
+        '  Screen "MapleScreen"' \
+        '  InputDevice "MaplePointer" "CorePointer"' \
+        'EndSection' \
         'Section "Device"' \
         '  Identifier "MapleGPU"' \
         '  Driver "nvidia"' \
@@ -212,6 +261,8 @@ start_display() {
     as_maple glxinfo -B > "${MAPLE_LOG_DIR}/glxinfo.log"
     grep -q 'OpenGL renderer string: NVIDIA' "${MAPLE_LOG_DIR}/glxinfo.log" || \
       fail "headless Xorg is not using the NVIDIA renderer"
+    [[ -S "$MAPLE_INPUT_SOCKET" ]] || \
+      fail "Xorg inputtest mouse socket is unavailable: ${MAPLE_INPUT_SOCKET}"
   fi
   if ! pid_is_running "$openbox_pid_file"; then
     as_maple bash -c '
@@ -219,6 +270,35 @@ start_display() {
       echo $! >"$2"
     ' bash "${MAPLE_LOG_DIR}/openbox.log" "$openbox_pid_file"
   fi
+}
+
+start_input_click_service() {
+  require_root
+  [[ -x "$MAPLE_INPUT_CLICK" ]] || fail "run install before automate"
+  [[ -S "$MAPLE_INPUT_SOCKET" ]] || fail "the NVIDIA XInput mouse is unavailable"
+  local pid_file="${MAPLE_RUN_DIR}/input-click.pid"
+  if ! pid_is_running "$pid_file"; then
+    nohup "$MAPLE_INPUT_CLICK" "$MAPLE_INPUT_SOCKET" "$MAPLE_INPUT_PORT" \
+      >"${MAPLE_LOG_DIR}/input-click.log" 2>&1 &
+    echo $! > "$pid_file"
+  fi
+  wait_for_tcp "$MAPLE_INPUT_PORT" "XInput click service"
+}
+
+real_mouse_click() {
+  local x="$1"
+  local y="$2"
+  as_maple xdotool mousemove "$x" "$y"
+  sleep 0.5
+  python3 - "$MAPLE_INPUT_PORT" <<'PY'
+import socket
+import sys
+
+with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=5) as sock:
+    sock.sendall(b"x")
+    if sock.recv(3) != b"ok\n":
+        raise SystemExit("XInput click service returned an invalid acknowledgement")
+PY
 }
 
 initialize_wine() {
@@ -293,6 +373,8 @@ start_servers() {
   PYTHONPATH="$MAPLE_SERVER_ROOT" nohup "${MAPLE_VENV}/bin/python" -m maple_server replay \
     --listen-host 127.0.0.1 \
     --listen-port 10282 \
+    --http-api-host 127.0.0.1 \
+    --http-api-port 10283 \
     --no-strict \
     --transcript "$MAPLE_LOGIN_TRANSCRIPT" \
     --transcript-dir "${MAPLE_LOG_DIR}/login" \
@@ -323,6 +405,7 @@ start_servers() {
     >"${MAPLE_LOG_DIR}/login-server.log" 2>&1 &
   echo $! > "$login_pid_file"
   wait_for_tcp 10282 "login server"
+  wait_for_tcp 10283 "login status API"
 }
 
 launch_client() {
@@ -345,6 +428,77 @@ launch_client() {
     sleep 0.1
   done
   fail "MapleStory Wine window did not appear"
+}
+
+wait_for_login_client() {
+  for _ in $(seq 1 180); do
+    if curl --fail --silent http://127.0.0.1:10283/api/v1/status | \
+       jq --exit-status '.connections.active == 1' >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "Wine client did not establish a login connection"
+}
+
+automate_login() {
+  require_root
+  start_input_click_service
+  wait_for_login_client
+  log "waiting for the Unity world selector"
+  sleep "${MAPLE_WORLD_SELECT_WAIT_SECONDS:-55}"
+
+  # World 4, channel 1, channel-confirm, captured character, start-game.
+  real_mouse_click 546 218
+  sleep 7
+  real_mouse_click 558 405
+  sleep 1
+  real_mouse_click 840 352
+  sleep 12
+  real_mouse_click 585 460
+  sleep 2
+  real_mouse_click 585 460
+  sleep 2
+  real_mouse_click 1015 294
+  sleep 3
+  real_mouse_click 1015 294
+
+  for _ in $(seq 1 90); do
+    if curl --fail --silent http://127.0.0.1:12858/api/v1/status | jq --exit-status '
+      .connections.active == 1 and
+      .protocol.world_heartbeat.probes_sent >= 2 and
+      .protocol.world_heartbeat.responses_observed >= 2 and
+      .protocol.world_heartbeat.pending == 0
+    ' >/dev/null; then
+      take_screenshot "${MAPLE_LOG_DIR}/verified-in-game.png" >/dev/null
+      log "Wine client entered the custom world and passed heartbeat verification"
+      return 0
+    fi
+    sleep 1
+  done
+  take_screenshot "${MAPLE_LOG_DIR}/automation-failed.png" >/dev/null || true
+  fail "Wine client did not enter the custom world; see automation-failed.png"
+}
+
+verify_world() {
+  local status
+  status="$(curl --fail --silent --show-error http://127.0.0.1:12858/api/v1/status)"
+  jq '{
+    verified: (
+      .connections.active == 1 and
+      .protocol.world_heartbeat.probes_sent >= 2 and
+      .protocol.world_heartbeat.responses_observed >= 2 and
+      .protocol.world_heartbeat.pending == 0
+    ),
+    connections,
+    heartbeat: .protocol.world_heartbeat
+  }' <<< "$status"
+  jq --exit-status '
+    .connections.active == 1 and
+    .protocol.world_heartbeat.probes_sent >= 2 and
+    .protocol.world_heartbeat.responses_observed >= 2 and
+    .protocol.world_heartbeat.pending == 0
+  ' <<< "$status" >/dev/null
 }
 
 take_screenshot() {
@@ -371,6 +525,7 @@ show_status() {
 stop_all() {
   require_root
   stop_managed_process "${MAPLE_RUN_DIR}/game.pid" "Maplestory_Classic.exe"
+  stop_managed_process "${MAPLE_RUN_DIR}/input-click.pid" "maple-xinput-click"
   stop_managed_process "${MAPLE_RUN_DIR}/login.pid" "maple_server"
   stop_managed_process "${MAPLE_RUN_DIR}/world.pid" "maple_server"
   stop_managed_process "${MAPLE_RUN_DIR}/openbox.pid" "openbox"
@@ -388,10 +543,12 @@ Commands:
   display        Start a private NVIDIA-Xorg (or Xvfb fallback) desktop.
   servers        Start the capture-backed login and held-open world servers.
   launch         Initialize Wine and launch the client with local arguments.
+  automate       Select world/channel/character and enter the custom world.
+  verify         Fail unless the client is active with heartbeat round trips.
   screenshot     Save the virtual desktop (optional output path argument).
   status         Print identifier-safe custom-world runtime evidence.
   stop           Stop only processes tracked by this deployment.
-  all            Run install, download, display, servers, and launch.
+  all            Install, download, launch, enter the world, and verify it.
 EOF
 }
 
@@ -403,6 +560,8 @@ main() {
     display) start_display ;;
     servers) start_servers ;;
     launch) launch_client ;;
+    automate) automate_login ;;
+    verify) verify_world ;;
     screenshot) take_screenshot "${2:-}" ;;
     status) show_status ;;
     stop) stop_all ;;
@@ -412,6 +571,8 @@ main() {
       start_display
       start_servers
       launch_client
+      automate_login
+      verify_world
       ;;
     -h|--help|help) usage ;;
     *) usage >&2; exit 2 ;;

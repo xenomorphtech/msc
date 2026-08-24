@@ -3,8 +3,10 @@
 `tools/maplestory_classic_server/tools/deploy_vast_wine_client.sh` installs and
 runs the Windows MapleStory Classic client and the capture-backed custom server
 on one disposable Vast.ai node. It downloads the official game payload from the
-NGM CDN, validates every manifest chunk and final file, starts a private display,
-starts the login and world servers, and launches the client through Wine.
+NGM CDN, validates every manifest chunk and final file, starts a GPU-backed
+private display, starts the login and world servers, launches the client through
+Wine, selects the captured character, enters the custom world, and verifies live
+heartbeat round trips.
 
 The game, captures, credentials, and Vast API key are deliberately not committed
 to the repository. Keep the API key in the repository's ignored `.env` file and
@@ -19,11 +21,17 @@ Provision an Ubuntu 24.04 Vast.ai instance with direct SSH and:
 - at least 25 GB of disk;
 - outbound HTTPS access to `tw-ngm.maplestoryclassic.games.gamania.com`.
 
-The script automatically binds headless Xorg to the GPU reported by
-`nvidia-smi`, including hosts that expose several NVIDIA device nodes. It checks
-that GLX reports an NVIDIA renderer before launching Wine. If no NVIDIA Xorg
-driver is available, it falls back to Xvfb; that fallback is useful for
-diagnostics but is normally too slow for interactive Unity rendering.
+The script installs current WineHQ staging because Ubuntu 24.04's packaged Wine
+predates pointer/focus fixes required by this Unity client. It automatically
+binds headless Xorg to the GPU reported by `nvidia-smi`, including hosts that
+expose several NVIDIA device nodes, and verifies the NVIDIA GLX renderer. It
+also attaches an Xorg `inputtest` pointer: ordinary XTEST clicks move the cursor
+but are ignored by this client, while button events from the pointer complete
+world, channel, character, and start-game selection.
+
+If no NVIDIA Xorg driver is available, `display` falls back to Xvfb for
+diagnostics. The `automate` and `all` flows require the NVIDIA Xorg backend and
+its `inputtest` socket.
 
 Vast instances continue billing until they are destroyed. Note the instance ID
 when provisioning and destroy the instance after collecting the required logs.
@@ -94,7 +102,9 @@ under `/workspace/maple-vast` until the Vast instance is destroyed.
 ## Install and run
 
 The `all` command is safe to rerun. Existing valid game files are revalidated
-and retained, and only processes tracked by the deployment are restarted.
+and retained, and only processes tracked by the deployment are restarted. It
+returns success only after the Wine client enters the custom world and responds
+to at least two heartbeat probes.
 
 ```bash
 ssh -t -i "${SSH_KEY}" -p "${VAST_SSH_PORT}" root@"${VAST_HOST}" \
@@ -113,12 +123,16 @@ For incremental operation, use:
 /workspace/maple-vast/deploy_vast_wine_client.sh display
 /workspace/maple-vast/deploy_vast_wine_client.sh servers
 /workspace/maple-vast/deploy_vast_wine_client.sh launch
+/workspace/maple-vast/deploy_vast_wine_client.sh automate
+/workspace/maple-vast/deploy_vast_wine_client.sh verify
 ```
 
 The script maps the official login hostname to `127.0.0.1` on the node. The
-custom login server listens on `127.0.0.1:10282`, hands the selected character
-to the world server on `127.0.0.1:12857`, and exposes identifier-safe world
-status on `127.0.0.1:12858`. None of these ports is exposed publicly.
+custom login server listens on `127.0.0.1:10282` with status on `127.0.0.1:10283`,
+hands the selected character to the world server on `127.0.0.1:12857`, and
+exposes identifier-safe world status on `127.0.0.1:12858`. The click helper
+listens only on loopback at `127.0.0.1:19099`. None of these ports is exposed
+publicly.
 
 ## Verify the deployment
 
@@ -129,15 +143,19 @@ grep -E 'direct rendering|OpenGL vendor|OpenGL renderer|OpenGL version' \
   /opt/maple-vast/logs/glxinfo.log
 ```
 
-Expected output includes `direct rendering: Yes` and an NVIDIA renderer. Check
-the custom world after the client has selected a character:
+Expected output includes `direct rendering: Yes` and an NVIDIA renderer. Run
+the strict custom-world verification:
 
 ```bash
-/workspace/maple-vast/deploy_vast_wine_client.sh status
+/workspace/maple-vast/deploy_vast_wine_client.sh verify
 ```
 
-A successful in-game session has one active world connection, an emitted
-initial field snapshot, and heartbeat response counters that continue to rise.
+A successful in-game session has one active world connection. The command exits
+nonzero unless that connection is active, at least two probes and responses
+have occurred, and none is pending. `status` prints wider
+diagnostic counters without enforcing those conditions. The automated visual
+evidence is saved to `/opt/maple-vast/logs/verified-in-game.png`.
+
 The startup TCP readiness probe intentionally produces one completed/failed
 zero-byte connection before the game connects; evaluate the active connection
 and heartbeat counters rather than that probe alone.
