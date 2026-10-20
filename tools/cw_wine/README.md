@@ -4,6 +4,11 @@ The patched working client is in `downloads/cw_wine/client/`. The reference
 `../maplestorycw/appdata/` is preserved. This is the native 0.9.0 client from
 the supplied capture, not the older Unity/IL2CPP client.
 
+The [incremental rebuild](../cw_rebuild/README.md) adds validated function
+replacements with `--rebuilt`, a stable tutorial session, fresh basic combat and
+quest-start/kill state. Use `--rebuilt --view` to play through a local browser
+viewer. Without `--rebuilt`, this tool retains the original capture playback.
+
 ## Launch
 
 From the workspace containing `msc/`, `maplestorycw/` and `.venv/`:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local capture playback for the native CW client; not an authoritative server."""
+"""Local native CW bootstrap and capture playback; not a complete game server."""
 import argparse
 import asyncio
 from collections import defaultdict
@@ -9,6 +9,8 @@ from pathlib import Path
 import struct
 import sys
 import time
+
+from sandbox import WorldSandbox
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cw_packet_decode"))
 from decode import crypt_aes, shuffle_iv
@@ -45,6 +47,7 @@ async def connection(reader, writer, role, rows, args):
     condition = asyncio.Condition()
     write_lock = asyncio.Lock()
     greeting_ready = asyncio.Event()
+    sandbox = WorldSandbox(args.logs / "sandbox", stamp) if role == "world" and args.world_mode == "sandbox" else None
     print(f"connected role={role} session={stamp}", flush=True)
 
     def record(direction, opcode, body):
@@ -68,10 +71,14 @@ async def connection(reader, writer, role, rows, args):
             async with condition:
                 received[opcode] += 1
                 condition.notify_all()
+            if sandbox:
+                await sandbox.receive(opcode, body, send_packet)
 
     async def send_packet(opcode, body):
         nonlocal server_iv
         async with write_lock:
+            if sandbox:
+                sandbox.observe_server(opcode, body)
             first = int.from_bytes(server_iv[2:], "little") ^ 0xfffe
             encoded = (crypt_aes(body, server_iv) if role == "login"
                        else bytes((v + server_iv[0]) & 255 for v in body))
@@ -98,6 +105,11 @@ async def connection(reader, writer, role, rows, args):
                 continue
             if row["opcode"] == (26 if role == "login" else 1579):
                 continue
+            if sandbox and row["timestamp_ns"] - origin > 1_400_000_000:
+                # All field/stat/NPC initialization finishes in this initial
+                # burst. Later recording events include another player's
+                # decisions, quest changes and map transitions.
+                break
             # The captured handoff assumes a real channel/character choice.
             # Sending it on a timer before the live UI selects one exits the client.
             barrier = ({14: 117, 17: 118, 16: 121}.get(row["opcode"])
@@ -116,7 +128,9 @@ async def connection(reader, writer, role, rows, args):
                     raise ValueError("unexpected captured handoff width")
                 body = body[:6] + bytes([127, 0, 0, 1]) + struct.pack("<H", args.world_port) + body[12:]
             await send_packet(row["opcode"], body)
-        print(f"playback_complete role={role}", flush=True)
+        print(f"{'sandbox_ready' if sandbox else 'playback_complete'} role={role}", flush=True)
+        if sandbox:
+            await sandbox.start(send_packet)
         # read_client owns the reader for the connection's entire lifetime.
         await asyncio.Future()
 
@@ -140,6 +154,10 @@ async def connection(reader, writer, role, rows, args):
         except ConnectionError:
             pass
         log.close()
+        if sandbox:
+            pending = list(sandbox.tasks)
+            sandbox.close()
+            await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def run(args):
@@ -163,6 +181,7 @@ def main():
     parser.add_argument("--login-port", type=int, default=8484)
     parser.add_argument("--world-port", type=int, default=8541)
     parser.add_argument("--speed", type=float, default=1)
+    parser.add_argument("--world-mode", choices=["replay", "sandbox"], default="replay")
     args = parser.parse_args()
     if args.speed <= 0:
         parser.error("speed must be positive")

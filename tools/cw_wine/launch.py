@@ -27,6 +27,8 @@ def namespace_command(command):
 
 
 def stop():
+    from view import stop as stop_view
+    stop_view()
     if (STATE / "prefix").exists():
         subprocess.run(namespace_command(["env", "WINEPREFIX=" + str(STATE / "prefix"),
                                           WINE_SERVER, "-k"]), check=False)
@@ -50,6 +52,9 @@ def main():
     parser.add_argument("--debug", default="-all", help="Wine debug channels")
     parser.add_argument("--renderer", choices=["auto", "wined3d", "dxvk"], default="auto")
     parser.add_argument("--speed", type=float, default=1, help="recording playback speed")
+    parser.add_argument("--rebuilt", action="store_true", help="load the verified incremental client transport DLL")
+    parser.add_argument("--world-mode", choices=["replay", "sandbox"], help="default: sandbox with --rebuilt, replay otherwise")
+    parser.add_argument("--view", action="store_true", help="use :97 and open a local browser viewer on port 6080")
     args = parser.parse_args()
     STATE.mkdir(parents=True, exist_ok=True)
     STATE.chmod(0o700)
@@ -80,7 +85,9 @@ def main():
             pass
     if processes:
         parser.error("the local client is already running; use --restart")
-    display = args.display or (":97" if args.headless else os.environ.get("DISPLAY", ":97"))
+    display = args.display or (":97" if args.headless or args.view else os.environ.get("DISPLAY", ":97"))
+    if args.view and display != ":97":
+        parser.error("--view uses the dedicated display :97")
     if display == ":97" and not Path("/tmp/.X11-unix/X97").exists():
         with (STATE / "logs/xvfb.log").open("ab") as log:
             p = subprocess.Popen(["Xvfb", ":97", "-screen", "0", "1366x768x24",
@@ -99,6 +106,13 @@ def main():
     (STATE / "client/MapleStory.exe").write_bytes(modified)
     manifest = {"original_sha256": digest(source), "patched_sha256": digest(modified), "patches": changes}
     (STATE / "client/MapleStory.patches.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    if args.rebuilt:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cw_rebuild"))
+        from install import install
+        install(STATE / "client", digest(source), REPO / "downloads/cw_graph/validation/client-transport/build.json")
+        leaf = REPO / "downloads/cw_graph/validation/leaf-core/build.json"
+        if leaf.exists():
+            install(STATE / "client", digest(source), leaf, dll_name="cw_leaf.dll", symbol="cw_leaf_probe", runtime_target="windows-x64-leaf-dll")
     renderer = args.renderer if args.renderer != "auto" else ("wined3d" if display == ":97" else "dxvk")
     if renderer == "dxvk":
         for name in ["d3d11", "dxgi"]:
@@ -123,7 +137,8 @@ def main():
     with server_log.open("wb") as log:
         command = [sys.executable, str(Path(__file__).with_name("replay.py")),
                    "--capture-dir", str(REPO / "downloads/cw_decode/export"),
-                   "--logs", str(STATE / "transcripts"), "--speed", str(args.speed)]
+                   "--logs", str(STATE / "transcripts"), "--speed", str(args.speed),
+                   "--world-mode", args.world_mode or ("sandbox" if args.rebuilt else "replay")]
         server = subprocess.Popen(namespace_command(command), stdout=log, stderr=log,
                                   start_new_session=True)
     (STATE / "server.pid").write_text(str(server.pid) + "\n")
@@ -148,9 +163,13 @@ def main():
         client = subprocess.Popen(namespace_command(command), cwd=STATE / "client",
                                   stdout=log, stderr=log, start_new_session=True)
     (STATE / "launch.pid").write_text(str(client.pid) + "\n")
+    viewer_url = None
+    if args.view:
+        from view import start as start_view
+        viewer_url = start_view()
     print(json.dumps({"display": display, "renderer": renderer, "namespace": NAMESPACE,
                       "client_pid": client.pid, "server_pid": server.pid,
-                      "client_log": str(client_log), "server_log": str(server_log)}))
+                      "client_log": str(client_log), "server_log": str(server_log), "viewer_url": viewer_url}))
 
 
 if __name__ == "__main__":

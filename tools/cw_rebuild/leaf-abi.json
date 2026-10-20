@@ -1,0 +1,96 @@
+{
+  "reference_sha256": "4384087a6df1991cb59fea6d1ef086dbe746c7a5af0705bfc39769f4cc56e276",
+  "scope": "Boolean predicates whose observed native callers consume AL; high return-register bits are outside this contract",
+  "functions": {
+    "0x279af0": {
+      "return_bits": 8,
+      "evidence": [
+        {
+          "site": "0x2da6029",
+          "bytes_sha256": "8037925c6fabe4d75cca81eb7c8a75cb502a8882a9544ce0f14940789abba991"
+        },
+        {
+          "site": "0x113eb21",
+          "bytes_sha256": "f89ae2b34808bcbeff6ae7e96fd0221ddd1ef785ece15476cb2943daa7b91dc6"
+        },
+        {
+          "site": "0x113f094",
+          "bytes_sha256": "3ff708b4b0ff2dd23aa3b3d4411dda832e7b070757e596a4b2552053132b10bb"
+        },
+        {
+          "site": "0x114022c",
+          "bytes_sha256": "00b214c4ec042040c16e24de81f51e8dbb389d2c21c16b45986b937f2093ff62"
+        }
+      ]
+    },
+    "0x2e114a0": {
+      "return_bits": 8,
+      "evidence": [
+        {
+          "site": "0x2dea774",
+          "bytes_sha256": "7e5580513a8ae2525def5ec85a539a7529cf55c5887642847ec11316258ea181"
+        },
+        {
+          "site": "0x2dea8a9",
+          "bytes_sha256": "ab26d9df7787a729244b12bbf480edb96f162c3583af6e9cf011da3a2d6e352c"
+        }
+      ]
+    },
+    "0x466c20": {
+      "return_bits": 8,
+      "evidence": [
+        {
+          "site": "0x466d1d",
+          "bytes_sha256": "2065745a95f66339d64565f1ac88775c52a0a16a71072c5d16005252fd227602"
+        },
+        {
+          "site": "0x466d10",
+          "bytes_sha256": "534f9efca44638108e6371cc1894aafa900e99dac2d654ad394759c7b5f1483d"
+        },
+        {
+          "site": "0x22c220e",
+          "bytes_sha256": "73c377537026247f056e33fdc6eff00ab6097fc387ef8c0b68a7fe3efd060b26"
+        },
+        {
+          "site": "0x22c53f1",
+          "bytes_sha256": "c5d2d4c671aa597befcb2633b7a662b49d99af666b057dc84a52aa3a0f401950"
+        }
+      ]
+    },
+    "0x466bd0": {
+      "return_bits": 8,
+      "evidence": [
+        {
+          "site": "0x22c418e",
+          "bytes_sha256": "901ccded74d70515e04fc837cba2aa91fb406402fb439779aa205a773efacf1a"
+        },
+        {
+          "site": "0x1f14e0",
+          "bytes_sha256": "733a39dcfd7443afd4bbb82114155005d2121a3dc167216f9a1e7c0c3848c171"
+        },
+        {
+          "site": "0x29755b",
+          "bytes_sha256": "b5506945b27f774808754963128b2a8c22cf13899d1780847b982ac941b3c01c"
+        }
+      ]
+    },
+    "0x466ba0": {
+      "return_bits": 8,
+      "evidence": [
+        {
+          "site": "0x22c527c",
+          "bytes_sha256": "584ffc160bc734cd44dfde32a04e22afed48d6b0df1eb62b23c055f8a4a1bb10"
+        }
+      ]
+    },
+    "0x2fe6e0": {
+      "return_bits": 8,
+      "evidence": [
+        {
+          "site": "0x2d21b54",
+          "bytes_sha256": "d2ea541a3079db86b342a8d0e4953fd8885f4e46e49ebcceaeeb20df4f329eb9"
+        }
+      ]
+    }
+  }
+}
